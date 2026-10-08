@@ -142,7 +142,7 @@
     <criterion testable="true">Tests cover the binding behaviours listed above; anything beyond needs a one-line justification in task notes. The package and SpaarkeAi build.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-26, FR-51, FR-55; D-17, D-18, D-19, D-23, D-26. Supersedes task 053 (UI half). Build against fixtures and 036's contract before 043 is live; 043 is a dep only for the live wiring step.</notes>
+  <notes>spec.md FR-26, FR-51, FR-55; D-17, D-18, D-19, D-23, D-26. Supersedes task 053 (UI half). Task 057 (PR #1382) shipped `StatusBar` without a post-recording state: 058 extends `StatusBar` for "Recorded" with open items left, the dismissal reason, and superseded-by (use `resolveDecisionRecordState` for Decision Record rows). Build against fixtures and 036's contract before 043 is live; 043 is a dep only for the live wiring step.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

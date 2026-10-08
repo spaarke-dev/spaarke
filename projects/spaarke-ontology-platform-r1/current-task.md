@@ -19,8 +19,8 @@
 | 098 | PR #1359 follow-ups: fold in 065 (D-27 `sprk_duedate`) + fix 9 non-working TZ-pin tests | PR #1359 (`C:\wt098`) | Focused independent review → ask owner to merge → mark 098 ✅ (065 already marked ✅ in index — it lands with #1359) → start **106** |
 | 039 | Secure-child Signals/Decision Records (uac-r2 conditions A/B on #1355) | Own PR to master (`C:\wts-039`, `feat/secure-child-signals-039`) + possibly writer change on this branch | Review → ask owner to merge → ✅ → start **037** |
 | Stream C | **036 + 026 MERGED into this branch** (`f7a12a24a`, ArchTests 818/818, Signals 454/454) — stream idle; next free tasks per TASK-INDEX stream table | — | — |
-| Stream C2 | 047 response columns (D-58) → D-60 drop foreign tables from `OntologyPlatformSolution` → 046 WA create on `RecordCreationService` (D-59, uac-r2 review) | Branch `stream/c2-047-046` (`C:\wts-c2`) | Give the D-60 job a POML number (draft in notes) → merge → ✅ |
-| Stream D | **072 MERGED** into this branch (ArchTests 818/818); **074 recall gate** (`C:\wts-d74`, `stream/d-074`) and **073 memo source** (`C:\wts-d73`, `stream/d-073`) running in parallel | Branches → merge back | 074 may escalate for a labelled set / >200 model calls |
+| Stream C2 | **047 ✅ + D-60 ✅ (task 069)**; **046 built + live-proven on `stream/c2-047-046` @ `022a46488` — NOT mergeable until uac-r2 names the route and reviews** (built on uac-r2 `OwnedChildWrite`, not `RecordCreationService` — owner decision pending); found live defect in uac-r2 shared create (org-owned AppendTo → 404 for all child-record wizard saves) → **PR #1391** (review running) | — | Ask owner: 046 base + ADR-013 exception; #1391 merge after review + uac-r2 |
+| Stream D | 072 ✅ merged; **074** unblocked by D-64 — agent drafting the synthetic set (`notes/074-labelling-set.json`, no labels) → main session puts labelling in front of the owner → one run; **073** blocked until 037+039+031 | Branches → merge back | — |
 | Stream B | 057 → PR #1382 (review running); **056 running** (own PR, `C:\wts-b56`) | Own PRs to master | Review → ask owner to merge → ✅ |
 | Stream E | 060 → PR #1384 (review running); next **068** (D-63) after #1359 merges | Own PRs to master | Review → ask owner to merge → ✅ |
 
@@ -29,7 +29,8 @@
 | ID | Role | State |
 |---|---|---|
 | a810b83c36e7d8f39 | 039 secure-child Signals/DRs (own PR, uac-r2 review) | running |
-| a87c76386416d9b61 | Stream C2: 047 → D-60 solution cleanup → 046 | running |
+| a87c76386416d9b61 | Stream C2: 047 ✅, D-60 ✅, 046 built (awaits uac-r2 + owner) | idle |
+| a058d5715cc84ee9c | Reviewer: PR #1391 (uac-r2 org-owned AppendTo fix) | running |
 | af7588b2ed6612c5f | Stream B: 056 WizardShell on SprkModal (own PR) | running |
 | a7d2ba5e803c9cc47 | Reviewer: 072 (stream D branch) | done |
 | a3f2fdb8356621906 | Reviewer: stream C round 2 (036/026) | done |
@@ -38,7 +39,7 @@
 | a67ad20f7bead7126 | 098 author (PR #1359) — FINAL round (TZ env Windows teardown, Briefing overdue gap per D-43, small K items); then main session reads diff → ask owner to merge | running |
 | a0c39a85690aeed2a | Stream C author (036/026) — round 3 | running |
 | ab5429413019d8fb9 | Stream D author (072) — merged | idle |
-| a1bcb0bae3c363ca9 | Stream D: 074 recall exit gate | running |
+| a1bcb0bae3c363ca9 | Stream D: 074 — drafting synthetic labelling set (D-64) | running |
 | af2686291a99e5351 | Stream D2: 073 — BLOCKED until 037 + 039 + 031 (writer accepts only matter/communication; needs sprk_regardingmemo lookup — owner approval at resume) | idle |
 | a18a719c189250af3 | Stream B author of 057 (PR #1382) — round 2 (Decision Record state resolver R-4, tones, NaN/unknown tier) | running |
 | a17154f00e69eeced | Stream E author of 060 (PR #1384) — round 2 (stale comments, High Priority IsOpenWork, test); conflicts with #1359 header comment; then 068 after #1359 merges | running |

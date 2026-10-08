@@ -104,6 +104,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-61 | Evaluator writes Signal fields **only when the result changes** (uac-r2 100k-rows-per-pass limit) | Binding (task 031) |
 | D-62 | Remove Console User **Create on Decision Record** with task 049 | Binding |
 | D-63 | `sprk_finalduedate` informational **everywhere** (notification playbook node, VisualHost card, CalendarVisual) | Binding (task 068) |
+| D-64 | Recall gate: **synthetic set, owner labels blind**, ~80–100 items, gate = combined fee-OR-scope recall ≥ 80%, one run | Binding (task 074) |
 
 ## Superseded or withdrawn
 

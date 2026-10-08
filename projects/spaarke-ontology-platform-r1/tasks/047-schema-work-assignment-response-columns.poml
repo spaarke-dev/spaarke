@@ -4,7 +4,7 @@
     <title>Schema: response columns on sprk_workassignment (D-54)</title>
     <phase>4b Commit and actions</phase>
     <gate>startable (owner-approved D-54; coordination with the work-assignment owner and uac-r2 first)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Column adds on a table another domain owns that is also a uac-r2 secure root; logical names are immutable.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,6 +88,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-52 (amended, D-54); D-54. Tasks 044 (writes) and 061 (reads) depend on this task.</notes>
+
+  <completion>COMPLETED 2026-10-07 (stream C2). First pass blocked at triggers 1-2 (no named area owner). Owner answered as area owner (D-58, spec section 9): approve as proposed. Created in spaarkedev1 by the 007 recipe (header MSCRM.SolutionUniqueName SpaarkeCore; PublishXml for sprk_workassignment only): sprk_respondedon (DateTime, Format DateOnly, DateTimeBehavior DateOnly, RequiredLevel None, MetadataId 61464111-acc2-f111-a05c-3833c5e9614d) and sprk_responseoutcome (local Picklist sprk_workassignment_sprk_responseoutcome: 100000000 Received outside Spaarke, 100000001 Delivered on the matter, 100000002 No longer needed; RequiredLevel None; MetadataId 67244417-acc2-f111-a05c-3833c5e9614d); both read back live. No note column (D-58: notes go in the Decision Record). uac-r2 no-lineage/census/role confirmation requested on issue 1355 (issuecomment-6049366401); per D-58 plain columns do not wait on the reply. uac-r2 files re-read at origin/master 0ea74d1c3 (list in notes/047-work-assignment-response-columns.md section 2). Negative: no other table or column changed; no tool without a publisher parameter. The OntologyPlatformSolution finding became D-60.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

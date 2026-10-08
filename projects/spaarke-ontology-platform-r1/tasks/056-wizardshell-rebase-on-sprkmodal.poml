@@ -4,7 +4,7 @@
     <title>WizardShell: characterization tests, re-base onto SprkModal, the v4 props, delete WizardModal</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>110 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the shared wizard engine used by eight shipped consumers.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -116,6 +116,21 @@
     <criterion testable="true">The package builds under both React type sets.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-07" pr="1386" branch="feat/wizardshell-sprkmodal-056" state="PR open, awaiting merge">
+    <commits>33ce24e08 characterization tests (55, all green on unmodified master, embedded snapshots); ac3680412 re-base + props; 160a00dc6 WizardModal retired (lands together with ac3680412, which already carried the file deletions).</commits>
+    <acceptance>
+      AC1 met: characterization tests committed first and green on master 36ff14147.
+      AC2 met: test asserts the only Dialog/DialogSurface is SprkModal's.
+      AC3 met: both embedded snapshots unchanged after the re-base; all 55 characterization tests pass unmodified in both modes.
+      AC4 met: nav + onBeforeNavigate, statusBar, footer override, stayOpenOnFinish, dismiss explicit, uiScale and 'skipped' covered by WizardShell.sprkModal.test.tsx (32 tests) + SprkModal guard tests.
+      AC5 met: WizardModal, its test and its export deleted; zero WizardModal hits under src/.
+      AC6 met: every consumer's tests run unmodified. Two consumers (WorkspaceLayoutWizard 14, SemanticSearchControl 25) fail identically on pristine master; pre-existing, filed #1388 and #1392.
+      AC7 met: ui-components tsc (React 19 types), all code pages + SpaarkeAi (React 18/19) and SemanticSearchControl PCF via Invoke-PcfBuildProd.ps1 (React 16 platform libs) build.
+    </acceptance>
+    <quality-gates>code-review: no F-class findings (K: async-guard double click, body scrollbar gutter). adr-check: no unresolved violations; one documented Path A (SprkModal.legacySize, transitional, removed by task 111).</quality-gates>
+    <deviations>notes/task-056-wizardshell-rebase-deviations.md: D1 'skipped' applies to every consumer's Skip (fourth UAT change); D2 legacySize; D3 no onBeforeClose (onClose is the seam); D4 footer override shape; D5 mode-specific props; D6 collateral edits; D7 body gutter.</deviations>
+    <not-done>Visual verification (canary in light/dark, 100% and large display) not run; it belongs to task 111. TASK-INDEX.md and current-task.md not edited (orchestrator instruction).</not-done>
+  </completion>
   <notes>spec.md FR-60; D-26; modal note sections 4, 5.1, 5.2 (P1-P3), 7. Regression across live consumers and deploy is task 111.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
