@@ -62,15 +62,72 @@ Beyond the stated contract, each with a reason:
 - The contact-issued case: the refused write also took the row over (it cleared the contact issuer), so the same defect had a second field.
 - The handler-level test: AC 3 asks for the 409's shape, and nothing pinned it.
 
+## Owner round 80 (2026-10-08, binding): a re-add over a lapsed grant restores it at the picked level
+
+**Trigger.** Verifier pass 1 on PR #1406 raised an F2. After the first commit, `/invite-and-grant` over a LAPSED grant with no `expiryDate` wrote nothing, yet still answered 200 "granted <level>" and adopted the Assigned-To ledger entry. The modal's "+ Contact" re-add never sends a date. A later `set-record-share-expiry` renewal would then revive the OLD level, possibly a higher one. That is fail-open relative to what the UI reported.
+
+**Owner decision (round 80, recorded in `notes/session27-owner-decisions-and-research.md`):** "Restore at picked level". A re-add over a lapsed grant is an explicit SET. It restores the grant at the PICKED level, with the default 90-day expiry.
+
+**`/grant`: same rule applies. Evidence it is a re-add route.** `AccessGrantModal.tsx` calls `/grant` with no `expiryDate` from three re-add paths:
+- "+ Contact" for an internal contact or one with no email (:1058);
+- "+ Organization" (:1142);
+- a suggestion's "Grant" (:1355).
+
+There is no other client: a repo grep finds only the modal and its bundle. No client handles `expired_not_restored` (the one grep hit is an unrelated provisioning code).
+
+**Implementation.**
+- **Grant core.** `CreateGrantAsync` gains an optional `reAddRestoresLapsed` parameter (default `false`). With it, a request with no date over a survivor that confers nothing gets `expiryToWrite = today + 90`, and the level is written as granted. Because the survivor is elected by conferral, a lapsed survivor means no row on the key confers.
+  - `effectiveExpiry` is now `EffectiveExpiry(expiryToWrite, row, today)`. This equals the old value in every case except the restore.
+  - A still-LIVE key keeps its date (task 097).
+- **The two routes.** `/grant` and `/invite-and-grant` pass `true`.
+- **The Assigned-To rule** passes nothing, so it keeps the task-113 behaviour: refuse and write nothing when no date is sent, and write as asked when it sends an explicit date (its restore path). Making the restore core-wide would have changed the rule's lapse-race path, whose ledger bookkeeping assumes nothing was written. Perturbation Q3 confirms it.
+- **The bounds still hold.**
+  - Grantor ceiling: the level is capped (narrowed, reported).
+  - Never-lower (task 139): a narrowed re-add over a lapsed HIGHER row is still 409 `would_lower_existing` and writes nothing.
+  - Contact issuer (round 42 item 2 / G2): the restored date is capped at the grantor's own. That route always sends a date, so it needs no flag.
+- **`/invite-and-grant`.** A non-conferring outcome is now a 409 `expired_not_restored`, with the contact id, never a 200. Nothing is adopted. With the restore, no known request reaches that branch; it is a fail-closed backstop.
+- **`/grant`'s own 409** is likewise now a backstop. A dateless request is restored, and a past date gets a 400.
+- **The 200 reports what was written.** `GrantedAccessLevel`/`Narrowed` are the written level. The responses carry no expiry field, and adding one would be a contract change nobody asked for. The restored date is the FR-33 default the UI already assumes.
+- **K log text, fixed.** The 409 builder words each case for what actually happened: no date (refused, nothing written, the detail text unchanged), or a supplied date that has passed (written as asked; only the Assigned-To restore sends one).
+
+**Tests.**
+- **Core** (`GrantLifecycleCharacterizationTests`): re-add over lapsed, lower, higher and same → picked level, today + 90, no warning. A live key keeps its date (the negative twin). The ISS-028 refusal pins now document the core's default mode.
+- **Handler** (`GrantorCeilingTests`; the task-113 409 pin was replaced, because round 80 changes that answer):
+  - `/grant` lapsed re-add, lower and higher → 200 at the picked level with today + 90;
+  - a Collaborate caller → restored at Collaborate, narrowed;
+  - a narrowed re-add over a lapsed higher row → 409 `would_lower_existing`, nothing written;
+  - `/invite-and-grant` lapsed re-add, lower and higher → 200 reports the written level, and the row carries it.
+  - The fake now applies `sprk_expiresdate`.
+- **Ledger** (`AssignedAccessMarkerTests`): a lapsed re-add is restored and only then adopted. A refused one (No Access, 422) writes nothing and is not adopted.
+- **Contact route** (`ContactGrantAuthorizationTests`): a lapsed own-row re-add → restored at the picked level, with the date capped at the grantor's own (+30, not +90).
+
+**Perturbations (committed first, each compiled).**
+
+| # | Perturbation | Caught by |
+|---|---|---|
+| Q1 | `/grant` does not opt in | 3 `/grant` restore tests and the adoption test (4 failed) |
+| Q2 | `/invite-and-grant` does not opt in | both invite restore cases (2 failed) |
+| Q3 | Core restores regardless of the flag | 5 core default-mode refusal tests and the materializer lapse-race test (6 failed) |
+| Q4 | Restore keeps the stored level | 7 restore tests |
+| Q5 | Restore resets every date, live or not | `ReAdd_OverALiveGrantWithNoExpiry_KeepsItsDate` |
+| Q6 | `/grant` adopts before checking the refusal | `ARefusedReAddOverALapsedAutoGrant_WritesNothing_AndIsNotAdopted` |
+
+**§11 (new surface inside an existing method).**
+- *Existing:* the FR-33 expiry default in the same expression (`survivor.ExpiresDate is null ? DefaultExpiry : null`).
+- *Extension:* yes. The parameter extends that one expression, and nothing else is added.
+- *Cost of doing nothing:* the modal's re-add over a lapsed grant answers 409 on `/grant`, and 200-without-a-write on `/invite-and-grant`. The owner's round-80 rule fails, and a later renewal revives a level nobody picked.
+
 ## Known limits (K-class)
 
+- K2: the `/invite-and-grant` and `/grant` 409 backstops for a non-conferring outcome are unreachable by construction after round 80, so no test reaches them. They are kept so that ADR-003's "never report success over a grant that confers nothing" holds on every route.
+
 - None on the contact-issuer route: it always sends a date (requested, or today + 90, capped), so the early refusal never applies there and its behaviour is unchanged.
-- K4: `/invite-and-grant` over an expired key with no expiry still answers 200 and logs (task 023, pre-existing by design). Its `GrantedAccessLevel` was never the effective access on that path, and now the row also keeps its old level.
+- ~~K4: `/invite-and-grant` over an expired key answered 200 and logged~~: this was the verifier's F2. Fixed by round 80 (above).
 
 ## Defects found in passing (filed + reported)
 
 - **#1404**: the FR-12 misfile guard fails OPEN on a regex timeout. `NewRecordIntentDetector.cs:136` returns null, meaning "no intent", so `IdentifierReverseLookupRung.cs:305-320` keeps 0.90, which is auto-file confidence. Seen as `IdentifierReverseLookupRungTests.Fr12_…` failing in the full unit run under load (0.9 instead of 0.65). It passes 21/21 in isolation. This belongs to email-communication-intelligence and is unrelated to this change.
-- K4: the 409 builder's log line ("the request supplied no new expiry") is inaccurate on the materializer's explicit-date restore path. It is log-only; no HTTP caller sees it.
+- ~~K4: the 409 builder's log text on the materializer's explicit-date path~~: fixed in the round-80 commit.
 
 ## Carried forward (not this task's scope)
 
