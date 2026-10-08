@@ -85,11 +85,10 @@ public class SpeBrokerOnlyByteIdentityGuardTests
                 "Sprk.Bff.Api.Api.Filters.AiAuthorizationFilter",
                 // /api/ai/rag/index-file naming a drive item with no document.
                 "Sprk.Bff.Api.Services.Ai.FileIndexingService",
-                // Configured-staging uploads (chat persist, chat Word export, workspace pre-fill).
+                // Configured-staging uploads (chat persist, chat Word export). Workspace pre-fill no longer stages: it
+                // extracts in memory since customer-provisioning-orchestration-r1 task 227f retired its staging container.
                 "Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints",
                 "Sprk.Bff.Api.Api.Ai.ChatWordExportEndpoints",
-                "Sprk.Bff.Api.Services.Workspace.MatterPreFillService",
-                "Sprk.Bff.Api.Services.Workspace.ProjectPreFillService",
             }.OrderBy(n => n, StringComparer.Ordinal)),
             "every byte path with a Dataverse record behind it runs app-only after that record's decision (owner round "
             + "69); an OBO byte call works only for a caller who holds a container role, which per-record secure "

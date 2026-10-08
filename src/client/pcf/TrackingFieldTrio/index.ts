@@ -120,6 +120,14 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.41 (task 153, unified-access-control-r2 — owner round 83 item 11, O1 "BOTH"): an access-status indicator in the
+ *   header row. The host reads task 064's per-record route (`GET /api/v1/records/{table}/{id}/no-access`, Read-gated,
+ *   the same answer the form banner `sprk_accessstatus_banner.js` reads) with `evaluateGrantGate`'s rules — fail
+ *   closed to "Access status unavailable", the answer must name THIS record, a late answer for a record the control has
+ *   left is dropped — and passes it as `accessStatus`. Clicking it (only when the server says the caller may manage
+ *   access) opens Manage Access, at the No Access List when a No Access restriction applies (`initialSection`).
+ *   Only the three root tables are asked; on any other host table no indicator is drawn.
+ *
  * v1.0.40 (task 067, unified-access-control-r2 — owner round 59 item 3; task 066 folded in): the bundled
  *   `AccessGrantModal` shows a read-only No Access List (task 064's `GET /api/v1/records/{table}/{id}/no-access`, Write
  *   holders only), marks Current Access rows an in-force wall overrides ("No Access") and rows the record's Secure /
@@ -198,6 +206,9 @@ import {
   TrackingFieldTrio as SharedTrackingFieldTrio,
   type ITrackingFieldTrioProps,
   type IAccessPermissionOption,
+  type ITrackingAccessStatus,
+  type GrantModalSection,
+  readAccessStatus,
 } from '@spaarke/ui-components/dist/components/TrackingFieldTrio';
 import {
   AccessGrantModal,
@@ -399,6 +410,17 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * {@link grantGateRequestedFor}, so `updateView` does not re-read on every refresh. */
   private secureFlagRequestedFor: string | null | undefined = undefined;
 
+  /** The Manage Access section the current open was asked for (task 153); reset on close. */
+  private grantModalSection: GrantModalSection | undefined = undefined;
+
+  /** The record's access status from task 064's route (task 153). `undefined` while not asked, in flight, or on a
+   * host table that has no such route (no indicator is drawn); the shared ACCESS_STATUS_UNAVAILABLE on every failure to
+   * obtain an answer this client can trust. */
+  private accessStatusValue: ITrackingAccessStatus | undefined = undefined;
+
+  /** The record id the status was ASKED about — the same three-state discipline as {@link grantGateRequestedFor}. */
+  private accessStatusRequestedFor: string | null | undefined = undefined;
+
   private authInitPromise: Promise<void> = Promise.resolve();
 
   // Email-members state (task 042). `apiBaseUrl` mirrors the value passed to
@@ -457,6 +479,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // Read the record's Secure flag for the Access Permission gate (task 138) — also not awaited; until it
     // answers, the modal state is the fail-closed Limited.
     this.ensureSecureFlag();
+    // The access-status indicator (task 153) — not awaited; nothing is drawn until it answers.
+    this.ensureAccessStatus();
 
     // Re-render when the user switches the Spaarke theme (same tab or another tab).
     this.themeListenerCleanup = setupThemeListener(() => this.renderControl());
@@ -477,7 +501,51 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     this.ensureGrantGate();
     // Same for the record's Secure flag (task 138).
     this.ensureSecureFlag();
+    // And for the access-status indicator (task 153).
+    this.ensureAccessStatus();
 
+    this.renderControl();
+  }
+
+  /**
+   * Reads the bound record's access status for the indicator (task 153), unless it is already asked or answered for
+   * this record. Only the three root tables have task 064's route: on any other host table nothing is asked and no
+   * indicator is drawn (the project fallback of `resolveGrantRoot` would ask about the wrong table).
+   */
+  private ensureAccessStatus(): void {
+    const recordId = this.getRecordId();
+    if (recordId === this.accessStatusRequestedFor) {
+      return;
+    }
+
+    // A different record: the previous record's status must not be shown for even one render.
+    this.accessStatusRequestedFor = recordId;
+    this.accessStatusValue = undefined;
+    const root = GRANT_ROOT_BY_ENTITY[this.getHostEntity()];
+    if (!recordId || !root) {
+      return;
+    }
+
+    void this.evaluateAccessStatus(recordId, root.recordType);
+  }
+
+  /**
+   * Asks task 064's per-record route whether the record is Secure and under a No Access restriction, with
+   * `evaluateGrantGate`'s rules, through the shared `readAccessStatus`: every non-200 (the route's uniform 404
+   * included), a thrown call (auth not initialised, network), an unparseable body or an answer that does not name THIS
+   * record is "unavailable" — shown as "Access status unavailable", never as "not restricted"; an unknown or missing
+   * signal is `unknown`. Entries a Write caller also receives are never read: the indicator shows no count, name or
+   * reason. Here only the staleness rule is applied.
+   */
+  private async evaluateAccessStatus(recordId: string, recordType: ExternalGrantRootType): Promise<void> {
+    // Never rejects; every failure is ACCESS_STATUS_UNAVAILABLE (the shared helper's tests pin each case).
+    const status = await readAccessStatus(this.authenticatedFetchGated, recordType, recordId);
+
+    // Drop a late answer for a record the control has since left.
+    if (this.accessStatusRequestedFor !== recordId) {
+      return;
+    }
+    this.accessStatusValue = status;
     this.renderControl();
   }
 
@@ -1303,7 +1371,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.40 • Built 2026-10-08',
+      versionText: 'v1.0.41 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1325,7 +1393,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       },
       // Governance toolbar — person icon opens the real access-grant modal
       // (task 041); email icon opens the canonical SendEmailDialog (task 042).
-      onOpenGrantModal: () => {
+      // Task 153: the access-status indicator passes 'noAccess' to open at the No Access List; the person icon passes
+      // nothing (the top).
+      onOpenGrantModal: (section?: GrantModalSection) => {
+        this.grantModalSection = section;
         this.isGrantModalOpen = true;
         this.renderControl();
       },
@@ -1355,6 +1426,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermissionDisabled: !this.isAccessPermissionEditable(),
       showAccessPermission: accessPermissionBound,
       secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
+      // Task 153: the access-status indicator (undefined while unasked or in flight → nothing drawn).
+      accessStatus: this.accessStatusValue,
     };
 
     const recordId = this.getRecordId();
@@ -1404,8 +1477,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     open: this.isGrantModalOpen,
                     onClose: () => {
                       this.isGrantModalOpen = false;
+                      this.grantModalSection = undefined;
                       this.renderControl();
                     },
+                    // Task 153: open at the No Access List when the access-status indicator asked for it.
+                    initialSection: this.grantModalSection,
                     recordId,
                     // Polymorphic root type derived from the bound host entity
                     // (task 071) — the modal sends {recordType, recordId}.

@@ -71,8 +71,8 @@ public interface IBicepDeployRunner
 /// <param name="SubscriptionId">Target subscription id (ADR-027 D4 — customer subscription, never platform).</param>
 /// <param name="TenancyModel">
 /// <c>Model1</c> or <c>Model2</c> per <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
-/// Model 2 deploys <c>customer.bicep</c>. Model 1 fails closed (ArmDeploymentRunner) until tasks 225b + 228
-/// converge it onto the same dedicated stamp — task 225a retired <c>stacks/model1-shared.bicep</c> (D-12).
+/// Both models deploy <c>customer.bicep</c> — the same dedicated stamp (D-12; Model 1 since task 228). Task 225a retired
+/// <c>stacks/model1-shared.bicep</c>.
 /// </param>
 /// <param name="Template">
 /// Task 245b: the ARM template this run deploys, resolved once by

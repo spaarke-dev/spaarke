@@ -1,0 +1,1384 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{5aa00242-5212-f111-8342-7ced8d1dc988}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls" shownavigationbar="false">
+      <tabs>
+        <tab verticallayout="true" id="{64b19a53-e08e-4c87-b2ed-aef95b98dbb4}" IsUserDefined="1" labelid="{6a66449e-0836-49e4-a8c4-1f7145e1e8fc}" name="tab_overview" expanded="true">
+          <labels>
+            <label description="OVERVIEW" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="66%">
+              <sections>
+                <section name="tab_overview_section_10" id="223b4dbd-d6c2-4f72-944f-f28673cb21f6" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="PROJECT INFORMATION NEW PCF" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{9b461abd-e9e4-4365-afb9-4e5c1bfe2c88}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Project Number" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectnumber" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_projectnumber" uniqueid="{4139784e-b744-4924-b8eb-8b0c622a63e8}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{d7e245f9-09a3-40bd-8554-7ff9b8a5d945}" labelid="{0ac22fe8-1a3a-4da6-aa17-278040a21624}" name="tab_projectinformation" celllabelposition="Top" columns="1111" visible="false">
+                  <labels>
+                    <label description="PROJECT INFORMATION OLD" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{d96b798b-c789-4cb1-a6ec-b78a58992fce}" labelid="{b1fa84a2-d2ec-48a4-9d13-1155c180087e}">
+                        <labels>
+                          <label description="Project Number" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectnumber" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_projectnumber" />
+                      </cell>
+                      <cell id="{1288de59-6bf7-4bf4-9816-db6bc218ca59}" locklevel="0" colspan="3" rowspan="1" labelid="{694b859b-ec11-455b-8ef3-cb4b4c0d9dfe}">
+                        <labels>
+                          <label description="Project Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_projectname" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{58f0c02b-eaff-42eb-84ce-05a50d7ee818}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Project Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projecttype_ref" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_projecttype_ref" disabled="false" />
+                      </cell>
+                      <cell id="{fdaf7da5-4d33-4cc8-a898-d8dff005f53d}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Matter Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mattertype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_mattertype" disabled="false" />
+                      </cell>
+                      <cell id="{3e861404-3ea1-4f7e-9cff-b43e0a5317e7}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Practice Area" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_practicearea" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_practicearea" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{94622db0-f802-4881-8f8c-dec9f689f13d}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{5d862a98-2faf-4179-bac2-997917893213}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Opened Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_openeddate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_openeddate" disabled="false" />
+                      </cell>
+                      <cell id="{965b7a89-4a5f-4f19-9b32-a55e86494ad4}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="HighPriority" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_highpriority" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_highpriority" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{6ca20217-3b4f-48d9-9ac4-f78a8679f0b7}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{a63c4940-0f2b-4e6b-b429-4d858aec918b}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{61d9382b-cace-4d2f-9b87-efb08e492eb9}" locklevel="0" colspan="4" rowspan="5" labelid="{ccff7ccf-6115-4a7b-9e37-2cf30ffdf417}">
+                        <labels>
+                          <label description="Project Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectdescription" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_projectdescription" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="overview_documents" id="58652b8a-9ec9-46f0-be52-df9edcd4c986" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115">
+                  <labels>
+                    <label description="DOCUMENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{90d1928e-d888-4431-a26e-9dee0cbc069e}" locklevel="0" colspan="1" rowspan="1" labelid="{4293d43a-65f3-45e3-acd4-3bcf31a61bbb}" visible="false">
+                        <labels>
+                          <label description="Container Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_containerid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_containerid" disabled="false" />
+                      </cell>
+                      <cell id="{bddf797e-244d-4b55-b2d4-5fa33abf0b0a}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="Container Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_containerid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_containerid" disabled="false" />
+                      </cell>
+                      <cell id="{e98bcaa3-6e91-4416-bb1c-4a489c855b29}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="Search Index Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_searchindexname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_searchindexname" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{175aa08a-7cbb-41f7-be29-0c3f38b00563}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell locklevel="0" id="{f2429a81-5d27-478a-b466-caa7f6ad6a28}" colspan="4" rowspan="25">
+                        <labels>
+                          <label description="New semantic search control" languagecode="1033" />
+                        </labels>
+                        <control id="cc_1772028601501" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" isunbound="true" isrequired="false" uniqueid="{2cb7a578-de60-495d-b39f-881aee741bb1}" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="overview_documentssubgrid" id="ea73186e-6af2-4d7e-bd5c-2d02b970ae47" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{4b1afaec-e860-407b-8c3f-6c94089b0bf7}" visible="false">
+                  <labels>
+                    <label description="DOCUMENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{308a9bfd-ac46-4d7e-98d7-3636d66cfdc4}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{860d58a0-0e28-44ad-b62f-096dbd1df2a6}">
+                        <labels>
+                          <label description="Documents Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_Documents" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_Project_Document_1n</RelationshipName>
+                            <TargetEntityType>sprk_document</TargetEntityType>
+                            <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                            <ViewIds>{82D75343-F530-4743-AC74-C2D13E83B1C0},{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="34%">
+              <sections>
+                <section name="overview_tracking" id="c965c581-fd0b-4370-8ee3-bd6668762ee6" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="TRACKING" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{cde55618-9e1e-4465-bf6d-cffa8f19cbca}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Monitor" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_monitor" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_monitor" uniqueid="{1f00d750-f7dc-4ff8-996d-a7f3aaaf04cd}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_overview_section_9" id="020c9e31-0d61-48ac-af0d-3de84f845dfa" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="MESSAGES" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{37550237-20fa-4f49-9f29-5609b94f0233}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Project Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectname" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_projectname" uniqueid="{a3755c5d-d540-4c71-b69c-1219acc503a1}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="overview_tasksevents" id="793723fe-7018-48ed-a3f5-2cecc45d6702" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" labelid="{84cc984c-f1fd-49e8-ba3e-916b09f3cc0d}">
+                  <labels>
+                    <label description="TASKS &amp; EVENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{1bc86a16-958e-4dcd-929d-15da12e118eb}" colspan="1" rowspan="1" labelid="{5b10cc6c-93eb-4c04-9330-2b7632e951aa}">
+                        <labels>
+                          <label description="New visual host" languagecode="1033" />
+                        </labels>
+                        <control id="cc_1772027736534" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" uniqueid="{9b7faf2b-ae53-4342-935a-4e0a9e97460b}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="overview_upcomingtasks" id="43392b09-013e-42b6-85bb-1f96f5760400" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" labelid="{d403b22e-7ac3-4729-8c0e-44bce8e69bfc}">
+                  <labels>
+                    <label description="PROJECT HEALTH" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{5c8a5427-fc3a-4df6-8dbc-c951598943e5}" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="New visual host" languagecode="1033" />
+                        </labels>
+                        <control id="cc_1772028416369" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" uniqueid="{a475495f-2530-4ea7-bfde-0e463d6af995}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="overview_projecthealth" id="57504398-8707-4fde-bb9c-40926d54f04d" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{240bc6bb-09e7-4f2b-8b1e-7a7a14117b6a}">
+                  <labels>
+                    <label description="BUDGET PERFORMANCE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{35c7ff6e-623a-465e-8aa0-a4c4b3a798e9}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="BUDGET PERFORMANCE" languagecode="1033" />
+                        </labels>
+                        <control id="cc_1772028326337" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" uniqueid="{04d5bb6d-3122-459e-90d4-89b861c5069d}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_matters" id="1356ac02-296a-4f98-86a0-e35faac03b5e" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="MATTERS" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="overview_relatedmatters" id="fc381a9e-efed-473f-959a-db4528c0a989" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="RELATED MATTERS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{721476c5-0a44-42b4-93ca-3fc85497fadd}" rowspan="4" colspan="1" auto="true" showlabel="false">
+                        <labels>
+                          <label description="Matters Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_matters" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_Project_Matter_nn</RelationshipName>
+                            <TargetEntityType>sprk_matter</TargetEntityType>
+                            <ViewId>{3BA2301F-692E-4A29-BE2E-365C923B01DD}</ViewId>
+                            <ViewIds>{3BA2301F-692E-4A29-BE2E-365C923B01DD}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_calendar" id="f0a56410-ac39-44e0-b333-26294c5acd5a" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{799782b7-e0c3-426d-966e-8323432c3e1c}">
+          <labels>
+            <label description="CALENDAR" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_calendar_section_events" id="24d862e0-bbbc-479e-865b-627362123c2a" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" visible="false">
+                  <labels>
+                    <label description="EVENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{d535e9b9-f73f-475d-94e1-0f7b85467b93}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="Events Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_events" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_event_RegardingProject_n1</RelationshipName>
+                            <TargetEntityType>sprk_event</TargetEntityType>
+                            <ViewId>{7690F9D7-9CB1-4837-AC76-D0705E9E1B75}</ViewId>
+                            <ViewIds>{7690F9D7-9CB1-4837-AC76-D0705E9E1B75}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="calendar_eventsgrid" id="8866580e-f73a-4638-baff-b63e5fbf3798" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="CALENDAR" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell rowspan="20" id="{0fcf1e2e-f156-4cb7-916d-41c1433c04c0}" showlabel="false" colspan="1" auto="true">
+                        <labels>
+                          <label description="Event Page Index" languagecode="1033" />
+                        </labels>
+                        <control id="WebResource_new_1" classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}">
+                          <parameters>
+                            <Url>sprk_eventspage.html</Url>
+                            <PassParameters>true</PassParameters>
+                            <Security>false</Security>
+                            <Scrolling>auto</Scrolling>
+                            <Border>false</Border>
+                            <ShowOnMobileClient>false</ShowOnMobileClient>
+                            <WebResourceId>{606fc817-1c02-f111-8407-7ced8d1dc988}</WebResourceId>
+                            <Data>mode=embedded</Data>
+                          </parameters>
+                        </control>
+                        <events>
+                          <event name="onload" application="false" active="false" />
+                        </events>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_contacts" id="4f85ee41-1292-45c7-ab25-a033bb312df5" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{a65e9913-9100-4d54-b2d7-8cd13f916681}">
+          <labels>
+            <label description="CONTACTS" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_contacts_section_people" id="855ab0ec-b322-4d52-94b1-c6acdeb9ccb9" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115" labelid="{ebeb07be-a74b-4f35-b924-74ff423e4387}">
+                  <labels>
+                    <label description="PEOPLE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{7fc8e874-b93a-4091-9240-0a2b23f79f3e}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Attorney 1" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedattorney1" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedattorney1" disabled="false" />
+                      </cell>
+                      <cell id="{556660fc-df36-4c9b-9b58-27f62952a4d0}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Attorney 2" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedattorney2" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedattorney2" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{d0d28982-752e-45e4-92de-87a81651ac68}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{bfa3b82a-2e85-44be-af92-f808c9184987}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{7d81d112-71f3-42c6-8d9e-73a4e0d9037d}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Paralegal 1" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedparalegal1" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedparalegal1" disabled="false" />
+                      </cell>
+                      <cell id="{6a95fc58-11fe-4b0f-90dd-7c78657fceef}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Paralegal 2" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedparalegal2" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedparalegal2" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{1b0063f6-4dd6-43a1-8882-e3b73eec1766}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{d1b31aa0-a5d2-415e-a05e-7073094ab914}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1d986d46-df30-4789-ab38-a97210643795}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned To Internal" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedtointernal" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedtointernal" disabled="false" />
+                      </cell>
+                      <cell id="{6a843ea5-6a58-4c28-aed3-a9391f0396f1}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned To External" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedtoexternal" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedtoexternal" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{20ed8ea8-70ec-4322-9354-012d6f595fcb}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{b86f508f-1cfd-469b-814a-271f97854dca}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell locklevel="0" id="{adc0626e-ecd1-4d03-b329-bd128f2d1946}" rowspan="4" colspan="4" auto="false" showlabel="false" labelid="{e02037f3-8ab7-464f-a311-7b82522b9d47}">
+                        <labels>
+                          <label description="Subgrid Contacts" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_contacts" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_Project_Contact_Contact_nn</RelationshipName>
+                            <TargetEntityType>contact</TargetEntityType>
+                            <ViewId>{0D5D377B-5E7C-47B5-BAB1-A5CB8B4AC105}</ViewId>
+                            <ViewIds>{00000000-0000-0000-00AA-000010001003},{0D5D377B-5E7C-47B5-BAB1-A5CB8B4AC105}</ViewIds>
+                            <VisualizationId>{E365462F-1DB9-46A8-928D-BEAB1A7A2375}</VisualizationId>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="tab_contacts_section_organizations" id="2cb99d35-ba81-4d24-9a0e-26325b28750c" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115" labelid="{ca3cfd4a-0a44-4f26-97d0-b86c7eb0548b}">
+                  <labels>
+                    <label description="ORGANIZATIONS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{efb6d767-60f0-418f-9b2c-82000b0bbc4f}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Law Firm 1" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedlawfirm1" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedlawfirm1" disabled="false" />
+                      </cell>
+                      <cell id="{7026e44e-efee-41d3-895f-17666e00ce8a}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Assigned Law Firm 2" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_assignedlawfirm2" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_assignedlawfirm2" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{31c382ca-9176-479e-896b-a4c6d7c36358}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{6759605c-b8ce-49a0-9cb9-4b051ac89bf0}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell locklevel="0" id="{03146acc-2fa7-421c-8d78-0a5e2a0a3583}" rowspan="4" colspan="4" auto="false" showlabel="false" labelid="{6a1ebc27-d03b-4f44-8779-cb80cdccc87c}">
+                        <labels>
+                          <label description="Subgrid Organizations" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_organizations" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_Project_sprk_Organization_Organization_nn</RelationshipName>
+                            <TargetEntityType>sprk_organization</TargetEntityType>
+                            <ViewId>{E909D8EE-8118-44B4-93A2-AA7F3859A6D4}</ViewId>
+                            <ViewIds>{E909D8EE-8118-44B4-93A2-AA7F3859A6D4}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_email" id="0bbefbc6-49f5-4ba8-ad34-e6c662b3fafb" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{70b91815-0861-494d-8f5a-a9eb66ef5dea}">
+          <labels>
+            <label description="EMAIL" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_email_section_email" id="3ed239b7-9345-4161-98e4-ada0eadd1a2b" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{b58b6770-9c64-4f09-93ad-31afbd9c66a9}">
+                  <labels>
+                    <label description="EMAIL MESSAGES" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{5b5f337d-6268-4e8e-be78-05e663334016}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{cb5dd37f-6fd5-48e5-b112-630dc1088759}">
+                        <labels>
+                          <label description="Email Sugrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_email" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_Project_Email_1n</RelationshipName>
+                            <TargetEntityType>email</TargetEntityType>
+                            <ViewId>{CC98CB1F-6552-4FD8-9E2F-39A1CAD2F710}</ViewId>
+                            <ViewIds>{7AFF64B0-5B8C-4AD7-89F8-976777EEE178},{CC98CB1F-6552-4FD8-9E2F-39A1CAD2F710}</ViewIds>
+                            <VisualizationId>{1EC1872A-23DE-4294-9D7F-1B76272A5FD5}</VisualizationId>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_billing" id="36b58e64-03c0-46e3-844e-00e4238faac9" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{1f53066e-df2d-4a50-b86a-fdb13797624c}">
+          <labels>
+            <label description="BILLING" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_billing_section_financials" id="21bef585-c9f7-4b4e-81f3-d2e4b1215ea6" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="11" labelwidth="115" labelid="{d3fe21b2-6b86-493f-b105-b2dd613dfefe}">
+                  <labels>
+                    <label description="FINANCIALS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{9d0b602b-3728-4592-8841-6cf96f37290a}" locklevel="0" colspan="1" rowspan="1" labelid="{dcc34526-32a7-418a-9335-bb3ae46cd8c2}">
+                        <labels>
+                          <label description="Total Spend to Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalspendtodate" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalspendtodate" disabled="false" />
+                      </cell>
+                      <cell id="{158f6ad3-f904-40f8-bfbe-bc41f6cb0758}" locklevel="0" colspan="1" rowspan="1" labelid="{1484e423-7a06-462d-9acf-edf3d46b4c24}">
+                        <labels>
+                          <label description="Invoice Count" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoicecount" classid="{C6D124CA-7EDA-4A60-AEA9-7FB8D318B68F}" datafieldname="sprk_invoicecount" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6a71ccca-da51-4fc8-8451-d0678acc1bf5}" locklevel="0" colspan="1" rowspan="1" labelid="{2cf07864-c67d-4bf3-88b8-a965ea8f2645}">
+                        <labels>
+                          <label description="Monthly Spend Current" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_monthlyspendcurrent" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_monthlyspendcurrent" disabled="false" />
+                      </cell>
+                      <cell id="{45dceedf-ff30-4f6a-9b99-cb7a4012a88d}" locklevel="0" colspan="1" rowspan="1" labelid="{43c76b86-4d1d-49b2-9348-d88e23a90c0f}">
+                        <labels>
+                          <label description="Total Budget" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalbudget" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalbudget" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b3d4898e-7692-4d86-b4d4-49f6aba1dae5}" locklevel="0" colspan="1" rowspan="1" labelid="{aadeb549-1f44-4aea-9c02-ea6ffc8201e4}">
+                        <labels>
+                          <label description="Month Over Month Velocity" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_monthovermonthvelocity" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_monthovermonthvelocity" disabled="false" />
+                      </cell>
+                      <cell id="{8e6fc84b-15c7-4744-9dc0-08c5b601bc81}" locklevel="0" colspan="1" rowspan="1" labelid="{374623ef-9cbc-4718-b8f0-f5445a5f939b}">
+                        <labels>
+                          <label description="Remaining Budget" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_remainingbudget" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_remainingbudget" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{bb3d44ce-8e20-43e2-8c4b-583f8899f58c}" locklevel="0" colspan="1" rowspan="1" labelid="{1cdcdd4c-e263-4196-a109-3ddc90386dee}">
+                        <labels>
+                          <label description="Monthly Spend Timeline" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_monthlyspendtimeline" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_monthlyspendtimeline" disabled="false" />
+                      </cell>
+                      <cell id="{3cec5325-faa5-476d-b8fb-cb11aa66ab3c}" locklevel="0" colspan="1" rowspan="1" labelid="{5f395220-cf6d-4e49-b895-eded8041ae30}">
+                        <labels>
+                          <label description="Budget Utilization Percent" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetutilizationpercent" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_budgetutilizationpercent" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{5b7588dc-99a6-41bb-a0a6-10bdec882cd1}" locklevel="0" colspan="1" rowspan="1" labelid="{dd9ee8e7-e2c0-47d3-a016-d7ce51cbb3e9}">
+                        <labels>
+                          <label description="Average Invoice Amount" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_averageinvoiceamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_averageinvoiceamount" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{6ce6c653-3faf-4f78-a088-723593bb6218}" labelid="{6d162008-cba8-4754-a595-21481ca41358}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_billing_section_invoices" id="f4604574-a13d-48ec-8743-2f3b139b5949" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{f0f2bb2a-d4f0-42dc-81e0-1f91d5f71015}">
+                  <labels>
+                    <label description="INVOICES" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{d01d399b-d2a5-450e-a2ac-ffe6201300ac}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{ac458342-5cb0-4281-94c4-e815a9780451}">
+                        <labels>
+                          <label description="Invoices subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_invoices" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_sprk_project_sprk_invoice_sprk_project</RelationshipName>
+                            <TargetEntityType>sprk_invoice</TargetEntityType>
+                            <ViewId>{2177AA81-4408-F111-8406-7C1E525ABD8B}</ViewId>
+                            <ViewIds>{2220A3BC-330E-4405-B441-3605DF961878},{2177AA81-4408-F111-8406-7C1E525ABD8B}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="tab_6_section_3" id="8d8e9826-79b6-442e-b834-7a92106fecfa" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115" labelid="{cfd6bcd0-c658-4007-91c5-cd9be29cdc4a}">
+                  <labels>
+                    <label description="BUDGETS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell locklevel="0" id="{9ed40598-52d9-441d-a3ce-249fa2841fa8}" rowspan="4" colspan="4" auto="true" showlabel="false" labelid="{decbbc3b-f98f-45be-807c-4c33cd3fd907}">
+                        <labels>
+                          <label description="Budgets Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_budgets" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_sprk_project_sprk_budget_sprk_project</RelationshipName>
+                            <TargetEntityType>sprk_budget</TargetEntityType>
+                            <ViewId>{E6734C42-5D1C-4D14-B829-6570B6422AAE}</ViewId>
+                            <ViewIds>{E6734C42-5D1C-4D14-B829-6570B6422AAE}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_reportcard" id="809df16f-ca10-4e8d-8da8-5bc9f80eb208" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{304dd19c-0a97-4485-8548-772e1adec7ab}">
+          <labels>
+            <label description="REPORT CARD" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_reportcard_section_performanceareas" id="8249916a-f9f6-4b88-adf6-3f434c5a04b8" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="111" labelwidth="115" labelid="{b31f84a1-6392-44fd-81d6-993dfbab0ae6}">
+                  <labels>
+                    <label description="PERFORMANCE AREAS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell locklevel="0" id="{a621cbf8-78ea-4e27-8c7b-5f80368aff91}" labelid="{bdfa1399-0a5b-40fe-92be-53bf9bf8773f}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{726b4e14-23ac-4f9f-984c-ecfab4791042}" labelid="{01d9ae34-b388-43e2-91fb-662634cd5506}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell locklevel="0" id="{ecc4a91b-d5aa-4a1d-ad5e-11613faf358f}" labelid="{e3e25522-d9ec-48fe-a54e-4dc4fd24b742}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2f13b260-e24a-4c97-b339-6de8e113310c}" locklevel="0" colspan="1" rowspan="1" labelid="{df100d23-d88f-4dd4-bbe3-86b38feca142}">
+                        <labels>
+                          <label description="Guideline Compliance Grade Current" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_guidelinecompliancegrade_current" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_guidelinecompliancegrade_current" disabled="false" />
+                      </cell>
+                      <cell id="{71ee9c3f-ded7-4f79-b6d2-0d7686781d4a}" locklevel="0" colspan="1" rowspan="1" labelid="{90b3e4f1-97c5-4535-b585-38a5963dfc38}">
+                        <labels>
+                          <label description="Budget Compliance Grade Current" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetcompliancegrade_current" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_budgetcompliancegrade_current" disabled="false" />
+                      </cell>
+                      <cell id="{fe9640b0-6b3b-43f6-b734-14dedcec422d}" locklevel="0" colspan="1" rowspan="1" labelid="{cbc222d0-1bea-4977-8276-7cb7f69b9b4d}">
+                        <labels>
+                          <label description="Outcome Compliance Grade Current" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_outcomecompliancegrade_current" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_outcomecompliancegrade_current" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6bc5108c-1ade-4043-9449-bf59e8b46105}" locklevel="0" colspan="1" rowspan="1" labelid="{0f403395-eec5-4437-9e70-bae0569299d2}">
+                        <labels>
+                          <label description="Gudeline Compliance Grade Average" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_gudelinecompliancegrade_average" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_gudelinecompliancegrade_average" disabled="false" />
+                      </cell>
+                      <cell id="{d82ce911-0e76-46b5-a2dc-880948c14354}" locklevel="0" colspan="1" rowspan="1" labelid="{ee300ede-551a-4fd6-bc95-e535e5fa82aa}">
+                        <labels>
+                          <label description="Budget Compliance Grade Average" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetcompliancegrade_average" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_budgetcompliancegrade_average" disabled="false" />
+                      </cell>
+                      <cell id="{3d3cce33-e262-4119-8a17-dac1013588a1}" locklevel="0" colspan="1" rowspan="1" labelid="{b19829ea-377b-4437-b075-fd1c22360100}">
+                        <labels>
+                          <label description="Outcome Compliance Grade Average" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_outcomecompliancegrade_average" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_outcomecompliancegrade_average" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_7_section_1" id="0093504b-8036-4535-ac75-a20ec96b3baf" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{81fce757-dd58-4640-86b5-a3f58afe1f2e}">
+                  <labels>
+                    <label description="KPI ASSESSMENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{9773a1b7-3398-4a47-899e-c115dfdc5433}" rowspan="4" colspan="1" auto="false" showlabel="false" labelid="{ffa15979-a026-40f0-8380-6309c819f5c2}">
+                        <labels>
+                          <label description="KPI Assessment Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_kpiassessment" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_kpiassessment_Project_1n</RelationshipName>
+                            <TargetEntityType>sprk_kpiassessment</TargetEntityType>
+                            <ViewId>{EDFB9E11-79FD-477A-B698-5FFCB2DFEE1E}</ViewId>
+                            <ViewIds>{EDFB9E11-79FD-477A-B698-5FFCB2DFEE1E}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_access" id="edf268aa-24c2-4a45-9c19-7a38ae9a937c" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" visible="false">
+          <labels>
+            <label description="ACCESS CONTROL" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_access_section_access" id="67ca8299-e37e-4397-a342-de9bd2b7f0ae" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="ACCESS CONTROL" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{7a41509c-cbe7-4e99-b3b9-45c5e5314134}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="External Access Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_externalaccess" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_externalrecordaccess_Project_sprk_project_n1</RelationshipName>
+                            <TargetEntityType>sprk_externalrecordaccess</TargetEntityType>
+                            <ViewId>{DADAF33F-D764-4310-B7BF-E6E3E36E05C2}</ViewId>
+                            <ViewIds>{DADAF33F-D764-4310-B7BF-E6E3E36E05C2}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_todos_sprk_project" id="215004ea-ec6f-4ad1-8c95-19eeb50500d1" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="To Dos" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_todos_section" id="2228fea4-be2e-4ead-8def-7b38fea4716f" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="TO DOS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{273ff860-6f6f-41d2-8b5b-4cee4384d9b9}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{89720244-83d8-4f93-a5a5-3c250d8ed28e}">
+                        <labels>
+                          <label description="To Dos Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_todos" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>30</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>true</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Both</ChartGridMode>
+                            <RelationshipName>sprk_sprk_project_sprk_todo_RegardingProject</RelationshipName>
+                            <TargetEntityType>sprk_todo</TargetEntityType>
+                            <ViewId>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewId>
+                            <ViewIds>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_analyses_sprk_project" id="b786e206-a5cc-4197-a025-c030e045287f" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="Analyses" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_analyses_section" id="e51854ad-d4bd-45b6-9a10-6fb03a234f42" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="ANALYSES" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{7bd7fbcd-0cfc-44da-a3ed-c5eb4ca15fd0}" rowspan="4" colspan="1" auto="true" showlabel="false">
+                        <labels>
+                          <label description="Analyses Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_analyses" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>30</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>true</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Both</ChartGridMode>
+                            <RelationshipName>sprk_analysis_RegardingProject_sprk_project</RelationshipName>
+                            <TargetEntityType>sprk_analysis</TargetEntityType>
+                            <ViewId>{4EF7E264-A43F-4D9C-AD56-E48C561AD30E}</ViewId>
+                            <ViewIds>{4EF7E264-A43F-4D9C-AD56-E48C561AD30E}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{ce58619f-be2e-4d67-a337-c264f467f963}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{2b58a300-2f81-41ae-898e-1b7afd3dcffc}" showlabel="false" labelid="{15766fbf-20fd-4ecd-9319-39de986124bd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{bf561f55-0338-48c2-8264-f21572b99bf3}" showlabel="false" labelid="{00df5777-c517-4382-be35-b1f160ae8985}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3fbd2bf4-984e-457e-983d-7ae78c7b6fcd}" showlabel="false" labelid="{1b971eb5-645a-4209-9026-b0ed1301684c}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{d1146e25-eea0-447c-bd77-5256454a8ef0}" locklevel="0" colspan="1" rowspan="1" labelid="{c1f06fdd-4256-4c0e-8300-79a1a0483a5c}">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{c6c0f7de-35a8-44ce-8f0c-2f0afb37c7d8}" locklevel="0" colspan="1" rowspan="1" labelid="{88286773-8ee8-4625-a673-523480342f84}">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{48a90c62-9635-475a-a8a4-ba0dc995bee8}" labelid="{8a96d8cd-916c-47f5-b594-4ad25232ac94}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+            <cell id="{6a74f945-ce27-47d2-b806-17ef5a12e59a}" locklevel="0" colspan="1" rowspan="1" labelid="{39a9588b-62b1-41ed-8713-a09855367c72}">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{04cb9701-8624-4f60-89de-dd0e0164d6fe}" locklevel="0" colspan="1" rowspan="1" labelid="{ca1cb5cb-0fc7-43f4-a48a-2660cf32be62}">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{e4062234-ee39-43c6-9c08-61cd5bc65ecf}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{ad743683-62ca-4518-bc2c-d659e48f6cab}" showlabel="false" labelid="{18d63383-7e7b-4a6e-88ab-bd393e6fca66}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{68253236-3194-44dc-8963-efcf460a8a54}" showlabel="false" labelid="{53b254c4-2f06-46f8-b65e-3dc47603db58}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{77b59ad0-902e-4f35-8918-24cd082cdd5d}" showlabel="false" labelid="{8ad46117-8b0d-4c64-857f-d1081a87907e}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="2" FallbackForm="true">
+        <Everyone />
+      </DisplayConditions>
+      <Navigation>
+        <NavBar>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Project_Document_1n" Id="nav_sprk_Project_Document_1n" Sequence="10000">
+            <Titles>
+              <Title Text="Documents" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_event_RegardingProject_n1" Id="nav_sprk_event_RegardingProject_n1" Sequence="10000">
+            <Titles>
+              <Title Text="Events" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Project_Contact_Contact_nn" Id="nav_sprk_Project_Contact_Contact_nn" Sequence="10000">
+            <Titles>
+              <Title Text="People" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Project_sprk_Organization_Organization_nn" Id="nav_sprk_Project_sprk_Organization_Organization_nn" Sequence="10000">
+            <Titles>
+              <Title Text="Organizations" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+          <NavBarByRelationshipItem Area="ProcessCenter" Show="false" RelationshipName="hardcoded_{B7196B13-6B9D-42CD-BD58-B19A3953126F}navAsyncOperations" Id="navAsyncOperations" Sequence="9500">
+            <Titles>
+              <Title Text="System Jobs" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+        </NavBar>
+      </Navigation>
+      <controlDescriptions>
+        <controlDescription forControl="{2cb7a578-de60-495d-b39f-881aee741bb1}">
+          <customControl formFactor="2" name="sprk_Sprk.SemanticSearchControl">
+            <parameters>
+              <searchScope type="Enum" static="true">entity</searchScope>
+              <showFilters type="TwoOptions" static="true">true</showFilters>
+              <compactMode type="TwoOptions" static="true">false</compactMode>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Sprk.SemanticSearchControl">
+            <parameters>
+              <searchScope type="Enum" static="true">entity</searchScope>
+              <showFilters type="TwoOptions" static="true">true</showFilters>
+              <compactMode type="TwoOptions" static="true">false</compactMode>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Sprk.SemanticSearchControl">
+            <parameters>
+              <searchScope type="Enum" static="true">entity</searchScope>
+              <showFilters type="TwoOptions" static="true">true</showFilters>
+              <compactMode type="TwoOptions" static="true">false</compactMode>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{04d5bb6d-3122-459e-90d4-89b861c5069d}">
+          <customControl formFactor="0" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">09a588b8-9f1c-f111-88b3-7ced8d1dc988</chartDefinitionId>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">09a588b8-9f1c-f111-88b3-7ced8d1dc988</chartDefinitionId>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">09a588b8-9f1c-f111-88b3-7ced8d1dc988</chartDefinitionId>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{1f00d750-f7dc-4ff8-996d-a7f3aaaf04cd}">
+          <customControl id="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}">
+            <parameters>
+              <datafieldname>sprk_monitor</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}">
+            <parameters>
+              <datafieldname>sprk_monitor</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Controls.TrackingFieldTrio">
+            <parameters>
+              <monitor type="TwoOptions">sprk_monitor</monitor>
+              <highPriority type="TwoOptions">sprk_highpriority</highPriority>
+              <accessPermission type="OptionSet">sprk_accesspermission</accessPermission>
+              <showTitle type="TwoOptions" static="true">true</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Controls.TrackingFieldTrio">
+            <parameters>
+              <monitor type="TwoOptions">sprk_monitor</monitor>
+              <highPriority type="TwoOptions">sprk_highpriority</highPriority>
+              <accessPermission type="OptionSet">sprk_accesspermission</accessPermission>
+              <showTitle type="TwoOptions" static="true">true</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Controls.TrackingFieldTrio">
+            <parameters>
+              <monitor type="TwoOptions">sprk_monitor</monitor>
+              <highPriority type="TwoOptions">sprk_highpriority</highPriority>
+              <accessPermission type="OptionSet">sprk_accesspermission</accessPermission>
+              <showTitle type="TwoOptions" static="true">true</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{a3755c5d-d540-4c71-b69c-1219acc503a1}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_projectname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_projectname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Controls.CommunicationConversationPanel">
+            <parameters>
+              <anchorField type="SingleLine.Text">sprk_projectname</anchorField>
+              <title type="SingleLine.Text" static="true">MESSAGES</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Controls.CommunicationConversationPanel">
+            <parameters>
+              <anchorField type="SingleLine.Text">sprk_projectname</anchorField>
+              <title type="SingleLine.Text" static="true">MESSAGES</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Controls.CommunicationConversationPanel">
+            <parameters>
+              <anchorField type="SingleLine.Text">sprk_projectname</anchorField>
+              <title type="SingleLine.Text" static="true">MESSAGES</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{9b7faf2b-ae53-4342-935a-4e0a9e97460b}">
+          <customControl formFactor="0" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">154bd4a4-f359-f111-a825-3833c5d9bcab</chartDefinitionId>
+              <height type="Whole.None" static="true">400</height>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">154bd4a4-f359-f111-a825-3833c5d9bcab</chartDefinitionId>
+              <height type="Whole.None" static="true">400</height>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">154bd4a4-f359-f111-a825-3833c5d9bcab</chartDefinitionId>
+              <height type="Whole.None" static="true">400</height>
+              <justification type="SingleLine.Text" static="true">left</justification>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{a475495f-2530-4ea7-bfde-0e463d6af995}">
+          <customControl formFactor="1" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">0e26da24-f094-f111-b8dc-7ced8ddc4a05</chartDefinitionId>
+              <height type="Whole.None" static="true">200</height>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">0e26da24-f094-f111-b8dc-7ced8ddc4a05</chartDefinitionId>
+              <height type="Whole.None" static="true">200</height>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Visuals.VisualHost">
+            <parameters>
+              <chartDefinitionId type="SingleLine.Text" static="true">0e26da24-f094-f111-b8dc-7ced8ddc4a05</chartDefinitionId>
+              <height type="Whole.None" static="true">200</height>
+              <showTitle type="TwoOptions" static="true">false</showTitle>
+              <showVersion type="TwoOptions" static="true">false</showVersion>
+              <showToolbar type="TwoOptions" static="true">true</showToolbar>
+              <enableDrillThrough type="TwoOptions" static="true">true</enableDrillThrough>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{4139784e-b744-4924-b8eb-8b0c622a63e8}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_projectnumber</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_projectnumber</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_projectnumber</boundField>
+              <title type="SingleLine.Text" static="true">PROJECT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Project Information","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_projectnumber","span":1,"required":true},{"name":"sprk_projectname","span":2},{"name":"sprk_projecttype_ref","span":1},{"name":"sprk_openeddate","span":1, "renderer": "date"},{"name":"sprk_highpriority","span":1},{"name":"sprk_projectdescription","span":3,"renderer":"textarea"}]}
+</layoutJson>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_projectnumber</boundField>
+              <title type="SingleLine.Text" static="true">PROJECT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Project Information","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_projectnumber","span":1,"required":true},{"name":"sprk_projectname","span":2},{"name":"sprk_projecttype_ref","span":1},{"name":"sprk_openeddate","span":1, "renderer": "date"},{"name":"sprk_highpriority","span":1},{"name":"sprk_projectdescription","span":3,"renderer":"textarea"}]}
+</layoutJson>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_projectnumber</boundField>
+              <title type="SingleLine.Text" static="true">PROJECT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Project Information","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_projectnumber","span":1,"required":true},{"name":"sprk_projectname","span":2},{"name":"sprk_projecttype_ref","span":1},{"name":"sprk_openeddate","span":1, "renderer": "date"},{"name":"sprk_highpriority","span":1},{"name":"sprk_projectdescription","span":3,"renderer":"textarea"}]}
+</layoutJson>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+      <events>
+        <event name="onload" application="false" active="false">
+          <Handlers>
+            <Handler functionName="Spaarke.AssignedAccess.onLoad" libraryName="sprk_/scripts/assignedaccess_postsave.js" handlerUniqueId="{ae388ebe-2ad0-80bb-e3b4-d70afd8f3471}" enabled="true" parameters="" passExecutionContext="true" />
+          </Handlers>
+        </event>
+      </events>
+      <formLibraries>
+        <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{6f44a23e-2c9c-171f-37b0-52bfa1beb77c}" />
+        <Library name="sprk_/scripts/assignedaccess_postsave.js" libraryUniqueId="{71df880f-29ff-6bff-7f60-fe22c9f2210a}" />
+      </formLibraries>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Project main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Project main form version 1" languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

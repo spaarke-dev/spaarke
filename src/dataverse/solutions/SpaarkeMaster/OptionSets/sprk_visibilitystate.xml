@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_visibilitystate" localizedName="Visibility State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Visibility State" languagecode="1033" />
+  </displaynames>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Invoiced" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="InternalWIP" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="PreBill" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Paid" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000004" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="WrittenOff" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000005" IsHidden="0">
+      <labels>
+        <label description="Approved" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+  </options>
+</optionset>

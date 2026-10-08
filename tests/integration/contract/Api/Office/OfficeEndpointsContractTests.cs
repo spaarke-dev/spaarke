@@ -695,10 +695,10 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // Graph call — see EmailProcessing:DefaultContainerId above and SpeFileStore.cs
             // ResolveDriveIdAsync.
             var graphClientFactory = Mock.Of<IGraphClientFactory>();
-            var containerOps = new ContainerOperations(graphClientFactory, Mock.Of<ILogger<ContainerOperations>>());
-            var driveItemOps = new DriveItemOperations(graphClientFactory, Mock.Of<ILogger<DriveItemOperations>>());
+            var containerOps = new ContainerOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<ContainerOperations>>());
+            var driveItemOps = new DriveItemOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<DriveItemOperations>>());
             var uploadMgr = new UploadSessionManager(
-                graphClientFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
+                graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
             var userOps = new UserOperations(graphClientFactory, Mock.Of<ILogger<UserOperations>>());
             var speFileStoreMock = new Mock<SpeFileStore>(
                 MockBehavior.Loose, containerOps, driveItemOps, uploadMgr, userOps, null!);
@@ -2122,9 +2122,9 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             var graphClientFactory = Mock.Of<IGraphClientFactory>();
             var spe = new Mock<SpeFileStore>(
                 MockBehavior.Loose,
-                new ContainerOperations(graphClientFactory, Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(graphClientFactory, Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(graphClientFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+                new ContainerOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<ContainerOperations>>()),
+                new DriveItemOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<DriveItemOperations>>()),
+                new UploadSessionManager(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
                 new UserOperations(graphClientFactory, Mock.Of<ILogger<UserOperations>>()),
                 null!);
             spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))

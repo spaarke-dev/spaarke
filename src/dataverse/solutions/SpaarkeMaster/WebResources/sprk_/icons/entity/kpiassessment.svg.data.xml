@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{d44cc18e-c00b-f111-8342-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_/icons/entity/kpiassessment.svg</Name>
+  <DisplayName>sprk_kpiassessment Icon</DisplayName>
+  <Description>Fluent UI icon: Gauge20Regular - KPI assessment record — scorecard child</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentitykpiassessmentsvgD44CC18E-C00B-F111-8342-7CED8D1DC988</FileName>
+</WebResource>

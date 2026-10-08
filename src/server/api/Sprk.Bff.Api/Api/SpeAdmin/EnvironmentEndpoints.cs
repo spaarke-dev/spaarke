@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -178,7 +179,7 @@ public static class EnvironmentEndpoints
 
             return TypedResults.Ok(items);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to list SPE environments");
             return Results.Problem(
@@ -218,7 +219,7 @@ public static class EnvironmentEndpoints
         {
             return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to retrieve SPE environment {Id}", id);
             return Results.Problem(
@@ -292,7 +293,7 @@ public static class EnvironmentEndpoints
 
             return Results.Created($"/api/spe/environments/{newId}", created.ToDetail());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to create SPE environment '{Name}'", request.Name);
             return Results.Problem(
@@ -362,7 +363,7 @@ public static class EnvironmentEndpoints
         {
             return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to update SPE environment {Id}", id);
             return Results.Problem(
@@ -438,7 +439,7 @@ public static class EnvironmentEndpoints
         {
             return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to delete SPE environment {Id}", id);
             return Results.Problem(

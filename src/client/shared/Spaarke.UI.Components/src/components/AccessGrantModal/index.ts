@@ -12,6 +12,8 @@ export type { IAssignedAccessEntry } from './AccessGrantModal';
 // Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).
 export { resolveAccessPermissionState } from './accessPermissionState';
 export type { IAccessPermissionValues } from './accessPermissionState';
+// Task 153: the ONE builder of task 064's per-record No Access route, reused by the TrackingFieldTrio host's status read.
+export { buildNoAccessPath } from './noAccess';
 export type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,

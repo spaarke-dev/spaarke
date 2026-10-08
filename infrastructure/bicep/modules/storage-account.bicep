@@ -18,8 +18,8 @@ param containers array = ['temp-files', 'document-processing', 'test-documents']
 @description('Enable lifecycle policy for test-documents container (24hr TTL)')
 param enableTestDocumentLifecycle bool = true
 
-@description('Disable shared key access (requires RBAC for all access)')
-param disableSharedKeyAccess bool = false
+@description('Disable shared key access (requires RBAC for all access). Default true (task 244, owner D13): the only caller, customer.bicep, is keyless.')
+param disableSharedKeyAccess bool = true
 
 @description('Subnet ID for VNet network rule (empty = allow all)')
 param allowedSubnetId string = ''
@@ -186,8 +186,5 @@ output storageAccountId string = storageAccount.id
 output storageAccountName string = storageAccount.name
 output primaryEndpoint string = storageAccount.properties.primaryEndpoints.blob
 
-// When shared key access is disabled, connection strings using account keys won't work.
-// Use managed identity (DefaultAzureCredential) with the blob endpoint instead.
-// For backward compatibility, output key-based connection string only when shared keys are enabled.
-#disable-next-line outputs-should-not-contain-secrets
-output connectionString string = disableSharedKeyAccess ? 'BlobEndpoint=${storageAccount.properties.primaryEndpoints.blob}' : 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
+// No connection-string output (task 244): callers use the blob endpoint above with their managed
+// identity (Storage Blob Data Contributor below). customer.bicep disables shared key access.

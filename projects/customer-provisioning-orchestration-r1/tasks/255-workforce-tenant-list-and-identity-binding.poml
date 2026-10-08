@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="255" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>INCOMING-141 (UAC-r2 task 141): provisioning writes the customer workforce tenant list, the acct optional claim, the contact identity-binding schema and the identity-link job switch</title>
+    <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (accepted 2026-10-06)</phase>
+    <gate>before T186</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Intake + H3 (app registration claim) + H4b settings + H13 check + Dataverse schema step; auth-relevant.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity: a wrong tenant list either denies every customer employee or binds Spaarke staff into a customer environment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Intake catalog, manifest and skill (main session).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, model1-dedicated, testing</tags>
+    <deps>230b</deps>
+  </metadata>
+
+  <prompt>Implement the provisioning half of UAC-r2 task 141 so a new stamp admits its customer's workforce users.</prompt>
+
+  <role>SPAARKE platform developer (L2 intake, H3, H4b, H13).</role>
+
+  <goal>
+    The binding spec is `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` (on master
+    since #1312). Today every new stamp denies every first-sign-in workforce bind (`workforce_tenant_list_empty`), because
+    nothing writes `WorkforceIdentity__CustomerTenantIds__N`; and denies Type-2 sign-ins without the `acct` optional claim and
+    the contact identity-binding schema. After this task a run writes all of them, and H13 checks the list.
+  </goal>
+
+  <context>
+    <background>
+      Hand-off §4 asks: (1) intake `customerWorkforceTenantIds` (GUID array; Model 1 REQUIRED and different from Spaarke's
+      tenant — it is the CUSTOMER's tenant, not the run's tenantId; Model 2 may default from the H0.5 consent tid; refuse the
+      CIAM tenant, the all-zero GUID, an unparseable value); (2) manifest `per_env_settings` `WorkforceIdentity__CustomerTenantIds__N`
+      both slots; (3) H13 asserts present + parses (+ not equal to `AzureAd__TenantId` on Model 1); (4) optional registry column.
+      §5 neighbours: the `acct` optional claim on every per-customer BFF registration (H3 is now C#,
+      GraphAppRegistrationProvisioner — the script path the hand-off names is retired); the Dataverse schema step
+      `Set-ContactIdentityBindingSchema.ps1 -Apply/-Verify` after H6 and before H9 — the Worker host has no pwsh (G38/T253),
+      so port it to C# or fold the components into the solution (T218); the job switch `IdentityLink__Reconciliation__WritesEnabled`
+      (absent = report-only).
+    </background>
+    <relevant-files>
+      <file>projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs; Api/Api/RunsEndpoints.cs; Handlers/EntraAppReg/**; Handlers/BulkAppSettings/**; Handlers/E2EAcceptance/**</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml; scripts/provisioning-prereqs/intake.schema.json; scripts/Set-ContactIdentityBindingSchema.ps1; .claude/skills/provision-environment/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="run-context contract">Intake value validated with the same rules at POST /api/runs and in the handler (shared code); H4b source declared in PerEnvSourceCatalog; RunContextContractTests stay green.</constraint>
+    <constraint source="hand-off">Never fall back to AzureAd:TenantId; never TenantRouting:Tenants[]. A value the BFF would refuse at startup is refused at intake.</constraint>
+    <constraint source="owner">No live change in this task; coordinate the schema step with T218 / T253.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Intake + validation (+ schema, skill Step 1, guide).</step>
+    <step order="2">H4b manifest entries (both slots) + the job switch decision; H3 `acct` optional claim (create + reconcile).</step>
+    <step order="3">Contact identity-binding schema step without pwsh (C# port or solution component) — before H9.</step>
+    <step order="4">H13 check; tests; docs; acknowledge delivery to UAC-r2 (owner relays or #1094 comment — ask first).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Model 1 run without `customerWorkforceTenantIds`, or with the CIAM / zero / Spaarke tenant, is refused at POST /api/runs.</criterion>
+    <criterion testable="true">H4b writes one `WorkforceIdentity__CustomerTenantIds__N` per tenant on both slots; H13 fails a stamp without it.</criterion>
+    <criterion testable="true">H3 adds the `acct` optional claim to a new and an existing registration idempotently.</criterion>
+    <criterion testable="true">The binding schema is applied before the BFF deploy without a shell tool.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>

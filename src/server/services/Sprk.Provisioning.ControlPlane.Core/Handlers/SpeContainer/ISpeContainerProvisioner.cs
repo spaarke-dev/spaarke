@@ -79,7 +79,115 @@ public interface ISpeContainerProvisioner
     Task<SpeContainerBindOutcome> BindRootContainerAsync(
         SpeContainerBindRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 227b (G9): ensures each grant exists on the container type's registration, as the owning app —
+    /// GET the grant, then create it (Graph v1.0 create is PUT) when missing or PATCH it when its permissions
+    /// differ; nothing is written when it already matches. Domain failures do NOT throw; infra faults (token
+    /// exchange, transport, timeout) MAY throw.
+    /// </summary>
+    Task<SpeContainerTypeGrantOutcome> EnsureGrantsAsync(
+        SpeContainerTypeGrantRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 227e: ensures the container carries the <c>spaarkeCustomerId</c> custom property
+    /// (<see cref="Spaarke.Contracts.Spe.SpeContainerCustomerMarker"/>) = the customer id — the marker the customer's BFF
+    /// recognises its containers by (T227d). GET first; written only when absent, so a re-run writes nothing. A container
+    /// marked for another customer, or whose marker is not a readable string, is a Failure and is left untouched.
+    /// </summary>
+    Task<SpeContainerMarkerOutcome> EnsureCustomerMarkerAsync(
+        SpeContainerMarkerRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 227e: READS (never writes) what an existing container says about its owner — its container type, its
+    /// <c>spaarkeCustomerId</c> marker and its business-unit stamp — so H8 can refuse a reused container that is not the
+    /// customer's BEFORE it binds or marks anything. A 404 is <see cref="SpeContainerInspection.NotFound"/>; any other
+    /// Graph refusal is a Failure. Infra faults MAY throw.
+    /// </summary>
+    Task<SpeContainerInspection> InspectContainerAsync(
+        SpeContainerInspectionRequest request,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.InspectContainerAsync"/>.</summary>
+public sealed record SpeContainerInspectionRequest(string TenantId, string OwningAppId, string ContainerId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.InspectContainerAsync"/>.</summary>
+public abstract record SpeContainerInspection
+{
+    private SpeContainerInspection() { }
+
+    /// <summary>
+    /// The container exists. <paramref name="Marker"/> is its <c>spaarkeCustomerId</c> (null when absent;
+    /// <paramref name="MarkerUnreadable"/> when present but not a string); <paramref name="BusinessUnitId"/> its business-unit
+    /// stamp (null when absent; <paramref name="StampUnreadable"/> when present but not one GUID).
+    /// </summary>
+    public sealed record Found(
+        string? ContainerTypeId,
+        string? Marker,
+        bool MarkerUnreadable,
+        Guid? BusinessUnitId,
+        bool StampUnreadable) : SpeContainerInspection;
+
+    /// <summary>Graph answered 404 for the owning app: no such container (or not one of the owning app's type).</summary>
+    public sealed record NotFound : SpeContainerInspection;
+
+    /// <summary>Graph refused the read — no verdict.</summary>
+    public sealed record Failure(string Diagnostic) : SpeContainerInspection;
+}
+
+/// <summary>
+/// One <c>applicationPermissionGrants</c> entry on a container-type registration (task 227b). Permission names
+/// are Graph's <c>fileStorageContainerTypeAppPermission</c> values (e.g. <c>full</c>); an empty list means none.
+/// </summary>
+/// <param name="AppId">The app (client) id the grant is for — the stamp UAMI or the customer BFF app registration.</param>
+/// <param name="ApplicationPermissions">Permissions for app-only tokens issued to <paramref name="AppId"/>.</param>
+/// <param name="DelegatedPermissions">Permissions for delegated (OBO) tokens issued to <paramref name="AppId"/>.</param>
+public sealed record SpeContainerTypeGrant(
+    string AppId,
+    IReadOnlyList<string> ApplicationPermissions,
+    IReadOnlyList<string> DelegatedPermissions);
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.EnsureGrantsAsync"/>.</summary>
+/// <param name="TenantId">Customer Entra tenant id (§4D I5 — explicit, never default).</param>
+/// <param name="ContainerTypeId">The container type whose registration carries the grants.</param>
+/// <param name="OwningAppId">The container type's owning app — the only app allowed to change its registration (FileStorageContainerTypeReg.Selected).</param>
+/// <param name="Grants">The grants to ensure, in order.</param>
+public sealed record SpeContainerTypeGrantRequest(
+    string TenantId,
+    string ContainerTypeId,
+    string OwningAppId,
+    IReadOnlyList<SpeContainerTypeGrant> Grants);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.EnsureGrantsAsync"/>.</summary>
+public abstract record SpeContainerTypeGrantOutcome
+{
+    private SpeContainerTypeGrantOutcome() { }
+
+    /// <summary>Every grant is in place. <paramref name="WrittenAppIds"/> lists those created or updated by this call.</summary>
+    public sealed record Success(IReadOnlyList<string> WrittenAppIds) : SpeContainerTypeGrantOutcome;
+
+    /// <summary>Graph refused to read or write the grant for <paramref name="AppId"/>; later grants were not attempted.</summary>
+    public sealed record Failure(string AppId, string Diagnostic) : SpeContainerTypeGrantOutcome;
+}
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
+public sealed record SpeContainerMarkerRequest(string TenantId, string OwningAppId, string ContainerId, string CustomerId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
+public abstract record SpeContainerMarkerOutcome
+{
+    private SpeContainerMarkerOutcome() { }
+
+    /// <summary>The container carries this customer's marker; <paramref name="Written"/> is true when this call wrote it.</summary>
+    public sealed record Success(bool Written) : SpeContainerMarkerOutcome;
+
+    /// <summary>Graph refused, or the container is marked for another customer / unreadably (left untouched).</summary>
+    public sealed record Failure(string Diagnostic) : SpeContainerMarkerOutcome;
+}
+
 
 /// <summary>Inputs to <see cref="ISpeContainerProvisioner.ActivateAsync"/>.</summary>
 /// <param name="CustomerId">Customer partition key — audit logs only.</param>
@@ -98,12 +206,16 @@ public sealed record SpeContainerActivationRequest(
 /// <param name="OwningAppId">The container type's owning app — the identity that created the container.</param>
 /// <param name="ContainerId">The container to bind.</param>
 /// <param name="BusinessUnitId">The owning business unit: the ROOT business unit of the customer's Dataverse environment.</param>
+/// <param name="RemoveIfNotBound">True for a container H8 just created (a failed bind removes it — nothing unbound is
+/// left). False for the customer's EXISTING container a later run reuses (task 227e): its files are the customer's data,
+/// so a failed bind leaves it in place and the run stops for an operator.</param>
 public sealed record SpeContainerBindRequest(
     string CustomerId,
     string TenantId,
     string OwningAppId,
     string ContainerId,
-    Guid BusinessUnitId);
+    Guid BusinessUnitId,
+    bool RemoveIfNotBound = true);
 
 /// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.BindRootContainerAsync"/>.</summary>
 public abstract record SpeContainerBindOutcome

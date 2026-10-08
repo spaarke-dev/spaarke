@@ -2,9 +2,9 @@
 // ArmOpenAiPinFreshnessProbe.cs
 //
 // HANDLER-03 (pre-dispatch audit 2026-08-27, Wave 2 remediation): F1
-// verbatim — pinned Azure OpenAI model versions (ADR-020 catalog:
-// gpt-4o=2024-08-06, gpt-4o-mini=2024-07-18, text-embedding-3-large=1)
-// MUST be GA and NOT-Deprecating in the target region + subscription
+// verbatim — the pinned Azure OpenAI model versions a stamp deploys
+// (PinnedModelCatalog.Models, mirrored from openai.bicep — task 247)
+// MUST be GA and NOT-Deprecating in the stamp's OpenAI region + subscription
 // BEFORE H2a's ~20-30 min Bicep deploy tries to create the model
 // deployment and fails with ServiceModelDeprecated.
 //
@@ -71,9 +71,6 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 /// </summary>
 public sealed class ArmOpenAiPinFreshnessProbe : IPreflightQuotaProbe
 {
-    /// <summary>Run-parameter key for the target Azure region (parity with sibling probes).</summary>
-    public const string RegionParameterKey = "region";
-
     /// <summary>Run-parameter key for the target Azure subscription id (parity with sibling probes).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
@@ -122,10 +119,9 @@ public sealed class ArmOpenAiPinFreshnessProbe : IPreflightQuotaProbe
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (!input.NonSecretParameters.TryGetValue(RegionParameterKey, out var region) || string.IsNullOrWhiteSpace(region))
-        {
-            return ConfigError($"Run parameter '{RegionParameterKey}' is required by {CheckName} (parity with {PreflightCheckNames.AzureOpenAiTpmHeadroom}).");
-        }
+        // Task 247: the OpenAI region (openAiLocation, else customer.bicep's default) — the models are
+        // deployed there, not in the primary `region`.
+        var region = ArmCognitiveServicesTpmProbe.ResolveOpenAiRegion(input.NonSecretParameters);
         if (!input.NonSecretParameters.TryGetValue(SubscriptionIdParameterKey, out var subscriptionId) || string.IsNullOrWhiteSpace(subscriptionId))
         {
             return ConfigError($"Run parameter '{SubscriptionIdParameterKey}' is required by {CheckName}.");

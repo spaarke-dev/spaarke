@@ -121,55 +121,17 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     public const string UpgradeCompatYellowGateId = "upgrade-compat-yellow";
 
     /// <summary>
-    /// COMP-10 (SESSION 17): non-secret parameter carrying the operator-declared
-    /// cost tier (matches intake.schema.json `tier` enum:
-    /// <c>shared-trial</c>|<c>smb</c>|<c>enterprise</c>|<c>dedicated</c>).
-    /// Used to look up the monthly cost ceiling in <see cref="H0Options.GetCeilingUsd"/>.
+    /// COMP-10: non-secret parameter carrying the operator-declared cost tier (intake.schema.json <c>tier</c> enum =
+    /// <see cref="CostEnvelopeIntake.Tiers"/>). Used to look up the monthly cost ceiling in <see cref="H0Options.GetCeilingUsd"/>.
     /// </summary>
-    public const string TierParameterKey = "tier";
+    public const string TierParameterKey = CostEnvelopeIntake.TierParameterKey;
 
     /// <summary>
-    /// COMP-10 (SESSION 17): non-secret parameter carrying the run's projected
-    /// monthly cost in USD as an invariant-culture decimal string (e.g.,
-    /// <c>"425"</c>, <c>"1200.50"</c>). Populated by the SKILL.md Step 2
-    /// BAT-10 client-side estimator OR by a direct-API caller passing its
-    /// own estimate. Missing/blank → the H0 cost gate LOG-ONLY skips
-    /// (no fail); values that fail invariant-culture decimal parse → same
-    /// skip with a WARN log line so operators notice.
+    /// COMP-10: non-secret parameter carrying the run's projected monthly cost in USD as an invariant-culture decimal
+    /// string (e.g. <c>"425"</c>, <c>"1200.50"</c>). Required for every model since task 229 (POST /api/runs and H0
+    /// apply <see cref="CostEnvelopeIntake"/>).
     /// </summary>
-    public const string EstimatedMonthlyUsdParameterKey = "estimatedMonthlyUsd";
-
-    /// <summary>
-    /// COMP-10 (SESSION 17): non-secret parameter carrying the operator's
-    /// cost-envelope policy — mirrors intake.schema.json `costEnvelopePolicy`
-    /// enum (<c>abortOnOverrun</c>|<c>warnAndProceed</c>).
-    ///
-    /// MATCHING SEMANTICS (Bucket B LOW#1 SESSION 18 alignment): the match
-    /// is <see cref="StringComparison.OrdinalIgnoreCase"/> (case-INSENSITIVE),
-    /// NOT exact literal. Any value that ordinal-ignore-case-equals
-    /// <c>warnAndProceed</c> (<c>WarnAndProceed</c>, <c>WARNANDPROCEED</c>,
-    /// <c>warnandproceed</c>, etc.) enters the warn branch; anything else
-    /// (including absent/null) falls through to the abortOnOverrun default.
-    /// This is deliberate operator-typo tolerance — the intake schema enum
-    /// enforces the canonical casing at author-time via ajv, but a direct-API
-    /// caller who typos the casing gets the SAFE (warn-branch-preserved) result
-    /// rather than a surprise abort. See
-    /// <see cref="Sprk.Provisioning.ControlPlane.Tests.Handlers.H0PreflightHandlerTests"/>
-    /// CostEnvelopePolicy_CaseInsensitive_Match_BucketB_LOW1 test.
-    ///
-    /// CROSS-FIELD ENFORCEMENT: Bucket B HIGH#12 SESSION 18 added server-side
-    /// enforcement of the Model2Dedicated + warnAndProceed cross-field
-    /// invariant. Direct-API callers bypassing SKILL.md Step 1.0 are now
-    /// correctly rejected here. See <see cref="CheckCostEnvelopeAsync"/>.
-    /// </summary>
-    public const string CostEnvelopePolicyParameterKey = "costEnvelopePolicy";
-
-    /// <summary>
-    /// Literal value of <see cref="CostEnvelopePolicyParameterKey"/> that skips
-    /// the abort branch. Matched case-INSENSITIVELY per the docstring on
-    /// <see cref="CostEnvelopePolicyParameterKey"/> (Bucket B LOW#1 SESSION 18).
-    /// </summary>
-    public const string CostEnvelopePolicyWarnAndProceed = "warnAndProceed";
+    public const string EstimatedMonthlyUsdParameterKey = CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey;
 
     /// <summary>Machine-stable rejection code emitted when COMP-10 aborts H0.</summary>
     public const string CostOverrunRejectionCode = "quota-cost-overrun";
@@ -302,7 +264,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         // the operator cannot resolve by adjusting a knob — it requires a code ship
         // (bump BFF version, deploy new solution, wait for a Green matrix entry).
         // Cost-overrun by contrast is a POLICY knob the operator can twist (adjust
-        // estimate, switch to warnAndProceed for Model1). Surfacing the harder-to-fix
+        // estimate or tier). Surfacing the harder-to-fix
         // blocker FIRST saves an operator round-trip: instead of hitting cost-overrun,
         // fixing the estimate, resuming, THEN discovering the upgrade-compat Red pair
         // and doing a code ship, they see the compat Red pair immediately and can
@@ -321,11 +283,9 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         // (3.5) COMP-10 (SESSION 17) — cost-envelope gate. Fires BEFORE any
         // Azure probe so an over-budget run blocks fast with zero API calls,
         // AFTER upgrade-compat (see 3.3 for the Bucket B LOW#3 reordering rationale).
-        // Skipped entirely when `Options.CostEnvelopeAbortsPreflight = false`
-        // OR when the required nonSecret parameters (tier + estimatedMonthlyUsd)
-        // are absent/unparseable (LOG-ONLY skip so operators notice missing
-        // plumbing without a hard-fail on runs that predate the schema
-        // addition). See CheckCostEnvelopeAsync for the full decision matrix.
+        // Skipped entirely when `Options.CostEnvelopeAbortsPreflight = false`;
+        // otherwise absent/unusable tier or estimate fails the run for every
+        // model (task 229). See CheckCostEnvelopeAsync for the decision matrix.
         var costFailure = await CheckCostEnvelopeAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (costFailure is not null)
         {
@@ -428,51 +388,29 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// COMP-10 (SESSION 17) cost-envelope gate. Returns a terminal
-    /// <see cref="HandlerResult.Failure"/> when the run's projected monthly
-    /// cost exceeds the tier ceiling AND the run's costEnvelopePolicy is not
-    /// <see cref="CostEnvelopePolicyWarnAndProceed"/> AND
-    /// <see cref="H0Options.CostEnvelopeAbortsPreflight"/> is true. Returns
-    /// <c>null</c> in every other case (gate disabled / missing parameters /
-    /// unknown tier / under-budget / warnAndProceed policy).
+    /// COMP-10 cost-envelope gate. Returns a terminal <see cref="HandlerResult.Failure"/> (Resumable) when the run's
+    /// tier or estimate is absent or unusable, or the estimate exceeds the tier ceiling; <c>null</c> when the gate is
+    /// disabled or the estimate is within the ceiling.
     ///
-    /// Decision matrix:
-    ///   CostEnvelopeAbortsPreflight = false            → null (log-only skip)
-    ///   tier missing or unknown                        → null (WARN log)
-    ///   estimatedMonthlyUsd missing or unparseable     → null (WARN log)
-    ///   estimatedMonthlyUsd ≤ ceiling                  → null (INFO log)
-    ///   estimatedMonthlyUsd > ceiling + warnAndProceed → null (WARN log)
-    ///   estimatedMonthlyUsd > ceiling + abortOnOverrun → Failure(Resumable, quota-cost-overrun)
+    /// Task 229 (D-12): every run deploys one dedicated stamp — Model 1 paid by Spaarke, Model 2 by the customer — so
+    /// the decision is the same for every tenancy model and has no override (the Model-1-only <c>warnAndProceed</c>
+    /// waiver and the Model-2-only strictness are gone):
+    ///   CostEnvelopeAbortsPreflight = false   → null (WARN log)
+    ///   tier / estimate absent or unusable    → Failure(Resumable, the CostEnvelopeIntake code)
+    ///   estimatedMonthlyUsd ≤ ceiling         → null (INFO log)
+    ///   estimatedMonthlyUsd > ceiling         → Failure(Resumable, quota-cost-overrun)
     ///
-    /// Skipped/log-only branches never mutate Cosmos state — H0's own tenant
-    /// guard already wrote to Cosmos if needed; the cost gate is additive.
+    /// POST /api/runs applies the same <see cref="CostEnvelopeIntake"/> rules, so the input refusals here are defence in
+    /// depth (a run document written another way).
     /// </summary>
     private async Task<HandlerResult?> CheckCostEnvelopeAsync(
         ProvisioningRun run,
         string etag,
         CancellationToken cancellationToken)
     {
-        // Bucket B MED#4/#5/#7 SESSION 18 (customer-provisioning-orchestration-r1
-        // adversarial e2e verify workflow wepdcb8we): pre-compute the strict
-        // gating flag ONCE at entry so every log branch below can include the
-        // structured `costGateOutcome` property (MED#7 machine-readable audit)
-        // + can decide whether to LOG-SKIP or FAIL (MED#4/#5 fail-CLOSED on
-        // Model2Dedicated).
-        // Task 223 (D-12): parse via the shared TenancyModelParser (case-sensitive) so this
-        // gate stays in lock-step with H1/H3/H12c which use the same parser. Behavioural
-        // change vs pre-Task-223: an unparseable / wrong-case tenancyModel value now sets
-        // isModel2Dedicated=false + strictModel2=false, so the strict-fail branches below
-        // are skipped — the ordinary log-and-continue path applies. The upstream
-        // ValidateTenancyProfilePair at RunsEndpoints.PostRuns already gates unparseable
-        // values with HTTP 400 before H0 ever sees them.
-        var isModel2Dedicated = Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var h0Tenancy)
-            && h0Tenancy == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2;
-        var strictModel2 = isModel2Dedicated && _options.RequireCostEnvelopeForModel2Dedicated;
-
         if (!_options.CostEnvelopeAbortsPreflight)
         {
-            // Bucket B MED#7: raised Info→Warning so Kusto alerts filtered on
-            // severityLevel>=Warning catch a run that proceeded without the
+            // Warning, not Info, so alerts filtered on severityLevel>=Warning catch a run that proceeded without the
             // gate. costGateOutcome=disabled is the machine-readable marker.
             _logger.LogWarning(
                 "H0 cost-envelope gate DISABLED via H0Options.CostEnvelopeAbortsPreflight=false — skipping " +
@@ -481,107 +419,26 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             return null;
         }
 
-        if (!TryGetNonEmpty(run.Parameters.NonSecret, TierParameterKey, out var tier))
+        run.Parameters.NonSecret.TryGetValue(TierParameterKey, out var tierRaw);
+        run.Parameters.NonSecret.TryGetValue(EstimatedMonthlyUsdParameterKey, out var estimateRaw);
+        var input = CostEnvelopeIntake.Validate(tierRaw, estimateRaw);
+        if (input is CostEnvelopeIntakeOutcome.Invalid invalid)
         {
-            // Bucket B MED#4: Model2Dedicated + missing tier = HARD FAIL, not log-skip.
-            if (strictModel2)
-            {
-                const string strictRejectionCode = "quota-cost-envelope-required-missing";
-                var strictDiag =
-                    $"H0 cost-envelope gate: Model2 requires nonSecret['{TierParameterKey}'] populated (Bucket B MED#4 SESSION 18). " +
-                    "Silent skip forbidden for dedicated-stamp tenancies. Set H0Options.RequireCostEnvelopeForModel2Dedicated=false only in internal-test envs.";
-                _logger.LogWarning(
-                    "H0 cost-envelope gate FAIL_MISSING_TIER (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
-                    "tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}",
-                    run.RunId, run.CustomerId, run.TenancyModel, "fail-missing-tier");
-                await MarkFailedAsync(run, etag, strictRejectionCode, strictDiag, evidence: null, cancellationToken).ConfigureAwait(false);
-                return new HandlerResult.Failure(FailureClass.Resumable, strictRejectionCode, strictDiag);
-            }
+            var inputDiagnostic = $"H0 cost-envelope gate: {invalid.Diagnostic}";
             _logger.LogWarning(
-                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}'] absent for runId={RunId} customerId={CustomerId} " +
-                "tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}. " +
-                "Populate `tier` via the intake schema so H0 can enforce the tier ceiling.",
-                TierParameterKey, run.RunId, run.CustomerId, run.TenancyModel, "skipped-missing-tier");
-            return null;
+                "H0 cost-envelope gate REFUSED — unusable input (runId={RunId} customerId={CustomerId} " +
+                "tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome} rejectionCode={RejectionCode})",
+                run.RunId, run.CustomerId, run.TenancyModel, "fail-input", invalid.RejectionCode);
+            await MarkFailedAsync(run, etag, invalid.RejectionCode, inputDiagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+            return new HandlerResult.Failure(FailureClass.Resumable, invalid.RejectionCode, inputDiagnostic);
         }
 
-        var ceiling = _options.GetCeilingUsd(tier);
-        if (ceiling is null)
-        {
-            // Bucket B MED#5: Model2Dedicated + unknown-tier = HARD FAIL, not log-skip.
-            if (strictModel2)
-            {
-                const string strictRejectionCode = "quota-cost-envelope-unknown-tier";
-                var strictDiag =
-                    $"H0 cost-envelope gate: Model2 + tier '{tier}' is unknown to H0Options.TierMonthlyCostCeilingsUsd " +
-                    $"AND built-in defaults (Bucket B MED#5 SESSION 18). Add tier to intake.schema.json enum + H0Options config, " +
-                    "or use a canonical tier (shared-trial/smb/enterprise/dedicated).";
-                _logger.LogWarning(
-                    "H0 cost-envelope gate FAIL_UNKNOWN_TIER (Bucket B MED#5) — runId={RunId} customerId={CustomerId} " +
-                    "tier={Tier} tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}",
-                    run.RunId, run.CustomerId, tier, run.TenancyModel, "fail-unknown-tier");
-                await MarkFailedAsync(run, etag, strictRejectionCode, strictDiag, evidence: null, cancellationToken).ConfigureAwait(false);
-                return new HandlerResult.Failure(FailureClass.Resumable, strictRejectionCode, strictDiag);
-            }
-            _logger.LogWarning(
-                "H0 cost-envelope gate SKIPPED — tier '{Tier}' has no ceiling in H0Options.TierMonthlyCostCeilingsUsd " +
-                "AND no built-in default (runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} " +
-                "costGateOutcome={CostGateOutcome}). Add the tier to the intake schema enum + configure a ceiling.",
-                tier, run.RunId, run.CustomerId, run.TenancyModel, "skipped-unknown-tier");
-            return null;
-        }
+        var (tier, estimatedMonthlyUsd) = (CostEnvelopeIntakeOutcome.Valid)input;
+        // CostEnvelopeIntake accepts only tiers of the built-in table, so a ceiling always exists.
+        var ceiling = _options.GetCeilingUsd(tier)
+            ?? throw new UnreachableException($"Tier '{tier}' passed CostEnvelopeIntake but has no ceiling.");
 
-        if (!TryGetNonEmpty(run.Parameters.NonSecret, EstimatedMonthlyUsdParameterKey, out var estimatedRaw))
-        {
-            // Bucket B MED#4: Model2Dedicated + missing estimate = HARD FAIL.
-            if (strictModel2)
-            {
-                const string strictRejectionCode = "quota-cost-envelope-required-missing";
-                var strictDiag =
-                    $"H0 cost-envelope gate: Model2 requires nonSecret['{EstimatedMonthlyUsdParameterKey}'] populated " +
-                    $"(Bucket B MED#4 SESSION 18) — tier='{tier}' ceiling=${ceiling}/mo. Silent skip forbidden.";
-                _logger.LogWarning(
-                    "H0 cost-envelope gate FAIL_MISSING_ESTIMATE (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
-                    "tier={Tier} tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}",
-                    run.RunId, run.CustomerId, tier, run.TenancyModel, "fail-missing-estimate");
-                await MarkFailedAsync(run, etag, strictRejectionCode, strictDiag, evidence: null, cancellationToken).ConfigureAwait(false);
-                return new HandlerResult.Failure(FailureClass.Resumable, strictRejectionCode, strictDiag);
-            }
-            _logger.LogWarning(
-                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}'] absent for runId={RunId} customerId={CustomerId} " +
-                "(tier='{Tier}', ceiling=${Ceiling}) tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}. " +
-                "Populate `estimatedMonthlyUsd` via the intake schema so H0 can enforce the cost envelope.",
-                EstimatedMonthlyUsdParameterKey, run.RunId, run.CustomerId, tier, ceiling,
-                run.TenancyModel, "skipped-missing-estimate");
-            return null;
-        }
-
-        if (!decimal.TryParse(estimatedRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var estimatedMonthlyUsd))
-        {
-            // Bucket B MED#4: Model2Dedicated + unparseable estimate = HARD FAIL.
-            if (strictModel2)
-            {
-                const string strictRejectionCode = "quota-cost-envelope-unparseable-estimate";
-                var strictDiag =
-                    $"H0 cost-envelope gate: Model2 + nonSecret['{EstimatedMonthlyUsdParameterKey}']='{estimatedRaw}' " +
-                    "is not a valid invariant-culture decimal (Bucket B MED#4 SESSION 18). Fix intake (e.g., '425' or '1200.50').";
-                _logger.LogWarning(
-                    "H0 cost-envelope gate FAIL_UNPARSEABLE_ESTIMATE (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
-                    "raw='{Raw}' tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}",
-                    run.RunId, run.CustomerId, estimatedRaw, run.TenancyModel, "fail-unparseable-estimate");
-                await MarkFailedAsync(run, etag, strictRejectionCode, strictDiag, evidence: null, cancellationToken).ConfigureAwait(false);
-                return new HandlerResult.Failure(FailureClass.Resumable, strictRejectionCode, strictDiag);
-            }
-            _logger.LogWarning(
-                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}']='{Raw}' is not a valid invariant-culture decimal " +
-                "for runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}. " +
-                "Fix the value in the intake (e.g., '425' or '1200.50').",
-                EstimatedMonthlyUsdParameterKey, estimatedRaw, run.RunId, run.CustomerId,
-                run.TenancyModel, "skipped-unparseable-estimate");
-            return null;
-        }
-
-        if (estimatedMonthlyUsd <= ceiling.Value)
+        if (estimatedMonthlyUsd <= ceiling)
         {
             _logger.LogInformation(
                 "H0 cost-envelope gate PASS — estimated ${Estimated}/mo ≤ tier '{Tier}' ceiling ${Ceiling}/mo " +
@@ -590,77 +447,21 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             return null;
         }
 
-        // Overrun path — decision hinges on policy.
-        var policy = run.Parameters.NonSecret.TryGetValue(CostEnvelopePolicyParameterKey, out var policyRaw)
-            ? policyRaw
-            : null;
-
-        // Bucket B HIGH#12 SESSION 18 (customer-provisioning-orchestration-r1
-        // adversarial e2e verify workflow wepdcb8we): the intake schema
-        // (scripts/provisioning-prereqs/intake.schema.json costEnvelopePolicy
-        // description) declares "warnAndProceed MUST reject for Model2Dedicated";
-        // the SKILL.md batch loader enforces it at Step 1.0 line 533-535 for
-        // skill-dispatched runs. But direct-API callers (retry scripts / ad-hoc
-        // curl / future non-skill orchestrators) bypass that check by POSTing
-        // directly to /api/runs. The server-side gate MUST close the
-        // asymmetry. When tenancyModel=Model2Dedicated is combined with
-        // warnAndProceed, force the fall-through to abortOnOverrun — a
-        // dedicated stamp running uncapped-budget contradicts the schema
-        // invariant regardless of who POSTed the request.
-        //
-        // ControlPlaneEnv=prod is the second dimension the schema names
-        // ("Model 1 shared-trial ONLY"). Not enforced HERE today because
-        // controlPlaneEnv is NOT currently plumbed into run.Parameters.NonSecret
-        // (SKILL.md Step 4.0 nonSecretParameters block lists tenantId /
-        // subscriptionId / openAiLocation / confirmationAcknowledgment /
-        // intakeFileSha256 / region / tier / estimatedMonthlyUsd /
-        // costEnvelopePolicy / operatorUpn — but NOT controlPlaneEnv). Adding
-        // the field here as a defensive-null-check would be dead code; when a
-        // future change plumbs controlPlaneEnv, extend the OR-clause below.
-        //
-        // Bucket B MED#4 SESSION 18: `isModel2Dedicated` was hoisted to the
-        // top of CheckCostEnvelopeAsync so the missing-input branches above
-        // could reuse it. Do NOT re-declare here.
-        if (isModel2Dedicated
-            && string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning(
-                "H0 cost-envelope gate WARN-AND-PROCEED REJECTED (Bucket B HIGH#12 SESSION 18): " +
-                "tenancyModel=Model2 MUST NOT permit warnAndProceed per intake.schema.json " +
-                "costEnvelopePolicy description (Model2 dedicated-stamp runs bar uncapped budget). " +
-                "Forcing fall-through to abortOnOverrun. runId={RunId} customerId={CustomerId} " +
-                "estimated=${Estimated}/mo tier='{Tier}' ceiling=${Ceiling}/mo costGateOutcome={CostGateOutcome}.",
-                run.RunId, run.CustomerId, estimatedMonthlyUsd, tier, ceiling, "reject-model2-warn-and-proceed");
-            policy = null; // Force the abortOnOverrun default branch below.
-        }
-        else if (string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning(
-                "H0 cost-envelope gate WARN-AND-PROCEED — estimated ${Estimated}/mo > tier '{Tier}' ceiling " +
-                "${Ceiling}/mo but nonSecret['{PolicyKey}']='{Policy}' explicitly requests proceed " +
-                "(runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}). " +
-                "Only permitted for Model1 per intake.schema.json costEnvelopePolicy description; " +
-                "Model2 + warnAndProceed is rejected above per Bucket B HIGH#12 SESSION 18.",
-                estimatedMonthlyUsd, tier, ceiling, CostEnvelopePolicyParameterKey, policy,
-                run.RunId, run.CustomerId, run.TenancyModel, "warn-and-proceed");
-            return null;
-        }
-
-        // Default (abortOnOverrun or unspecified) → fail Resumable.
+        // Intake is fixed at POST /api/runs, so the remedy is a NEW run with a corrected tier or estimate.
         var diagnostic =
-            $"Cost-envelope overrun: estimated ${estimatedMonthlyUsd:F2}/mo exceeds tier '{tier}' ceiling " +
-            $"${ceiling:F2}/mo (COMP-10). Set nonSecret['{CostEnvelopePolicyParameterKey}']='{CostEnvelopePolicyWarnAndProceed}' " +
-            "on Model 1 shared-trial runs to warn-and-proceed OR reduce the projected cost + resume. Batch-mode " +
-            "operators fix the estimate in the intake JSON; interactive operators re-invoke the skill.";
+            $"Cost-envelope overrun: estimated ${estimatedMonthlyUsd.ToString("F2", CultureInfo.InvariantCulture)}/mo " +
+            $"exceeds tier '{tier}' ceiling ${ceiling.ToString("F2", CultureInfo.InvariantCulture)}/mo (COMP-10). Start a " +
+            "new run whose intake carries the tier that covers the stamp, or a reduced projected cost (batch: fix the " +
+            "intake JSON; interactive: re-invoke the skill).";
         _logger.LogWarning(
             "H0 cost-envelope gate ABORT — estimated ${Estimated}/mo > tier '{Tier}' ceiling ${Ceiling}/mo " +
-            "(runId={RunId} customerId={CustomerId} policy={Policy} tenancyModel={TenancyModel} " +
+            "(runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} " +
             "costGateOutcome={CostGateOutcome}) — rejecting with {RejectionCode}.",
-            estimatedMonthlyUsd, tier, ceiling, run.RunId, run.CustomerId, policy ?? "<absent>",
+            estimatedMonthlyUsd, tier, ceiling, run.RunId, run.CustomerId,
             run.TenancyModel, "abort", CostOverrunRejectionCode);
         await MarkFailedAsync(
             run, etag, CostOverrunRejectionCode, diagnostic,
-            evidence: BuildCostOverrunEvidence(tier, estimatedMonthlyUsd, ceiling.Value, policy),
+            evidence: BuildCostOverrunEvidence(tier, estimatedMonthlyUsd, ceiling),
             cancellationToken).ConfigureAwait(false);
         return new HandlerResult.Failure(FailureClass.Resumable, CostOverrunRejectionCode, diagnostic);
     }
@@ -668,15 +469,13 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private static JsonElement BuildCostOverrunEvidence(
         string tier,
         decimal estimatedMonthlyUsd,
-        decimal ceilingUsd,
-        string? policy)
+        decimal ceilingUsd)
         => JsonSerializer.SerializeToElement(new
         {
             tier,
             estimatedMonthlyUsd,
             ceilingUsd,
             overageUsd = estimatedMonthlyUsd - ceilingUsd,
-            costEnvelopePolicy = policy ?? "abortOnOverrun (default)",
             rejectionCode = CostOverrunRejectionCode,
         });
 
@@ -819,7 +618,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private static string BuildRejectionCode(string checkName) => checkName switch
     {
         PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
-        PreflightCheckNames.DataverseEnvCreationRate => "quota-dataverse-env-rate",
         PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
         // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
         // code the punchlist mandates so operators can filter for the

@@ -11,6 +11,9 @@
     to know what to include in the packaged managed solution, and that Test-SolutionCompleteness.ps1
     compares against for drift detection.
 
+    T218c: this inventory records what EXISTS in Spaarke solutions. What must SHIP is decided by the package scope
+    rule (SpaarkePackageScope.psm1 + docs/data-model/package-scope.json) and checked by Test-SolutionCompleteness.ps1.
+
     This is a READ-ONLY script - safe to run any time.
 
 .PARAMETER EnvironmentUrl
