@@ -21,6 +21,19 @@
 
   <prompt>Make the STORED sprk_issecure and sprk_accesspermission of every filed work assignment and project equal its parents' effective values (task 174's rule), in both directions and on every change. Lock them while the record has a parent: in the UI (field and commands) and on the server (the secure/unsecure endpoints refuse a child with a parent).</prompt>
 
+  <amendments source="main session, 2026-10-08 (task 067 verifier pass 2)" binding="true">
+    <amendment>Manage Access modal lock for a child with a parent (AccessGrantModal + TrackingFieldTrio host):
+- Hide or disable + Contact / + Organization / + User, candidate approve, level dropdowns, Suggested Access Grant/Dismiss and Revoke.
+- Show a banner "Access follows the parent {type/name}; manage it there", linking to the parent.
+- can-manage-access (or the modal) distinguishes "locked: follows parent" from "no permission".
+- classifyAccessFailure maps the new 409 access_follows_parent to a designed message.
+- The host's Access Permission pill is read-only on a child (accessPermissionDisabled).
+- Inherited grants are a read-only row kind (new provenance value + classifyCurrentAccessRow branch), with the veto and cancellation markers still applied.
+- describeCoverage wording follows 064's contract.
+- Tests for a locked child.
+- PCF version bump per the pcf-deploy skill.</amendment>
+  </amendments>
+
   <role>SPAARKE platform developer: .NET 10 BFF secure transitions (inheritance job, unsecure endpoint, SPE container moves), Dataverse ribbon and form XML, PowerShell operator scripts.</role>
 
   <goal>(1) DOWNWARD CASCADE ON EVERY CHANGE.

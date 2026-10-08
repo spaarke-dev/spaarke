@@ -21,6 +21,10 @@
 
   <prompt>Make every external-access decision use the EFFECTIVE flags of a work assignment or project: the most restrictive of its own sprk_issecure / sprk_accesspermission and those of every record it is filed under (up the filing chain), so a not-yet-flagged child of a secure or Restricted parent is never more open than its parent. In the same change, make the contact plane (read-time contact veto and grant-time grantee check) honour a secure parent's No Access entries.</prompt>
 
+  <amendments source="main session, 2026-10-08 (task 067 verifier pass 2)" binding="true">
+    <amendment>Manage Access modal (AccessGrantModal, after PR #1434): compute "No effect" from the EFFECTIVE (parent-derived) Secure / Limited / Restricted. Preferably the server echoes the effective state and the governing parent (e.g. on 064's response or the existing flags read). Add tests for cancellation inherited from a parent, and update notes/phase4-access-report-contract.md. 067's K4 "cancellation follows the record's own flag" becomes a defect once this lands and is closed by this task.</amendment>
+  </amendments>
+
   <role>SPAARKE platform developer: .NET 10 BFF external-access plane (AccessibleRecordSetService, ExternalParticipationService, GrantExternalAccessEndpoint, AssignedAccessMaterializer), Dataverse SDK queries, xUnit.</role>
 
   <goal>(1) EFFECTIVE FLAGS. For a sprk_workassignment or sprk_project, the effective Secure flag is true if the record or ANY filing ancestor is secure. The effective Access Permission is the most restrictive (Restricted over Limited over Standard; null = Standard) across the record and its ancestors. sprk_matter is a top-level record and is unchanged. Computed through the batched walk from #1419 (no N+1). An unreadable chain fails closed: the record counts as Secure and Restricted for cancellation, and as walled for the veto.
