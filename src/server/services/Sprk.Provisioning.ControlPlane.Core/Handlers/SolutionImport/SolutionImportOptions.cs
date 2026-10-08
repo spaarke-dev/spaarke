@@ -95,19 +95,16 @@ public sealed class SolutionImportOptions
     public string SolutionArtifactManifestBlobName { get; set; } = "dataverse-solutions-latest.json";
 
     /// <summary>
-    /// Per-HTTP-request timeout for a single Dataverse Web API call (existing-
-    /// solutions GET, ImportSolution/StageAndUpgrade POST, or a single
-    /// importjobs poll GET). Defaults to 100 seconds — generous headroom for
-    /// the ImportSolution/StageAndUpgrade POST's base64-encoded solution ZIP
-    /// payload (largest of the 9 solutions is still well under Dataverse's
-    /// binary-parameter size limits). Distinct from <see cref="ImportTimeout"/>
-    /// (the OVERALL 8-solution deadline).
+    /// Per-HTTP-request timeout for a single Dataverse Web API call (installed-solution GET, the
+    /// ImportSolutionAsync/StageAndUpgradeAsync POST — which returns at once — or a single poll GET). Applied to the
+    /// importer's named HttpClient (Worker/Program.cs). Defaults to 100 seconds — headroom for uploading the base64
+    /// package. Distinct from <see cref="ImportTimeout"/> (the overall deadline for the import to complete).
     /// </summary>
     public TimeSpan DataverseWebApiRequestTimeout { get; set; } = TimeSpan.FromSeconds(100);
 
     /// <summary>
-    /// Interval between <c>importjobs({ImportJobId})</c> poll GETs while
-    /// waiting for a single solution's import to reach a terminal state
+    /// Interval between <c>asyncoperations({AsyncOperationId})</c> poll GETs while
+    /// waiting for the package import to reach a terminal state
     /// (<c>completedon</c> non-null). Defaults to 15 seconds — solution
     /// imports run minutes, not seconds, so a 15 s cadence keeps API call
     /// volume low across the fleet's longest-running handler (DS-2b §1.2)

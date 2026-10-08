@@ -416,7 +416,8 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             TenantId: tenantId,
             ClientId: clientId,
             Managed: managed,
-            ClientSecret: clientSecret);
+            ClientSecret: clientSecret,
+            ExpectedVersion: ((SolutionImportOutcome.Success)importOutcome).PackageVersion);
 
         SolutionVerificationOutcome verifyOutcome;
         try

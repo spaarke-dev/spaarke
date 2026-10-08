@@ -44,6 +44,8 @@ public interface ISolutionVerifier
 /// <param name="ClientId">BFF Entra app registration id.</param>
 /// <param name="Managed">T218b — <c>true</c> when the run imported the managed package; the installed SpaarkeMaster's
 /// <c>ismanaged</c> must match.</param>
+/// <param name="ExpectedVersion">T218b — the published package version the importer reported; when set, the installed
+/// version must equal it (an upgrade that silently did nothing is not success).</param>
 /// <param name="ClientSecret">
 /// Resolved BFF app-reg client secret. NEVER logged. The stateless Web API verifier acquires its OWN bearer token
 /// and therefore needs this value independently. A44.5 (task 205i):
@@ -57,7 +59,8 @@ public sealed record SolutionVerificationRequest(
     string TenantId,
     string ClientId,
     bool Managed,
-    string? ClientSecret);
+    string? ClientSecret,
+    string? ExpectedVersion = null);
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionVerifier.VerifyAsync"/>.

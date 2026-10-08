@@ -186,7 +186,9 @@ $SolutionImportOrder = [ordered]@{
     # customer-provisioning-orchestration-r1 2026-08-28). Depends on Tier 1
     # entities + Tier 3 feature forms/ribbons. Ships the sprk_MatterManagement
     # MDA — without this, customer envs receive all entities but no MDA to sign
-    # into. Lockstep with CanonicalSolutionCatalog.cs (unit test enforces).
+    # into. NOTE (T218b, 2026-10-07): provisioning H6 no longer uses this script or list — customer environments
+    # get ONE package, SpaarkeMaster (ADR-027 §3). This list (6 of whose solutions exist nowhere) survives only for
+    # Deploy-Release.ps1 / Provision-Customer.ps1 — see GitHub #1401 (ISS-005).
     "SpaarkeCorporateCounselApp" = @{ DisplayName = "Spaarke Corporate Counsel App (Matter Management MDA)"; SolutionName = "SpaarkeCorporateCounselApp"; Tier = 4 }
 }
 

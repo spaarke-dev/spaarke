@@ -161,15 +161,16 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
                     $"'{request.TargetDataverseUrl}'. Body: {Truncate(bodyText, DiagnosticTailBudget)}");
             }
 
-            return ParseSolutionsResponse(bodyText, request.Managed);
+            return ParseSolutionsResponse(bodyText, request.Managed, request.ExpectedVersion);
         }
     }
 
     /// <summary>
     /// Parses the JSON <c>solutions</c> response and checks SpaarkeMaster is present with <c>ismanaged</c> equal to
-    /// <paramref name="managed"/>. Exposed <c>internal</c> for direct unit testing.
+    /// <paramref name="managed"/> and, when given, the version equal to <paramref name="expectedVersion"/>. Exposed
+    /// <c>internal</c> for direct unit testing.
     /// </summary>
-    internal static SolutionVerificationOutcome ParseSolutionsResponse(string bodyText, bool managed)
+    internal static SolutionVerificationOutcome ParseSolutionsResponse(string bodyText, bool managed, string? expectedVersion = null)
     {
         var name = SpaarkePackage.SolutionUniqueName;
         try
@@ -199,6 +200,14 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
                             ImmutableArray.Create(name),
                             $"{name} {version} is installed as {(isManaged ? "managed" : "unmanaged")}, but the run " +
                             $"imported the {(managed ? "managed" : "unmanaged")} package.");
+                    }
+
+                    if (expectedVersion is not null && SpaarkePackage.CompareVersions(version, expectedVersion) != 0)
+                    {
+                        return new SolutionVerificationOutcome.Missing(
+                            ImmutableArray.Create(name),
+                            $"{name} is installed at version '{version}', not the imported package version " +
+                            $"'{expectedVersion}' — the import reported success but the environment did not change.");
                     }
 
                     return new SolutionVerificationOutcome.AllPresent(ImmutableArray.Create(

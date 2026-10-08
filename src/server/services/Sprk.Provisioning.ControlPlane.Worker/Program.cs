@@ -602,7 +602,10 @@ builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
 builder.Services.Configure<SolutionImportOptions>(
     builder.Configuration.GetSection(nameof(SolutionImportOptions)));
 builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
-builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName);
+// T218b review: the per-request timeout is the option, not HttpClient's silent 100 s default.
+builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName)
+    .ConfigureHttpClient((sp, client) =>
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 // A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
 // OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
 // H6's importer/verifier. Mirrors master's DataverseServiceClientImpl

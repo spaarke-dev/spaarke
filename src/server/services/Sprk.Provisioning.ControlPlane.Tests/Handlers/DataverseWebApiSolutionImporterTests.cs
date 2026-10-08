@@ -13,11 +13,13 @@
 //
 // COVERAGE:
 //   Fresh install (managed / unmanaged blob picked by the request), upgrade
-//   (StageAndUpgrade), equal-version skip (incl. "1.2" == "1.2.0.0"), the
+//   (StageAndUpgradeAsync for managed; ImportSolutionAsync for unmanaged), equal-version skip (incl. "1.2" == "1.2.0.0"), the
 //   T218b refusals (other type installed; newer version installed) — no import
 //   POST in either; failed upgrade → PartialImport; failed fresh import → not
 //   promoted; timeout never promoted; token failure; manifest 404 / old format
 //   / missing blob for the requested type (never falls back); package ZIP 404;
+//   async-operation polling: transient statuses retried, a fresh token per
+//   poll, throttling until the deadline is Timeout (never PartialImport);
 //   unreadable installed state (500 / 403) → failure, never "assume fresh";
 //   undeterminable version; pure parsers; source-grep defense-in-depth.
 // -----------------------------------------------------------------------------
@@ -52,19 +54,19 @@ public sealed class DataverseWebApiSolutionImporterTests
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, data: null)),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
         };
         var blob = new FakeBlobs(ManifestJson("1.2.0.0"));
         var importer = BuildImporter(dv, blob);
 
         var outcome = await importer.ImportAsync(BuildRequest(managed: true), CancellationToken.None);
 
-        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>().Which.PackageVersion.Should().Be("1.2.0.0");
         blob.Requested.Should().Contain(ManagedBlob).And.NotContain(UnmanagedBlob);
 
         var post = dv.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Post).Which;
-        post.Uri.AbsolutePath.Should().EndWith("/ImportSolution");
+        post.Uri.AbsolutePath.Should().EndWith("/ImportSolutionAsync");
         using var doc = JsonDocument.Parse(post.Body!);
         doc.RootElement.GetProperty("OverwriteUnmanagedCustomizations").GetBoolean().Should().BeTrue();
         doc.RootElement.GetProperty("PublishWorkflows").GetBoolean().Should().BeTrue();
@@ -83,8 +85,8 @@ public sealed class DataverseWebApiSolutionImporterTests
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, data: null)),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
         };
         var blob = new FakeBlobs(ManifestJson("1.2.0.0"));
 
@@ -97,13 +99,13 @@ public sealed class DataverseWebApiSolutionImporterTests
     // ---------- upgrade / skip ----------
 
     [Fact]
-    public async Task ImportAsync_OlderVersionOfSameType_FiresStageAndUpgrade()
+    public async Task ImportAsync_OlderManagedVersion_FiresStageAndUpgradeAsync()
     {
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, data: null)),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
         };
 
         var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
@@ -111,7 +113,7 @@ public sealed class DataverseWebApiSolutionImporterTests
 
         outcome.Should().BeOfType<SolutionImportOutcome.Success>();
         dv.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Post)
-            .Which.Uri.AbsolutePath.Should().EndWith("/StageAndUpgrade");
+            .Which.Uri.AbsolutePath.Should().EndWith("/StageAndUpgradeAsync");
     }
 
     [Theory]
@@ -177,8 +179,9 @@ public sealed class DataverseWebApiSolutionImporterTests
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, data: FailureDataXml("boom"))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => JsonResponse(HttpStatusCode.OK, ImportJobDataJson(FailureDataXml("boom"))),
         };
 
         var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
@@ -186,7 +189,7 @@ public sealed class DataverseWebApiSolutionImporterTests
 
         var failure = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Subject;
         failure.FailureKind.Should().Be(SolutionImportFailureKind.PartialImport,
-            "a failed StageAndUpgrade may leave the holding solution behind");
+            "a managed StageAndUpgrade that Dataverse reports as failed may leave the holding solution behind");
         failure.Diagnostic.Should().Contain("boom");
     }
 
@@ -196,8 +199,9 @@ public sealed class DataverseWebApiSolutionImporterTests
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, data: FailureDataXml("bad zip"))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => JsonResponse(HttpStatusCode.OK, ImportJobDataJson(FailureDataXml("bad zip"))),
         };
 
         var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
@@ -214,8 +218,8 @@ public sealed class DataverseWebApiSolutionImporterTests
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
-            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
-            OnImportJobPoll = (_, _) => JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: false, data: null)),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20)),
         };
         var importer = BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
             importTimeout: TimeSpan.FromMilliseconds(80), pollInterval: TimeSpan.FromMilliseconds(10));
@@ -225,6 +229,142 @@ public sealed class DataverseWebApiSolutionImporterTests
         outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
             .Which.FailureKind.Should().Be(SolutionImportFailureKind.Timeout,
                 "timeout is never promoted to PartialImport — no confirmed failure, resume is safe");
+    }
+
+    [Fact]
+    public async Task ImportAsync_OlderUnmanagedVersion_UpdatesWithImportSolutionAsync_NotStageAndUpgrade()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", false))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => JsonResponse(HttpStatusCode.OK, ImportJobDataJson(FailureDataXml("unmanaged boom"))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: false), CancellationToken.None);
+
+        dv.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Post)
+            .Which.Uri.AbsolutePath.Should().EndWith("/ImportSolutionAsync", "an unmanaged package has no holding solution");
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.UnknownInvocationFailure,
+                "PartialImport (holding solution left behind) applies only to a managed upgrade");
+    }
+
+    [Theory]
+    [InlineData(429)]
+    [InlineData(503)]
+    [InlineData(401)]
+    [InlineData(404)]
+    public async Task ImportAsync_TransientPollStatus_IsRetried_ThenSucceeds(int transientStatus)
+    {
+        var polls = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => ++polls == 1
+                ? new HttpResponseMessage((HttpStatusCode)transientStatus) { Content = new StringContent("busy") }
+                : JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        polls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ImportAsync_ManagedUpgradePollThrottledUntilDeadline_IsTimeout_NeverPartialImport()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => new HttpResponseMessage((HttpStatusCode)429) { Content = new StringContent("throttled") },
+        };
+        var importer = BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+            importTimeout: TimeSpan.FromMilliseconds(80), pollInterval: TimeSpan.FromMilliseconds(10));
+
+        var outcome = await importer.ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.Timeout,
+                "an unreadable status is not a failure Dataverse reported — the run must not be quarantined");
+    }
+
+    [Fact]
+    public async Task ImportAsync_NonTransientPollStatus_FailsWithoutPromotion()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("no") },
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.AuthFailure);
+    }
+
+    [Fact]
+    public async Task ImportAsync_PollRequestsAFreshTokenEachTime()
+    {
+        var polls = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => ++polls < 3
+                ? JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20))
+                : JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
+        };
+        var credential = new CountingCredential();
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")), credential: credential)
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        credential.Calls.Should().Be(1 + 3, "one token for the setup calls, then one per poll (a long import outlives a token)");
+    }
+
+    [Fact]
+    public async Task ImportAsync_StartResponseWithoutAsyncOperationId_Fails()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, "{}"),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("AsyncOperationId");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, true)]
+    [InlineData(HttpStatusCode.Unauthorized, true)]
+    [InlineData((HttpStatusCode)429, true)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, true)]
+    [InlineData(HttpStatusCode.Forbidden, false)]
+    [InlineData(HttpStatusCode.BadRequest, false)]
+    public void IsTransientPollStatus_Classifies(HttpStatusCode status, bool expected)
+        => DataverseWebApiSolutionImporter.IsTransientPollStatus(status).Should().Be(expected);
+
+    [Fact]
+    public void TryReadAsyncOperationId_ReadsGuidOrNull()
+    {
+        DataverseWebApiSolutionImporter.TryReadAsyncOperationId(StartedJson()).Should().Be(Guid.Parse(AsyncOperationId));
+        DataverseWebApiSolutionImporter.TryReadAsyncOperationId("{}").Should().BeNull();
+        DataverseWebApiSolutionImporter.TryReadAsyncOperationId("not json").Should().BeNull();
     }
 
     // ---------- auth / artifacts ----------
@@ -484,10 +624,11 @@ public sealed class DataverseWebApiSolutionImporterTests
         FakeBlobs blobs,
         bool throwingCredential = false,
         TimeSpan? importTimeout = null,
-        TimeSpan? pollInterval = null)
+        TimeSpan? pollInterval = null,
+        TokenCredential? credential = null)
     {
         TokenCredential Factory(string tenantId, string clientId, string clientSecret)
-            => throwingCredential ? new ThrowingCredential() : new FakeCredential();
+            => credential ?? (throwingCredential ? new ThrowingCredential() : new FakeCredential());
 
         return new DataverseWebApiSolutionImporter(
             new HttpClient(dvHandler),
@@ -563,12 +704,20 @@ public sealed class DataverseWebApiSolutionImporterTests
         return $$"""{"value":[{{string.Join(",", items)}}]}""";
     }
 
-    private static string ImportJobJson(bool completed, string? data)
-    {
-        var completedOn = completed ? "\"2026-08-20T12:00:00Z\"" : "null";
-        var dataJson = data is null ? "null" : JsonSerializer.Serialize(data);
-        return $$"""{"importjobid":"11111111-2222-3333-4444-555555555555","progress":100,"completedon":{{completedOn}},"data":{{dataJson}},"solutionname":"x"}""";
-    }
+    private const string AsyncOperationId = "99999999-8888-7777-6666-555555555555";
+    private const int InProgress = 2;
+    private const int AsyncCompleted = 3;
+    private const int AsyncSucceeded = 30;
+    private const int AsyncFailed = 31;
+
+    private static string StartedJson()
+        => $$"""{"AsyncOperationId":"{{AsyncOperationId}}","ImportJobKey":"k"}""";
+
+    private static string AsyncOpJson(int stateCode, int statusCode)
+        => $$"""{"statecode":{{stateCode}},"statuscode":{{statusCode}},"message":null}""";
+
+    private static string ImportJobDataJson(string? data)
+        => $$"""{"data":{{(data is null ? "null" : JsonSerializer.Serialize(data))}}}""";
 
     private static string FailureDataXml(string errorText)
         => $"""<importexportxml><solutionManifest><result result="failure" errortext="{errorText}" /></solutionManifest></importexportxml>""";
@@ -603,6 +752,20 @@ public sealed class DataverseWebApiSolutionImporterTests
             => new(GetToken(requestContext, cancellationToken));
     }
 
+    private sealed class CountingCredential : TokenCredential
+    {
+        public int Calls { get; private set; }
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return new($"token-{Calls}", DateTimeOffset.UtcNow.AddHours(1));
+        }
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
+
     private sealed class ThrowingCredential : TokenCredential
     {
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
@@ -614,14 +777,15 @@ public sealed class DataverseWebApiSolutionImporterTests
 
     /// <summary>
     /// Hand-rolled fake <see cref="HttpMessageHandler"/> (NOT Mock&lt;HttpMessageHandler&gt; — banned per testing.md)
-    /// that routes requests to solutions-GET / import-action / importjobs-poll delegates by method + URL shape.
+    /// that routes requests to solutions-GET / import-action / asyncoperations-poll / importjobs-detail delegates.
     /// </summary>
     private sealed class FakeDataverseHandler : HttpMessageHandler
     {
         public List<(HttpMethod Method, Uri Uri, string? Body)> Requests { get; } = new();
         public Func<HttpRequestMessage, HttpResponseMessage>? OnSolutionsGet { get; set; }
         public Func<HttpRequestMessage, HttpResponseMessage>? OnImportPost { get; set; }
-        public Func<HttpRequestMessage, string, HttpResponseMessage>? OnImportJobPoll { get; set; }
+        public Func<HttpRequestMessage, HttpResponseMessage>? OnAsyncOperationPoll { get; set; }
+        public Func<HttpRequestMessage, HttpResponseMessage>? OnImportJobGet { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -633,16 +797,19 @@ public sealed class DataverseWebApiSolutionImporterTests
             var path = request.RequestUri!.AbsolutePath;
 
             if (request.Method == HttpMethod.Post
-                && (path.EndsWith("/ImportSolution", StringComparison.Ordinal) || path.EndsWith("/StageAndUpgrade", StringComparison.Ordinal)))
+                && (path.EndsWith("/ImportSolutionAsync", StringComparison.Ordinal) || path.EndsWith("/StageAndUpgradeAsync", StringComparison.Ordinal)))
             {
                 return (OnImportPost ?? throw new InvalidOperationException("unexpected import POST — no OnImportPost wired"))(request);
             }
 
+            if (request.Method == HttpMethod.Get && path.Contains("/asyncoperations(", StringComparison.Ordinal))
+            {
+                return (OnAsyncOperationPoll ?? throw new InvalidOperationException("unexpected asyncoperations poll — no OnAsyncOperationPoll wired"))(request);
+            }
+
             if (request.Method == HttpMethod.Get && path.Contains("/importjobs(", StringComparison.Ordinal))
             {
-                var start = path.IndexOf('(') + 1;
-                var end = path.IndexOf(')', start);
-                return (OnImportJobPoll ?? throw new InvalidOperationException("unexpected importjobs poll — no OnImportJobPoll wired"))(request, path[start..end]);
+                return OnImportJobGet?.Invoke(request) ?? JsonResponse(HttpStatusCode.OK, ImportJobDataJson(null));
             }
 
             if (request.Method == HttpMethod.Get && path.Contains("/solutions", StringComparison.Ordinal))

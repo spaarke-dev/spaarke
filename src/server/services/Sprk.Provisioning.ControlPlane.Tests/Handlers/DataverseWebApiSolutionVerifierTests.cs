@@ -72,6 +72,29 @@ public sealed class DataverseWebApiSolutionVerifierTests
             .Which.ImportedRecords.Single().IsManaged.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task VerifyAsync_PresentButNotAtTheImportedVersion_ReturnsMissing()
+    {
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson(("1.1.0.0", true))));
+        var request = BuildRequest(managed: true) with { ExpectedVersion = "1.2.0.0" };
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(request, CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>()
+            .Which.Diagnostic.Should().Contain("'1.1.0.0'").And.Contain("'1.2.0.0'");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_AtTheImportedVersion_Padded_IsPresent()
+    {
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson(("1.2.0.0", true))));
+        var request = BuildRequest(managed: true) with { ExpectedVersion = "1.2" };
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(request, CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>();
+    }
+
     // ---------- T2 absent / wrong type ----------
 
     [Fact]

@@ -71,7 +71,8 @@ public abstract record SolutionImportOutcome
     private SolutionImportOutcome() { }
 
     /// <summary>The package is installed at the published version (imported now, or already there).</summary>
-    public sealed record Success() : SolutionImportOutcome;
+    /// <param name="PackageVersion">The published package version — the verifier requires the installed version to equal it.</param>
+    public sealed record Success(string PackageVersion) : SolutionImportOutcome;
 
     /// <summary>
     /// The import did not complete. <paramref name="FailureKind"/> tells the handler how to classify the failure per
@@ -104,7 +105,8 @@ public enum SolutionImportFailureKind
     MissingSolutionZips = 4,
 
     /// <summary>
-    /// A <c>StageAndUpgrade</c> failed after it started — a holding solution may be left behind. QuarantineRequired.
+    /// A managed <c>StageAndUpgradeAsync</c> started and Dataverse reported it failed — a holding solution may be left
+    /// behind. QuarantineRequired. (A timeout or an unreadable status is never this.)
     /// </summary>
     PartialImport = 5,
 

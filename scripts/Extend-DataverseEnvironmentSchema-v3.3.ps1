@@ -156,7 +156,7 @@ $stringCols = @(
     },
     @{
         N    = "sprk_solutionversion"; D = "Dataverse Solution Version"; L = 50; R = "None"
-        Desc = "32-hex fingerprint of the Dataverse solution set H6 imported (owner D17, version-compatibility-matrix.md v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
+        Desc = "The Dataverse package H6 installed: SpaarkeMaster {version} ({managed|unmanaged}) (T218b, version-compatibility-matrix.md v3; was a 32-hex set fingerprint, owner D17 v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
     },
     @{
         # PascalCase schema name is intentional per project convention — see design.md §7.9

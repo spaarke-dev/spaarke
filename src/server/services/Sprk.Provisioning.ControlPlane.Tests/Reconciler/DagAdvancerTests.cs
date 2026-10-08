@@ -165,7 +165,7 @@ public sealed class DagAdvancerTests
         var ready = _sut.ComputeReadyHandlers(run);
 
         ready.Should().NotContain("H9",
-            "EXEC-01: HandlerDependencies[H9] = { H3, H4b } — H9 must remain blocked until " +
+            "EXEC-01: HandlerDependencies[H9] = { H3, H4b, H6 } — H9 must remain blocked until " +
             "H4b lands the batched app-settings; deploying BFF against an incomplete app-settings " +
             "surface is precisely the F20 IOptions fail-fast chain r1 was written to prevent.");
         ready.Should().NotContain("H8",

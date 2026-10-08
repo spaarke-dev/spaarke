@@ -98,6 +98,7 @@ public sealed class H6SolutionImportHandlerTests
         importer.LastRequest.TargetDataverseUrl.Should().Be(EnvUrl);
         importer.LastRequest.Managed.Should().BeTrue("managed is the default (ADR-027 §3, owner D8)");
         verifier.LastRequest!.Managed.Should().BeTrue();
+        verifier.LastRequest.ExpectedVersion.Should().Be("1.2.0.0", "the verifier checks the imported version, not only presence");
     }
 
     // ---------- T2 idempotency ----------
@@ -763,7 +764,7 @@ public sealed class H6SolutionImportHandlerTests
         private FakeSolutionImporter(SolutionImportOutcome outcome) => _outcome = outcome;
 
         public static FakeSolutionImporter Success()
-            => new(new SolutionImportOutcome.Success());
+            => new(new SolutionImportOutcome.Success("1.2.0.0"));
 
         public static FakeSolutionImporter Failure(SolutionImportFailureKind kind, string diagnostic)
             => new(new SolutionImportOutcome.Failure(kind, diagnostic));
