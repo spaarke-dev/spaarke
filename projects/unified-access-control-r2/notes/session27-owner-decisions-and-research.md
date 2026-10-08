@@ -1250,6 +1250,20 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **F. Key Vault:** agents never read secrets from the prod Key Vault (`sprk-prod-kv`) for dev checks; a dev gate that needs a prod-only credential stops and asks. Standing rule in the project CLAUDE.md §5. Context: gatesA read app `170c98e1`'s secret from `sprk-prod-kv` (read only, never printed) for Graph container reads.
 - **G. Task 153 wording:** (a) the banners no longer point at "the person icon"; (b) the indicator shows only No Access. The pill already shows Secure, so the SECURE banner points to Manage Access, not to a marker.
 
+## Round 86 (2026-10-08): BINDING. OWNER decision: ADR-006 amended (path B) for thin form-event scripts
+
+- **Conflict (CLAUDE.md §6.5):** ADR-006 forbade new framework-free JS web resources. Task 153's banner (`sprk_accessstatus_banner.js`) and task 173's lock (`sprk_accesspermission_inherited.js`) need form or field notifications and per-record field state. Only form scripts can reach those: a PCF cannot raise form notifications or change another control, and a Code Page is a dialog or page. Four such scripts had already shipped, flagged only as warnings (`sprk_bff_auth.js`, `sprk_assignedaccess_postsave.js`, `sprk_noaccessentry_postsave.js`, `sprk_todo_regarding_presave.js`).
+- **Owner:** "if this can't be done any other way then approve". Path B, amendment (version 2.1, PR #1462).
+- **Limits:**
+  - form events only;
+  - platform form APIs, plus the BFF through `Spaarke.BffAuth`, only;
+  - no UI of its own;
+  - no access decision;
+  - fails safe;
+  - namespaced, idempotent and jest-tested;
+  - registered by a checked-in operator script.
+- **Sequencing:** PR #1462 merges before PR #1450 and PR #1458.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
