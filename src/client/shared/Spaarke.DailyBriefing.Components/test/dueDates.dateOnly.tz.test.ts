@@ -6,7 +6,7 @@
  * new Date() / Date.parse that is UTC midnight — the previous day in New York — so "Add to To Do" dated the To Do a
  * day early, and the "due within N days" filter measured from the wrong instant.
  *
- * TZ pinned to America/New_York before any Date use (a UTC runner would pass trivially).
+ * Runs in America/New_York through the @jest-environment on line 1 (a UTC runner would pass trivially).
  */
 
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only

@@ -7,7 +7,7 @@
  * `new Date("YYYY-MM-DD")` (UTC midnight = 8pm the previous day in New York),
  * so a due date of TODAY read as 1 day overdue, and the "active date"
  * selection skipped a `sprk_duedate` of today in favour of `sprk_finalduedate`.
- * The zone is pinned BEFORE any Date-touching import so the test is hermetic.
+ * The file runs in America/New_York through the @jest-environment on line 1, so it is hermetic.
  */
 
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only

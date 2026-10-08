@@ -9,7 +9,7 @@
  * for a Date Only BEHAVIOUR column and leave genuine instants (UserLocal /
  * TimeZoneIndependent, always `…Z`) on their local-day rendering.
  *
- * Pins the process timezone to America/New_York BEFORE any `Date` use, so a UTC
+ * Runs in America/New_York through the @jest-environment on line 1, so a UTC
  * CI runner cannot pass this trivially (same pattern as dateLocal.test.ts).
  */
 

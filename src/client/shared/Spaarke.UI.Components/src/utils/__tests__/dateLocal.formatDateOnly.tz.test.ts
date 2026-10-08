@@ -8,7 +8,7 @@
  * writers sent `new Date().toISOString()` — a timestamp, and the UTC date: at
  * 23:30 on Oct 5 in New York that is "2026-10-06T03:30:00.000Z".
  *
- * TZ pinned to America/New_York before any Date use (see dateLocal.test.ts).
+ * Runs in America/New_York through the @jest-environment on line 1.
  */
 
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only

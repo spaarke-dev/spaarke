@@ -14,8 +14,8 @@
  * its own detail view implied.
  *
  * The fix converges all three on ONE `parseDueDate` (`@spaarke/ui-components`
- * `utils/dateLocal.ts`). This file pins the process timezone to a UTC-behind
- * zone BEFORE any Date-touching import, so the test is hermetic regardless of
+ * `utils/dateLocal.ts`). This file runs in a UTC-behind zone through the
+ * @jest-environment on line 1, so the test is hermetic regardless of
  * the CI runner's own timezone (mirrors
  * `Spaarke.AI.Widgets/.../EntityInfoWidget.tz.test.tsx`).
  */

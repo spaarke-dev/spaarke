@@ -63,8 +63,8 @@ describe('formatDueDate', () => {
 // `sprk_duedate`) is a calendar day. `new Date("2026-10-05")` is UTC midnight,
 // i.e. 8pm on Oct 4 in New York, so before the fix a task due TODAY read
 // "Overdue by 1d" and one due tomorrow read "Due today" in every US zone.
-// Run in a fixed negative-offset zone; restore TZ so other files in the same
-// jest worker are unaffected.
+// The whole file runs in America/New_York (a fixed negative-offset zone) through
+// the @jest-environment on line 1; the cases above do not depend on the zone.
 // ---------------------------------------------------------------------------
 
 describe('formatDueDate — DateOnly values in America/New_York', () => {

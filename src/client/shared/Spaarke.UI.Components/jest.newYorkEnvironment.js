@@ -5,7 +5,10 @@
  * `process.env`, so assigning TZ there never reaches Node and the file keeps the runner's zone. On a UTC CI runner a
  * "negative UTC offset" regression test then passes trivially, or fails its own guard. This constructor runs in the
  * worker's REAL process, where assigning `process.env.TZ` makes Node re-read the zone for every Date in the worker.
- * Teardown restores the previous zone, so the next test file in the same worker is unaffected.
+ *
+ * Teardown puts the worker back in the zone it had before. When TZ was not set, it assigns the zone that was in effect
+ * (captured before switching) rather than deleting TZ: on Windows, deleting TZ does not make Node re-read the system
+ * zone, so the worker would stay in New York for every later test file.
  *
  * Use it from a docblock on the first line of a test file, with the path relative to that package's rootDir:
  *   - in this package:            @jest-environment ./jest.newYorkEnvironment.js
@@ -20,15 +23,13 @@ class NewYorkJsdomEnvironment extends TestEnvironment {
   constructor(config, context) {
     super(config, context);
     this.previousTz = process.env.TZ;
+    this.previousZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     process.env.TZ = 'America/New_York';
   }
 
   async teardown() {
-    if (this.previousTz === undefined) {
-      delete process.env.TZ;
-    } else {
-      process.env.TZ = this.previousTz;
-    }
+    // Never `delete process.env.TZ`: on Windows that leaves New York in effect. Assign what was in effect instead.
+    process.env.TZ = this.previousTz !== undefined ? this.previousTz : this.previousZone;
     await super.teardown();
   }
 }

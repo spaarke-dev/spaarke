@@ -3,8 +3,8 @@
  * formatRelativeTime — bucket boundaries, styles and locale (task 081 /
  * F3, F5, F9, F10, F11 + compact style).
  *
- * The zone is pinned to America/New_York (restored afterwards so other files in
- * the same jest worker are unaffected) and "now" is a fixed LOCAL instant via
+ * The file runs in America/New_York through the @jest-environment on line 1
+ * (the zone is restored on teardown) and "now" is a fixed LOCAL instant via
  * fake timers; offsets are built from local date components so calendar-day
  * buckets are deterministic across DST.
  */

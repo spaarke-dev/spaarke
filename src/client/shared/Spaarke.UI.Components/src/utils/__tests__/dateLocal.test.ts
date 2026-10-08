@@ -3,8 +3,8 @@
  * dateLocal — timezone regression guard (spaarke-ontology-platform-r1 task
  * 080 / C-10, 2026-10-03).
  *
- * Pins the process timezone to a UTC-BEHIND zone (America/New_York,
- * UTC-4/-5) BEFORE any module that touches `Date` loads, so this test is
+ * Runs in a UTC-BEHIND zone (America/New_York, UTC-4/-5) through the
+ * @jest-environment on line 1, so this test is
  * hermetic regardless of the CI runner's own timezone — a UTC runner would
  * pass trivially even with the bug present, because local == UTC there.
  * Mirrors the established pattern in

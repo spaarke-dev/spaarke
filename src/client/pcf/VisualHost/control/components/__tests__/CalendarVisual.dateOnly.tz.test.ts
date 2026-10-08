@@ -5,8 +5,8 @@
  *
  * sprk_duedate / sprk_finalduedate are Dataverse Date Only: the Web API returns
  * "2026-10-02", which `new Date("2026-10-02")` reads as UTC midnight — Oct 1 in
- * New York, so the event dot landed on the previous day. TZ pinned to
- * America/New_York before any Date use (a UTC runner would pass trivially).
+ * New York, so the event dot landed on the previous day. The file runs in America/New_York through the
+ * @jest-environment on line 1 (a UTC runner would otherwise pass trivially).
  */
 
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
