@@ -771,13 +771,16 @@ public sealed class NoAccessShareEnforcer
     }
 
     /// <summary>
-    /// Task 158 final round (main-session round 58 item 1): the walled users' DIRECT shares on the secure work assignments and
+    /// Task 158 final round (main-session round 58 item 1): the walled users' DIRECT shares on the work assignments and
     /// projects FILED UNDER a covered matter or project the author holds Write on — each removed exactly as on a covered record
     /// (<see cref="EnforceOnRecordAsync"/>: N5 on that record, the lock, S5, the read-back, its children). The filed records
     /// come from the ONE child-direction walk (<c>SecureRootInheritance.ListFiledRootsAsync</c>).
-    /// A record not flagged secure yet is reported <see cref="NoAccessEnforcementReason.NotSecure"/> (the inheritance job
-    /// secures it; the next enforcement reaches it). Anything not finished — the walk could not be read, a record whose filing
-    /// type could not be read, a failure on a filed record — is a <c>children-incomplete</c> failure naming the parent.
+    /// GitHub #1410 / owner round 82 ("the parent permissions control"): a CONFIRMED filed record is enforced whatever its own
+    /// <c>sprk_issecure</c> reads — secure, not secure yet (inheritance pending), or left unsecured because inheritance ended
+    /// Refused or Failed, when "the next enforcement reaches it" would never come. Before, such a record was reported
+    /// <see cref="NoAccessEnforcementReason.NotSecure"/> and kept the walled user's share. Anything not finished — the walk
+    /// could not be read, a record whose filing type could not be read, a failure on a filed record — is a
+    /// <c>children-incomplete</c> failure naming the parent.
     /// </summary>
     private async Task EnforceOnFiledRecordsAsync(
         (string LogicalName, Guid Id) parent,
@@ -816,12 +819,6 @@ public sealed class NoAccessShareEnforcer
             if (!root.Confirmed)
             {
                 undecided++; // whether it is filed under this record could not be read: nothing removed on a guess
-                continue;
-            }
-
-            if (!root.FlaggedSecure)
-            {
-                run.NotEnforced.Add(new NoAccessNotEnforced(root.Table, root.Id, null, NoAccessEnforcementReason.NotSecure));
                 continue;
             }
 
