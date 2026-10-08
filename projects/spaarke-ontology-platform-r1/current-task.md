@@ -35,7 +35,7 @@
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
 | **#1384** (060) round 2 done; IsOpenWork | author rebasing onto master (with D-43) — `a17154f00e69eeced` | Independent re-check → ask owner to merge → 060 ✅; author then starts **068** in `C:\wts-068` |
-| **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** running (`aa80f91b9ac7b3b76`, `C:\wts-112`, code only); **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
+| **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
 | **#1424** master compile fix (CS0411, #1418) | CI (background wait) | Owner PRE-APPROVED merge when fully green → verify master compiles → close #1418 |
 
@@ -48,7 +48,8 @@
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 060 author: rebasing #1384, then task 068 | running |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
-| aa80f91b9ac7b3b76 | 112 author (Create wizards in-app) | running |
+| aa80f91b9ac7b3b76 | 112 author — PR #1422 done (`0b2ec81bc`) | idle |
+| a747ef8af51f83500 | Reviewer: PR #1422 (112) | running |
 | a9b2dd472c21a670c | 111 author — deployed; waits for owner live checks | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) — done | idle |
 | a810b83c36e7d8f39 | 039 author — fixes accepted; next: after #1390 merges, merge master into the writer branch + add the pin test | idle |
