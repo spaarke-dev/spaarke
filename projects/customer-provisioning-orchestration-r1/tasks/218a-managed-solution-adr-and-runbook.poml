@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>ADR-027 §3 amended (managed by default, unmanaged on explicit instruction) + one "Managed solution IAM and upgrade runbook" replacing the contradicting package docs</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, D8, G11, G15); notes/t218-plan.md</phase>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation and one ADR amendment; no code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment (CLAUDE.md §6.5 path B) that every later package task cites.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/adr (main-session-only).</parallel-reason>
+    <tags>provisioning, dataverse, solution, adr, docs</tags>
+    <deps>236</deps>
+  </metadata>
+
+  <prompt>Make the binding text say what the owner decided (D8) and give the operator one document for the package's identity, first import and upgrade.</prompt>
+
+  <goal>
+    ADR-027 §3 (concise + full) states: customer environments receive SpaarkeMaster MANAGED by default and UNMANAGED only on
+    explicit instruction recorded on the run and the registry row; dev (the authoring environment) stays unmanaged. One
+    runbook describes the package (t218-plan.md design 1-7), who imports it (IAM), the first import, the upgrade, and the
+    release steps; every doc that says otherwise points to it.
+  </goal>
+
+  <context>
+    <background>t218-plan.md F6, F12: the release-process doc says one managed SpaarkeMaster; production-release.md says
+      unmanaged SpaarkeMaster; the deployment guide says 9 and 8 solutions; ci-cd-workflow.md says 8; ADR-027 §3 says
+      unmanaged everywhere and "do not enforce managed". D8 (owner 2026-09-30) decided managed by default.</background>
+    <relevant-files>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md §3; docs/adr/ADR-027-*.md (amendment block :127-142, Decision 3 :220-260)</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md; docs/procedures/production-release.md; docs/procedures/ci-cd-workflow.md (:169, :643)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H6 row :549, :1021); docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md (Dataverse solutions rows)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Path B amendment: concise and full ADR updated together; the full ADR keeps its history (amendment block dated 2026-10-07, citing D8).</constraint>
+    <constraint source="code wins">Describe the behaviour 218b–218d build, marked as such until they land; never claim a mechanism that does not exist.</constraint>
+    <constraint source="reuse">Extend SPAARKE-SOLUTION-RELEASE-PROCESS.md into the runbook rather than adding a parallel doc; other docs link to it.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Amend ADR-027 §3 (concise + full): managed default for customer environments, unmanaged on explicit instruction (`solutionPackageType`, recorded on the registry row), dev unmanaged, one solution SpaarkeMaster; drop "do not enforce managed".</step>
+    <step order="2">Rewrite SPAARKE-SOLUTION-RELEASE-PROCESS.md as "Spaarke solution package — release, IAM and upgrade runbook": scope rule + exclusions, git source of record, release steps, first import (H6), upgrade (StageAndUpgrade; removals delete components; values persist; downgrade and type switch refused; H6 before H9), IAM (importing identity = System Administrator via H10; roles ship in the package).</step>
+    <step order="3">Correct production-release.md, ci-cd-workflow.md, the deployment guide H6 row + the 8-solution passage, and the inventory rows to point at the runbook (one solution, managed by default).</step>
+    <step order="4">Grep for remaining "9 solutions"/"8 solutions"/"unmanaged everywhere" claims in docs/ and .claude/; fix or list them; commit.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-027 files state managed-by-default + unmanaged-on-explicit-instruction; neither says "unmanaged everywhere" as current practice.</criterion>
+    <criterion testable="true">`git grep -n -i "9 solutions\|8 solutions\|nine solutions"` in docs/ and .claude/ returns only historical/dated lines or none.</criterion>
+    <criterion testable="true">The runbook covers scope rule, release, first import, upgrade (incl. removals, downgrade/type-switch refusal, H6-before-H9) and IAM.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>

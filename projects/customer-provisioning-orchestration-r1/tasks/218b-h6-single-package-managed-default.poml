@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H6 imports the one SpaarkeMaster package — managed by default, unmanaged on explicit instruction (intake solutionPackageType, recorded on the registry row); verifier checks ismanaged; type switch and downgrade refused; DAG H9 ← H6; the 9-solution catalog and Deploy-DataverseSolutions.ps1 retire</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, D8, G11); notes/t218-plan.md design 1, 4, 5</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 intake + H6 handler, importer, verifier, DAG, manifest contract, scripts and tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Provisioning-pipeline contract change (manifest schema, intake, DAG) with refusal paths that protect customer environments.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints and the provision-environment skill (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, dataverse, solution, testing</tags>
+    <deps>218a</deps>
+  </metadata>
+
+  <prompt>Make H6 install exactly one package, of the type the run asked for, and refuse the two imports that damage a customer environment.</prompt>
+
+  <goal>
+    A run imports SpaarkeMaster from the provisioning-artifacts manifest. `solutionPackageType` (intake, optional,
+    `managed` | `unmanaged`, default `managed`) picks the zip; the value is stored canonically on the run and promoted to
+    the registry row. H6 refuses — Resumable, named, nothing imported — when the environment already holds SpaarkeMaster
+    of the other type, or a higher version than the package. The verifier proves presence AND `ismanaged`. H9 waits for H6.
+    Nothing in src/ or scripts/ still names the 9-solution catalog.
+  </goal>
+
+  <context>
+    <background>t218-plan.md F1-F5: catalog of 9 (6 nonexistent), no type flag, presence-only verifier, PS mirror script with
+      a broken managed filter; DagAdvancer.cs:162 — H9 ← H3, H4b only.</background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/** (CanonicalSolutionCatalog, ISolutionCatalog, H6SolutionImportHandler, DataverseWebApiSolutionImporter, DataverseWebApiSolutionVerifier, SolutionImportOptions, SolutionImportRejectionCodes)</file>
+      <file>Api/RunsEndpoints.cs; Core/Models/IntakeParameterCatalog.cs; scripts/provisioning-prereqs/intake.schema.json; Core/Reconciler/{DagAdvancer,HandlerRunInputs}.cs</file>
+      <file>H13 registry promotion (H13BuildPromotedColumns / IDataverseEnvironmentRegistryClient) — where run values reach sprk_dataverseenvironment</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1; tests H6SolutionImportHandlerTests (CanonicalSolutionCatalog_MirrorsPowerShellScriptSolutionImportOrder)</file>
+      <file>.claude/skills/provision-environment/SKILL.md (Step 1 intake); .claude/constraints/provisioning.md; docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md H6</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="D8">Default managed; unmanaged only when the intake says so. No environment-level or server-level default that flips it.</constraint>
+    <constraint source="manifest contract">Manifest `solutions.SpaarkeMaster` = { version, managedBlobName, unmanagedBlobName }. A missing blob for the requested type → Resumable refusal naming the manifest; never fall back to the other type.</constraint>
+    <constraint source="needed-or-remove">The catalog tiers, the retired-name guard (if only the catalog needs it), the PS importer options (SolutionPath, ImportMode) and Deploy-DataverseSolutions.ps1 go unless something else reads them (grep first).</constraint>
+    <constraint source="registry">Reuse an existing registry column or promotion path if one carries run parameters; a NEW Dataverse column on the admin registry is a live schema change — ask the owner first.</constraint>
+    <constraint source="tests">Real HTTP against hand-written handlers; never Mock&lt;HttpMessageHandler&gt;. The pac pre-import steps stay as they are (T253 owns them).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Intake: `solutionPackageType` (enum, default managed) in schema + catalog + endpoint, canonical on the run; parity tests.</step>
+    <step order="2">H6/importer: one package; manifest schema with both blobs; pick by type; pre-check installed `solution` row (uniquename, version, ismanaged) → refuse type switch / downgrade; equal version → skip; verifier checks ismanaged; tests for every branch.</step>
+    <step order="3">DAG `H9 ← H6`; DAG parity + run-context contract tests.</step>
+    <step order="4">Registry: the package type and installed SpaarkeMaster version reach the registry row (existing path; ask before a new column).</step>
+    <step order="5">Retire the catalog, Deploy-DataverseSolutions.ps1 and its mirror test; skill Step 1 asks for the type only when the operator says unmanaged; guide + constraints.</step>
+    <step order="6">Verify (ControlPlane tests, ArchTests, Worker + Api build 0 warnings); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateRun: missing → managed; `unmanaged` accepted; any other value → 400; schema and endpoint agree.</criterion>
+    <criterion testable="true">H6 imports the managed blob by default and the unmanaged blob when asked; a manifest without the requested blob → Resumable refusal, no import call.</criterion>
+    <criterion testable="true">Environment holds SpaarkeMaster of the other type → Resumable `solimport-package-type-mismatch` (or equivalent), no import; installed version higher → Resumable downgrade refusal, no import; equal → skip, success.</criterion>
+    <criterion testable="true">Verifier fails when the installed SpaarkeMaster's ismanaged differs from the requested type.</criterion>
+    <criterion testable="true">DAG: H9 depends on H6; no cycle.</criterion>
+    <criterion testable="true">`git grep` finds no CanonicalSolutionCatalog tier list, no Deploy-DataverseSolutions.ps1 caller, and no "9 solutions" claim in src/ or scripts/.</criterion>
+    <criterion testable="true">ControlPlane.Tests and ArchTests pass; Worker/Api build with 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Recording the type on the registry row needs a new admin-environment column (live schema change).</trigger>
+    <trigger>Something outside H6 reads the catalog tiers or Deploy-DataverseSolutions.ps1.</trigger>
+  </escalation>
+
+  <notes/>
+</task>

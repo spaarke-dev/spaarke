@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218e" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Close the package's content gaps (code pages, roles incl. the hand-made ones, sprk_noaccessentry, H11's guest role, unused folders) and commit the first SpaarkeMaster source export</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, G11) + T256 prerequisite; notes/t218-plan.md design 2, 6, 7</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live changes to the dev authoring environment's SpaarkeMaster membership and the first committed package source.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Decides the content every customer receives; coordinates with UAC-r2 (T256) and owning projects.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live dev changes need the owner in the loop; edits the provisioning constraints.</parallel-reason>
+    <tags>provisioning, dataverse, solution, security-roles</tags>
+    <deps>218c</deps>
+  </metadata>
+
+  <prompt>Make the package complete, then put it in git.</prompt>
+
+  <goal>
+    After 218c's drift report: every rule-matching component is in SpaarkeMaster in dev or listed (with a reason) in the
+    exclusions file; the roles customers need (incl. "Spaarke Office Add In User" and "Secure Record Owner", today made by
+    hand) are in the package; H11's guest role default names a shipped role; `sprk_noaccessentry` ships (with UAC-r2,
+    #1364 / T256); folders with no runtime reference are confirmed with their owning project and removed or excluded; the
+    first export (SpaarkeMaster 1.2.x) is unpacked into git with no environment-variable values.
+  </goal>
+
+  <context>
+    <background>t218-plan.md F7, F9, F11; inventory 2026-10-07: DemoRegistration (2 .md files) and
+      sprk_communicationconversationpage (comment-only reference) look unused; EventDetailSidePane IS used (EventsPage
+      eventConfig.ts:282); CalendarSidePane must keep working (root CLAUDE.md §17).</background>
+    <relevant-files>
+      <file>docs/data-model/package-exclusions.yaml (218c); src/dataverse/solutions/SpaarkeMaster/ (218c output)</file>
+      <file>Core/Handlers/UserProvisioning/H11UserProvisioningOptions.cs:51 (GuestSecurityRoleNames default)</file>
+      <file>docs/guides/office-addins-admin-guide.md:560-583; scripts/Set-SecureRecordOwnerRolePrivileges.ps1; src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="live">Each change to dev (Assemble run, role edits, version bump, export) is asked for first, with the -WhatIf report.</constraint>
+    <constraint source="ownership">Do not delete another project's folder without that project's confirmation (owner relays); exclusion with a reason is the default meanwhile.</constraint>
+    <constraint source="no values">The committed source carries no environment-variable values (218c guard).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Run 218c's drift report; classify each missing item ship / exclude (reason); owner OK for the list.</step>
+    <step order="2">Roles: confirm names in dev; add the hand-made roles to SpaarkeMaster; align H11's default (code + tests + guide).</step>
+    <step order="3">sprk_noaccessentry with UAC-r2 (#1364): schema settled → in SpaarkeMaster.</step>
+    <step order="4">Unused folders → coordination message; exclusions meanwhile.</step>
+    <step order="5">Owner OK → Assemble (adds), version bump, Export-SpaarkeMasterSource → commit the source; drift check green; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test-SolutionCompleteness against dev exits 0 after the assemble.</criterion>
+    <criterion testable="true">src/dataverse/solutions/SpaarkeMaster contains sprk_spaarkeai, the Office Add In User and Secure Record Owner roles, and sprk_noaccessentry; the value guard passes.</criterion>
+    <criterion testable="true">H11's default guest role is a role present in the committed package (test reads the role list).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>UAC-r2's #1364 answer changes sprk_noaccessentry's schema after the export — re-export, do not hand-edit the unpacked XML.</trigger>
+  </escalation>
+
+  <notes/>
+</task>
