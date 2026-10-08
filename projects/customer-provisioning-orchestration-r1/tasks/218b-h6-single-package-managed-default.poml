@@ -3,7 +3,7 @@
   <metadata>
     <title>H6 imports the one SpaarkeMaster package — managed by default, unmanaged on explicit instruction (intake solutionPackageType, recorded on the registry row); verifier checks ismanaged; type switch and downgrade refused; DAG H9 ← H6; the 9-solution catalog and Deploy-DataverseSolutions.ps1 retire</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, D8, G11); notes/t218-plan.md design 1, 4, 5</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 intake + H6 handler, importer, verifier, DAG, manifest contract, scripts and tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -79,5 +79,14 @@
     <trigger>Something outside H6 reads the catalog tiers or Deploy-DataverseSolutions.ps1.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-07">COMPLETED (SESSION 43). Commits 3f41aab33 (implementation), 4f6c579ed (review fixes), d3aa70726 (re-check fixes). ControlPlane 2344/0 (1 skip), ArchTests 841/841, Worker/Api 0 warnings.
+    - Intake solutionPackageType (managed | unmanaged, exact case; absent → managed stored at CreateRun; 400 intake-invalid-solution-package-type); schema + skill Step 1b-quinquies + Step 4.0; H6 declares it in HandlerRunInputs.
+    - H6 imports ONE package (SpaarkePackage.SolutionUniqueName = SpaarkeMaster). Manifest {solutions:{SpaarkeMaster:{version, managedBlobName, unmanagedBlobName}}}; no fallback to the other type. Reads the installed row first (failure = failure, never "fresh"); refuses package-type-mismatch and downgrade-refused (Resumable, nothing imported); equal version (1.2 == 1.2.0.0) skips; a version that is not a version is refused.
+    - REVIEW-DRIVEN: ImportSolutionAsync / StageAndUpgradeAsync (verified on Learn 2026-10-07) replace the synchronous actions, which held the request for the whole import and outlived the 100 s client timeout; completion = asyncoperations statecode 3 / statuscode 30, detail from importjobs.data; poll retries 404/401/408/429/5xx/transport/token errors until ImportTimeout with a fresh token per poll; PartialImport only for a managed StageAndUpgrade whose failure Dataverse reported; unmanaged update = ImportSolutionAsync. Verifier checks presence + ismanaged + version (Success carries the package version); an unreadable environment is Unavailable → verification-unavailable (Resumable), not a quarantine. Both named clients take DataverseWebApiRequestTimeout.
+    - DAG H9 ← H6. sprk_solutionversion = "SpaarkeMaster {version} ({managed|unmanaged})" — records the package type on the registry row with no new column (supersedes owner D17's fingerprint; version-compatibility-matrix v3; skill Step 6a recomputes the same string).
+    - Removed: CanonicalSolutionCatalog/ISolutionCatalog (9 entries, 6 never existed), DeployDataverseSolutionsScriptImporter, PacCliSolutionVerifier and their tests, PS-only options; retired-name guard (no catalog to scan; code kept [Obsolete] per the codes' stability rule).
+    - DEVIATION (AC "no Deploy-DataverseSolutions.ps1 caller"): the script stays — Deploy-Release.ps1 (deploy-new-release skill, Spaarke's own environments) and the legacy Provision-Customer.ps1 still call it; H6 no longer does. Filed ISS-005 / #1401 (its list names 6 nonexistent solutions and its zip filter accepts every zip). Escalation trigger reported to the owner.
+    - KNOWN LIMITS (K): a start POST that times out after Dataverse queued the job is reported as Timeout and resume is refused by "import already running" until it finishes (self-heals); a persistent 401/404 on the poll waits the full ImportTimeout; importer poll tests use real 80 ms deadlines; pre-import steps (required apps, org settings) run before the refusals (harmless — only raise values).</note>
+  </notes>
 </task>
