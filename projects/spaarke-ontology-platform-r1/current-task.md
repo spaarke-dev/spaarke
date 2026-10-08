@@ -36,6 +36,8 @@
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
 | **#1384** (060) round 2 done; IsOpenWork | author rebasing onto master (with D-43) — `a17154f00e69eeced` | Independent re-check → ask owner to merge → 060 ✅; author then starts **068** in `C:\wts-068` |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** running (`aa80f91b9ac7b3b76`, `C:\wts-112`, code only); **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
+| **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
+| **#1424** master compile fix (CS0411, #1418) | CI (background wait) | Owner PRE-APPROVED merge when fully green → verify master compiles → close #1418 |
 
 ### Agent IDs (SendMessage resumes a finished agent with its context)
 
@@ -47,7 +49,7 @@
 | a17154f00e69eeced | 060 author: rebasing #1384, then task 068 | running |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
 | aa80f91b9ac7b3b76 | 112 author (Create wizards in-app) | running |
-| a9b2dd472c21a670c | 111 author (consumer sizes + dev deploy + regression) | running |
+| a9b2dd472c21a670c | 111 author — deployed; waits for owner live checks | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) — done | idle |
 | a810b83c36e7d8f39 | 039 author — fixes accepted; next: after #1390 merges, merge master into the writer branch + add the pin test | idle |
 | a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 follow-ups done | idle |
