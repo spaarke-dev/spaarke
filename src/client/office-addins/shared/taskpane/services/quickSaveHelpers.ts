@@ -44,7 +44,8 @@ export interface OfficeSaveRequestBody {
   triggerAiProcessing: boolean;
   aiOptions: { profileSummary: boolean; ragIndex: boolean; deepAnalysis: boolean };
   documentMetadata: { name: string; description?: string };
-  targetEntity: { entityType: string; entityId: string; displayName: string };
+  /** Absent for an UNFILED save (task 118): association is optional on the server. */
+  targetEntity?: { entityType: string; entityId: string; displayName: string };
   email: {
     subject: string;
     senderEmail: string;
@@ -73,6 +74,15 @@ function mapRecipientType(type: 'to' | 'cc' | 'bcc'): 'To' | 'Cc' | 'Bcc' {
 }
 
 /**
+ * The save's `targetEntity` for a filing target. The FRIENDLY type name ("Matter"), never the logical name
+ * ("sprk_matter"): the save accepts only friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002
+ * otherwise), and the finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
+ */
+function buildTargetEntity(target: EntitySearchResult): NonNullable<OfficeSaveRequestBody['targetEntity']> {
+  return { entityType: target.entityType, entityId: target.id, displayName: target.name };
+}
+
+/**
  * Build the `POST /api/office/save` body that files an email to the engine-predicted record.
  *
  * Task 116a: `content` is the body + attachments read in the add-in (`captureEmailContent`), sent the same way the
@@ -81,7 +91,7 @@ function mapRecipientType(type: 'to' | 'cc' | 'bcc'): 'To' | 'Cc' | 'Bcc' {
  */
 export function buildEmailSaveRequest(
   context: QuickSaveEmailContext,
-  target: EntitySearchResult,
+  target: EntitySearchResult | null,
   idempotencyKey: string,
   content?: EmailContentCapture
 ): OfficeSaveRequestBody {
@@ -91,14 +101,8 @@ export function buildEmailSaveRequest(
       DEFAULT_AI_OPTIONS.profileSummary || DEFAULT_AI_OPTIONS.ragIndex || DEFAULT_AI_OPTIONS.deepAnalysis,
     aiOptions: { ...DEFAULT_AI_OPTIONS },
     documentMetadata: { name: context.subject || 'Untitled Email' },
-    targetEntity: {
-      // The FRIENDLY type name ("Matter"), never the logical name ("sprk_matter"): the save accepts only
-      // friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002 otherwise), and the
-      // finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
-      entityType: target.entityType,
-      entityId: target.id,
-      displayName: target.name,
-    },
+    // Task 118: `null` = an unfiled save (the supported "no related record" case) — no targetEntity at all.
+    ...(target ? { targetEntity: buildTargetEntity(target) } : {}),
     email: {
       subject: context.subject || 'Untitled Email',
       senderEmail: context.senderEmail || 'unknown@placeholder.com',
@@ -132,7 +136,7 @@ export function buildEmailSaveRequest(
  * forever. `kind` is a real discriminant (not a label) so each source's canonical shape stays honest.
  */
 export type QuickSaveIdempotencySource =
-  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult }
+  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult | null }
   | {
       readonly kind: 'document';
       readonly title: string;
@@ -147,7 +151,9 @@ export type QuickSaveIdempotencySource =
 
 function canonicalQuickSaveKey(source: QuickSaveIdempotencySource): string {
   if (source.kind === 'email') {
-    return `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`;
+    return source.target
+      ? `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`
+      : `email:${source.internetMessageId}|unfiled`;
   }
   return source.existingDocumentId
     ? `document-version:${source.existingDocumentId}|${source.title}|${source.contentBase64}`
