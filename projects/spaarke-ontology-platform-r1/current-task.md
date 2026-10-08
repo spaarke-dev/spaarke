@@ -33,7 +33,7 @@
 | What | Waiting for | Then |
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
-| **#1359** (098) final round | agent `a67ad20f7bead7126` | Main session reads the diff → ask owner to merge → mark 098 ✅ (065 lands with it) → start **106** and **068** (`a17154f00e69eeced`) |
+| **#1359** (098) final round DONE `fcdd78409` (D-43 overdue from 1 day; env teardown; K-fixes; +18 KB), CI green 42/0 | independent re-check `a9a94cad98b6b124f` running | Main session reads the diff → ask owner to merge → mark 098 ✅ (065 lands with it) → start **106** and **068** (`a17154f00e69eeced`) |
 | **#1384** (060) round 2 DONE `e69e99ab1`, CI green (High Priority now IsOpenWork too) | #1359 merging first | Rebase onto master (header-comment conflict: keep #1359 wording + "open work (IsOpenWork)") → ask owner to merge → 060 ✅ |
 | **056** → **PR #1386**: review PASS-WITH-FINDINGS; owner decided D-69 (skipped marker opt-in) + D-70 (ADR-050 Path A, 111 removes); fixes sent to author `af7588b2ed6612c5f` (opt-in prop + stepper tests, PR body, K2 warn, merge master) | author fixing | Independent re-check of the fix diff → owner merge question (list the user-visible changes) → 111/112/113/114 |
 
@@ -41,7 +41,8 @@
 
 | ID | Role | State |
 |---|---|---|
-| a67ad20f7bead7126 | 098 author, PR #1359 — final round | running |
+| a67ad20f7bead7126 | 098 author, PR #1359 — final round done `fcdd78409` | idle |
+| a9a94cad98b6b124f | Re-checker: #1359 final round | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 060 author, PR #1384 (round 2 done, awaits #1359) — next 068 after #1359 | idle |
 | af7588b2ed6612c5f | 056 author, PR #1386 — doing D-69/D-70 review fixes | running |
