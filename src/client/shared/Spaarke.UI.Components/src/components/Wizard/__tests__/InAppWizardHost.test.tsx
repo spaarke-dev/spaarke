@@ -373,11 +373,12 @@ describe('InAppWizardHost — code-page wizards open through supplied renderers 
     mountHost(undefined, ALL_RENDERERS);
     let outcome: unknown;
     act(() => {
-      void navigateToWebResourceSurfaceAsync({ webresourceName: 'sprk_workspacelayoutwizard', data: 'mode=create' }).then(
-        o => {
-          outcome = o;
-        }
-      );
+      void navigateToWebResourceSurfaceAsync({
+        webresourceName: 'sprk_workspacelayoutwizard',
+        data: 'mode=create',
+      }).then(o => {
+        outcome = o;
+      });
     });
     await screen.findByTestId('wizard-layout');
     expect(outcome).toBeUndefined();

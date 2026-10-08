@@ -27,7 +27,9 @@ beforeEach(() => {
 
 describe('SummarizeFilesDialog — in-app hosting props', () => {
   it('forwards uiScale to the shell and leaves size / dismiss / legacy sizing to the shell defaults', () => {
-    render(<SummarizeFilesDialog open onClose={jest.fn()} embedded={false} uiScale={1.5} authenticatedFetch={jest.fn()} />);
+    render(
+      <SummarizeFilesDialog open onClose={jest.fn()} embedded={false} uiScale={1.5} authenticatedFetch={jest.fn()} />
+    );
 
     expect(mockShell.props.uiScale).toBe(1.5);
     expect(mockShell.props.embedded).toBe(false);
