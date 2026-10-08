@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{e3d9af6c-48c1-f111-a05a-7ced8d20291d}</WebResourceId>
+  <Name>sprk_/scripts/assignedaccess_postsave.js</Name>
+  <DisplayName>sprk_/scripts/assignedaccess_postsave.js</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_scriptsassignedaccess_postsavejsE3D9AF6C-48C1-F111-A05A-7CED8D20291D</FileName>
+</WebResource>

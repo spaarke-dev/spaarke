@@ -1,0 +1,135 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{a2508788-e10c-f111-8342-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{fbb23880-3339-43f4-9ac1-d013a0b01725}" IsUserDefined="1" labelid="{3f0aedc0-399c-4c6a-bd01-8fc2a9182578}">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{bf63668f-c3ff-4089-8a55-5a23bae66847}" labelid="{cd8cd47a-e128-46d5-9b1a-606736e9c063}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{19e0c29b-8226-4210-8936-a0e86847504f}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoice" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_invoice" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{07d5a2aa-11d2-4442-9833-e81234f7bf09}" labelid="{5bc90206-83f7-4a97-ae23-499ae9536134}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2b99d62e-c705-46b5-9ec3-bd69705ca247}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingevent" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingevent" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a389d757-8de1-47ca-8205-f828f2f874cc}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_amount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_amount" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{c7776434-f39b-43e5-972d-934390c2632e}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{b3f0f4b1-1ad2-4020-ba0f-85bc200b2234}" showlabel="false" labelid="{93900739-5281-40c6-ba02-77d114932dc3}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{95d9874a-1d15-4db3-b821-f6e523d75894}" showlabel="false" labelid="{c6edd534-88ef-438b-bc25-3c5cd71c1b06}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{b5cf9fb6-06b5-4025-b443-43eb5b328523}" showlabel="false" labelid="{65869f4a-ca47-49b6-b689-8c7b72fbe296}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{e89505c1-8d9b-460a-87c7-6d9a09f5998e}" labelid="{42ccb4d7-8dfb-4093-99d7-15a9ef3a6606}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+            <cell id="{d596d5f7-54d5-489f-8fc8-3eb5568f63ba}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{aa5254db-cc9d-4e9e-a927-bd62d11c91eb}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{7524a2b8-18fe-44c0-8ea2-884921bde6be}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{70a2ecb8-2dcc-466b-aa68-d51a1da89e4b}" showlabel="false" labelid="{c11b1bed-da5f-4661-9ab1-46cfdbc58219}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3ffc5558-a09a-4de6-8715-0c08e3f5070d}" showlabel="false" labelid="{08e6706f-08b1-4c12-8854-e40da2cf83f2}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3f64ce10-c4f8-4f9c-9530-93172315ebd5}" showlabel="false" labelid="{b090f8fd-8f08-4589-8831-89050a082a07}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Invoice Line Item main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

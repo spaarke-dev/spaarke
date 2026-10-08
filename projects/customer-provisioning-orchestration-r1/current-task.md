@@ -17,7 +17,7 @@
 
 ### T218 facts for 218e/218d (details in 218c's POML notes)
 - Live SpaarkeMaster in dev (2026-10-08, read-only): 520 in scope, 18 excluded, **53 missing**, **8 sprk_ tables packaged as shells** (incl. sprk_signal, sprk_noaccessentry, sprk_policy), Provisioning Registry role packaged though excluded, **13 outside the rule** (5 Microsoft tables dragged in by the 2026-08-23 rebuild, 8 env-var values).
-- Roles: "Spaarke Basic User" (H11 default) EXISTS and is in SpaarkeMaster; "Secure Record Owner" is a root role in the child unit "Secure Record". (Two earlier wrong notes came from 20-row-capped MCP queries — pass `top` or use the scripts.)
+- Roles: "Spaarke Basic User" (H11 default) EXISTS and is in SpaarkeMaster; "Secure Record Owner" lives in the child unit "Secure Record" by design and is NOT packaged — H7b (T256) creates it per environment. (Two earlier wrong notes came from 20-row-capped MCP queries — pass `top` or use the scripts.)
 - The store `sprkcpartifactsdev/provisioning-artifacts` holds the hand-made old-format manifest → a real run fails at H6 (missing-solution-zips) until 218d publishes. Manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
 
 ### T240b (unblocked 2026-10-08)

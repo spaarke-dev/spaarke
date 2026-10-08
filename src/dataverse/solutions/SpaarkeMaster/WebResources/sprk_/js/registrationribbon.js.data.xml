@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{f39e1719-3e30-f111-88b5-7c1e525abd8b}</WebResourceId>
+  <Name>sprk_/js/registrationribbon.js</Name>
+  <DisplayName>Registration Ribbon Commands</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_jsregistrationribbonjsF39E1719-3E30-F111-88B5-7C1E525ABD8B</FileName>
+</WebResource>

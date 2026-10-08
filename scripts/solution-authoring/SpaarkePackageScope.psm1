@@ -11,7 +11,7 @@
         (incl. every code page), CustomControl (PCF), AppModule, SiteMap, EnvironmentVariableDefinition;
       + sprk_ custom columns on non-sprk (OOB) tables, unmanaged system views / forms on OOB tables, and unmanaged
         dashboards;
-      + root security roles (any business unit) whose name matches the scope's role pattern, plus the named extras;
+      + security roles of the ROOT business unit whose name matches the scope's role pattern, plus the named extras;
       + every unmanaged field security profile (they secure sprk_ columns; no other publisher authors in dev);
       − the committed exclusions in docs/data-model/package-scope.json (each with a reason and a date).
     Environment-variable VALUES are never in scope (H7 writes them per customer).
@@ -180,10 +180,14 @@ function Get-PackageRuleComponents {
         $items.Add((New-ScopeItem FieldSecurityProfile $p.fieldsecurityprofileid $p.name))
     }
 
-    # Roles: ROOT roles (roleid = parentrootroleid) in ANY business unit — a role's copies in descendant units
-    # share its root id; a role authored in a child unit (e.g. Secure Record Owner) is its own root.
+    # Roles: those of the ROOT business unit only (copies in child units share the root's id and are skipped).
+    # Dataverse packages no role authored in a child unit ("root component Role is missing", T218e 2026-10-08):
+    # such a role is per-environment by design - e.g. Secure Record Owner, contained in the Secure Record unit
+    # (SECURE-PROJECT-ENVIRONMENT-SETUP.md 5.2), which provisioning H7b creates (T256).
     $alsoIncluded = @($Scope.roleNamesAlsoIncluded)
-    foreach ($r in @(Get-AllPages $Get "roles?`$select=roleid,name,_parentrootroleid_value&`$filter=ismanaged eq false")) {
+    $rootUnits = @(Get-AllPages $Get "businessunits?`$select=businessunitid&`$filter=_parentbusinessunitid_value eq null")
+    if ($rootUnits.Count -ne 1) { throw "Expected exactly one root business unit; found $($rootUnits.Count)." }
+    foreach ($r in @(Get-AllPages $Get "roles?`$select=roleid,name,_parentrootroleid_value&`$filter=ismanaged eq false and _businessunitid_value eq $($rootUnits[0].businessunitid)")) {
         if ([string]$r.roleid -ne [string]$r._parentrootroleid_value) { continue }
         if ($r.name -match $Scope.roleNamePattern -or $alsoIncluded -contains $r.name) {
             $items.Add((New-ScopeItem Role $r.roleid $r.name))

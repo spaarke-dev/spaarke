@@ -61,7 +61,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Test-SolutionCompleteness against dev exits 0 after the assemble.</criterion>
-    <criterion testable="true">src/dataverse/solutions/SpaarkeMaster contains sprk_spaarkeai, the Office Add In User and Secure Record Owner roles, and sprk_noaccessentry; the value guard passes.</criterion>
+    <criterion testable="true">AMENDED 2026-10-08 (Secure Record Owner cannot be packaged: a child-unit role, contained by design; H7b/T256 creates it): src/dataverse/solutions/SpaarkeMaster contains sprk_spaarkeai, the Office Add In User role, and sprk_noaccessentry; the value guard passes.</criterion>
     <criterion testable="true">H11's default guest role is a role present in the committed package (test reads the role list).</criterion>
   </acceptance-criteria>
 

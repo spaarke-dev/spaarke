@@ -3,7 +3,7 @@
 # customer-provisioning-orchestration-r1 task 218c: the package scope rule (scripts/solution-authoring/
 # SpaarkePackageScope.psm1). Proves: every sprk_ web resource is in scope whatever solution it sits in (paged
 # results included); managed, intersect and non-prefixed components are not; OOB tables contribute only their sprk_
-# columns, unmanaged views and forms; root roles come from ANY business unit (copies skipped) by pattern or name;
+# columns, unmanaged views and forms; roles come from the ROOT business unit only (copies skipped) by pattern or name;
 # unmanaged field security profiles are in scope; exclusions need a reason and a date; the comparison reports
 # missing, shell-packaged, excluded-but-packaged, outside-the-rule, stale exclusions and unmatched extra names; the
 # env-var value guard catches a values file in a folder and in a zip.
@@ -33,7 +33,7 @@ function New-FakeGet {
     }.GetNewClosure()
 }
 
-function New-Scope([object[]]$Exclusions = @(), [string[]]$AlsoIncluded = @('Secure Record Owner')) {
+function New-Scope([object[]]$Exclusions = @(), [string[]]$AlsoIncluded = @('Spaarke Extra Role')) {
     [PSCustomObject]@{
         prefix                = 'sprk_'
         roleNamePattern       = '(?i)^spaarke '
@@ -82,10 +82,11 @@ function Get-DevPages {
                 )) }
         'systemforms'                    = @{ Filter = 'ismanaged eq false'; Page = (Page @([PSCustomObject]@{ formid = 'F1'; name = 'Documents'; objecttypecode = 'none' })) }
         'fieldsecurityprofiles'          = @{ Filter = 'ismanaged eq false'; Page = (Page @([PSCustomObject]@{ fieldsecurityprofileid = 'P1'; name = 'Identity Link Readers' })) }
-        'roles'                          = @{ Filter = 'ismanaged eq false'; Page = (Page @(
+        'businessunits'                  = @{ Filter = '_parentbusinessunitid_value eq null'; Page = (Page @([PSCustomObject]@{ businessunitid = 'B0' })) }
+        'roles'                          = @{ Filter = @('ismanaged eq false', '_businessunitid_value eq B0'); Page = (Page @(
                     [PSCustomObject]@{ roleid = 'R1'; name = 'Spaarke Core User'; _parentrootroleid_value = 'R1' }
                     [PSCustomObject]@{ roleid = 'R1b'; name = 'Spaarke Core User'; _parentrootroleid_value = 'R1' }
-                    [PSCustomObject]@{ roleid = 'R2'; name = 'Secure Record Owner'; _parentrootroleid_value = 'R2' }
+                    [PSCustomObject]@{ roleid = 'R2'; name = 'Spaarke Extra Role'; _parentrootroleid_value = 'R2' }
                     [PSCustomObject]@{ roleid = 'R3'; name = 'System Customizer'; _parentrootroleid_value = 'R3' }
                 )) }
     }
@@ -132,7 +133,7 @@ Describe 'Get-PackageRuleComponents (T218c)' {
         ($names -contains 'Identity Link Readers') | Should Be $true
     }
 
-    It 'takes ROOT roles from any business unit by pattern or name - never a copy, never another role' {
+    It 'takes roles of the root business unit only (a child-unit role cannot be packaged), by pattern or name - never a copy, never another role' {
         @($rule | Where-Object { $_.TypeName -eq 'Role' } | ForEach-Object ObjectId) | Should Be @('r1', 'r2')
     }
 
@@ -187,7 +188,7 @@ Describe 'Compare-PackageScope (T218c)' {
     $scope = New-Scope -Exclusions @(
         [PSCustomObject]@{ type = 'CustomControl'; name = 'sprk_Spaarke.Controls.DueDatesWidget'; reason = 'r'; date = '2026-08-21' }
         [PSCustomObject]@{ type = 'Role'; name = 'Gone Role'; reason = 'r'; date = '2026-08-21' }
-    ) -AlsoIncluded @('Secure Record Owner', 'No Such Role')
+    ) -AlsoIncluded @('Spaarke Extra Role', 'No Such Role')
     $rule = @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope)
     $membership = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($k in '2|a1', '9|o1', '61|w2', '66|c1', '66|c2', '80|m1', '380|v1', '20|r1', '20|r2', '26|q1', '70|p1', '60|f1') { $membership[$k] = 0 }

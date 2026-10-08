@@ -126,8 +126,10 @@ schema. No separate BFF/package version gate exists — the ordering and the dow
 | Release owner | System Customizer or higher in `spaarkedev1`; repo write for the PR | Spaarke |
 | CI publish | Storage Blob Data Contributor on the provisioning-artifacts container, through OIDC | Platform Bicep |
 
-**Roles ship in the package.** Roles created by hand today ("Spaarke Office Add In User", "Secure Record Owner") move
-into SpaarkeMaster *(218e)*.
+**Roles ship in the package** — those of the ROOT business unit (the rule takes no other: Dataverse refuses a role
+authored in a child unit, "root component Role is missing"). "Spaarke Office Add In User" ships since 1.2.0.0 *(218e)*.
+"Secure Record Owner" is deliberately contained in the Secure Record business unit (SECURE-PROJECT-ENVIRONMENT-SETUP.md
+§5.2), so provisioning creates it per environment with that unit and its team (H7b, T256) — never the package.
 
 ## 7. Governance
 

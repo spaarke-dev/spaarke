@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_noaccessentry.AddExistingAssoc.Hide" Location="Mscrm.SubGrid.sprk_noaccessentry.AddExistingAssoc" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_noaccessentry.AddExistingStandard.Hide" Location="Mscrm.SubGrid.sprk_noaccessentry.AddExistingStandard" />
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions />
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules />
+  </RuleDefinitions>
+  <LocLabels />
+</RibbonDiffXml>

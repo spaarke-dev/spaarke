@@ -1,0 +1,56 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{5802ed7f-89be-f111-aaaf-0022482913fc}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="fullname" select="1" icon="1" preview="1">
+        <row name="result" id="contactid">
+          <cell name="fullname" width="200" />
+          <cell name="emailaddress1" width="200" />
+          <cell name="sprk_identitycollisionreason" width="220" />
+          <cell name="sprk_identitycollisionon" width="150" />
+          <cell name="sprk_identitycollisionoid" width="250" />
+          <cell name="sprk_identitycollisionplane" width="120" />
+          <cell name="sprk_identitycollisionparties" width="300" />
+          <cell name="sprk_externalobjectid" width="250" />
+          <cell name="sprk_externalobjectidkey" width="250" />
+          <cell name="sprk_identityplane" width="120" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="contact">
+          <attribute name="fullname" />
+          <attribute name="emailaddress1" />
+          <attribute name="sprk_externalobjectid" />
+          <attribute name="sprk_externalobjectidkey" />
+          <attribute name="sprk_identityplane" />
+          <attribute name="sprk_identitycollisionon" />
+          <attribute name="sprk_identitycollisionreason" />
+          <attribute name="sprk_identitycollisionoid" />
+          <attribute name="sprk_identitycollisionplane" />
+          <attribute name="sprk_identitycollisionparties" />
+          <attribute name="contactid" />
+          <order attribute="sprk_identitycollisionon" descending="true" />
+          <filter type="and">
+            <condition attribute="sprk_identitycollisionon" operator="not-null" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Contacts with Identity Collisions" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Every contact with an open identity collision (task 141). Resolve per SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; the reconciliation job clears the flag." languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>

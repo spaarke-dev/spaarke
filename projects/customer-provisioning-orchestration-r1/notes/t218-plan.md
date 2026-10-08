@@ -48,7 +48,9 @@
    a refused downgrade, no concrete failure is left for it.
 6. **IAM.** H6 imports as the identity that is System Administrator in the customer environment (H10); the runbook
    states it. Roles ship in the package; H11's guest role default must name a shipped role; the hand-created roles
-   (Office Add In User, Secure Record Owner) move into the package.
+   (Office Add In User, Secure Record Owner) move into the package. **CORRECTED 2026-10-08 (218e):** only root-unit roles
+   can be packaged; Secure Record Owner stays contained in the Secure Record unit by UAC-r2's design and H7b (T256)
+   creates it per environment.
 7. **Code pages** all ship inside SpaarkeMaster (rule 2). The per-page `Deploy-*.ps1` scripts stay as dev-iteration
    tools and never touch a customer environment. Folders with no runtime reference (`DemoRegistration` — two .md files;
    `sprk_communicationconversationpage` — comment-only reference) are confirmed with their owning projects, then

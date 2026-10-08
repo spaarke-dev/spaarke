@@ -1,0 +1,280 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_playbookexecutortype" localizedName="Playbook Executor Type" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <ExternalTypeName></ExternalTypeName>
+  <displaynames>
+    <displayname description="Playbook Executor Type" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="" languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="0" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="AI Analysis" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="1" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="AI Completion" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="2" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="AI Embedding" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="10" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Rule Engine" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="11" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Calculation" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="12" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Data Transform" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="20" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Create Task" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="21" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Send Email" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="22" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Update Record" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="23" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Call Webhook" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="24" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Send Teams Message" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="30" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Condition" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="31" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Parallel" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="32" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Wait" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="33" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Start" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="40" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Deliver Output" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="41" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Deliver To Index" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="42" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Deliver Composite" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="50" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Create Notification" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="51" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Query Dataverse" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="52" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Lookup User Membership" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="60" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Agent Service" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="70" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Grounding Verify" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="80" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Live Fact" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="90" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Index Retrieve" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="100" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Evidence Sufficiency" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="110" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Decline To Find" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="120" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Return Insight Artifact" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="130" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Sanitization" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="140" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Observation Emit" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="141" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Entity Name Validator" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="142" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Load Knowledge" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+    <option value="143" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Return Response" languagecode="1033" />
+      </labels>
+      <Descriptions>
+        <Description description="" languagecode="1033" />
+      </Descriptions>
+    </option>
+  </options>
+</optionset>

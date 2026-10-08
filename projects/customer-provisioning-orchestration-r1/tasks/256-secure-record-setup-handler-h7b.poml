@@ -70,5 +70,7 @@
     <criterion testable="true">Rejection codes per the hand-off §2.4; dry run writes nothing.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-08">FROM T218e: the "Secure Record Owner" role is NOT in SpaarkeMaster and cannot be — Dataverse packages no role authored in a child business unit ("Subcomponent ... cannot be added to the solution because the root component Role is missing"), and UAC-r2 contains it in the Secure Record unit on purpose (SECURE-PROJECT-ENVIRONMENT-SETUP.md 5.2). So H7b MUST create it: in the Secure Record unit, with exactly the Read-at-Basic privileges of config/secure-record-owner-role.json (the same file and checks as scripts/Set-SecureRecordOwnerRolePrivileges.ps1: metadata privilege names, read back, never wider), then assign it to the named owner team. Coordination note: notes/coordination/2026-10-08-to-uac-r2-2.md.</note>
+  </notes>
 </task>

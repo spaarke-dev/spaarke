@@ -6,8 +6,8 @@
 .DESCRIPTION
     T218c (ADR-027 §3 amended 2026-10-07). The scope is a RULE (scripts/solution-authoring/SpaarkePackageScope.psm1 +
     docs/data-model/package-scope.json): every unmanaged sprk_ component of the scoped types, sprk_ columns on OOB
-    tables, unmanaged views/forms on OOB tables, unmanaged dashboards, field security profiles and Spaarke root roles
-    from any business unit, minus committed exclusions. Before T218c this script added only what was
+    tables, unmanaged views/forms on OOB tables, unmanaged dashboards, field security profiles and Spaarke roles of
+    the ROOT business unit, minus committed exclusions. Before T218c this script added only what was
     already inside some Spaarke solution; the first rule run (2026-10-07) found 44 in-scope components missing.
 
     Flags (T218c review): every custom table goes in WITH all its subcomponents (DoNotIncludeSubcomponents = false) -
@@ -117,7 +117,7 @@ if (-not $RemoveUnexplained) {
 foreach ($x in $diff.UnmatchedExclusions) { Write-Warning "Stale exclusion (matches nothing): $($x.type) $($x.name)" }
 foreach ($x in $diff.UnmatchedAlsoIncluded) { Write-Warning "roleNamesAlsoIncluded matches no root role: $x" }
 
-if ($toAdd.Count -eq 0 -and $shells.Count -eq 0 -and $toRemove.Count -eq 0) { Write-Host "==> Nothing to change. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
+if ($toAdd.Count -eq 0 -and $shells.Count -eq 0 -and $toRemove.Count -eq 0 -and -not $Version) { Write-Host "==> Nothing to change. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
 
 $newVersion = Get-NextPackageVersion -Current $master.version -Kind $VersionBumpKind -Version $Version
 
