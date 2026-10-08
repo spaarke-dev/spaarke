@@ -228,7 +228,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ [done] 110 | [ADR-050 path B amendment (WizardShell preset, in-app launch rule)](110-adr-050-amendment-wizard-preset-and-launch-rule.poml) | FULL | **opus**/high | — | — | ⚠️ `.claude/` → **main session only**. Amendment text is in the POML `<notes>`. Can start now |
-| 🔄 [wip] 056 | [WizardShell: characterization tests, re-base on SprkModal, v4 props, delete WizardModal](056-wizardshell-rebase-on-sprkmodal.poml) | FULL | **opus**/high | 110 | — | Modal note P1-P3. Embedded markup must not move |
+| ✅ [done] 056 | [WizardShell: characterization tests, re-base on SprkModal, v4 props, delete WizardModal](056-wizardshell-rebase-on-sprkmodal.poml) | FULL | **opus**/high | 110 | — | Modal note P1-P3. Embedded markup must not move |
 | 🔲 [open] 111 | [**Deploy** + regression of non-embedded WizardShell consumers](111-wizard-consumer-regression-and-deploy.poml) | FULL | sonnet/high | 056 | — | Modal note P4; SemanticSearchControl PCF last (`build:prod`) |
 | 🔲 [open] 112 | [Migrate Create wizards off `navigateTo` (in-app host)](112-migrate-create-wizards-in-app.poml) | FULL | **opus**/high | 056 | — | Modal note P5 part 1: Matter, Project, Event, To Do, Work Assignment. Ribbon stays |
 | 🔲 [open] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout |

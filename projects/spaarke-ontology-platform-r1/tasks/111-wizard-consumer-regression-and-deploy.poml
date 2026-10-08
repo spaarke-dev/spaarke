@@ -37,7 +37,7 @@
     <constraint source="project">Scope: PCF builds use npm run build:prod, never npm run build; record the SemanticSearchControl bundle size before and after.</constraint>
     <constraint source="project">Scope: Vite solutions install with npm install --legacy-peer-deps --no-audit --no-fund, not npm ci.</constraint>
     <constraint source="project">Scope: replace the raw maxWidth/height strings in consumers 1, 3 and 5 with named sizes; no other consumer code changes.</constraint>
-    <constraint source="owner">AMENDED 2026-10-07 (D-70, ADR-050 Path A ends here): after the consumers use named sizes, DELETE SprkModal's legacySize prop and WizardShell's deprecated maxWidth/height props from @spaarke/ui-components (code, types, docs), and add a test that fails if either prop is reintroduced. git grep for legacySize across src/ must return nothing outside history. Also check WizardStepper's '1px'/'2px' literals move to tokens (#1386 review K4).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-70, ADR-050 Path A ends here): after the consumers use named sizes, DELETE SprkModal's legacySize prop and WizardShell's deprecated maxWidth/height props from @spaarke/ui-components (code, types, docs), and add a test that fails if either prop is reintroduced. git grep for legacySize across src/ must return nothing outside history. Also REPLACE the '1px'/'2px' literals in WizardStepper.tsx (lines ~37 and ~73 at #1386 head 54e8f637f) with Fluent tokens, per ADR-050's zero-'1px'-literals rule (#1386 review K4 and re-check K1).</constraint>
     <constraint source="project">Scope: verify against real dev (spaarkedev1), never a mock; record every row's result in notes/deploy-log.md naming the environment.</constraint>
   </constraints>
 

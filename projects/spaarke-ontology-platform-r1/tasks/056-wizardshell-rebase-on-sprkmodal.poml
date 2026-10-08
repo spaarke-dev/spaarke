@@ -4,7 +4,7 @@
     <title>WizardShell: characterization tests, re-base onto SprkModal, the v4 props, delete WizardModal</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>110 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the shared wizard engine used by eight shipped consumers.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -116,7 +116,7 @@
     <criterion testable="true">The package builds under both React type sets.</criterion>
   </acceptance-criteria>
 
-  <completion date="2026-10-07" pr="1386" branch="feat/wizardshell-sprkmodal-056" state="PR open, awaiting merge">
+  <completion date="2026-10-08" pr="1386" branch="feat/wizardshell-sprkmodal-056" state="MERGED to master 23c359eaf (owner approval 2026-10-08; head 54e8f637f, re-check merge-ready)">
     <commits>33ce24e08 characterization tests (55, all green on unmodified master, embedded snapshots); ac3680412 re-base + props; 160a00dc6 WizardModal retired (lands together with ac3680412, which already carried the file deletions); c6992555c merge of origin/master; 54e8f637f review fixes: showSkippedSteps opt-in (D-69), D-70 exception cited in JSDoc, guard-failure console.warn (K2).</commits>
     <acceptance>
       AC1 met: characterization tests committed first and green on master 36ff14147.

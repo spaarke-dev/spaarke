@@ -4,7 +4,7 @@
     <title>D-63: remaining sprk_finalduedate readers judge and show sprk_duedate (playbook, VisualHost card, CalendarVisual), own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live playbook node's query (Dataverse data) and client code; behaviour users see.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -53,4 +53,10 @@
   <notes>Created 2026-10-07 by the main session on owner decision D-63 (from task 098's report).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <status>in-progress (PR #1413 open, awaiting CI and merge)</status>
+    <date>2026-10-08</date>
+    <summary>Branch fix/finalduedate-readers-068 (worktree C:/wts-068) off origin/master 11dc9b0da. VisualHost card (selectDueDate, sprk_duedate only) + CalendarVisual default (sprk_duedate) changed with tests that fail on the old fallback (4 fail when restored; VisualHost jest 84/84); PCF 1.4.38 -> 1.4.39, prod build succeeded via Invoke-PcfBuildProd. Live node Query Overdue Tasks (348b6395-...) in spaarkedev1: the OR-filter over sprk_duedate/sprk_finalduedate replaced by the single sprk_duedate lt {{todayUtc}} condition (before/after text in the PR body); live proof with zz-068- rows: BEFORE query returned rescheduled+overdue, AFTER returned overdue only; rows deleted. Repo copy of the playbook JSON updated. Flagged, not changed: node still orders by sprk_finalduedate and filters statuscode=Open only (D-57 class). Also carries the one-line EventRoutesLiveTests compile fix for master (same as PR #1384).</summary>
+    <needs>CI green and merge of PR #1413; per-environment step: apply the same one-condition edit when the playbook solution is promoted beyond spaarkedev1.</needs>
+  </completion>
 </task>
