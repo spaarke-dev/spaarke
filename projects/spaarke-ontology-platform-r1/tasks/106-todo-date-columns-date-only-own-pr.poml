@@ -32,6 +32,7 @@
     <constraint source="project">The change must ship to other environments: record what has to be exported/replicated (the owning solution) and write the per-environment procedure (re-running the value analysis there), in docs/data-model next to task 098's sprk_event procedure. Do not export or import solutions yourself.</constraint>
     <constraint source="project">Code changes go in their own worktree off origin/master and their own PR. Root CLAUDE.md section 10 applies to the BFF part (placement, publish size against a fresh master from short paths, CVE). #1309's blocking Xrm capability guard applies to any getXrm use. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
     <constraint source="project">A one-way schema change breaks every reader/writer of the column: fix the dev surfaces broken by the conversion in the same PR (task 098's lesson), and prove writes live (no HTTP 400 on To Do create/update/complete/reschedule paths).</constraint>
+    <constraint source="project">ADDED 2026-10-08: fix issue #1402 (ISS-011) in this PR if it touches EventRoutesLiveTests.cs or the live-test harness: the 097 leg's CreateAnalysisAsync must find a row by name and register it for cleanup when OData-EntityId is missing (copy the Briefing leg, lines ~463-472), and the "found by name" count message must count only rows found by name. If this PR does not touch that file, fix it anyway as a separate small commit in this PR and close #1402.</constraint>
   </constraints>
 
   <steps mode="prescriptive">

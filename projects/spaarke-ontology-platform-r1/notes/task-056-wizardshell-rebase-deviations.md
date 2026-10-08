@@ -4,19 +4,20 @@
 
 Recorded per POML step 8. Each item says what the POML asked for, what was done, and why.
 
-## D1 — `'skipped'` applies to every consumer's Skip button (a fourth UAT-visible change)
+## D1 — `'skipped'` marker: first shipped for every consumer, now OPT-IN (owner decision D-69)
 
-- **POML**: add a `'skipped'` `WizardStepStatus` that does not tick the step. It also says "nothing else changes for existing consumers" beyond three listed UAT changes.
-- **Done**: the shell's Skip button now dispatches a new `SKIP_STEP` reducer action. It marks the step it leaves `'skipped'`, and the stepper draws a dashed ring with no tick. So existing wizards with skippable steps (the `CreateRecordWizard` follow-on steps) now show a skipped follow-on without a tick. Before, Skip showed a tick (`completed`).
-- **Why**: the two POML constraints cannot both hold without an opt-in flag, and an opt-in flag would break "additive props **exactly**". HANDOFF §4.1 states the rule generally: "A skipped step must not show a tick." A tick on a skipped step is wrong information in any wizard.
-- **For UAT**: add to the three intended changes. *A skipped step shows an empty dashed ring instead of a tick.*
-- **Reversal cost**: about one line. Make Skip dispatch `NEXT_STEP` unless an opt-in prop is set.
-
+- **POML**: add a `'skipped'` `WizardStepStatus` that does not tick the step; "nothing else changes for existing consumers".
+- **First version**: the shell's Skip button always dispatched `SKIP_STEP`. The independent review of #1386 found that this hit main steps of existing wizards in both modes (Add file(s) in every Create* wizard, Associate To, Work to Assign / Add Files, the Summarize Files and Document Upload follow-ons).
+- **Fixed (`54e8f637f`, D-69)**: a new opt-in prop, `showSkippedSteps` (default `false`). With it off, Skip dispatches `NEXT_STEP` exactly as on master, so the step shows the tick. With it on, the step shows the dashed ring. The 058 decision wizard opts in.
+- **Tests**:
+  - With the prop off, Skip marks the step completed; the test asserts the stepper state.
+  - With the prop on, the step shows the skipped marker.
+  - Mutation-checked both ways: 2 and 4 failures respectively.
 ## D2 — `SprkModal` gained a transitional `legacySize` prop (`@deprecated`)
 
 - **POML**: `maxWidth`/`height` strings are deprecated and must keep working; task 111 maps them to named sizes.
 - **Done**: `SprkModal` has no sizing escape hatch, so the re-based shell could not honour those strings without one. I added `legacySize?: { width?, height? }`, marked `@deprecated`. WizardShell is its only caller. It replaces the named size's width (still clamped by the 96vw outer `maxWidth`), sets `height` and `minHeight`, and is ignored while maximized. Task 111 should delete it once the callers use named sizes (`CreateAnalysisWizardWidget` 60vw/70vh, `DocumentEmailWizard` 1280px/85vh through SemanticSearchControl and DocumentRelationshipViewer).
-- **ADR-050 note**: this is not a new per-surface size. It carries existing behaviour through a migration that task 111 completes.
+- **ADR-050**: owner-approved as an **ADR-050 Path A exception (spec §6, D-70)**; removal in task 111. The JSDoc on `legacySize`, `maxWidth` and `height` cites it.
 
 ## D3 — No `onBeforeClose` prop
 
