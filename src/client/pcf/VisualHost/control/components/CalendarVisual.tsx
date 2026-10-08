@@ -47,7 +47,7 @@ export interface ICalendarVisualProps {
 /**
  * v1.4.24 — Map a fetched Dataverse record to a calendar event for the popover.
  * Generic: tries chartDefinition.sprk_groupbyfield as the date attribute,
- * falls back to sprk_finalduedate / sprk_duedate (both common on sprk_event).
+ * falls back to sprk_duedate (D-63: sprk_finalduedate is informational and never picks the bucket).
  * Event type name + color resolve via any `<alias>.sprk_name` /
  * `<alias>.sprk_eventtypecolor` key so the FetchXML's link-entity alias
  * (e.g. `evtype`, `eventtype`) doesn't have to be standardized.
@@ -61,8 +61,8 @@ export function mapRecordToEvent(
   const id = (record[primaryIdAttr] as string) || (record.sprk_eventid as string) || '';
   const name = (record.sprk_eventname as string) || (record[`${entityName}name`] as string) || 'Untitled';
 
-  // Resolve the bucketing date: configured field → finalduedate → duedate.
-  const candidates = [dateField, 'sprk_finalduedate', 'sprk_duedate'].filter((f): f is string => !!f);
+  // Resolve the bucketing date: configured field → sprk_duedate (D-63; never sprk_finalduedate).
+  const candidates = [dateField, 'sprk_duedate'].filter((f): f is string => !!f);
   let dateStr: string | undefined;
   for (const f of candidates) {
     const v = record[f] as string | undefined;
