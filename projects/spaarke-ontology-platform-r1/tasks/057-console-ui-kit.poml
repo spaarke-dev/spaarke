@@ -4,7 +4,7 @@
     <title>Console UI kit in @spaarke/ui-components: reuse first, then EvidenceLine, StatusBar, RecordRow, AggregateCard</title>
     <phase>5 The worklist surface</phase>
     <gate>startable (012 complete)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared UI components; each must pass the section 11 gate individually.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -124,6 +124,12 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-28 (amended, D-24), FR-48; v4 HANDOFF section 1.3. Off the critical path to 031; can start now.</notes>
+
+  <completion>
+    <date>2026-10-07</date>
+    <pr>https://github.com/spaarke-dev/spaarke/pull/1382</pr>
+    <summary>Shipped as its own PR to master (branch feat/console-ui-kit-057). Adds EvidenceLine, StatusBar, RecordRow, AggregateCard and the nine-state CONSOLE_STATE_BADGES table in @spaarke/ui-components; StatusBadge (task 012, branch-only) brought onto master unchanged plus the success tone. 36 tests pass. D-50 issue: https://github.com/spaarke-dev/spaarke/issues/1381 (recorded in notes/defer-issues.md ISS-007). Notes, section 11 justifications, deviations: notes/057-console-ui-kit-notes.md. Merge of PR pending; the ontology branch will see an add/add conflict on StatusBadge files when merging master (take master).</summary>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

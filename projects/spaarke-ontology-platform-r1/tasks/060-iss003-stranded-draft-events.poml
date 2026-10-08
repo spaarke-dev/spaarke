@@ -4,7 +4,7 @@
     <title>ISS-003: resolve the sprk_event rows stranded in Draft</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>startable</gate>
-    <status>blocked</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data correctness in another domain that this project depends on; the Do lane under-reports without it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,9 +84,9 @@
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
   <completion>
-    <status>blocked-escalated</status>
+    <status>in-progress (PR open, awaiting merge)</status>
     <date>2026-10-07</date>
-    <summary>Escalation trigger fired at step 2; NO data was changed. Live re-count (spaarkedev1): Draft 49 (not 48), Open 22, Completed 7, Cancelled 1. All 49 Draft rows were created by the same single user (1d02f31c-...), 0 have sprk_regardingcommunication, so the issue-1050 classifier (createdby + regardingcommunication) does not separate system-generated from human-authored. Names are mixed: generic 'Task' rows (Feb 2026), 'Assign Work', 'Analysis AI review', 'Event', and obvious manual test rows ('Task 5 7/9/2026', 'Test new event'). Of these only the Task-type rows could be argued Open; the rest are Event/untyped. Note IsOpenWork already counts Draft, so the Do lane does not under-report these; only the briefing's statuscode=Open filter misses them.</summary>
-    <needs>Owner / communication-intelligence domain owner decision on the classification rule and approval of any bulk update (count and plan reported to the main session). Issue 1050 left open; TASK-INDEX untouched.</needs>
+    <summary>RE-SCOPED by owner decision D-57 (2026-10-07): NO Dataverse data changes; the data-fix part is closed as not needed. The 49 Draft events (live re-count) are open work under EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned). Replacement deliverable: DailyBriefingCollector's Upcoming/Overdue task channels now filter statuscode by IsOpenWork instead of Open alone (the only briefing reader filtering events on Open; TodoGenerationService already used IsOpenWork). Shipped as its own PR #1384 to master (branch fix/briefing-open-work-060). New test CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses fails on the old filter. Live on spaarkedev1: zz-060- Draft/OnHold/Completed events, old filter returned [], new filter returned draft + onhold, Completed excluded, all test rows deleted. Publish size master 36.22 MB vs branch 36.22 MB (delta 0.00, 192 files each, Compress-Archive); no vulnerable packages. Issue 1050 to be closed on merge with the re-scope note.</summary>
+    <needs>Merge of PR #1384; then set status completed and TASK-INDEX marker (main session). Possible trivial rebase against PR #1359 (same file, disjoint hunks).</needs>
   </completion>
 </task>

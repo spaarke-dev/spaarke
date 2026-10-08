@@ -103,6 +103,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-60 | Remove the 11 foreign tables from `OntologyPlatformSolution` (reference only) | Binding |
 | D-61 | Evaluator writes Signal fields **only when the result changes** (uac-r2 100k-rows-per-pass limit) | Binding (task 031) |
 | D-62 | Remove Console User **Create on Decision Record** with task 049 | Binding |
+| D-63 | `sprk_finalduedate` informational **everywhere** (notification playbook node, VisualHost card, CalendarVisual) | Binding (task 068) |
 
 ## Superseded or withdrawn
 
