@@ -5,7 +5,7 @@ namespace Spaarke.Dataverse;
 
 /// <summary>
 /// Reads and writes Dataverse calendar-date columns (the six <c>sprk_event</c> date columns: due, final due, base,
-/// completed, approved, meeting) without any time-zone conversion.
+/// completed, approved, meeting — task 098; <c>sprk_todo.sprk_duedate</c> — task 106) without any time-zone conversion.
 /// </summary>
 /// <remarks>
 /// <para><b>Why (spaarke-ontology-platform-r1 task 098).</b> These columns were Format DateOnly / Behavior UserLocal:

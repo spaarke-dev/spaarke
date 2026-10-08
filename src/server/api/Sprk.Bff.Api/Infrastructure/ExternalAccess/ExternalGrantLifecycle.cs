@@ -282,6 +282,8 @@ internal static class ExternalGrantLifecycle
     /// an explicitly requested date wins; otherwise a date someone already set is KEPT (a re-grant from a
     /// surface with no date field must never move it — task 097); otherwise an unbounded row is bounded at
     /// the FR-33 default.</para>
+    /// <para>Owner round 80: the upsert passes the date it will WRITE as the explicit one (the requested date, or a
+    /// lapsed re-add's restored default), so a restored row is judged on the date it will carry.</para>
     ///
     /// <para><b>This answers a per-request question and MUST NOT be used to rank rows</b> — see
     /// <see cref="ConferralRank"/> for why. Use it for the one elected row, to decide what that row will

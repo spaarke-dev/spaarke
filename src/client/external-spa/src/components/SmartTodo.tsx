@@ -59,6 +59,7 @@ import {
   CalendarLtrRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
+import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
 import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
 import { TruncatedListNotice } from './TruncatedListNotice';
@@ -264,29 +265,22 @@ const PRIORITY_OPTIONS: PriorityOption[] = [
 // Helper utilities
 // ---------------------------------------------------------------------------
 
-/** Format an ISO date string as a short human-readable date. */
+/**
+ * A to-do due date is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 106). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function formatDueDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return '';
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return '';
+  const d = parseDueDate(isoDate);
+  if (!d) return '';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Check if a to-do due date is overdue. */
+/** A to-do is overdue once its due DAY has passed (a to-do due today is not overdue — task 106, D-43). */
 function isOverdue(isoDate: string | null | undefined, isCompleted: boolean): boolean {
-  if (!isoDate || isCompleted) return false;
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return false;
-  return d < new Date();
-}
-
-/** Convert YYYY-MM-DD input value to ISO string for Dataverse. */
-function dateInputToIso(value: string): string | undefined {
-  if (!value) return undefined;
-  // Input type=date provides YYYY-MM-DD; convert to noon UTC to avoid timezone shifts
-  const [year, month, day] = value.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return d.toISOString();
+  if (isCompleted) return false;
+  const d = parseDueDate(isoDate);
+  if (!d) return false;
+  return daysBetweenLocalMidnight(new Date(), d) < 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +681,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
         const newTodo = await createTodo(projectId, {
           sprk_name: formData.title,
           ...(formData.description ? { sprk_notes: formData.description } : {}),
-          ...(formData.dueDate ? { sprk_duedate: dateInputToIso(formData.dueDate) ?? null } : {}),
+          // The date input's own "yyyy-MM-dd" is the calendar day the user picked — the only shape a Date Only column
+          // accepts (task 106; this used to send toISOString() of noon UTC, which Dataverse now refuses with 400).
+          ...(formData.dueDate ? { sprk_duedate: formData.dueDate } : {}),
           sprk_priorityscore: formData.priority,
         });
 

@@ -459,6 +459,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   activeComposeEditLedgerRef,
   documents = [],
   playbooks = [],
+  enablePlaybookDiscovery = false,
   predefinedPrompts = [],
   contentRef: externalContentRef,
   maxCharCount,
@@ -563,10 +564,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // Ref to the root container — passed to QuickActionChips for width-based visibility (NFR-04)
   const rootContainerRef = React.useRef<HTMLDivElement>(null);
 
-  // Playbook discovery (fetches available playbooks for quick-action chips)
+  // Playbook discovery (fetches available playbooks for the selector + quick-action chips).
+  // Opt-in (default off): the endpoint returns every playbook the user owns, uncurated — which
+  // surfaced as a raw "Playbook:" dropdown + chip wall in the Assistant once the BFF owner filter
+  // was corrected (uac-r2 #1312). The Assistant picks capabilities from the closed catalog instead.
   const { playbooks: discoveredPlaybooks } = useChatPlaybooks({
     apiBaseUrl,
     authenticatedFetch,
+    enabled: enablePlaybookDiscovery,
   });
 
   // Analysis context mapping — only active when analysisId is provided (analysis mode)

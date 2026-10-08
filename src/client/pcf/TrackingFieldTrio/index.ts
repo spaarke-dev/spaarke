@@ -120,6 +120,13 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.40 (task 067, unified-access-control-r2 — owner round 59 item 3; task 066 folded in): the bundled
+ *   `AccessGrantModal` shows a read-only No Access List (task 064's `GET /api/v1/records/{table}/{id}/no-access`, Write
+ *   holders only), marks Current Access rows an in-force wall overrides ("No Access") and rows the record's Secure /
+ *   Limited / Restricted state cancels ("No effect"). New host callback `fetchContactOrganizationMemberships` reads
+ *   `sprk_contactorganization` so a contact in a walled organization is marked too. Walls are still authored only in
+ *   No Access Entries (task 154).
+ *
  * v1.0.39 (task 114, unified-access-control-r2 — owner test round 3, 2026-10-07): dark mode still light on 1.0.38 —
  *   a STANDARD control's `fluentDesignLanguage.isDarkTheme` reads false in Spaarke dark mode, so the theme no longer
  *   reads the PCF context (user choice → dark-mode URL flag → navbar; the shared resolver also gained the URL step).
@@ -201,6 +208,7 @@ import {
   type IUserPick,
   type IUserPickOptions,
   type ISecureOwnerInfo,
+  type IContactOrganizationMembership,
   type ExternalGrantRootType,
   type AccessPermissionState,
   resolveAccessPermissionState,
@@ -1109,6 +1117,48 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }
   };
 
+  /** Task 067: which of the given contacts hold an ACTIVE membership in which of the given (walled) organizations —
+   * `sprk_contactorganization`, bounded by its own state only (`statecode` active or blank, no dates), the same predicate
+   * the server's wall uses (`ExternalParticipationService.WallMembershipStateClause`). The modal calls this only when an
+   * organization wall is in force on the record, and marks those contacts' Current Access rows walled off. Errors
+   * propagate: the modal then says the rows could not be checked, never that they are not walled. Contacts are asked in
+   * chunks so a long Current Access list cannot exceed the URL limit. */
+  private fetchContactOrganizationMemberships = async (
+    contactIds: string[],
+    organizationIds: string[]
+  ): Promise<IContactOrganizationMembership[]> => {
+    if (contactIds.length === 0 || organizationIds.length === 0) return [];
+    // Only canonical GUIDs enter the OData filter. Anything else is refused (the modal then says the rows could not be
+    // checked) rather than dropped, so a bad id can neither alter the query nor silently unmark a row.
+    const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const contacts = contactIds.map(cleanGuid);
+    const organizations = organizationIds.map(cleanGuid);
+    if (![...contacts, ...organizations].every(id => GUID.test(id))) {
+      throw new Error('fetchContactOrganizationMemberships: an id is not a GUID');
+    }
+    const orgClause = organizations.map(id => `_sprk_organization_value eq ${id}`).join(' or ');
+    const memberships: IContactOrganizationMembership[] = [];
+    const CHUNK = 40;
+    for (let i = 0; i < contacts.length; i += CHUNK) {
+      const contactClause = contacts
+        .slice(i, i + CHUNK)
+        .map(id => `_sprk_contact_value eq ${id}`)
+        .join(' or ');
+      const result = await this.context.webAPI.retrieveMultipleRecords(
+        'sprk_contactorganization',
+        `?$select=_sprk_contact_value,_sprk_organization_value` +
+          `&$filter=(${contactClause}) and (${orgClause}) and (statecode eq 0 or statecode eq null)`
+      );
+      for (const e of result.entities) {
+        const row = e as unknown as { _sprk_contact_value?: string; _sprk_organization_value?: string };
+        if (row._sprk_contact_value && row._sprk_organization_value) {
+          memberships.push({ contactId: row._sprk_contact_value, organizationId: row._sprk_organization_value });
+        }
+      }
+    }
+    return memberships;
+  };
+
   /** Reads the bound record's secure-project owner + business-unit alignment
    * (task 065, design.md §6) for the modal's read-only display. Host-context,
    * single-entity read of `ownerid`/`owningbusinessunit`/`sprk_issecure` —
@@ -1253,7 +1303,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.39 • Built 2026-10-07',
+      versionText: 'v1.0.40 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1388,6 +1438,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     isSecureRecord: this.isSecureValue === true,
                     // Secure-record owner/BU read-only display (task 065, design.md §6).
                     fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
+                    // Task 067: contacts in a walled organization are marked walled off in Current Access.
+                    fetchContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the

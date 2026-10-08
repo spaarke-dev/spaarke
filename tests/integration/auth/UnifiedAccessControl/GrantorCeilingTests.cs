@@ -239,6 +239,105 @@ public class GrantorCeilingTests
         existing.AccessLevel.Should().Be(ViewOnly);
     }
 
+    /// <summary>
+    /// Owner round 80 (task 113): the Manage Access modal's re-add calls <c>/grant</c> with no date. Over a LAPSED grant that
+    /// is an explicit SET — restored at the picked level, in either direction, with today + 90 — and the 200 reports what was
+    /// written. Before round 80 the same request answered 409 "Grant did not take effect" (task 113 made that refusal write
+    /// nothing; before task 113 it wrote the level and then refused).
+    /// </summary>
+    [Theory]
+    [InlineData(ViewOnly, ExternalAccessLevel.FullAccess)]
+    [InlineData(FullAccess, ExternalAccessLevel.ViewOnly)]
+    public async Task Grant_ReAddOverALapsedGrant_RestoresItAtThePickedLevel_ForTheDefaultDays(int stored, ExternalAccessLevel picked)
+    {
+        var existing = _dataverse.Seed(ContactId, null, stored);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(ContactGrant(picked), FullAccessCaller);
+
+        var body = OkBody<GrantAccessResponse>(result);
+        body.GrantedAccessLevel.Should().Be(picked, "the 200 reports the level actually written");
+        body.Narrowed.Should().BeFalse();
+        body.AccessRecordId.Should().Be(existing.Id, "restored in place");
+        existing.AccessLevel.Should().Be((int)picked);
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+        _dataverse.Updates.Should().ContainSingle();
+        _dataverse.Creates.Should().BeEmpty();
+    }
+
+    /// <summary>Round 80 on the modal's "+ Organization" re-add: an organization-wide lapsed grant is restored the same way.</summary>
+    [Fact]
+    public async Task Grant_OrganizationReAddOverALapsedGrant_RestoresItAtThePickedLevel_ForTheDefaultDays()
+    {
+        var existing = _dataverse.Seed(null, OrganizationId, FullAccess);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(OrganizationGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        var body = OkBody<GrantAccessResponse>(result);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.ViewOnly);
+        body.AccessRecordId.Should().Be(existing.Id);
+        existing.AccessLevel.Should().Be(ViewOnly);
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
+    /// <summary>Round 80: the grantor ceiling still bounds a restore — a Collaborate caller restores at Collaborate, and says so.</summary>
+    [Fact]
+    public async Task Grant_ReAddOverALapsedLowerGrant_ByACollaborateCaller_IsRestoredAtTheirCeiling()
+    {
+        var existing = _dataverse.Seed(ContactId, null, ViewOnly);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller);
+
+        var body = OkBody<GrantAccessResponse>(result);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.Narrowed.Should().BeTrue();
+        existing.AccessLevel.Should().Be(Collaborate);
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
+    /// <summary>
+    /// Round 80's bound, the other side: a NARROWED re-add over a lapsed HIGHER grant is still the never-lower refusal (task
+    /// 139) — nothing restored, nothing written. The ceiling bounds the restore; it never becomes a quiet downgrade.
+    /// </summary>
+    [Fact]
+    public async Task Grant_NarrowedReAddOverALapsedHigherGrant_Is409WouldLower_AndWritesNothing()
+    {
+        var existing = _dataverse.Seed(ContactId, null, FullAccess);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller);
+
+        Problem(result).Should().Be((409, ExternalGrantLifecycle.WouldLowerExistingReasonCode));
+        _dataverse.Updates.Should().BeEmpty();
+        existing.AccessLevel.Should().Be(FullAccess);
+        existing.ExpiresDate.Should().Be(Today.AddDays(-1));
+    }
+
+    /// <summary>
+    /// Round 80 on the modal's OTHER re-add route: <c>/invite-and-grant</c> over a lapsed grant with no date restores it at the
+    /// picked level with today + 90, and its 200 reports the level written. Before round 80 this answered 200 "granted" while
+    /// writing nothing (task 113) — the row kept its old level for a later renewal to revive.
+    /// </summary>
+    [Theory]
+    [InlineData(FullAccess, ExternalAccessLevel.ViewOnly)]
+    [InlineData(ViewOnly, ExternalAccessLevel.FullAccess)]
+    public async Task InviteAndGrant_ReAddOverALapsedGrant_RestoresItAtThePickedLevel_AndReportsIt(int stored, ExternalAccessLevel picked)
+    {
+        SeedProvisionedInvitee();
+        var existing = _dataverse.Seed(ContactId, null, stored);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await InviteAndGrant(Invite(picked), FullAccessCaller);
+
+        var body = OkBody<InviteAndGrantResponse>(result);
+        body.GrantedAccessLevel.Should().Be(picked);
+        body.AccessRecordId.Should().Be(existing.Id);
+        existing.AccessLevel.Should().Be((int)picked, "the 200 is never answered over a write that did not happen");
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
     /// <summary>A narrowed request that does NOT lower anything (the grantee holds less) is written — the upgrade case.</summary>
     [Fact]
     public async Task Grant_NarrowedAboveAnExistingLowerGrant_RaisesIt()
@@ -851,6 +950,10 @@ public class GrantorCeilingTests
                 var level = Regex.Match(json, @"""sprk_accesslevel"":(\d+)");
                 if (level.Success)
                     row.AccessLevel = int.Parse(level.Groups[1].Value);
+                // Task 113 / round 80: the restore writes the expiry too, so the double applies it.
+                var expiry = Regex.Match(json, @"""sprk_expiresdate"":""(\d{4}-\d{2}-\d{2})""");
+                if (expiry.Success)
+                    row.ExpiresDate = DateOnly.Parse(expiry.Groups[1].Value);
             }
 
             return Task.CompletedTask;

@@ -41,6 +41,7 @@ import type {
   HostAdapterErrorCode,
   EmailComposeContent,
   ComposeEmailResult,
+  EmailIdentityKeys,
 } from './types';
 
 /**
@@ -654,6 +655,8 @@ export class OutlookAdapter implements IHostAdapter {
       canReadDocumentStamp: false,
       // No open document in Outlook — task 089's stamp write is Word-only
       canWriteDocumentStamp: false,
+      // task 120 (UAT round 12 O6): a message being READ has a Message-ID to look up; a draft being composed has none.
+      canResolveEmailIdentity: isReadMode,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support
@@ -866,6 +869,24 @@ export class OutlookAdapter implements IHostAdapter {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Task 120 (UAT round 12 O6): the open email's identity keys for `POST /api/documents/resolve-email-identity` —
+   * the RFC Message-ID and the Exchange item id, each exactly as Office reports it. Both are sent because the two save
+   * paths store different ones on the saved `.eml` (Quick Save the Message-ID, the task pane the item id).
+   *
+   * @returns `null` when the item has no Message-ID.
+   * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` outside read mode (see `canResolveEmailIdentity`).
+   */
+  async getEmailIdentityKeys(): Promise<EmailIdentityKeys | null> {
+    const item = this.getReadItem();
+    const internetMessageId = (item.internetMessageId ?? '').trim();
+    if (!internetMessageId) {
+      return null;
+    }
+    const exchangeItemId = (item.itemId ?? '').trim();
+    return { internetMessageId, exchangeItemId: exchangeItemId || null };
   }
 
   /**

@@ -115,6 +115,17 @@ export interface HostCapabilities {
    * `false` no write is attempted and the save is reported exactly as before.
    */
   canWriteDocumentStamp: boolean;
+  /**
+   * Whether the pane can ask Spaarke whether the open EMAIL is already saved — i.e. whether the host can supply the
+   * email's identity keys ({@link IHostAdapter.getEmailIdentityKeys}: the RFC Message-ID and the Exchange item id) for
+   * `POST /api/documents/resolve-email-identity` (spaarkeai-word-add-in-r1 task 120, UAT round 12 O6).
+   *
+   * True for Outlook in READ mode (a received or sent message has a Message-ID; a draft being composed has none).
+   * False for Word, which identifies its document by URL and stamp instead ({@link canGetDocumentUrl},
+   * {@link canReadDocumentStamp}). Optional so existing fixtures stay valid: absent = `false`. Views/services MUST gate
+   * the email lookup on this flag, never on `hostType` (NFR-10).
+   */
+  canResolveEmailIdentity?: boolean;
   /** Whether document can be saved as PDF */
   canSaveAsPdf: boolean;
   /** Whether item can be saved as EML (Outlook emails) */
@@ -238,6 +249,18 @@ export interface HostCapabilities {
   minApiVersion: string;
   /** Currently supported requirement set */
   supportedRequirementSet: string;
+}
+
+/**
+ * The open email's identity keys (spaarkeai-word-add-in-r1 task 120), sent as-is to
+ * `POST /api/documents/resolve-email-identity`. Both are needed: the ribbon Quick Save stores the RFC Message-ID on the
+ * saved `.eml`, while the task-pane save stores the Exchange item id.
+ */
+export interface EmailIdentityKeys {
+  /** `Office.context.mailbox.item.internetMessageId` (RFC 5322 Message-ID). */
+  internetMessageId: string;
+  /** `Office.context.mailbox.item.itemId` (Exchange item id), or `null` when the host gave none. */
+  exchangeItemId: string | null;
 }
 
 /**

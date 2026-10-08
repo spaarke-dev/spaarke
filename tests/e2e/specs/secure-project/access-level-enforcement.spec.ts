@@ -74,7 +74,7 @@ import { test, expect, Page, BrowserContext } from '@playwright/test';
 
 const POWER_PAGES_URL = process.env.POWER_PAGES_URL || 'https://spaarke-portal-dev.powerappsportals.com';
 
-const BFF_API_URL = process.env.BFF_API_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+const BFF_API_URL = process.env.BFF_API_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 
 const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID || '';
 
