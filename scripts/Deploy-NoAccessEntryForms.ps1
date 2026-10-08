@@ -607,7 +607,10 @@ if ($writes.appComponent) {
         AppId      = $app.appmoduleid
         Components = @(@{ '@odata.type' = 'Microsoft.Dynamics.CRM.entity'; entityid = $meta.MetadataId })
     } | Out-Null
-    Write-Ok "$Table added to the app"
+    # AddAppComponents can answer 204 and add nothing (seen on spaarkedev1, 2026-10-08): read back before claiming it.
+    $after = @((Invoke-Dv "appmodulecomponents?`$filter=_appmoduleidunique_value eq $($app.appmoduleidunique) and componenttype eq 1&`$select=objectid").value)
+    if (@($after | Where-Object { "$($_.objectid)" -eq "$($meta.MetadataId)" }).Count -gt 0) { Write-Ok "$Table added to the app" }
+    else { Write-Host "   WARN  AddAppComponents accepted $Table but the app does not list it; add the table in the app designer (Matter Management > Add page > Table), then -Verify." -ForegroundColor Yellow }
 }
 
 $publish = "<importexportxml><entities><entity>$Table</entity><entity>sprk_organization</entity><entity>contact</entity></entities>" +

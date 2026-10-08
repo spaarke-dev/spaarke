@@ -246,11 +246,12 @@ if (-not $adminInSolution -and -not $created) {
     Write-Host "  added '$AdminRoleName' to $SolutionUniqueName" -ForegroundColor Green
 }
 if ($adminDelete) {
-    Invoke-DvPost "roles($($admin.roleid))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ PrivilegeId = $deletePrivilege.Id } | Out-Null
+    # RemovePrivilegeRole takes a `Privilege` entity (live $metadata) carrying its privilegeid, not a PrivilegeId parameter.
+    Invoke-DvPost "roles($($admin.roleid))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = "$($deletePrivilege.Id)" } } | Out-Null
     Write-Host "  removed $($deletePrivilege.Name) from $AdminRoleName" -ForegroundColor Green
 }
 foreach ($p in $coreHeld) {
-    Invoke-DvPost "roles($($core.roleid))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ PrivilegeId = "$($p.PrivilegeId)" } | Out-Null
+    Invoke-DvPost "roles($($core.roleid))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = "$($p.PrivilegeId)" } } | Out-Null
     Write-Host "  removed $($p.PrivilegeName) from $CoreRoleName" -ForegroundColor Green
 }
 foreach ($upn in $AssignToUserPrincipalName) {

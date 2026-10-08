@@ -126,8 +126,14 @@ if ($unexpected.Count -gt 0) {
 }
 
 $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("NoAccessEntryRibbons-{0}.zip" -f (Get-Date -Format 'yyyyMMddHHmmss'))
-& pac solution pack --zipfile $zip --folder $SolutionFolder --packagetype Unmanaged
-if ($LASTEXITCODE -ne 0) { throw "pac solution pack failed ($LASTEXITCODE)." }
+# `pac` must resolve to the Power Platform CLI executable. Under Git Bash the PATH can put a bash shim named `pac`
+# first; PowerShell cannot run it and leaves $LASTEXITCODE untouched, so a pack/import that never ran looked successful
+# (task 154 dev apply, 2026-10-08).
+$pacExe = (Get-Command pac -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in '.cmd', '.exe', '.bat' } | Select-Object -First 1).Source
+if (-not $pacExe) { throw 'pac CLI not found: need pac.cmd or pac.exe on PATH.' }
+& $pacExe solution pack --zipfile $zip --folder $SolutionFolder --packagetype Unmanaged
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $zip)) { throw "pac solution pack failed ($LASTEXITCODE)." }
 Write-Host "Packed: $zip"
 
 if (-not $Apply) {
@@ -135,7 +141,7 @@ if (-not $Apply) {
     exit 0
 }
 
-& pac solution import --environment $BaseUrl --path $zip --publish-changes
+& $pacExe solution import --environment $BaseUrl --path $zip --publish-changes
 if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
 
 foreach ($delay in @(0, 15, 30, 45, 60, 30)) {
