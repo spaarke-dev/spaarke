@@ -2,17 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 (context-handoff before /compact) — this session: 218e ✅, T235 ✅, 218d ✅, 218f code complete, control plane deployed, master merged into the branch. **In progress: merging PR #1365 (owner OK) — CI was still running at handoff.**
+> **Last Updated**: 2026-10-08 SESSION 45 — **PR #1365 MERGED** (`1ef1b0949`, 22:05Z) after fixing 2 CI test failures; master verified. Waiting on owner items 2 and 3.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Merge PR #1365** (owner: "yes merge", 2026-10-08), then **218f**'s last acceptance check. |
-| **Step** | Branch updated from master (`c7e3d719b`, 0 behind, conflicts resolved: CHANGELOG both sides; ArchTests ledger count 118). Head `946033583` pushed; at handoff 6 PR checks were still pending (a background watcher was waiting). |
-| **Status** | in-progress (waiting for CI). |
-| **Next Action** | (1) `gh pr checks 1365` — wait until 0 pending AND 0 fail on head `946033583` (or later). Any fail → read the log, fix, push, re-wait — never merge on `Router` alone. (2) `gh pr merge 1365 --merge` (merge commit, not squash). (3) Verify on master: `git fetch`; grep the BFF for `.ForApp(` (31 known sites: the guard + mail/Graph-subscription/registration services); `dotnet test tests/Spaarke.ArchTests` (SpeAppOnlyContainerGuardTests inside). (4) Sync the main repo (`C:\code_files\spaarke`, `git pull --ff-only` on master — only if clean). (5) Tell the owner it merged; ask for owner items 2 and 3. (6) After the publish: 218f AC2 (below), close 218f, sync the board. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean, 0 behind master at `c7e3d719b`. |
+| **Task** | **218f**'s last acceptance check (AC2), after the first SpaarkeMaster publish (owner item 2). |
+| **Step** | SESSION 45: CI on `93c805fbd` failed 2 tests, both fixed in `2c5cac232` (merged at `73e83d50f`) — DataverseRecordShareWireTests (master's uac-r2 test used the pre-guard SpeContainerMembershipService constructor) and LoadTests EnqueueLatencyScenario (NativeAccount Model1 intake, refused since T232). Master merged again (9 commits, clean); solution build 0 errors; ArchTests 841/841; UAC tests 231/231; LoadTests 5/5; `.ForApp(` 31. CI on `73e83d50f`: 33 pass, 7 skip, 0 fail. Trial merge with 13 newer master commits clean, no new `.ForApp(`. **Merged `1ef1b0949`.** Master verified: build 0 errors, ArchTests 841/841, `.ForApp(` 31, guard present. Push-triggered runs on master (Deploy SpaarkeAi → DEV, Publish Provisioning ARM Artifacts, CI, Bicep, prereqs) were queued at 22:06Z. |
+| **Status** | blocked on the owner (items 2, 3). |
+| **Next Action** | (1) Owner OK → run `publish-dataverse-solutions-manifest.yml` on master with `publish: true`; watch it to green (manifest read-back). (2) 218f AC2 (below), close 218f, close #1401 (ISS-005 → Resolved), sync the board. (3) Owner OK → delete the `gh-pull_request` FIC on `8c85a481-…` (#1446), close ISS-007. (4) Check the master push runs listed above finished green. (5) Then T250. |
+| **Branch** | `work/customer-provisioning-orchestration-r1`, merged into master at `1ef1b0949`; 0 behind. |
+| **Main repo** | `C:\code_files\spaarke` master NOT fast-forwarded (still `b0a78f880`): another session's uncommitted researcher-memory edits (`.claude/agent-memory/researcher/MEMORY.md` + 2 files) block it. Left untouched — the owner decides. |
 | **Order after the merge** | first SpaarkeMaster publish (owner OK) → 218f close → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
 
 ### Files changed this session (all committed and pushed)
@@ -29,7 +30,7 @@
 
 ## Owner items
 
-1. **PR #1365 merge — APPROVED** (in progress, see Quick Recovery). Merging deploys the Console to DEV (deploy-spaarke-ai push trigger, T254's SprkChat change) and publishes ARM artifacts to `sprkcpartifactsdev`; production only by manual dispatch.
+1. **PR #1365 — MERGED** 2026-10-08 (`1ef1b0949`). Its push runs deploy the Console to DEV and publish ARM artifacts to `sprkcpartifactsdev`; production only by manual dispatch.
 2. **First real SpaarkeMaster publish** (after the merge): `publish-dataverse-solutions-manifest.yml` on master with `publish: true` — uploads 1.2.0.0 + manifest, keeps the hand-made manifest as `latest.previous`. Needed by T186 and 218f AC2. **Ask for OK.**
 3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — verified 2026-10-08 that no workflow signs in on pull requests. Entra write. **Ask for OK.**
 4. **T240b live re-test** with add-in package 1.1.2 (owner, test tenant Dewey Cheatham `deweycheatham.onmicrosoft.com`; guest `ralph@deweycheatham.onmicrosoft.com`; Diagnostics view should show `acct` 1).
