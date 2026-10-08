@@ -367,7 +367,26 @@ public static class ChatDocumentEndpoints
                 detail: "Request must be multipart/form-data with a 'file' field");
         }
 
-        var form = await httpContext.Request.ReadFormAsync(httpContext.RequestAborted);
+        // A malformed multipart body (e.g. a section without Content-Disposition) is a CLIENT error: answer 400
+        // instead of letting the parser's exception surface as a 500. Logged by type + trace id only — the
+        // parser's message can echo request content. Cancellation is deliberately not caught here.
+        IFormCollection form;
+        try
+        {
+            form = await httpContext.Request.ReadFormAsync(httpContext.RequestAborted);
+        }
+        catch (Exception ex) when (ex is System.IO.InvalidDataException or BadHttpRequestException)
+        {
+            logger.LogWarning(
+                "Document upload rejected: malformed multipart body ({ExceptionType}) for session {SessionId}, TraceId={TraceId}",
+                ex.GetType().Name, sessionId, httpContext.TraceIdentifier);
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Request body is not valid multipart/form-data.");
+        }
+
         var file = form.Files.GetFile("file");
 
         if (file == null || file.Length == 0)
