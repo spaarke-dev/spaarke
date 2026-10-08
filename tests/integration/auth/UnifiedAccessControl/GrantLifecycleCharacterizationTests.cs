@@ -966,18 +966,20 @@ public class GrantLifecycleCharacterizationTests
     /// Round 80's NEGATIVE twin: a re-add over a still-LIVE grant keeps its date (task 097 — a dateless surface never moves
     /// a date someone set). Without this, a restore that reset every date to today + 90 would also pass the above.
     /// </summary>
-    [Fact]
-    public async Task ReAdd_OverALiveGrantWithNoExpiry_KeepsItsDate()
+    [Theory]
+    [InlineData(12)]
+    [InlineData(0)] // expires TODAY: still live (ConfersAccessOn is inclusive), so it is not "lapsed" and keeps its date
+    public async Task ReAdd_OverALiveGrantWithNoExpiry_KeepsItsDate(int daysLeft)
     {
         var table = new FakeGrantTable();
-        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: Today.AddDays(12));
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: Today.AddDays(daysLeft));
         var client = table.BuildMock();
 
         var outcome = await ReAdd(client, Request(ExternalAccessLevel.Collaborate, expiryDate: null));
 
         outcome.Warning.Should().BeNull();
         seeded.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
-        seeded.ExpiresDate.Should().Be(Today.AddDays(12));
+        seeded.ExpiresDate.Should().Be(Today.AddDays(daysLeft));
         table.ExpiryUpdateCount.Should().Be(0);
     }
 

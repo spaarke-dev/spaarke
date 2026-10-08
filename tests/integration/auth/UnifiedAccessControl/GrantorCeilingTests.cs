@@ -265,6 +265,22 @@ public class GrantorCeilingTests
         _dataverse.Creates.Should().BeEmpty();
     }
 
+    /// <summary>Round 80 on the modal's "+ Organization" re-add: an organization-wide lapsed grant is restored the same way.</summary>
+    [Fact]
+    public async Task Grant_OrganizationReAddOverALapsedGrant_RestoresItAtThePickedLevel_ForTheDefaultDays()
+    {
+        var existing = _dataverse.Seed(null, OrganizationId, FullAccess);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(OrganizationGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        var body = OkBody<GrantAccessResponse>(result);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.ViewOnly);
+        body.AccessRecordId.Should().Be(existing.Id);
+        existing.AccessLevel.Should().Be(ViewOnly);
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
     /// <summary>Round 80: the grantor ceiling still bounds a restore — a Collaborate caller restores at Collaborate, and says so.</summary>
     [Fact]
     public async Task Grant_ReAddOverALapsedLowerGrant_ByACollaborateCaller_IsRestoredAtTheirCeiling()

@@ -17,7 +17,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Every grant is time-bounded (spec FR-33, task 097): a requested expiry before today is rejected (400,
 /// <c>sdap.access.grant.expiry_in_past</c>); an ABSENT one keeps the grant's existing expiry, else becomes
-/// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. No client has to send a date.
+/// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. No client has to send a date. Owner round 80: a re-add
+/// over a LAPSED grant is a SET — on <c>/grant</c> and <c>/invite-and-grant</c> it is restored at the picked
+/// (ceiling-capped) level with today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>.
 ///
 /// Broker-only (ADR-028 Amendment A1): external users never authenticate to SPE
 /// directly — all external SPE access is app-only via the BFF — so no synthetic
@@ -53,8 +55,9 @@ public static class GrantExternalAccessEndpoint
             // 403: the delegation gate, or (task 139) the grantor's own rights allow granting nothing
             // (sdap.access.grant.caller_cannot_grant).
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            // 409: the upsert matched an EXPIRED row and the request supplied no new expiry (task 023), or (task 139)
-            // the request was capped at the grantor's level and the grantee already holds more (would_lower_existing).
+            // 409: (task 139) the request was capped at the grantor's level and the grantee already holds more
+            // (would_lower_existing); or expired_not_restored (task 023) — since owner round 80 only a fail-closed
+            // backstop, because a dateless re-add over a lapsed grant is now restored, and nothing is written (task 113).
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
             // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
@@ -385,8 +388,9 @@ public static class GrantExternalAccessEndpoint
             // FR-33 (task 097): an absent expiry is DEFAULTED, never left unbounded. On a match, the default
             // is to KEEP the survivor's existing expiry — a re-grant from a surface with no date field must
             // never move a date someone set, in either direction. Only an UNBOUNDED survivor gets
-            // today + DefaultExpiryDays. (An EXPIRED survivor keeps its date too, and is reported by the
-            // ADR-003 check below rather than silently renewed.)
+            // today + DefaultExpiryDays. (In the core's DEFAULT mode — the Assigned-To rule — an EXPIRED survivor
+            // keeps its date too, and is reported by the ADR-003 check below rather than silently renewed. With
+            // `reAddRestoresLapsed` — /grant and /invite-and-grant, owner round 80 — it is restored at today + 90.)
             // `expiryToWrite` (null = write NOTHING) is a different value from the `effectiveExpiry`
             // computed below (what the row will CARRY). Renamed from `requestedExpiry` after review
             // finding F4: the election helpers take a parameter of that name holding the caller's RAW
