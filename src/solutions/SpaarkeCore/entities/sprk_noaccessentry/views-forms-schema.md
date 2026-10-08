@@ -41,7 +41,10 @@ post-save enforcement.
 
 **Library**: `sprk_/scripts/bff_auth.js`, then `sprk_/scripts/noaccessentry_postsave.js`
 (source `src/solutions/webresources/sprk_noaccessentry_postsave.js`, version 1.1.0 or later). ONE form event:
-OnLoad `Spaarke.NoAccessEntry.onLoad` (pass execution context), which registers everything else.
+OnLoad `Spaarke.NoAccessEntry.onLoad` (pass execution context), which registers everything else, each handler exactly
+once (Unified Interface fires OnLoad again after a save). On load, a stored record id the access checks do not match
+(braces, a leading space, blank) is corrected on the form and flagged "walls nothing until it is saved". The record
+picker is self-contained (`Spaarke.NoAccessEntry.Picker`, one `register` call), so it can be replaced by a control.
 
 | Handler | What it does |
 |---|---|
@@ -49,7 +52,7 @@ OnLoad `Spaarke.NoAccessEntry.onLoad` (pass execution context), which registers 
 | Record picker (OnChange of Record Type) | The Record Type lookup offers only Project, Matter and Work Assignment (the roots the deny readers evaluate). Choosing one opens the platform lookup dialog for that table (the dialog the shared `PolymorphicPicker` uses). The picked id is written in canonical form and the object organization is cleared. Clearing the type clears the id. To choose another record, choose the record type again. |
 | OnChange of Record Id (typed by hand) | Normalises at once; a value that is not a record id, or a record that does not exist, gets a field notification, which blocks the save. On load, a record that no longer exists gets a non-blocking warning instead. |
 | OnChange of Organization (object) | Clears the record type and id, so exactly one object survives. |
-| OnPostSave (task 143) | `POST /api/v1/external-access/no-access/enforce {entryId}` as the user. The notice names each record the entry was not enforced on because the author lacks Write (owner N5), and reports team/role access that cannot be removed per person (N2) and the last-person rule (S5). |
+| OnPostSave (task 143) | Only after a SUCCESSFUL save: `POST /api/v1/external-access/no-access/enforce {entryId}` as the user. If the sign-in helper is missing, a notice says the entry is enforced within 5 minutes. The notice names each record the entry was not enforced on because the author lacks Write (owner N5), and reports team/role access that cannot be removed per person (N2) and the last-person rule (S5). |
 
 **Why no display-name column and no dedicated picker control.** Owner round 59 item 4: reuse the existing picker, do
 not build the ObjectRecordPicker PCF, and keep `sprk_objectrecordname` only if the picker cannot show the record
@@ -81,7 +84,15 @@ the other views (including "Incomplete Entries"). A malformed entry is reported 
 ## NO ACCESS subgrids
 
 All three use the view above, 5 rows, no view picker. "+ New" opens the main form with the relationship's lookup
-filled in by the platform.
+filled in by the platform. **"Add Existing" is hidden** on every `sprk_noaccessentry` subgrid (HideCustomAction on
+`Mscrm.SubGrid.sprk_noaccessentry.AddExistingStandard` / `.AddExistingAssoc`; the ribbon-only solution
+`infrastructure/dataverse/ribbon/NoAccessEntryRibbons`, imported by `scripts/Deploy-NoAccessEntryRibbon.ps1`): it
+re-points an existing entry's subject or object lookup without the form, so it would skip the shape check and the
+enforcement and could leave a two-subject entry that walls nothing while the subgrid still lists it.
+
+**Known limit (accepted):** the grid's bulk Edit dialog, the grid Activate command, an Excel or data import and the
+Web API also write without the form. A malformed row they leave denies nothing and is logged (and the enforce route
+answers 422 for it); opening it in the form corrects a non-canonical id and names the problem.
 
 | Form (the one the Matter Management app exposes) | Placement | Subgrid | Relationship | "+ New" fills |
 |---|---|---|---|---|
@@ -119,10 +130,14 @@ pwsh -File scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev
 
 # 2. Form, view, subgrids, site map: dry run, apply, verify
 pwsh -File scripts/Deploy-NoAccessEntryForms.ps1
-pwsh -File scripts/Deploy-NoAccessEntryForms.ps1 -Apply      # snapshot in scripts/logs; undo with -RestoreFrom
-pwsh -File scripts/Deploy-NoAccessEntryForms.ps1 -Verify
+pwsh -File scripts/Deploy-NoAccessEntryForms.ps1 -Apply      # snapshot in scripts/logs; undo with -RestoreFrom (same environment only)
 
-# 3. Roles (O2): dry run, apply, verify
+# 3. Hide Add Existing on the subgrids (ribbon-only solution import): dry run, apply (verifies itself)
+pwsh -File scripts/Deploy-NoAccessEntryRibbon.ps1
+pwsh -File scripts/Deploy-NoAccessEntryRibbon.ps1 -Apply
+pwsh -File scripts/Deploy-NoAccessEntryForms.ps1 -Verify      # also checks Add Existing is hidden
+
+# 4. Roles (O2): dry run, apply, verify
 pwsh -File scripts/Set-NoAccessEntryRolePrivileges.ps1
 pwsh -File scripts/Set-NoAccessEntryRolePrivileges.ps1 -Apply -AcceptOtherRoles -AssignToUserPrincipalName <admin UPN>
 pwsh -File scripts/Set-NoAccessEntryRolePrivileges.ps1 -Verify

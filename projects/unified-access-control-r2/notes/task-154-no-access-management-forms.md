@@ -116,11 +116,28 @@ their app-only deny reads are unaffected; the role script re-checks this every r
 - **(e) no persisted N5 outcome.** Owner round 59 cut the stored state; the per-record notice is the outcome. No action
   recommended.
 
+## Verifier pass 1 (2026-10-07) - fixes
+
+| Finding | Fix |
+|---|---|
+| F2 Add Existing bypasses the form | Hidden on every `sprk_noaccessentry` subgrid: `infrastructure/dataverse/ribbon/NoAccessEntryRibbons` + `scripts/Deploy-NoAccessEntryRibbon.ps1` (dry run / -Apply / -Verify); `Deploy-NoAccessEntryForms.ps1 -Verify` checks it too. I-15 wording corrected; bulk edit, grid Activate, Excel import and the Web API recorded as the known limit. |
+| F3 stored non-canonical id shown as healthy | `_checkStoredRecordId`: corrected on load (dirty) with a WARNING when the readers do not match it as stored; tidied silently when they do (upper case). |
+| F3 -RestoreFrom across environments | Refused unless the snapshot's environment equals the target. |
+| F3 double registration | `_registerOnce` (remove then add) for OnSave, OnPostSave, every OnChange and the PreSearch (now a stable function). |
+| F4 whitespace-only id | Stored as no id on change and on save. |
+| F4 canonical-id rule vs Dataverse equality | Measured live (case, accents, full-width, U+FEFF anywhere, trailing U+0020/U+3000 match; leading space, mid U+3000, trailing tab/NBSP/em space/LF/U+200B/U+00AD do not). `FoldLikeDataverse` applies exactly the matched foldings; reader and enforcer share it. Trimming "all Unicode whitespace" was NOT done: Dataverse does not ignore a trailing tab/NBSP/em space, so accepting them would let the enforcer act on rows the veto never matches. |
+| F4 role -Verify wording | Extras are listed (reported, not failed); wording now "holds every privilege of its set". |
+| F4 OnPostSave | Enforces only when `getIsSaveSuccess()`; a missing `Spaarke.BffAuth` shows a form notice. |
+
+The picker is isolated in `Spaarke.NoAccessEntry.Picker` (one `register` call in `onLoad`), ready for the pending owner
+decision on a RegardingResolver "link only" mode.
+
 ## Live steps (main session, after merge), in order
 
 1. Deploy the BFF (the reader/enforcer canonical-id rule) by the standard BFF deploy.
 2. `scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WebResourceName sprk_/scripts/noaccessentry_postsave.js -FilePath src/solutions/webresources/sprk_noaccessentry_postsave.js -WebResourceType 3`, then read back and compare.
-3. `pwsh -File scripts/Deploy-NoAccessEntryForms.ps1` (dry run; `-PlanOut <dir>` saves the XML), then `-Apply`, then `-Verify` (exit 0).
+3. `pwsh -File scripts/Deploy-NoAccessEntryForms.ps1` (dry run; `-PlanOut <dir>` saves the XML), then `-Apply`.
+3b. `pwsh -File scripts/Deploy-NoAccessEntryRibbon.ps1` (dry run), then `-Apply` (pac import; verifies itself). Then `Deploy-NoAccessEntryForms.ps1 -Verify` (exit 0).
 4. Owner answers the O2 platform-role question, then `pwsh -File scripts/Set-NoAccessEntryRolePrivileges.ps1` (dry run), `-Apply -AcceptOtherRoles -AssignToUserPrincipalName <admin test user>`, `-Verify` (exit 0). Re-probe a user's access 3 times (privilege cache).
 5. The manual live gate (criterion 11) below, then 143's gate 14.
 
@@ -144,6 +161,9 @@ form, site map, app component); quick create already off; role plan as in the ta
 | j | BFF deny read after the role change | A walled contact is still denied on SPA |
 | k | N5: an organization wall whose author lacks Write on some covered secure records | The notice names exactly those records |
 | l | Dark mode | Form notifications and native controls adapt (no custom UI in this task) |
+| m | The three NO ACCESS subgrids (Organization x2, Contact) | **No "Add Existing"** command; "+ New" present |
+| n | Create an entry, save it, then change its Record Type | The lookup dialog opens ONCE; the enforce call runs ONCE per save (one notice, one request in the network log) |
+| o | Open an entry whose stored id has braces (seed one through the Web API as an administrator) | The id is corrected on the form (dirty) with a warning "walls nothing until it is saved"; after Save the warning is gone and the veto matches |
 
 **No false empty (h).** If the platform renders an EMPTY list for a user without Read (rather than hiding the subgrid or
 showing a permission message), the follow-up is the small `sprk_noaccess_sections.js` OnLoad probe from the POML

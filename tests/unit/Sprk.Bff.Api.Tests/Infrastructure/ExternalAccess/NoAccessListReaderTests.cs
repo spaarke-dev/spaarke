@@ -573,29 +573,40 @@ public class NoAccessListReaderTests
 
     // ── Task 154: the object record id must be in the form the record filter matches ────────────────
 
+    private const string Id = "abcdef01-2345-6789-abcd-ef0123456789";
+
+    // Each case was probed against Dataverse's own `eq` on spaarkedev1 (2026-10-07): "accepted" rows are values the
+    // record filter matches, "refused" rows are values it never matches. The rule must agree with the filter both ways.
     [Theory]
-    [InlineData("66666666-6666-6666-6666-666666666666", true)]   // canonical: what the form and the picker write
-    [InlineData("ABCDEF01-2345-6789-ABCD-EF0123456789", true)]   // upper case: Dataverse string equality ignores case
-    [InlineData("abcdef01-2345-6789-abcd-ef0123456789  ", true)] // trailing spaces: Dataverse equality ignores them
-    [InlineData("{abcdef01-2345-6789-abcd-ef0123456789}", false)] // braces: never matched by the filter
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789", true)]           // canonical: what the form and the picker write
+    [InlineData("ABCDEF01-2345-6789-ABCD-EF0123456789", true)]           // upper case: case-insensitive
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789  ", true)]         // trailing spaces: padding
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u3000", true)]     // trailing ideographic space: width-insensitive padding
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789 \u3000", true)]
+    [InlineData("\uFEFFabcdef01-2345-6789-abcd-ef0123456789\uFEFF", true)] // U+FEFF is ignored anywhere
+    [InlineData("\uFF41bcdef01-2345-6789-abcd-ef0123456789", true)]      // full-width a: width-insensitive
+    [InlineData("\u00E1bcdef01-2345-6789-abcd-ef0123456789", true)]      // accented a: accent-insensitive
+    [InlineData("a\u0301bcdef01-2345-6789-abcd-ef0123456789", true)]     // a + combining acute
+    [InlineData("{abcdef01-2345-6789-abcd-ef0123456789}", false)]        // braces: never matched by the filter
     [InlineData("(abcdef01-2345-6789-abcd-ef0123456789)", false)]
-    [InlineData("abcdef0123456789abcdef0123456789", false)]       // 32 digits, no hyphens
-    [InlineData(" abcdef01-2345-6789-abcd-ef0123456789", false)]  // leading space: never matched
-    [InlineData("00000000-0000-0000-0000-000000000000", false)]   // the empty id names no record
+    [InlineData("abcdef0123456789abcdef0123456789", false)]              // 32 digits, no hyphens
+    [InlineData(" abcdef01-2345-6789-abcd-ef0123456789", false)]         // leading space: never matched
+    [InlineData("\u3000abcdef01-2345-6789-abcd-ef0123456789", false)]    // leading ideographic space
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\t", false)]        // trailing tab: significant to Dataverse
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u00A0", false)]    // trailing NBSP: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u2003", false)]    // trailing em space: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\n", false)]        // trailing LF: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u200B", false)]    // trailing zero-width space: significant
+    [InlineData("abcdef01-2345-6789\u3000abcd-ef0123456789", false)]     // a U+3000 inside the value
+    [InlineData("00000000-0000-0000-0000-000000000000", false)]          // the empty id names no record
     [InlineData("not a record id", false)]
     [InlineData("", false)]
+    [InlineData("   ", false)]
     [InlineData(null, false)]
-    public void TryParseObjectRecordId_AcceptsExactlyTheFormsTheRecordFilterMatches(string? raw, bool expected)
+    public void TryParseObjectRecordId_AcceptsExactlyWhatTheRecordFilterMatches(string? raw, bool expected)
     {
         NoAccessListReader.TryParseObjectRecordId(raw, out var id).Should().Be(expected);
-        if (expected)
-        {
-            id.ToString().Should().Be(raw!.Trim().ToLowerInvariant(), "the parsed id is the record the filter matched");
-        }
-        else
-        {
-            id.Should().Be(Guid.Empty);
-        }
+        id.Should().Be(expected ? Guid.Parse(Id) : Guid.Empty, "the parsed id is the record the filter matched");
     }
 
     [Fact]
@@ -773,11 +784,13 @@ public class NoAccessListReaderTests
         }
 
         /// <summary>
-        /// Dataverse's <c>sprk_objectrecordid eq '{id}'</c> on a text column: case-insensitive, trailing spaces ignored
-        /// (task 154, verified live). A braced or otherwise non-canonical stored value never matches.
+        /// Dataverse's <c>sprk_objectrecordid eq '{id}'</c> on a text column, for the values these tests store:
+        /// case-insensitive, trailing U+0020 / U+3000 ignored (task 154, measured live). A braced or otherwise
+        /// non-canonical stored value never matches. Deliberately written independently of the production rule.
         /// </summary>
         private static bool MatchesLikeDataverse(string? stored, Guid id)
-            => stored is not null && string.Equals(stored.TrimEnd(' '), id.ToString(), StringComparison.OrdinalIgnoreCase);
+            => stored is not null
+               && string.Equals(stored.TrimEnd(' ', '　'), id.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static NoAccessEntryRow OrganizationObjectRow(

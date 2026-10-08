@@ -42,11 +42,12 @@ interface FakeAttr {
   getValue: () => unknown;
   setValue: (v: unknown) => void;
   addOnChange: (fn: (ctx: unknown) => void) => void;
+  removeOnChange: (fn: (ctx: unknown) => void) => void;
   setSubmitMode: jest.Mock;
   handlers: Array<(ctx: unknown) => void>;
 }
 
-function makeForm(initial: Record<string, unknown>, saveMode = 1) {
+function makeForm(initial: Record<string, unknown>, saveMode = 1, saveSuccess = true) {
   const names = [
     'sprk_subjectcontact',
     'sprk_subjectorganization',
@@ -67,6 +68,9 @@ function makeForm(initial: Record<string, unknown>, saveMode = 1) {
         attr.value = v;
       },
       addOnChange: fn => attr.handlers.push(fn),
+      removeOnChange: fn => {
+        attr.handlers = attr.handlers.filter(h => h !== fn);
+      },
       setSubmitMode: jest.fn(),
     };
     attrs[name] = attr;
@@ -74,6 +78,7 @@ function makeForm(initial: Record<string, unknown>, saveMode = 1) {
       setNotification: jest.fn(),
       clearNotification: jest.fn(),
       addPreSearch: jest.fn(),
+      removePreSearch: jest.fn(),
       addCustomFilter: jest.fn(),
     };
   }
@@ -83,11 +88,29 @@ function makeForm(initial: Record<string, unknown>, saveMode = 1) {
     getAttribute: (n: string) => attrs[n] ?? null,
     getControl: (n: string) => controls[n] ?? null,
     ui: { setFormNotification: jest.fn(), clearFormNotification: jest.fn() },
-    data: { entity: { addOnSave: jest.fn(), addOnPostSave: jest.fn(), getId: () => '' } },
+    data: {
+      entity: {
+        onSave: [] as unknown[],
+        onPostSave: [] as unknown[],
+        addOnSave: jest.fn(function (this: any, fn: unknown) {
+          this.onSave.push(fn);
+        }),
+        removeOnSave: jest.fn(function (this: any, fn: unknown) {
+          this.onSave = this.onSave.filter((h: unknown) => h !== fn);
+        }),
+        addOnPostSave: jest.fn(function (this: any, fn: unknown) {
+          this.onPostSave.push(fn);
+        }),
+        removeOnPostSave: jest.fn(function (this: any, fn: unknown) {
+          this.onPostSave = this.onPostSave.filter((h: unknown) => h !== fn);
+        }),
+        getId: () => '{AAAAAAAA-1111-2222-3333-444444444444}',
+      },
+    },
   };
   const ctx = {
     getFormContext: () => formContext,
-    getEventArgs: () => ({ preventDefault, getSaveMode: () => saveMode }),
+    getEventArgs: () => ({ preventDefault, getSaveMode: () => saveMode, getIsSaveSuccess: () => saveSuccess }),
   };
   /** Sets a field as the user would and fires its OnChange handlers. */
   const change = (name: string, value: unknown) => {
@@ -488,5 +511,142 @@ describe('registration and the post-save notice', () => {
     expect(text).toContain('Removed 1 direct share(s)');
     expect(text).toContain('Not enforced on Matter aaaaaaaa, Project bbbbbbbb');
     expect(text).not.toContain('cccccccc');
+  });
+});
+
+describe('task 154 verifier pass 1', () => {
+  it('on load, corrects a braced stored id (dirty) and warns that the entry walls nothing until saved', async () => {
+    const { api } = load();
+    const f = makeForm({
+      sprk_subjectcontact: lookup(CONTACT),
+      sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
+      sprk_objectrecordid: `{${MATTER_ID.toUpperCase()}}`,
+    });
+
+    api.onLoad(f.ctx);
+    await flush();
+
+    expect(f.attrs.sprk_objectrecordid.value).toBe(MATTER_ID);
+    const warning = f.formContext.ui.setFormNotification.mock.calls.find(
+      (c: unknown[]) => c[2] === 'sprk_noaccess_storedid'
+    );
+    expect(warning?.[1]).toBe('WARNING');
+    expect(warning?.[0]).toContain('walls nothing until it is saved');
+  });
+
+  it('on load, tidies an upper-case stored id without a warning (the access checks match it already)', async () => {
+    const { api } = load();
+    const f = makeForm({
+      sprk_subjectcontact: lookup(CONTACT),
+      sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
+      sprk_objectrecordid: MATTER_ID.toUpperCase(),
+    });
+
+    api.onLoad(f.ctx);
+    await flush();
+
+    expect(f.attrs.sprk_objectrecordid.value).toBe(MATTER_ID);
+    expect(
+      f.formContext.ui.setFormNotification.mock.calls.some((c: unknown[]) => c[2] === 'sprk_noaccess_storedid')
+    ).toBe(false);
+  });
+
+  it('on load, clears a blank stored id and warns', async () => {
+    const { api } = load();
+    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT), sprk_objectrecordid: '   ' });
+
+    api.onLoad(f.ctx);
+    await flush();
+
+    expect(f.attrs.sprk_objectrecordid.value).toBeNull();
+    const warning = f.formContext.ui.setFormNotification.mock.calls.find(
+      (c: unknown[]) => c[2] === 'sprk_noaccess_storedid'
+    );
+    expect(warning?.[0]).toContain('blank');
+  });
+
+  it('readerMatches mirrors the server rule (measured Dataverse equality)', () => {
+    const { api } = load();
+    expect(api.readerMatches(MATTER_ID.toUpperCase())).toBe(true);
+    expect(api.readerMatches(MATTER_ID + '  ')).toBe(true);
+    expect(api.readerMatches(MATTER_ID + '\u3000')).toBe(true);
+    expect(api.readerMatches(`{${MATTER_ID}}`)).toBe(false);
+    expect(api.readerMatches(' ' + MATTER_ID)).toBe(false);
+    expect(api.readerMatches(MATTER_ID + '\t')).toBe(false);
+    expect(api.readerMatches(MATTER_ID + '\u00A0')).toBe(false);
+  });
+
+  it('a whitespace-only id typed by hand is stored as no id', () => {
+    const { api } = load();
+    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT) });
+    api.onLoad(f.ctx);
+
+    f.change('sprk_objectrecordid', '   ');
+
+    expect(f.attrs.sprk_objectrecordid.value).toBeNull();
+  });
+
+  it('a whitespace-only id on save is cleared and the save is refused for the real problem (no object)', () => {
+    const { api } = load();
+    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT) });
+    api.onLoad(f.ctx);
+    f.attrs.sprk_objectrecordid.value = '  ';
+
+    api.onSave(f.ctx);
+
+    expect(f.attrs.sprk_objectrecordid.value).toBeNull();
+    expect(f.preventDefault).toHaveBeenCalled();
+    expect(f.formContext.ui.setFormNotification.mock.calls.at(-1)[0]).toContain('Choose what they are denied');
+  });
+
+  it('OnLoad firing twice (as after a save) registers every handler once: the picker opens once', async () => {
+    const { api, lookupObjects } = load({
+      lookupResult: [{ id: `{${MATTER_ID}}`, name: 'Smith v Jones', entityType: 'sprk_matter' }],
+    });
+    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT) });
+
+    api.onLoad(f.ctx);
+    api.onLoad(f.ctx);
+    f.change('sprk_objectrecordtype', typeLookup(MATTER_TYPE_REF));
+    await flush();
+
+    expect(lookupObjects).toHaveBeenCalledTimes(1);
+    expect((f.formContext.data.entity as any).onSave).toHaveLength(1);
+    expect((f.formContext.data.entity as any).onPostSave).toHaveLength(1);
+    expect(f.attrs.sprk_objectrecordtype.handlers).toHaveLength(1);
+    expect(f.controls.sprk_objectrecordtype.removePreSearch).toHaveBeenCalled();
+  });
+
+  it('after a FAILED save, OnPostSave neither enforces nor describes anything', async () => {
+    const { api } = load();
+    const fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+    const f = makeForm({}, 1, false);
+    api.Config.apiBaseUrl = 'https://bff.example';
+
+    api.onPostSave(f.ctx);
+    await flush();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(f.formContext.ui.setFormNotification).not.toHaveBeenCalled();
+  });
+
+  it('when the sign-in helper is missing, the user sees a notice (not only the console)', async () => {
+    const { api } = load();
+    const fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+    win.Spaarke.BffAuth = undefined;
+    const f = makeForm({});
+    api.Config.apiBaseUrl = 'https://bff.example';
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    api.onPostSave(f.ctx);
+    await flush();
+
+    consoleError.mockRestore();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const [text, level] = f.formContext.ui.setFormNotification.mock.calls.at(-1);
+    expect(level).toBe('WARNING');
+    expect(text).toContain('enforced within 5 minutes');
   });
 });

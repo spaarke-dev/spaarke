@@ -15,7 +15,8 @@
  *   SubjectKindOf); see docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md section 5.
  * - The record id is NORMALISED to the canonical lowercase form without braces before it is saved. The readers match the
  *   id by string equality, so a braced id walled nothing (batch-5 review, side finding 4).
- * - Record picker: choosing an Object Record Type (filtered to project, matter and work assignment) opens the platform's
+ * - Record picker (Spaarke.NoAccessEntry.Picker, self-contained and replaceable): choosing an Object Record Type
+ *   (filtered to project, matter and work assignment) opens the platform's
  *   lookup dialog for that table, the same dialog the shared PolymorphicPicker uses. The picked id is written to
  *   sprk_objectrecordid. No typed GUID is needed.
  * - Exactly one object survives: choosing an organization clears the record pair; choosing a record clears the organization.
@@ -24,7 +25,9 @@
  * Web Resource Name: sprk_/scripts/noaccessentry_postsave.js
  *
  * Form Events (registered by task 154's scripts/Deploy-NoAccessEntryForms.ps1):
- * - OnLoad: Spaarke.NoAccessEntry.onLoad (pass execution context). It registers OnSave, OnPostSave and every OnChange.
+ * - OnLoad: Spaarke.NoAccessEntry.onLoad (pass execution context). It registers OnSave, OnPostSave and every OnChange,
+ *   each exactly once (Unified Interface fires OnLoad again after a save).
+ * - A stored record id the access checks do not match (braces, a leading space, blank) is corrected on load and flagged.
  * - Library order: sprk_/scripts/bff_auth.js FIRST, then this library.
  *
  * What the user sees after a save (text-only form notifications - owner O1 final):
@@ -52,6 +55,7 @@ Spaarke.NoAccessEntry.Config = {
     notificationId: "sprk_noaccess_enforcement",
     shapeNotificationId: "sprk_noaccess_shape",
     objectNotificationId: "sprk_noaccess_object",
+    storedIdNotificationId: "sprk_noaccess_storedid",
     /**
      * The object record types a deny reader evaluates: the three roots (NoAccessShareEnforcer.SecureRootTypes;
      * AccessibleRecordSetService composes only these). An entry on any other table is stored and enforced nowhere.
@@ -90,23 +94,66 @@ Spaarke.NoAccessEntry._cachedApiBaseUrl = null;
 // ---------------------------------------------------------------------------------------------------------------------
 
 var CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+var EMPTY_ID = "00000000-0000-0000-0000-000000000000";
+var NON_SPACING_MARK = /\p{Mn}/u;
+
+/**
+ * The value as Dataverse's text comparison sees it, the mirror of NoAccessListReader.FoldLikeDataverse (measured live,
+ * task 154): U+FEFF and combining marks removed, full-width forms mapped to ASCII, U+3000 mapped to a space.
+ */
+Spaarke.NoAccessEntry._foldLikeDataverse = function (value) {
+    var decomposed = typeof value.normalize === "function" ? value.normalize("NFD") : value;
+    var out = "";
+    for (var i = 0; i < decomposed.length; i++) {
+        var ch = decomposed.charAt(i);
+        var code = decomposed.charCodeAt(i);
+        if (code === 0xFEFF || NON_SPACING_MARK.test(ch)) {
+            continue;
+        }
+
+        if (code === 0x3000) {
+            out += " ";
+        } else if (code >= 0xFF01 && code <= 0xFF5E) {
+            out += String.fromCharCode(code - 0xFEE0);
+        } else {
+            out += ch;
+        }
+    }
+
+    return out;
+};
+
+/**
+ * Whether the server's deny readers match this stored id as it is (NoAccessListReader.TryParseObjectRecordId): after the
+ * Dataverse folding and without trailing spaces, a hyphenated record id in any case. A braced id, a leading space or a
+ * trailing tab is NOT matched, so such an entry walls nothing until it is saved in canonical form.
+ */
+Spaarke.NoAccessEntry.readerMatches = function (raw) {
+    if (raw === null || raw === undefined) {
+        return false;
+    }
+
+    var value = Spaarke.NoAccessEntry._foldLikeDataverse(String(raw)).replace(/ +$/, "").toLowerCase();
+    return CANONICAL_ID.test(value) && value !== EMPTY_ID;
+};
 
 /**
  * The canonical form of a record id: trimmed, without braces, lower case. Returns null when the value is not a record id
- * (including the all-zero id). The readers match this exact text (NoAccessListReader.BuildRecordObjectFilter).
+ * (including the all-zero id). The readers match this exact text (NoAccessListReader.BuildRecordObjectFilter). Lenient by
+ * design: whatever it accepts is written back in canonical form.
  */
 Spaarke.NoAccessEntry.normalizeRecordId = function (raw) {
     if (raw === null || raw === undefined) {
         return null;
     }
 
-    var value = String(raw).trim();
+    var value = Spaarke.NoAccessEntry._foldLikeDataverse(String(raw)).trim();
     if (value.charAt(0) === "{" && value.charAt(value.length - 1) === "}") {
         value = value.substring(1, value.length - 1).trim();
     }
 
     value = value.toLowerCase();
-    if (!CANONICAL_ID.test(value) || value === "00000000-0000-0000-0000-000000000000") {
+    if (!CANONICAL_ID.test(value) || value === EMPTY_ID) {
         return null;
     }
 
@@ -227,6 +274,22 @@ Spaarke.NoAccessEntry._formNotify = function (formContext, id, text, level) {
     }
 };
 
+/**
+ * Registers a handler exactly once: the platform keeps every add*, and Unified Interface fires OnLoad again after a save,
+ * so an unguarded add* would run the shape check, the picker and the enforcement twice. remove* first is idempotent.
+ */
+Spaarke.NoAccessEntry._registerOnce = function (target, addName, removeName, handler) {
+    if (!target || typeof target[addName] !== "function") {
+        return;
+    }
+
+    if (typeof target[removeName] === "function") {
+        target[removeName](handler);
+    }
+
+    target[addName](handler);
+};
+
 Spaarke.NoAccessEntry._cleanId = function (id) {
     return (id || "").replace(/[{}]/g, "").toLowerCase();
 };
@@ -273,23 +336,22 @@ Spaarke.NoAccessEntry.onLoad = function (executionContext) {
         var F = Spaarke.NoAccessEntry.Fields;
         Spaarke.NoAccessEntry._state = { recordType: null, recordName: null, lastSuggestedName: null };
 
-        formContext.data.entity.addOnSave(Spaarke.NoAccessEntry.onSave);
-        formContext.data.entity.addOnPostSave(Spaarke.NoAccessEntry.onPostSave);
+        var entity = formContext.data.entity;
+        Spaarke.NoAccessEntry._registerOnce(entity, "addOnSave", "removeOnSave", Spaarke.NoAccessEntry.onSave);
+        Spaarke.NoAccessEntry._registerOnce(entity, "addOnPostSave", "removeOnPostSave", Spaarke.NoAccessEntry.onPostSave);
 
         var onChange = function (name, handler) {
-            var attr = Spaarke.NoAccessEntry._attr(formContext, name);
-            if (attr) {
-                attr.addOnChange(handler);
-            }
+            Spaarke.NoAccessEntry._registerOnce(Spaarke.NoAccessEntry._attr(formContext, name), "addOnChange", "removeOnChange", handler);
         };
         onChange(F.objectOrganization, Spaarke.NoAccessEntry.onObjectOrganizationChange);
-        onChange(F.objectRecordType, Spaarke.NoAccessEntry.onObjectRecordTypeChange);
         onChange(F.objectRecordId, Spaarke.NoAccessEntry.onObjectRecordIdChange);
         onChange(F.subjectContact, Spaarke.NoAccessEntry.onSubjectChange);
         onChange(F.subjectOrganization, Spaarke.NoAccessEntry.onSubjectChange);
         onChange(F.subjectUser, Spaarke.NoAccessEntry.onSubjectChange);
 
-        Spaarke.NoAccessEntry._filterRecordTypes(formContext);
+        // The record picker is self-contained: replacing it (e.g. by a PCF) means removing this one call and
+        // registering a Record Type OnChange that calls _resolveRecordType, which the shape check needs.
+        Spaarke.NoAccessEntry.Picker.register(formContext);
         Spaarke.NoAccessEntry._loadObjectRecord(formContext);
         Spaarke.NoAccessEntry._applySuggestedName(formContext);
 
@@ -303,22 +365,44 @@ Spaarke.NoAccessEntry.onLoad = function (executionContext) {
     }
 };
 
-/** Restricts the Object Record Type lookup to the types a deny reader evaluates. */
-Spaarke.NoAccessEntry._filterRecordTypes = function (formContext) {
+// ---------------------------------------------------------------------------------------------------------------------
+// The record picker (self-contained; see onLoad). It owns: the Record Type lookup filter, opening the platform lookup
+// dialog when a type is chosen, and writing the picked id. Everything else (shape check, normalisation, verification,
+// mutual exclusion, name suggestion) is the form's and does not depend on how the record was picked.
+// ---------------------------------------------------------------------------------------------------------------------
+
+Spaarke.NoAccessEntry.Picker = Spaarke.NoAccessEntry.Picker || {};
+
+/** Registers the picker's handlers on the form, once. */
+Spaarke.NoAccessEntry.Picker.register = function (formContext) {
     try {
-        var control = formContext.getControl(Spaarke.NoAccessEntry.Fields.objectRecordType);
-        if (!control || typeof control.addPreSearch !== "function") {
-            return;
+        var F = Spaarke.NoAccessEntry.Fields;
+        Spaarke.NoAccessEntry.Picker._formContext = formContext;
+        Spaarke.NoAccessEntry._registerOnce(Spaarke.NoAccessEntry._attr(formContext, F.objectRecordType),
+            "addOnChange", "removeOnChange", Spaarke.NoAccessEntry.Picker.onRecordTypeChange);
+        Spaarke.NoAccessEntry._registerOnce(formContext.getControl(F.objectRecordType),
+            "addPreSearch", "removePreSearch", Spaarke.NoAccessEntry.Picker.onRecordTypePreSearch);
+    } catch (error) {
+        console.error("[No Access] Could not register the record picker:", error);
+    }
+};
+
+/** PreSearch of the Record Type lookup: only the types a deny reader evaluates. A stable function, so it registers once. */
+Spaarke.NoAccessEntry.Picker.onRecordTypePreSearch = function (executionContext) {
+    try {
+        var control = executionContext && typeof executionContext.getEventSource === "function"
+            ? executionContext.getEventSource()
+            : null;
+        if (!control || typeof control.addCustomFilter !== "function") {
+            control = Spaarke.NoAccessEntry.Picker._formContext.getControl(Spaarke.NoAccessEntry.Fields.objectRecordType);
         }
 
         var values = Spaarke.NoAccessEntry.Config.allowedObjectTypes.map(function (t) {
             return "<value>" + t + "</value>";
         }).join("");
-        control.addPreSearch(function () {
-            control.addCustomFilter(
-                "<filter type=\"and\"><condition attribute=\"sprk_recordlogicalname\" operator=\"in\">" + values +
-                "</condition></filter>", "sprk_recordtype_ref");
-        });
+        control.addCustomFilter(
+            "<filter type=\"and\"><condition attribute=\"sprk_recordlogicalname\" operator=\"in\">" + values +
+            "</condition></filter>", "sprk_recordtype_ref");
     } catch (error) {
         console.error("[No Access] Could not filter the record types:", error);
     }
@@ -353,8 +437,17 @@ Spaarke.NoAccessEntry._resolveRecordType = function (formContext) {
         });
 };
 
-/** OnLoad of an existing entry: resolves the type and shows which record the entry names. */
+/**
+ * OnLoad of an existing entry: corrects a stored id that is not in canonical form (the field becomes dirty), warns when
+ * the stored id walls nothing as it is, resolves the type and shows which record the entry names.
+ */
 Spaarke.NoAccessEntry._loadObjectRecord = function (formContext) {
+    try {
+        Spaarke.NoAccessEntry._checkStoredRecordId(formContext);
+    } catch (error) {
+        console.error("[No Access] Error checking the stored record id:", error);
+    }
+
     Spaarke.NoAccessEntry._resolveRecordType(formContext).then(function (type) {
         var id = Spaarke.NoAccessEntry.normalizeRecordId(
             Spaarke.NoAccessEntry._value(formContext, Spaarke.NoAccessEntry.Fields.objectRecordId));
@@ -396,6 +489,44 @@ Spaarke.NoAccessEntry._verifyRecord = function (formContext, type, id, blocking)
             console.error("[No Access] The object record could not be read:", error);
         }
     });
+};
+
+/**
+ * A stored id the readers do not match (braces, a leading space, a blank value) walls nothing: correct it on the form
+ * (dirty, saved with the next save) and say so. An id the readers match but that is not canonical (e.g. upper case) is
+ * corrected without a warning.
+ */
+Spaarke.NoAccessEntry._checkStoredRecordId = function (formContext) {
+    var C = Spaarke.NoAccessEntry.Config;
+    var F = Spaarke.NoAccessEntry.Fields;
+    Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId, null);
+    var raw = Spaarke.NoAccessEntry._value(formContext, F.objectRecordId);
+    if (raw === null || raw === undefined || raw === "") {
+        return;
+    }
+
+    var normalized = Spaarke.NoAccessEntry.normalizeRecordId(raw);
+    if (normalized === null) {
+        var blank = String(raw).trim() === "";
+        if (blank) {
+            Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, null);
+        }
+
+        Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId, (blank
+            ? "The stored record id is blank, so this entry walls nothing."
+            : "The stored record id is not a record id, so this entry walls nothing.") +
+            " Choose the record type to pick the record, then save.", "WARNING");
+        return;
+    }
+
+    if (normalized !== raw) {
+        Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, normalized);
+        if (!Spaarke.NoAccessEntry.readerMatches(raw)) {
+            Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId,
+                "The stored record id was not in the form the access checks match, so this entry walls nothing until " +
+                "it is saved. It has been corrected here: save the entry.", "WARNING");
+        }
+    }
 };
 
 Spaarke.NoAccessEntry._showObjectRecord = function (formContext, type, name) {
@@ -440,7 +571,7 @@ Spaarke.NoAccessEntry.onObjectOrganizationChange = function (executionContext) {
  * sprk_objectrecordid in canonical form and the object organization is cleared. Clearing the type clears the id, so the
  * pair is never left half set. A type the readers do not evaluate is refused at once.
  */
-Spaarke.NoAccessEntry.onObjectRecordTypeChange = function (executionContext) {
+Spaarke.NoAccessEntry.Picker.onRecordTypeChange = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
         var F = Spaarke.NoAccessEntry.Fields;
@@ -468,17 +599,17 @@ Spaarke.NoAccessEntry.onObjectRecordTypeChange = function (executionContext) {
             }
 
             Spaarke.NoAccessEntry._setValue(formContext, F.objectOrganization, null);
-            Spaarke.NoAccessEntry._pickRecord(formContext, type);
+            Spaarke.NoAccessEntry.Picker.pickRecord(formContext, type);
         }).catch(function (error) {
             console.error("[No Access] Error resolving the record type:", error);
         });
     } catch (error) {
-        console.error("[No Access] Error in onObjectRecordTypeChange:", error);
+        console.error("[No Access] Error in Picker.onRecordTypeChange:", error);
     }
 };
 
 /** Opens the platform lookup dialog for the type and writes the picked record. */
-Spaarke.NoAccessEntry._pickRecord = function (formContext, type) {
+Spaarke.NoAccessEntry.Picker.pickRecord = function (formContext, type) {
     var F = Spaarke.NoAccessEntry.Fields;
     return Xrm.Utility.lookupObjects({
         entityTypes: [type.logicalName],
@@ -518,6 +649,11 @@ Spaarke.NoAccessEntry.onObjectRecordIdChange = function (executionContext) {
         Spaarke.NoAccessEntry._formNotify(formContext, Spaarke.NoAccessEntry.Config.objectNotificationId, null);
 
         if (raw === null || String(raw).trim() === "") {
+            if (raw !== null) {
+                // A blank-but-not-empty id is malformed server-side (it walls nothing): store nothing instead.
+                Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, null);
+            }
+
             Spaarke.NoAccessEntry._controlNotify(formContext, F.objectRecordId, null);
             Spaarke.NoAccessEntry._applySuggestedName(formContext);
             return;
@@ -596,6 +732,12 @@ Spaarke.NoAccessEntry.onSave = function (executionContext) {
         }
 
         var rawId = Spaarke.NoAccessEntry._value(formContext, F.objectRecordId);
+        if (rawId !== null && rawId !== undefined && String(rawId).trim() === "") {
+            // Blank but not empty is malformed server-side: save no id, so the shape check names the real problem.
+            Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, null);
+            rawId = null;
+        }
+
         var normalized = Spaarke.NoAccessEntry.normalizeRecordId(rawId);
         if (normalized && normalized !== rawId) {
             Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, normalized);
@@ -644,6 +786,11 @@ Spaarke.NoAccessEntry.onSave = function (executionContext) {
 /** OnPostSave: fire-and-forget enforcement. Never throws, never blocks the save. */
 Spaarke.NoAccessEntry.onPostSave = function (executionContext) {
     try {
+        var args = executionContext.getEventArgs ? executionContext.getEventArgs() : null;
+        if (args && typeof args.getIsSaveSuccess === "function" && !args.getIsSaveSuccess()) {
+            return; // the save failed: nothing was saved, so there is nothing to enforce or describe
+        }
+
         var formContext = executionContext.getFormContext();
         var entryId = (formContext.data.entity.getId() || "").replace(/[{}]/g, "");
         if (!entryId) {
@@ -719,6 +866,9 @@ Spaarke.NoAccessEntry._enforce = async function (formContext, entryId) {
         if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
             console.error("[No Access] Spaarke.BffAuth is not loaded (register sprk_/scripts/bff_auth.js first); " +
                 "the 5-minute job will enforce this entry.");
+            Spaarke.NoAccessEntry._notify(formContext,
+                "This entry could not be enforced from the form (its sign-in helper is not loaded); it is enforced " +
+                "within 5 minutes.", "WARNING");
             return;
         }
 

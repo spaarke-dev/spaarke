@@ -616,8 +616,8 @@ public class NoAccessListReader : INoAccessListReader
     }
 
     /// <summary>
-    /// The ONE rule for a well-formed <c>sprk_objectrecordid</c> (task 154), shared with the enforcer: the value is a
-    /// record id in the hyphenated 36-character form, in either case, with no braces and no leading whitespace.
+    /// The ONE rule for a well-formed <c>sprk_objectrecordid</c> (task 154), shared with the enforcer: after the folding
+    /// Dataverse's own string comparison applies, the value is a non-empty record id in the hyphenated 36-character form.
     /// </summary>
     /// <remarks>
     /// <para><b>Why not <see cref="Guid.TryParse(string?, out Guid)"/>.</b> Every reader of the column matches it by
@@ -625,14 +625,18 @@ public class NoAccessListReader : INoAccessListReader
     /// <c>NoAccessEnforcementStore.CoveringObjectFilters</c>). <c>Guid.TryParse</c> also accepts braces, parentheses and
     /// the 32-digit form, none of which that equality ever matches. Before task 154, such an entry was enforced on save
     /// (shares removed) yet never vetoed a read, and no reader reported it: a wall that walled nothing.</para>
-    /// <para><b>What the rule accepts is exactly what the filters match.</b> Dataverse compares strings
-    /// case-insensitively and ignores TRAILING spaces (verified live on spaarkedev1, 2026-10-07), so an upper-case id or
-    /// one with trailing spaces is matched and is accepted here. Rejecting either would turn a working wall into one that
-    /// denies nothing. A leading space, braces, or any other form is never matched, so it is malformed.</para>
+    /// <para><b>The rule accepts what the filters match, as measured.</b> Dataverse's <c>eq</c> on a text column uses a
+    /// case-, accent- and width-insensitive collation and pads with spaces. Probed live on spaarkedev1 (2026-10-07, task
+    /// 154 verifier pass 1): it MATCHES a different case, an accented or combining-marked letter, full-width forms,
+    /// U+FEFF anywhere, and trailing U+0020 / U+3000; it does NOT match a leading space (U+0020 or U+3000), a U+3000
+    /// inside the value, or a trailing tab, LF, NBSP (U+00A0), em space (U+2003), zero-width space (U+200B) or soft
+    /// hyphen (U+00AD). <see cref="FoldLikeDataverse"/> applies exactly the matched foldings before parsing. Accepting
+    /// less would turn a wall that works today into one that denies nothing; accepting more (e.g. trimming every Unicode
+    /// space) would let the enforcer remove shares for a row the read-time veto never matches.</para>
     /// </remarks>
     /// <param name="raw">The stored <c>sprk_objectrecordid</c> text.</param>
     /// <param name="recordId">The parsed id when the value is well-formed; otherwise <see cref="Guid.Empty"/>.</param>
-    /// <returns><c>true</c> when the value is a non-empty record id in the canonical form.</returns>
+    /// <returns><c>true</c> when the value is a non-empty record id the record filter matches.</returns>
     internal static bool TryParseObjectRecordId(string? raw, out Guid recordId)
     {
         recordId = Guid.Empty;
@@ -641,10 +645,38 @@ public class NoAccessListReader : INoAccessListReader
             return false;
         }
 
-        var value = raw.TrimEnd(' ');
+        var value = FoldLikeDataverse(raw);
         return value.Length == 36
                && Guid.TryParseExact(value, "D", out recordId)
                && recordId != Guid.Empty;
+    }
+
+    /// <summary>
+    /// The value as Dataverse's text comparison sees it (measured; see <see cref="TryParseObjectRecordId"/>): U+FEFF
+    /// removed, combining marks removed (accent-insensitive), full-width forms mapped to ASCII and U+3000 to a space
+    /// (width-insensitive), then trailing spaces removed (padding). Nothing else is trimmed or mapped.
+    /// </summary>
+    internal static string FoldLikeDataverse(string raw)
+    {
+        var decomposed = raw.Normalize(System.Text.NormalizationForm.FormD);
+        var builder = new System.Text.StringBuilder(decomposed.Length);
+        foreach (var c in decomposed)
+        {
+            if (c == '\uFEFF'
+                || System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            builder.Append(c switch
+            {
+                '\u3000' => ' ',
+                >= '\uFF01' and <= '\uFF5E' => (char)(c - 0xFEE0),
+                _ => c,
+            });
+        }
+
+        return builder.ToString().TrimEnd(' ');
     }
 
     /// <summary>

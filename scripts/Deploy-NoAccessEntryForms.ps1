@@ -24,6 +24,8 @@
       6. The app's site map: a "No Access Entries" subarea after "Access Permission Grants", which requires Read on
          sprk_noaccessentry, and the table as an app component.
       Then it publishes what it changed.
+      7. -Verify also checks that "Add Existing" is hidden on sprk_noaccessentry subgrids. That ribbon change is a
+         solution import, made by the sibling scripts/Deploy-NoAccessEntryRibbon.ps1 (task 154 verifier pass 1, F2).
 
     WHAT IT REFUSES (exit 2, nothing written)
       - The library sprk_/scripts/noaccessentry_postsave.js on the server is not version 1.1.0 or later (deploy it first
@@ -43,8 +45,10 @@
     OPERATOR-RUN ONLY. Run by the main session after the PR merges, in this order:
       1. scripts/Deploy-WebResourceInline.ps1 -DataverseUrl <env> -WebResourceName sprk_/scripts/noaccessentry_postsave.js
             -FilePath src/solutions/webresources/sprk_noaccessentry_postsave.js -WebResourceType 3
-      2. this script (dry run), then -Apply, then -Verify
-      3. scripts/Set-NoAccessEntryRolePrivileges.ps1 (owner decision O2) - dry run, -Apply, -Verify
+      2. this script (dry run), then -Apply
+      3. scripts/Deploy-NoAccessEntryRibbon.ps1 (dry run), then -Apply (hides Add Existing)
+      4. this script with -Verify (exit 0)
+      5. scripts/Set-NoAccessEntryRolePrivileges.ps1 (owner decision O2) - dry run, -Apply, -Verify
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL.
@@ -364,6 +368,11 @@ Write-Host "Deploy-NoAccessEntryForms (task 154)  env: $BaseUrl (org '$org')  mo
 if ($RestoreFrom) {
     if (-not (Test-Path -LiteralPath $RestoreFrom)) { Stop-Refused "snapshot '$RestoreFrom' does not exist." }
     $snap = Get-Content -LiteralPath $RestoreFrom -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $snap.environment -or "$($snap.environment)".TrimEnd('/') -ne $BaseUrl) {
+        # Form, view and site map ids are per environment: restoring another environment's XML here would write the
+        # wrong content, or fail half way.
+        Stop-Refused "snapshot '$RestoreFrom' was taken in '$($snap.environment)', not in $BaseUrl."
+    }
     foreach ($f in @($snap.forms)) { Invoke-Dv "systemforms($($f.formid))" 'PATCH' @{ formxml = $f.formxml } | Out-Null; Write-Ok "form $($f.name) restored" }
     if ($snap.view) {
         Invoke-Dv "savedqueries($($snap.view.savedqueryid))" 'PATCH' @{ fetchxml = $snap.view.fetchxml; layoutxml = $snap.view.layoutxml } | Out-Null
@@ -529,6 +538,17 @@ else {
 if ($tableInApp) { Write-Ok "$Table is an app component" }
 elseif ($Verify) { Write-Gap "$Table is not a component of the app" }
 else { Write-Plan "add $Table to the app's components"; $writes.appComponent = $true }
+
+Write-Step "7. Add Existing hidden on $Table subgrids (made by scripts/Deploy-NoAccessEntryRibbon.ps1)"
+$ribbonResponse = Invoke-Dv "RetrieveEntityRibbon(EntityName='$Table',RibbonLocationFilter=Microsoft.Dynamics.CRM.RibbonLocationFilters'All')"
+$ribbonZip = [System.IO.Compression.ZipArchive]::new([System.IO.MemoryStream]::new([Convert]::FromBase64String($ribbonResponse.CompressedEntityXml)))
+$ribbonReader = [System.IO.StreamReader]::new($ribbonZip.Entries[0].Open())
+try { [xml]$effectiveRibbon = $ribbonReader.ReadToEnd() } finally { $ribbonReader.Dispose(); $ribbonZip.Dispose() }
+$addExisting = @("Mscrm.SubGrid.$Table.AddExistingStandard", "Mscrm.SubGrid.$Table.AddExistingAssoc" |
+    Where-Object { $effectiveRibbon.SelectSingleNode("//Button[@Id='$_']") })
+if ($addExisting.Count -eq 0) { Write-Ok 'Add Existing is hidden' }
+elseif ($Verify) { Write-Gap "Add Existing is still on the subgrids ($($addExisting -join ', ')): run scripts/Deploy-NoAccessEntryRibbon.ps1 -Apply" }
+else { Write-Plan "Add Existing is still on the subgrids: run scripts/Deploy-NoAccessEntryRibbon.ps1 -Apply after this script (not written here)" }
 
 # ---- Verify / dry run end ----------------------------------------------------------------------------------------------
 if ($Verify) {

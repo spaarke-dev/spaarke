@@ -177,7 +177,17 @@ if ($others.Count -gt 0) {
 }
 
 if ($Verify) {
-    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: O2 holds ($CoreRoleName has no access to entries; $AdminRoleName has exactly its set)." -ForegroundColor Green; exit 0 }
+    # Privileges the access-administrator role holds beyond its set. AddPrivilegesRole is known to re-inject platform
+    # privileges (setup guide section 5.4), so extras are REPORTED; an extra on sprk_noaccessentry itself is a gap
+    # (Delete is checked above; no other sprk_noaccessentry privilege exists outside the set).
+    if ($admin) {
+        $extras = @($adminHeld | Where-Object { $wanted.Id -notcontains "$($_.PrivilegeId)".ToLowerInvariant() } | Sort-Object PrivilegeName)
+        if ($extras.Count -gt 0) {
+            Write-Host "`n$AdminRoleName also holds $($extras.Count) privilege(s) outside its set (reported, not failed; review them):" -ForegroundColor DarkYellow
+            foreach ($x in $extras) { Write-Host ("  {0,-44} {1}" -f $x.PrivilegeName, $x.Depth) -ForegroundColor DarkYellow }
+        }
+    }
+    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: O2 holds ($CoreRoleName has no access to entries; $AdminRoleName holds every privilege of its set at Global and no Delete; any extras are listed above)." -ForegroundColor Green; exit 0 }
     foreach ($g in $gaps) { Write-Host "  GAP  $g" -ForegroundColor Red }
     Write-Host "`nVERIFY FAIL: $($gaps.Count) gap(s)." -ForegroundColor Red
     exit 1
