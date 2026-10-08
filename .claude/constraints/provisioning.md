@@ -1,6 +1,6 @@
 # Provisioning Constraints
 
-> **Last Reviewed**: 2026-10-07 (T232 — Model 1 guest access rule added; 2026-10-06 T244 keyless stamp resources; T246 Content Safety)
+> **Last Reviewed**: 2026-10-08 (T235 — keyless section cites ADR-028 A6); 2026-10-07 (T232 — Model 1 guest access rule added; 2026-10-06 T244 keyless stamp resources; T246 Content Safety)
 > **Reviewed By**: customer-provisioning-orchestration-r1 task 203a per punch list row A08
 > **Load when**: task tags include `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning`
 > **Wired into**: `.claude/skills/task-execute/SKILL.md` Step 4a tag map
@@ -232,7 +232,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **The root business unit names the root container (T227g)**: H7 sets `businessunit.sprk_containerid` on the environment's root unit to H8's container — unified-access-control-r2 task 076 resolves a record that is not secure to its owning business unit's `sprk_containerid`, so without it a fresh stamp stores no non-secure file. Equal → no write; empty → PATCH + read back; **another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten** (it would move where the customer's files go). **Every container a script creates** is stamped AND marked (`Invoke-SpeContainerBindOrRemove -CustomerId <the BFF's Customer__Id>`; ArchTest `SpeContainerMarkerParityTests`). The `Secure Record` business unit has **no** container (each secure record has its own).
 - Do **not** propose a container type per customer as the fix: the owner rejected it (25-per-tenant cap, 5 used, standard types undeletable).
 
-## Stamp resources are keyless (BINDING, task 244 / owner D13)
+## Stamp resources are keyless (BINDING, task 244 / owner D13 — ADR-028 Amendment A6, 2026-10-08)
 
 - **MUST** keep local/key auth disabled on the stamp's AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB and SignalR (`disableLocalAuth: true`; AI Search with no `authOptions`), Storage (`allowSharedKeyAccess: false` — the module default since T244) and Redis (rule above). A new keyed resource ships the same way (Content Safety did, T246: its endpoint is a plain app setting, `AiSafety__ContentSafety__Endpoint`, and the BFF refuses to start outside Development/Testing without it — never a fallback to a shared or dev account). Documented exclusions (in the test file): App Insights ingestion, and ACS (setting unverified on its pinned API).
 - **MUST NOT** add `listKeys()` / `listAdminKeys()` / `listQueryKeys()`, a SAS authorization rule, an `AccountKey=` connection string, or a key / connection-string output to any stamp module or to `customer.bicep`. A caller that needs data-plane access gets a **role** (BFF UAMI: `bff-runtime-rbac.bicep` + module grants; L2 UAMI: `customer-l2-bff-rbac.bicep` — Website Contributor, Search Service Contributor, Search Index Data Reader — L2 writes no documents).

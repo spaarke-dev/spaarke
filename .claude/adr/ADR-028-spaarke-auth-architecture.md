@@ -380,6 +380,58 @@ Both are **blocking** — without them the impersonated read cannot work correct
 > A5 is a **server-side derivation-policy change on one plane**: no new IdP, no new client surface, no
 > new token exchange, and **no weakening of the no-OBO invariant**.
 
+## Amendment A6 (2026-10-08): Customer stamps are keyless
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Decision**: owner **D13**
+> (2026-09-30, `projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md` §2).
+> **Driver**: `customer-provisioning-orchestration-r1` task T235; built by T226, T242, T243, T244 and T230.
+> Records shipped reality: every rule below is already in `infrastructure/bicep/customer.bicep` and its modules.
+
+### Why this amendment exists
+
+The pre-A6 server rule said "use managed identity for app-only outbound" but left keys **available** on each Azure
+resource, so a key could always come back through configuration. Keys existed for ordinary reasons (Microsoft
+quickstart defaults, per-service MI prerequisites, E-2's 401) and nothing forced them out. A customer stamp is a new,
+dedicated deployment per customer (D-12), so it can start without keys instead of migrating away from them.
+
+### New MUST rules (customer stamps — every stamp deployed from `customer.bicep`)
+
+- **MUST** disable key / local authentication on every data-plane resource where Azure allows it: AI Search,
+  Azure OpenAI (`kind: OpenAI`, custom subdomain), Document Intelligence, Content Safety, Cosmos DB, Service Bus,
+  SignalR (`disableLocalAuth: true`), Storage (`allowSharedKeyAccess: false`) and Azure Managed Redis
+  (`accessKeysAuthentication: 'Disabled'`, Microsoft Entra only — D12).
+- **MUST** reach each of them as the stamp's user-assigned managed identity. Provisioning writes endpoints and
+  identities, never a key (the H4b settings catalog and the canonical secret catalog, T226/T225b).
+- **MUST** prove it on the first run of every stamp: H13 calls the stamp BFF's keyless proof
+  (`POST /api/platform/keyless-proof`) and fails acceptance on anything but `proved` per service (T230b).
+- Operational detail and forcing functions (`CustomerStampKeylessTemplateTests`, `KeyCredentialCensusTests`,
+  `StampKeySettingCatalog`): `.claude/constraints/provisioning.md` "Stamp resources are keyless".
+
+### New MUST NOT rules
+
+- **MUST NOT** put a credential in a stamp's Key Vault when a managed-identity path exists. What a stamp vault holds:
+  the inbound-webhook client states and signing keys Spaarke generates (Spaarke is the issuer; there is no managed
+  identity alternative) and non-secret endpoints / ids kept for reference parity. No `BFF-API-ClientSecret` and no
+  `Dataverse-ClientSecret` (A4, secret-free stamps — `provisioning.md` "KV credential lifecycle"). The Bing and
+  LlamaParse vendor keys are not provisioned (D18).
+- **MUST NOT** fix a stamp failure by re-enabling local auth or adding a key setting. A managed-identity failure on
+  a stamp is an owner decision (path B), not a configuration change.
+
+### Scope
+
+- **Customer stamps only.** Spaarke's own shared dev and demo environments keep the BFF's "key if configured, else
+  managed identity" behaviour until the D13 follow-on migrates them and deletes the BFF key fallbacks. Named interim
+  case: the Document Intelligence key on `spaarke-docintel-dev` (no custom subdomain, so no Entra path). That window
+  is not licence for a new key path: new code reaches Azure services with managed identity.
+- **E-2** (below) covers the shared dev account (`kind: AIServices`) only. A stamp has no key to fall back to; the
+  stamp-side measurement is pending the first live run (T186). If it returns 401, that is a path-B decision recorded
+  against E-2, not a key.
+- **E-1** is unchanged by A6 (owning-app secrets are other applications' identities; L2 itself uses MI-FIC, T248).
+
+> **Note (A6)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries
+> Amendments **A1–A6**. A6 changes resource configuration and provisioning only — no client surface, IdP or token
+> exchange changes.
+
 ## Documented MI exceptions
 
 When MI is genuinely unworkable for a specific outbound surface, the **only** sanctioned alternative is a **Key Vault–backed secret reference** (`@Microsoft.KeyVault(SecretUri=...)`) — never plain text in App Service config. Each exception is enumerated here with rationale, scope, and a remediation TODO. Adding an exception requires a PR that updates this list.
@@ -418,7 +470,7 @@ E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, an
 
 **Do not remove E-2 without that measurement.** Re-testing only the half that was already known to pass would reproduce the prior result and mistake it for a refutation — the failure mode this project exists to eliminate.
 
-- **Note (2026-10-06, customer-provisioning-orchestration-r1 T244 — informational, no rule change)**: E-2's scope is the shared dev account (`kind=AIServices`) only. Customer stamps deploy `kind: OpenAI` with a custom subdomain and **local auth disabled** (owner D13, T244), so a stamp has no API key to fall back to — the managed identity is its only path, and E-2's key escape hatch does not apply. Task T230 makes the first real managed-identity call against a stamp account: if it also returns 401, that is a stamp-scope extension of E-2 and needs an owner decision (path B) — it cannot be fixed by setting a key without re-enabling local auth in Bicep. The ADR-028 amendment recording D13 is task T235.
+- **Note (2026-10-06, customer-provisioning-orchestration-r1 T244 — informational, no rule change)**: E-2's scope is the shared dev account (`kind=AIServices`) only. Customer stamps deploy `kind: OpenAI` with a custom subdomain and **local auth disabled** (owner D13, T244), so a stamp has no API key to fall back to — the managed identity is its only path, and E-2's key escape hatch does not apply. Task T230 makes the first real managed-identity call against a stamp account: if it also returns 401, that is a stamp-scope extension of E-2 and needs an owner decision (path B) — it cannot be fixed by setting a key without re-enabling local auth in Bicep. D13 is recorded as **Amendment A6** (2026-10-08, T235).
 - **Note (2026-10-06, customer-provisioning-orchestration-r1 T230b — informational, no rule change)**: the measurement mechanism now exists. H13 calls the stamp BFF's keyless proof (`POST /api/platform/keyless-proof`), which makes a 16-token chat completion and an embedding with the BFF's managed identity against the stamp's `kind: OpenAI` account; H13 logs it as `ADR-028 E-2 measurement (stamp kind: OpenAI, managed identity)` and fails acceptance on anything but `proved` (no key fallback exists or is added). **The measurement itself is pending the first live run (T186).** A 401 there is the path-B decision above.
 
 ### E-3: OBO / BFF-identity confidential clients — transitional retained secret (2026-08-17, per A4) — ✅ **CLOSED 2026-08-24**
@@ -525,7 +577,7 @@ var result = await cca.AcquireTokenOnBehalfOf(scopes, new UserAssertion(userToke
                       .ExecuteAsync();
 ```
 
-**Rules**: obtain the credential from the shared provider (never per call site); **cache the CCA at singleton scope** keyed `(tenant|client)` — assertions require shared clients and per-request construction discards the MSAL token cache; prefer the declarative `AzureAd:ClientCredentials` ordered list (MI-FIC → KV cert → dev credential) over hand-built clients. `.WithClientSecret(...)` is **prohibited** for BFF-identity clients outside transitional exception **E-3**.
+**Rules**: obtain the credential from the shared provider (never per call site); **cache the CCA at singleton scope** keyed `(tenant|client)` — assertions require shared clients and per-request construction discards the MSAL token cache; prefer the declarative `AzureAd:ClientCredentials` ordered list (MI-FIC → KV cert → dev credential) over hand-built clients. `.WithClientSecret(...)` is **prohibited** for BFF-identity clients (E-3 closed 2026-08-24; no site may cite it).
 
 ### Server: PostConfigure idempotency
 

@@ -783,7 +783,7 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 #### 1b. `tenantId` (required per I1 invariant — NEVER default)
 
 - Format: RFC 4122 GUID
-- The customer's Entra tenant ID (Model 2: their tenant; Model 1: Spaarke's shared tenant)
+- The customer's Entra tenant ID (Model 1: Spaarke's tenant, where every dedicated stamp lives; Model 2 — out of scope now — would be the customer's tenant)
 - Do NOT default; do NOT fall back to `az account show` — the operator MUST supply this explicitly. This enforces the §4D I1 tenant-isolation invariant (FR-28).
 
 #### 1b-bis. `subscriptionId` and `dataverseEnvUrl` (required for every model — T228)

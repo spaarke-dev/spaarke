@@ -7,6 +7,21 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
+
+`customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
+
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: Amendment **A6** — customer stamps disable key/local auth on
+  every data-plane resource and reach them as the stamp UAMI; a stamp vault holds no credential with a managed-identity
+  alternative; dev/demo keep "key if configured" until the D13 follow-on (named case: the dev Document Intelligence key).
+  The A4 pattern note no longer points at the closed E-3. `INDEX.md` row updated.
+- **`.claude/constraints/provisioning.md`**: the keyless section cites A6.
+- **`.claude/skills/provision-environment/SKILL.md`**: the tenant-id line no longer calls Spaarke's tenant "shared".
+- **`.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`**: Decision 3 (shared-BFF Dataverse routing) marked
+  superseded by D-12.
+- Root `CLAUDE.md` unchanged (its provisioning and auth pointer rows were already correct).
+
+---
 ###### 2026-10-07 — Stamp BFF clients: CORS + H3 client access (T240a)
 
 `customer-provisioning-orchestration-r1` T240a (owner 2026-10-07: `addins.spaarke.com`, `external.spaarke.com`).

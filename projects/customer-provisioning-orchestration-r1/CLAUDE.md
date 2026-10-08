@@ -71,7 +71,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 - ADR-020 A — the stamp deployment `gpt-4o-mini` runs gpt-4.1-mini (T247).
 - ADR-007 A — L2 calls Graph SPE APIs directly (T248).
 - ADR-038 A — L2 test project location.
-- ADR-028 A — time-boxed: only the dev/demo Document Intelligence key remains, until T235.
+- ADR-028 — CLOSED 2026-10-08 (T235): ADR-028 Amendment A6 records D13 (keyless customer stamps); the dev/demo Document Intelligence key is A6's named dev/demo window, not a project exception.
 - T254, owner-approved 2026-10-07:
   - `Set-AiSpendLimit.ps1` single-setting writes;
   - no `ValidateOnStart` for the AiSpendLimit options;
