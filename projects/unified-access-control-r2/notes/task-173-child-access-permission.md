@@ -105,7 +105,7 @@ Escalation trigger 3 does not fire: no path writes these tables without the reco
 | Files | 192 | 192 |
 | Zip | 38,011,535 B (36.25 MB) | 38,042,928 B (36.28 MB) |
 
-Delta **+31,393 B (+0.03 MB)**. Convention: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included (4). Both from fresh short-path worktrees. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages (no package added).
+Delta **+31,393 B (+0.03 MB)**. Re-measured after verifier pass 1 (branch `8a7fd1f0c` vs master `b0a78f880`, whose new commits touch no server code): 38,044,388 B vs 38,011,524 B, **+32,864 B (+0.03 MB)**, 192 files each, same convention. Convention: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included (4). Both from fresh short-path worktrees. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages (no package added).
 
 ## 7. Tests
 
