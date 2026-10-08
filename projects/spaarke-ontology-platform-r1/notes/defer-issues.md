@@ -325,6 +325,24 @@ unit; choosing that rule is uac-r2's access-model call, and getting it wrong ove
 
 ---
 
+### ISS-013 — `EventRoutesLiveTests`: 097 leg leaks the analysis row when `OData-EntityId` is missing
+
+| Field | Value |
+|---|---|
+| **Status** | Open — fixed by task 106 (POML constraint) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-08 |
+| **Source** | Independent re-check of PR #1359 (task 098) final round, K1/K2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1402 (filed as ISS-011, renumbered: task 112 took ISS-011/012) |
+
+**Description**: test code only. `CreateAnalysisAsync` in the 097 live leg returns `created[^1]` (an event id) when
+Dataverse omits `OData-EntityId`, leaking the analysis row; the Briefing leg's find-by-name + register-for-cleanup
+pattern should be copied. The "found by name" message also counts every registered event.
+
+**Related**: #1359 · task 106
+
+---
+
 ## Deferred scope
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
@@ -380,5 +398,55 @@ classifier is meant never to see it (spec `mvp-technical-spec.md:956`).
 **Estimated effort**: 1 hour
 **Blockers**: none; the file is owned by the email project
 **Related**: task 072, issue #1049
+
+---
+
+### ISS-011 — Create Work Assignment never reports a committed create to `launchSurface`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-08 |
+| **Source** | Task 112 review (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1420 |
+
+**Description**
+
+`WorkAssignmentWizardDialog` has no `onComplete` seam, so neither the code page nor `InAppWizardHost` writes
+`completeHandoff`. `launchSurface({ consumerType: 'create-work-assignment' })` therefore always resolves as cancelled,
+and Quick Start's `onRecordCreated` (task 064 E1b) never fires for "Assign Work".
+
+**Suggested fix**: add `onComplete` and route the success close through `completeOrClose`, as `CreateMatterWizard`
+does; wire it in both hosts.
+
+**Estimated effort**: 1-2 hours
+**Blockers**: none
+**Related**: task 112
+
+---
+
+### ISS-012 — `CreateProjectWizardWidget` still opens Create Project via its own `navigateTo`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (candidate for task 113) |
+| **Filed** | 2026-10-08 |
+| **Source** | Task 112 (outside its file scope) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1421 |
+
+**Description**
+
+The `create-project-wizard` workspace widget (`Spaarke.AI.Widgets/.../CreateProjectWizardWidget.tsx` ~:140-170) calls
+`Xrm.Navigation.navigateTo(webresource)` directly. That path keeps the white platform header that task 112 removed
+everywhere else.
+
+**Suggested fix**: replace it with the shared `navigateToWebResourceSurfaceAsync`, which opens the wizard in-app when
+the host is mounted.
+
+**Estimated effort**: 1 hour
+**Blockers**: none
+**Related**: task 112, D-26
 
 ---

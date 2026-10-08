@@ -4,7 +4,7 @@
     <title>Regression and deploy of the re-based WizardShell across its non-embedded consumers (incl. SemanticSearchControl PCF)</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>056 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deploys a shared component change to code pages and a PCF in a shared environment.</rigor-reason>
     <model-tier>sonnet</model-tier>

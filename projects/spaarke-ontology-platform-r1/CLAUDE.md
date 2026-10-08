@@ -166,6 +166,8 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — A cross-session message to another Claude session can be held for approval and expire; use a GitHub issue as the durable channel.
 - 2026-10-07 — In PowerShell, `[IO.File]` resolves relative paths against the PROCESS directory (this worktree), not `cd`'s location: an edit meant for another worktree silently landed here. Always pass absolute paths to .NET file APIs.
 - 2026-10-07 — A PowerShell double-quoted here-string (`@"…"@`) treats the backtick as an escape: Markdown code spans lose their backticks and `` `t ``/`` `b `` become tab/backspace. Write Markdown with the Edit/Write tools or a single-quoted `@'…'@`, never `@"…"@`.
+- 2026-10-08 — The repo's deploy skills (`pcf-deploy`, `dataverse-deploy`, `ribbon-edit`) import with `pac solution import --publish-changes`, which publishes ALL customizations in the environment — the tenant-wide publish this project forbids (task 111 ran it in spaarkedev1). In a task prompt, say: import WITHOUT `--publish-changes`, then publish only the imported components (`PublishXml` for that solution's entities and web resources).
+- 2026-10-08 — Two PRs green on their own can break master together (#1408 changed a return type; #1359's test, merged after it, still used the old one → CS0411 on master, #1418). Before merging a PR whose CI ran on an older base, merge master into it (or check that nothing it calls changed on master since its last CI run).
 
 ## 7. Key documents
 
