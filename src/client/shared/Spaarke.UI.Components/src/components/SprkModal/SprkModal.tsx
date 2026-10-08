@@ -205,7 +205,8 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   const hasFooter = Boolean(footer || footerStart);
 
   // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
-  // when it allows it. A throwing / rejecting guard blocks the move (fail closed).
+  // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
+  // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
   const handleNavigate = (dir: 'prev' | 'next') => {
     if (!nav) return;
     const guard = nav.onBeforeNavigate;
@@ -213,17 +214,20 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       nav.onNavigate(dir);
       return;
     }
+    const reportGuardFailure = (err: unknown) =>
+      console.warn(`[SprkModal] nav.onBeforeNavigate failed for '${dir}'; navigation blocked.`, err);
     let verdict: boolean | Promise<boolean>;
     try {
       verdict = guard(dir);
-    } catch {
+    } catch (err) {
+      reportGuardFailure(err);
       return;
     }
     void Promise.resolve(verdict).then(
       allowed => {
         if (allowed) nav.onNavigate(dir);
       },
-      () => undefined
+      reportGuardFailure
     );
   };
 

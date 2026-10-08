@@ -19,8 +19,8 @@ import type { SprkModalSize } from '../SprkModal/sizes';
 /**
  * Visual status of a wizard step in the sidebar stepper.
  *
- * `'skipped'` (ontology task 056): the user left the step with **Skip** — the stepper shows it without a
- * tick. A skipped step keeps that status while the user moves elsewhere; it becomes `'completed'` only if
+ * `'skipped'` (ontology task 056; opt-in via `showSkippedSteps`, D-69): the user left the step with
+ * **Skip** — the stepper shows it without a tick. Without the opt-in, Skip marks the step `'completed'`. A skipped step keeps that status while the user moves elsewhere; it becomes `'completed'` only if
  * the user returns to it and leaves with Next.
  */
 export type WizardStepStatus = 'pending' | 'active' | 'completed' | 'skipped';
@@ -341,6 +341,13 @@ export interface IWizardShellProps {
    */
   stayOpenOnFinish?: boolean;
   /**
+   * Opt-in (D-69). When `true`, a step left with **Skip** is marked `'skipped'` and the stepper shows an
+   * empty dashed ring instead of a tick. Default `false`: Skip ticks the step like Next does (the
+   * behaviour every existing wizard relies on). Both modes.
+   * @since ontology task 056
+   */
+  showSkippedSteps?: boolean;
+  /**
    * Ordered array of step configurations. The shell builds its initial
    * step list from these configs. Additional steps can be added at runtime
    * via {@link IWizardShellHandle.addDynamicStep}.
@@ -394,7 +401,7 @@ export interface IWizardShellProps {
    *   the named `wizard` size at task 080 (spec FR-17, 2026-08-02).
    * @deprecated Use {@link size}. Still honoured (modal mode: it becomes the surface width, carried
    *   through `SprkModal`'s transitional `legacySize`); ontology task 111 maps the remaining callers
-   *   to named sizes.
+   *   to named sizes and removes this prop. ADR-050 Path A exception (ontology spec §6, D-70).
    */
   maxWidth?: string;
   /**
@@ -413,7 +420,8 @@ export interface IWizardShellProps {
    * @since v1.1.63; default swapped to the named `wizard` size at
    *   task 080 (spec FR-17, 2026-08-02).
    * @deprecated Use {@link size}. Still honoured (modal mode, via `SprkModal`'s transitional
-   *   `legacySize`); ontology task 111 maps the remaining callers to named sizes.
+   *   `legacySize`); ontology task 111 maps the remaining callers to named sizes and removes this
+   *   prop. ADR-050 Path A exception (ontology spec §6, D-70).
    */
   height?: string;
   /**

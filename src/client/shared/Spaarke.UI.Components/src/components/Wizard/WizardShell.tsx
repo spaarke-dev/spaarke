@@ -168,6 +168,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     statusBar,
     footer: footerOverride,
     stayOpenOnFinish = false,
+    showSkippedSteps = false,
   } = props;
 
   const styles = useStyles();
@@ -321,10 +322,12 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     dispatch({ type: 'PREV_STEP' });
   }, []);
 
-  // ── Skip button click (advances without canAdvance check; marks the step 'skipped') ──
+  // ── Skip button click (advances without canAdvance check) ──
+  // Default (master behaviour): the skipped step is ticked like any completed step. With
+  // `showSkippedSteps` (opt-in, D-69) it is marked 'skipped' and shows the dashed ring instead.
   const handleSkip = React.useCallback(() => {
-    dispatch({ type: 'SKIP_STEP' });
-  }, []);
+    dispatch({ type: showSkippedSteps ? 'SKIP_STEP' : 'NEXT_STEP' });
+  }, [showSkippedSteps]);
 
   // ── Build the imperative handle for renderContent ─────────────────────
   // We need a stable-ish reference to pass into renderContent. Since

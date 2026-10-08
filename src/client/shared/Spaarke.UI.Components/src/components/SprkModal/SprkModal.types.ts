@@ -84,7 +84,8 @@ export interface SprkModalProps {
    * `maxWidth` / `height` string overrides (v1.1.63) through its re-base onto this shell
    * (ontology task 056) so existing wizards keep their footprint. `width` replaces the named size's
    * width (still clamped by its 96vw outer `maxWidth`); `height` sets both `height` and `minHeight`.
-   * Ignored while maximized. Removed when task 111 maps those consumers to named sizes.
+   * Ignored while maximized. Removed in ontology task 111, which maps those consumers to named sizes.
+   * ADR-050 Path A exception (ontology spec §6, D-70).
    */
   legacySize?: { width?: string; height?: string };
   /** Whether the maximize/restore control is shown (default true). */

@@ -127,21 +127,31 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
       await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('prev'));
     });
 
-    it('a guard that rejects or throws blocks the move (fail closed)', async () => {
-      const rejecting = jest.fn().mockRejectedValue(new Error('boom'));
-      const onNavigate = renderNav(rejecting);
-      fireEvent.click(screen.getByRole('button', { name: /next record/i }));
-      await waitFor(() => expect(rejecting).toHaveBeenCalled());
-      await new Promise(r => setTimeout(r, 0));
-      expect(onNavigate).not.toHaveBeenCalled();
+    it('a guard that rejects blocks the move (fail closed) and warns', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const rejecting = jest.fn().mockRejectedValue(new Error('boom'));
+        const onNavigate = renderNav(rejecting);
+        fireEvent.click(screen.getByRole('button', { name: /next record/i }));
+        await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error)));
+        expect(onNavigate).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
-    it('a guard that throws synchronously blocks the move', () => {
-      const onNavigate = renderNav(() => {
-        throw new Error('boom');
-      });
-      fireEvent.click(screen.getByRole('button', { name: /next record/i }));
-      expect(onNavigate).not.toHaveBeenCalled();
+    it('a guard that throws synchronously blocks the move and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const onNavigate = renderNav(() => {
+          throw new Error('boom');
+        });
+        fireEvent.click(screen.getByRole('button', { name: /next record/i }));
+        expect(onNavigate).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error));
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 

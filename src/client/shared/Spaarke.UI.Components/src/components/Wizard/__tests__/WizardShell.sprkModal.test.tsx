@@ -231,9 +231,23 @@ describe.each([
     expect(await screen.findByText('Recorded')).toBeInTheDocument();
   });
 
-  it("Skip marks the step 'skipped' (no tick); Next later turns it completed", () => {
+  it('default (showSkippedSteps off): Skip ticks the step as completed, exactly as on master', () => {
     renderWithProviders(
       <WizardShell {...props({ embedded, steps: [step('a', { isSkippable: true }), step('b'), step('c')] })} />
+    );
+    fireEvent.click(button('Skip'));
+    const left = screen.getByLabelText('Step a, completed');
+    // The completed row renders the checkmark icon; no step is ever 'skipped'.
+    expect(left.closest('li')!.querySelector('svg')).not.toBeNull();
+    expect(screen.queryByLabelText(/, skipped$/)).toBeNull();
+    expect(screen.getByLabelText('Step b, active')).toBeInTheDocument();
+  });
+
+  it("showSkippedSteps: Skip marks the step 'skipped' (no tick); Next later turns it completed", () => {
+    renderWithProviders(
+      <WizardShell
+        {...props({ embedded, showSkippedSteps: true, steps: [step('a', { isSkippable: true }), step('b'), step('c')] })}
+      />
     );
     fireEvent.click(button('Skip'));
     const skipped = screen.getByLabelText('Step a, skipped');
@@ -251,13 +265,13 @@ describe.each([
     expect(screen.getByLabelText('Step a, completed')).toBeInTheDocument();
   });
 
-  it('re-opening forgets skipped marks', () => {
+  it('showSkippedSteps: re-opening forgets skipped marks', () => {
     const steps = [step('a', { isSkippable: true }), step('b')];
-    const { rerender } = renderWithProviders(<WizardShell {...props({ embedded, steps })} />);
+    const { rerender } = renderWithProviders(<WizardShell {...props({ embedded, steps, showSkippedSteps: true })} />);
     fireEvent.click(button('Skip'));
     expect(screen.getByLabelText('Step a, skipped')).toBeInTheDocument();
-    rerender(<WizardShell {...props({ embedded, steps, open: false })} />);
-    rerender(<WizardShell {...props({ embedded, steps, open: true })} />);
+    rerender(<WizardShell {...props({ embedded, steps, showSkippedSteps: true, open: false })} />);
+    rerender(<WizardShell {...props({ embedded, steps, showSkippedSteps: true, open: true })} />);
     expect(screen.getByLabelText('Step a, active')).toBeInTheDocument();
     expect(screen.getByLabelText('Step b, pending')).toBeInTheDocument();
   });
