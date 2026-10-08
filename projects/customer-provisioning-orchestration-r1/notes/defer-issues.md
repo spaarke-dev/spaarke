@@ -149,6 +149,26 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
+### ISS-007 — CI identity trusts the `pull_request` OIDC subject
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner action (Entra write) |
+| **Urgency** | soon (security exposure; nothing uses the subject) |
+| **Filed** | 2026-10-08 (T218d review) |
+| **Source** | T218d — the new publish workflow uses the same CI identity |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1446 |
+
+**Description**
+
+`github-actions-spe-infrastructure` (`8c85a481-…`) has federated credential `gh-pull_request`
+(`repo:spaarke-dev/spaarke:pull_request`). Unused since task 249. A same-repo pull request that edits a workflow can sign
+in to Azure as the app, with all its roles, before review.
+
+**Suggested fix**
+
+Delete the credential; drop `pull_request` from the OIDC guide's setup loop (guide row already corrected).
+
 ---
 
 ## Resolved

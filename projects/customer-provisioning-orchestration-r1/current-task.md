@@ -2,18 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅, T235 ✅ (ADR-028 A6 keyless stamps; docs sweep; RAG guidance corrected, #1432). Next 218d.
+> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅, T235 ✅, 218d ✅ (CI pack + publish workflow, dry runs green; first real publish waits for the master merge + owner OK). Next 218f.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **218d** — CI packs + publishes SpaarkeMaster from git (POML `tasks/218d-ci-packs-and-publishes-spaarkemaster.poml`). T218: 218a/b/c/e ✅; 218d, 218f open. T235 ✅ (`087d677ed`…`5dc95dcf0`). |
-| **Step** | 218d not started: step 1 (rewrite `publish-dataverse-solutions-manifest.yml`: pac pack managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, value guard, versioned upload, manifest), step 2 dry run on the branch. |
+| **Task** | **218f** — Spaarke's own environments take the canonical SpaarkeMaster (POML `tasks/218f-spaarke-environments-take-canonical-package.poml`). T218: a/b/c/d/e ✅. |
+| **Step** | 218f not started. Its `-WhatIf` acceptance check reads the published manifest, which exists only after the first CI publish (needs the master merge). |
 | **Status** | not-started. |
-| **Next Action** | `task-execute` 218d. Its FIRST REAL PUBLISH to `sprkcpartifactsdev` (overwrites `dataverse-solutions-latest.json`) needs the owner's OK — ask with the dry-run result. Then 218f. |
+| **Next Action** | Owner decisions first (owner items 1–2): merge the branch to master (PR #1365) so the first publish can run; delete the unused `pull_request` OIDC credential (#1446). Meanwhile `task-execute` 218f (code + Pester; the live `-WhatIf` waits for the publish). |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
-| **Order** | 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner's live re-test with add-in package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
+| **Order** | 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner's live re-test with add-in package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
 ### T218 facts for 218d/218f
 - Dev SpaarkeMaster **1.2.0.0** (2026-10-08): no drift; source in `src/dataverse/solutions/SpaarkeMaster` (managed + unmanaged unpack). Re-export after any dev change with `Export-SpaarkeMasterSource.ps1` (output folder ≤ 140 chars). Roles come from the ROOT business unit only; Secure Record Owner is created per environment by H7b (T256).
@@ -28,11 +28,13 @@ Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-
 
 ## Owner items
 
-1. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
-2. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
-3. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
-4. Board Status "Active" vs Status Reason "On hold" on Issue #438.
-5. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
+1. **Merge this branch to master (PR #1365)** — recommended now: the first SpaarkeMaster publish runs from master only, 218f's live check and T186 need the published package, and the branch is ~40 commits behind. The merge brings master's push-triggered workflows (e.g. ARM-artifact publish) into play — ask before merging. After the merge: grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`.
+2. **First real SpaarkeMaster publish** (after the merge): run `publish-dataverse-solutions-manifest.yml` on master with `publish: true` — uploads 1.2.0.0 to `sprkcpartifactsdev`, keeps the hand-made manifest as `latest.previous`, moves `latest`. Needs OK.
+3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — any same-repo PR can sign in to Azure as the CI app. Entra write, needs OK.
+4. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
+5. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
+6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
+7. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
 
 Done 2026-10-08 (owner OK): `spaarketestpartner.onmicrosoft.com` Azure link resource deleted (REST api 2025-08-01-preview; az's default version failed with AADB2C90063 because the tenant was already gone); control-plane API swap reset, Bicep `s44`/`s44b` Succeeded, Deploy-ControlPlane Both from `35c20287c` — Worker + Api healthy, Worker has `EntraAppRegOptions__SpaarkeTenantId` + `PreAuthorizedClientAppIds__0=1958aec2`.
 
@@ -46,7 +48,7 @@ Done 2026-10-08 (owner OK): `spaarketestpartner.onmicrosoft.com` Azure link reso
 
 - Prod client sites (Standard SWAs, `rg-spaarke-shared-prod`, subscription `cd95fcec-6b89-49ea-8339-c2b579b12587`): `swa-spaarke-office-addins-prod` → `https://addins.spaarke.com`; `swa-spaarke-external-spa-prod` → `https://external.spaarke.com`. Both Ready, managed certs, empty.
 - Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master ≥ `c8b93b294`. T227d not on dev yet (OwnedContainerIds is set). Dev BFF MI holds application `full` on the Model 1 container type (owner option A).
-- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → T218f), #1432 (ISS-006, RAG `Dedicated` mode reads an index nothing creates — BFF).
+- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → T218f), #1432 (ISS-006, RAG `Dedicated` mode reads an index nothing creates — BFF), #1446 (ISS-007, CI identity trusts the PR OIDC subject).
 
 ## Open items (no task yet)
 
