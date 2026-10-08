@@ -34,13 +34,26 @@ public static class NoAccessEntriesState
     public const string Unavailable = "unavailable";
 }
 
+/// <summary>Why a listed entry is not in force on the record (<see cref="RecordNoAccessEntry.NotInForceReason"/>).</summary>
+public static class NoAccessEntryNotInForceReason
+{
+    /// <summary>The entry fails the well-formedness rule: it walls nobody off. <c>inForce</c> is false.</summary>
+    public const string Malformed = "malformed";
+
+    /// <summary>A USER wall on a record that is not Secure: user walls bind only Secure records (owner Q4). <c>inForce</c> is false.</summary>
+    public const string UserWallOnNonSecureRecord = "userWallOnNonSecureRecord";
+
+    /// <summary>A user wall on a record whose Secure flag could not be read: whether it binds is unknown. <c>inForce</c> is null.</summary>
+    public const string SecureStateUnknown = "secureStateUnknown";
+}
+
 /// <summary>
 /// The access status of ONE project, matter or work assignment, for a caller who holds Read on it.
 /// </summary>
 /// <param name="RecordType">The table logical name the route named (<c>sprk_project</c>, <c>sprk_matter</c>, <c>sprk_workassignment</c>).</param>
 /// <param name="RecordId">The record, echoed so a client can check the answer is about the record it asked for.</param>
 /// <param name="Secure">Whether the record is Secure (<c>sprk_issecure</c>): an <see cref="AccessSignalState"/> value.</param>
-/// <param name="NoAccess">Whether any active, well-formed No Access entry covers the record (its own entries, walls over
+/// <param name="NoAccess">Whether any active No Access entry IN FORCE on the record covers it (its own entries, walls over
 /// organizations it references, and the same for every secure record it is filed under): an <see cref="AccessSignalState"/>
 /// value.</param>
 /// <param name="EntriesState">A <see cref="NoAccessEntriesState"/> value.</param>
@@ -74,6 +87,10 @@ public sealed record RecordNoAccessStatus(
 /// filed under (round 61: a parent's list reaches every secure record filed below it).</param>
 /// <param name="Malformed">The entry fails the well-formedness rule (schema Business Rule 1, task 154's canonical id): it
 /// walls nobody off and does not count toward <see cref="RecordNoAccessStatus.NoAccess"/>. Listed so it can be fixed.</param>
+/// <param name="InForce">Whether the entry walls anyone off THIS record: true; false (see <paramref name="NotInForceReason"/>,
+/// e.g. a user wall on a record that is not Secure); null when that could not be read. Only an entry in force makes
+/// <see cref="RecordNoAccessStatus.NoAccess"/> apply.</param>
+/// <param name="NotInForceReason">A <see cref="NoAccessEntryNotInForceReason"/> value when <paramref name="InForce"/> is not true.</param>
 /// <param name="ModifiedById">The entry's last modifier (the author owner N5 checks).</param>
 /// <param name="ModifiedByName">Their display name.</param>
 /// <param name="ModifiedOn">When the entry last changed.</param>
@@ -90,6 +107,8 @@ public sealed record RecordNoAccessEntry(
     Guid CoveredRecordId,
     bool ViaSecureParent,
     bool Malformed,
+    bool? InForce,
+    string? NotInForceReason,
     Guid? ModifiedById,
     string? ModifiedByName,
     DateTimeOffset? ModifiedOn);

@@ -29,9 +29,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <para><b>What "covers" means</b> is <see cref="NoAccessShareEnforcer.ReadCoverageAsync"/>, the lookup the enforcer's
 /// "Update Access" path uses — one source of truth: an active entry whose object is the record, or an organization the
 /// record references in ANY org-typed lookup (B-10), and the same for every secure record it is filed under (round 61).
-/// An entry counts toward <c>noAccess</c> only when well-formed (<see cref="NoAccessShareEnforcer.TryClassify"/>, the
-/// enforcer's rule): a malformed entry walls nobody off. The Write tier lists malformed entries flagged, so they can be
-/// fixed.</para>
+/// An entry counts toward <c>noAccess</c> only when it is in force on this record (<see cref="InForce"/>): well-formed
+/// (<see cref="NoAccessShareEnforcer.TryClassify"/>, the enforcer's rule), and — for a USER wall — on a Secure record or
+/// through a secure parent (owner Q4: a user wall binds only Secure records). The Write tier lists every active entry,
+/// with <c>inForce</c> and the reason when it is not, so a malformed or inert entry can be seen and fixed.</para>
 ///
 /// <para><b>Fails closed, visibly</b> (NFR-01, ADR-003). A signal that cannot be read is <c>unknown</c>, never
 /// <c>doesNotApply</c>: an unreadable or masked <c>sprk_issecure</c> (<see cref="RootRecordFlags.IsUnreadable"/>); an
@@ -133,7 +134,7 @@ public static class RecordNoAccessEndpoint
         var canSeeEntries = (rights & AccessRights.Write) == AccessRights.Write;
         var secure = await ReadSecureAsync(logicalName, recordId, participations, logger, ct).ConfigureAwait(false);
         var (noAccess, entriesState, entries) =
-            await ReadNoAccessAsync(logicalName, recordId, canSeeEntries, enforcer, store, logger, ct).ConfigureAwait(false);
+            await ReadNoAccessAsync(logicalName, recordId, secure, canSeeEntries, enforcer, store, logger, ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "[NO-ACCESS-READ] {Type} {RecordId}: secure {Secure}, no access {NoAccess}, entries {EntriesState} ({Count}).",
@@ -169,12 +170,13 @@ public static class RecordNoAccessEndpoint
 
     /// <summary>
     /// The No Access signal and (for a Write caller) the entries. Every covering entry is read, for every caller: whether
-    /// the restriction applies depends on each entry being well-formed and still active, so a Read-only caller's answer is
-    /// computed from the same rows a Write caller is shown.
+    /// the restriction applies depends on each entry being well-formed, still active and in force on this record
+    /// (<see cref="InForce"/>), so a Read-only caller's answer is computed from the same rows a Write caller is shown.
     /// </summary>
     private static async Task<(string NoAccess, string EntriesState, IReadOnlyList<RecordNoAccessEntry>? Entries)> ReadNoAccessAsync(
         string logicalName,
         Guid recordId,
+        string secure,
         bool canSeeEntries,
         NoAccessShareEnforcer enforcer,
         NoAccessEnforcementStore store,
@@ -196,6 +198,7 @@ public static class RecordNoAccessEndpoint
 
         var rows = new List<RecordNoAccessEntry>();
         var anyInForce = false;
+        var anyUndecided = false;
         foreach (var cover in covering)
         {
             NoAccessEntrySnapshot? entry;
@@ -217,16 +220,20 @@ public static class RecordNoAccessEndpoint
             }
 
             var wellFormed = NoAccessShareEnforcer.TryClassify(entry.Row, out var subjectKind, out var isOrgObject);
-            anyInForce |= wellFormed;
+            var viaSecureParent = !IsThisRecord(cover, logicalName, recordId);
+            var (inForce, notInForceReason) = InForce(wellFormed, subjectKind, viaSecureParent, secure);
+            anyInForce |= inForce == true;
+            anyUndecided |= inForce is null;
             if (canSeeEntries)
             {
-                rows.Add(ToView(entry, cover, logicalName, recordId, wellFormed, subjectKind, isOrgObject));
+                rows.Add(ToView(entry, cover, viaSecureParent, wellFormed, subjectKind, isOrgObject, inForce, notInForceReason));
             }
         }
 
-        // A prefix with nothing in force cannot prove the rest is clear.
+        // An entry whose force hangs on an unread Secure flag, or a prefix with nothing in force, cannot prove the
+        // record is clear.
         var noAccess = anyInForce ? AccessSignalState.Applies
-            : truncated ? AccessSignalState.Unknown
+            : anyUndecided || truncated ? AccessSignalState.Unknown
             : AccessSignalState.DoesNotApply;
 
         if (!canSeeEntries)
@@ -237,9 +244,48 @@ public static class RecordNoAccessEndpoint
         return (noAccess, truncated ? NoAccessEntriesState.Truncated : NoAccessEntriesState.Complete, rows);
     }
 
+    private static bool IsThisRecord(NoAccessCoveringEntry cover, string logicalName, Guid recordId)
+        => cover.CoveredRecordId == recordId && string.Equals(cover.CoveredRecordType, logicalName, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether one active entry walls anyone off THIS record: <c>true</c>, <c>false</c> with the reason, or <c>null</c>
+    /// when that cannot be known.
+    /// </summary>
+    /// <remarks>
+    /// <para>A malformed entry walls nobody off (the reader's rule).</para>
+    /// <para><b>A user wall binds only a SECURE record</b> (owner Q4): on a non-secure record a systemuser-subject entry
+    /// removes nothing at read time (<c>AccessibleRecordSetService.ResolveSystemUserDenyVetoAsync</c>) and the enforcer
+    /// acts only on secure records. So on a record whose Secure flag reads false it is listed but not in force; when the
+    /// flag could not be read it is undecided (fail closed: the signal becomes unknown, never "does not apply"). An entry
+    /// reached through a secure PARENT is in force whatever this record's flag says: the parent is secure, and its list
+    /// reaches every secure record filed below it (round 61).</para>
+    /// <para>A contact or organization entry is in force on any record (the contact plane, and owner N3 on non-secure
+    /// records).</para>
+    /// </remarks>
+    internal static (bool? InForce, string? NotInForceReason) InForce(
+        bool wellFormed, NoAccessSubjectKinds subjectKind, bool viaSecureParent, string secure)
+    {
+        if (!wellFormed)
+        {
+            return (false, NoAccessEntryNotInForceReason.Malformed);
+        }
+
+        if (subjectKind != NoAccessSubjectKinds.SystemUser || viaSecureParent)
+        {
+            return (true, null);
+        }
+
+        return secure switch
+        {
+            AccessSignalState.Applies => (true, null),
+            AccessSignalState.DoesNotApply => (false, NoAccessEntryNotInForceReason.UserWallOnNonSecureRecord),
+            _ => (null, NoAccessEntryNotInForceReason.SecureStateUnknown),
+        };
+    }
+
     private static RecordNoAccessEntry ToView(
-        NoAccessEntrySnapshot entry, NoAccessCoveringEntry cover, string logicalName, Guid recordId,
-        bool wellFormed, NoAccessSubjectKinds subjectKind, bool isOrgObject)
+        NoAccessEntrySnapshot entry, NoAccessCoveringEntry cover, bool viaSecureParent,
+        bool wellFormed, NoAccessSubjectKinds subjectKind, bool isOrgObject, bool? inForce, string? notInForceReason)
     {
         var row = entry.Row;
         var subjectId = row._sprk_subjectcontact_value ?? row._sprk_subjectorganization_value ?? row._sprk_subjectsystemuser_value;
@@ -264,9 +310,10 @@ public static class RecordNoAccessEndpoint
             ObjectOrganizationName: entry.Display?.ObjectOrganizationName,
             CoveredRecordType: cover.CoveredRecordType,
             CoveredRecordId: cover.CoveredRecordId,
-            ViaSecureParent: !(cover.CoveredRecordId == recordId
-                               && string.Equals(cover.CoveredRecordType, logicalName, StringComparison.Ordinal)),
+            ViaSecureParent: viaSecureParent,
             Malformed: !wellFormed,
+            InForce: inForce,
+            NotInForceReason: notInForceReason,
             ModifiedById: entry.ModifiedBy,
             ModifiedByName: entry.Display?.ModifiedByName,
             ModifiedOn: entry.Display?.ModifiedOn);

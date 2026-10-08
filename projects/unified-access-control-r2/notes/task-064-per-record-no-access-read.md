@@ -60,7 +60,7 @@
   the banner must answer Read-only callers.
 - No Read, no bearer token, an absent record and a probe fault are all the uniform 404; nothing else is read for a
   refused caller. 401 when not signed in.
-- Known limit (K2): a walled internal user who still holds Write through a team or role (owner N2) sees the entry list,
+- Known limit (K3): a walled internal user who still holds Write through a team or role (owner N2) sees the entry list,
   including the entry naming them. No Reason is shown, and that user already knows they are walled (they cannot be shared
   the record). Not changed.
 
@@ -119,6 +119,39 @@ In the BFF: a synchronous per-request read on a form load (latency budget), comp
   organizations only, while round 61 (binding) says a parent's list reaches every secure record filed below it. A walled
   user who still reaches a filed secure work assignment through a team (N2) is told by the enforcer "hidden on Teams/SPA"
   but sees it there. `AccessibleRecordSetService.cs` is the exclusive zone where 036 is in flight, so it was not fixed here.
+
+## Verifier pass 1 (main session, 2026-10-08): fixes
+
+| Finding | Fix |
+|---|---|
+| F3 (pre-existing; breaks NFR-01 "not distinguishable in any channel" on this route): timing oracle. The probe re-asks only on 404 (400 ms + 1,200 ms, `CallerRecordAccessProbe.NotFoundRetryDelay` and its retry loop). Dataverse answers 404 `0x80040217` only for a record that does not exist; a record the caller cannot see answers 403 `0x80048306` at once. So an unknown id reached the uniform 404 ~1.6 s after a denied one. The probe remark claiming Dataverse answers "not found" for a record the caller cannot see was false. | `CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync` (non-virtual; scopes the schedule with an `AsyncLocal` and calls the virtual `GetCallerRightsAsync`, so every test double is still the one asked). On that path ANY 403 follows the not-found schedule (`FollowsNotFoundSchedule`, pure), so both denials make the same asks and waits. The not-found retry itself is kept; every other probe use is unchanged; an allowed caller pays nothing. `RecordRouteAccessAuthorizationFilter`'s fixed-entity-set form (task 159's events `/{id}`, `/complete`, `/filing`, and these `/no-access` routes) and declared-target form (events create) use it. Every 403 is equalised, not only `0x80048306`, because a missing-privilege 403 is as fast and would reopen the oracle. Remark corrected. Wire seams `SendPrincipalAccessRequestAsync` / `DelayAsync` (protected virtual) let the test run the real loop with no transport double and no sleep. |
+| F3 follow-on (pre-existing, out of scope): the same oracle on the other caller-rights gates (`DelegationRuleFilter.cs:183`, the upload form `RecordRouteAccessAuthorizationFilter.cs:276`, `EntityAccessFilter.cs:276`, `TodoSourceAccessFilter.cs:184`, `QuickCreateSourceAccessFilter.cs:260/:332`, `CommunicationRecordAuthorizationFilter.cs:735/:745`) | Filed **#1414** (a one-line switch per gate). Not changed here: the verifier scoped the fix to the route-record gate, and `DelegationRuleFilter` is the exclusive zone. |
+| F4: a systemuser-subject entry counted toward `noAccess` on a NON-secure record, though user walls bind only secure records (Q4; `AccessibleRecordSetService.ResolveSystemUserDenyVetoAsync` removes nothing for it; the enforcer acts only on secure records) | `RecordNoAccessEndpoint.InForce`: on `secure: doesNotApply` such an entry is listed `inForce: false`, `notInForceReason: "userWallOnNonSecureRecord"` and does not count; on `secure: unknown` it is `inForce: null` (`secureStateUnknown`) and makes `noAccess` `unknown` unless another entry is in force; reached through a secure parent it stays in force. Contract note updated. |
+| Test gap: Write-tier shape of an organization wall over what the secure parent references | Added. |
+
+Tests added: `AuthorizationGateTimingTests` (13: same asks and waits for unknown vs denied on the gate, any 403 equalised,
+allowed caller unaffected, off-gate behaviour unchanged, no leak to the next question, the pure rule, and both filter forms
+end to end); `RecordNoAccessEndpointTests` +7 (user wall non-secure / secure / unknown / unknown-but-another-in-force,
+contact wall on non-secure, parent org-wall shape, parent user wall vs the child's own flag). Perturbations, all caught: the
+gate not equalising; each filter form using the plain probe; equalising every probe use; dropping the not-found retry; a
+user wall counted on a non-secure record; an unknown Secure flag read as "not in force"; a parent's user wall judged by
+the child's flag.
+
+Gates after the fixes (rebased on `origin/master` 11dc9b0da): `Spaarke.sln` builds; `Sprk.Bff.Api.Tests` 18,662 passed,
+4 failed on a loaded machine (Compose/Document contract tests timing out at ~2 m 47 s with "client aborted"; all 27 tests
+of those four classes pass on a rerun; none touches this change); `Sprk.Bff.Api.IntegrationTests` 87 / 0 (3 live tests
+skipped); `Spe.Integration.Tests` 350 / 0; `Spaarke.ArchTests` 811 / 0. Publish 36.254 MB compressed (base 36.225 MB at
+37d0c944c; +0.029 MB including master's #1359). No package change, no CVE.
+
+**Found in passing and fixed (master build break):** `tests/integration/Sprk.Bff.Api.IntegrationTests/Events/EventRoutesLiveTests.cs:407`
+did not compile on `origin/master` (CS1061): #1359 called `.Single` on `ExternalDataService.GetEventsAsync`, whose result
+#1408 (task 105) had just changed to `ExternalCollectionResponse<T>`. Fixed to `.Value.Single(...)`. Without it
+`Spaarke.sln` and the integration suite the project requires before a PR do not build.
+
+Known limits recorded (no change): **K1** an organization a secure PARENT references becomes visible (id and name) to a
+Write holder on a filed child through the parent's organization-wall entries. **K2** `sprk_name` is free text and reaches
+Write holders as typed (an administrator could put sensitive text there; Reason stays out). **K3** a walled internal user
+who still holds Write through a team or role (N2) sees the entry naming them (see Authorization).
 
 ## Owner questions
 

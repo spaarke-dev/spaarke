@@ -364,7 +364,9 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
         AccessRights rights;
         try
         {
-            rights = await probe.GetCallerRightsAsync(
+            // The gate form (task 064): a record the caller cannot see takes as long as one that does not exist, so
+            // the uniform 404 is not a timing oracle either.
+            rights = await probe.GetCallerRightsForAuthorizationGateAsync(
                 TokenHelper.ExtractBearerTokenOrNull(httpContext),
                 entitySetName,
                 recordId,
@@ -486,7 +488,8 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                     throw new InvalidOperationException("The declared target has no entity set or an empty id.");
                 }
 
-                rights = await probe.GetCallerRightsAsync(callerToken, named.EntitySet, named.RecordId, ct);
+                // The gate form (task 064): an absent record and a denied one take the same time, as they get the same 403.
+                rights = await probe.GetCallerRightsForAuthorizationGateAsync(callerToken, named.EntitySet, named.RecordId, ct);
             }
         }
         catch (Exception ex)

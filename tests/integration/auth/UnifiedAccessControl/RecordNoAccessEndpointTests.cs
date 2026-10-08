@@ -117,6 +117,8 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         d.GetProperty("coveredRecordId").GetGuid().Should().Be(Record);
         d.GetProperty("viaSecureParent").GetBoolean().Should().BeFalse();
         d.GetProperty("malformed").GetBoolean().Should().BeFalse();
+        d.GetProperty("inForce").GetBoolean().Should().BeTrue("a user wall binds a SECURE record");
+        d.GetProperty("notInForceReason").ValueKind.Should().Be(JsonValueKind.Null);
         d.GetProperty("modifiedById").GetGuid().Should().Be(Author);
         d.GetProperty("modifiedByName").GetString().Should().Be("Author Person");
 
@@ -127,7 +129,8 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         w.GetProperty("subjectKind").GetString().Should().Be("contact");
         w.GetProperty("subjectId").GetGuid().Should().Be(WalledContact);
 
-        body.ToString().Should().NotContainEquivalentOf("reason", "an entry's Reason is never returned (task 143 / O2)");
+        entries.SelectMany(e => e.EnumerateObject().Select(p => p.Name)).Should()
+            .NotContain(new[] { "reason", "sprk_reason" }, "an entry's Reason is never returned (task 143 / O2)");
     }
 
     // ── (e) Read tier: the signals only ───────────────────────────────────────────────────────────────────────────
@@ -225,8 +228,84 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
         row.GetProperty("entryId").GetGuid().Should().Be(malformed);
         row.GetProperty("malformed").GetBoolean().Should().BeTrue();
+        row.GetProperty("inForce").GetBoolean().Should().BeFalse();
+        row.GetProperty("notInForceReason").GetString().Should().Be(NoAccessEntryNotInForceReason.Malformed);
         row.GetProperty("subjectKind").ValueKind.Should().Be(JsonValueKind.Null);
         row.GetProperty("objectKind").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    // ── user walls bind only SECURE records (owner Q4; verifier finding F4) ────────────────────────────────────
+
+    [Fact]
+    public async Task AUserWall_OnANonSecureRecord_DoesNotApply_AndIsListedNotInForce()
+    {
+        H.Participations.Flags[Record] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+        var entry = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(Project, Record);
+
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.DoesNotApply);
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.DoesNotApply,
+            "a systemuser-subject entry removes nothing on a non-secure record (AccessibleRecordSetService, the enforcer)");
+        var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
+        row.GetProperty("entryId").GetGuid().Should().Be(entry);
+        row.GetProperty("inForce").GetBoolean().Should().BeFalse();
+        row.GetProperty("notInForceReason").GetString().Should().Be(NoAccessEntryNotInForceReason.UserWallOnNonSecureRecord);
+        row.GetProperty("malformed").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AUserWall_OnASecureRecord_Applies()
+    {
+        H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
+        CallerHolds("sprk_projects", Record, AccessRights.Read);
+
+        var body = await GetOk(Project, Record);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+    }
+
+    [Fact]
+    public async Task AUserWall_WhenTheSecureFlagIsUnknown_IsUnknown_NeverDoesNotApply()
+    {
+        H.Participations.Flags[Record] = RootRecordFlags.Unreadable;
+        H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(Project, Record);
+
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.Unknown);
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Unknown);
+        var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
+        row.GetProperty("inForce").ValueKind.Should().Be(JsonValueKind.Null);
+        row.GetProperty("notInForceReason").GetString().Should().Be(NoAccessEntryNotInForceReason.SecureStateUnknown);
+    }
+
+    [Fact]
+    public async Task AUserWall_WhenTheSecureFlagIsUnknown_ButAnotherEntryIsInForce_Applies()
+    {
+        H.Participations.Flags[Record] = RootRecordFlags.Unreadable;
+        H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
+        H.Store.AddEntry(subjectContact: WalledContact, objectOrganization: Org, modifiedBy: Author);
+        CallerHolds("sprk_projects", Record, AccessRights.Read);
+
+        var body = await GetOk(Project, Record);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+    }
+
+    [Fact]
+    public async Task AContactWall_OnANonSecureRecord_StillApplies()
+    {
+        H.Participations.Flags[Record] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+        H.Store.AddEntry(subjectContact: WalledContact, objectOrganization: Org, modifiedBy: Author);
+        CallerHolds("sprk_projects", Record, AccessRights.Read);
+
+        var body = await GetOk(Project, Record);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies,
+            "a contact or organization wall binds any record (the contact plane; owner N3)");
     }
 
     // ── secure parents (round 61) ─────────────────────────────────────────────────────────────────────────────────
@@ -259,6 +338,49 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         row.GetProperty("viaSecureParent").GetBoolean().Should().BeTrue();
         row.GetProperty("coveredRecordType").GetString().Should().Be(Matter);
         row.GetProperty("coveredRecordId").GetGuid().Should().Be(SecureMatter);
+    }
+
+    [Fact]
+    public async Task AWriteCaller_SeesAnOrganizationWallOverWhatTheSecureParentReferences_WithItsShape()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        H.Participations.RecordOrganizations[SecureMatter] = new[] { OtherOrg };
+        var wall = H.Store.AddEntry(subjectContact: WalledContact, objectOrganization: OtherOrg, modifiedBy: Author);
+        H.Store.Entries[wall] = H.Store.Entries[wall] with
+        {
+            Display = new NoAccessEntryDisplay("Contact walled from Other Org", "Walled Contact", "Other Org", null, null),
+        };
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+        var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
+        row.GetProperty("entryId").GetGuid().Should().Be(wall);
+        row.GetProperty("objectKind").GetString().Should().Be("organization");
+        row.GetProperty("objectOrganizationId").GetGuid().Should().Be(OtherOrg);
+        row.GetProperty("objectOrganizationName").GetString().Should().Be("Other Org");
+        row.GetProperty("subjectKind").GetString().Should().Be("contact");
+        row.GetProperty("subjectId").GetGuid().Should().Be(WalledContact);
+        row.GetProperty("viaSecureParent").GetBoolean().Should().BeTrue();
+        row.GetProperty("coveredRecordType").GetString().Should().Be(Matter);
+        row.GetProperty("coveredRecordId").GetGuid().Should().Be(SecureMatter);
+        row.GetProperty("inForce").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AUserWallOnTheSecureParent_StaysInForce_WhateverTheFiledRecordsOwnFlagReads()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+        H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies, "the parent is secure (round 61)");
+        body.GetProperty("entries").EnumerateArray().Should().ContainSingle()
+            .Which.GetProperty("inForce").GetBoolean().Should().BeTrue();
     }
 
     [Fact]
