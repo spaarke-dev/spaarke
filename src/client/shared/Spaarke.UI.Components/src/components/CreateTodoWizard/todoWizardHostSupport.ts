@@ -8,9 +8,9 @@
  *    successful `sprk_todo` create, post `{ type: 'sprk_todo:created' }` on the
  *    `sprk_todo:lifecycle` BroadcastChannel. The LegalWorkspace To Do widget shim
  *    (`src/solutions/LegalWorkspace/src/sections/todo.registration.ts`) subscribes and refetches.
- *    The constants MUST stay in lockstep with that shim's. BroadcastChannel delivers to every
- *    other channel object of the same name in the origin — another window/iframe (the code page)
- *    or the same window (the in-app host) alike.
+ *    The shim imports the two constants below, so sender and listener share one definition.
+ *    BroadcastChannel delivers to every other channel object of the same name in the origin —
+ *    another window/iframe (the code page) or the same window (the in-app host) alike.
  *
  * 2. `resolveCurrentUserContact` — smart-todo-r5 UAT 2026-08-17 (item #1): default "Assigned To"
  *    to the current user's CONTACT (`contact.sprk_systemuser` = the user).
@@ -20,9 +20,9 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { getXrm } from '../../utils/xrmContext';
 
 const SPRK_TODO_ENTITY = 'sprk_todo';
-/** BroadcastChannel name — lockstep with todo.registration.ts. */
+/** BroadcastChannel name — imported by todo.registration.ts. */
 export const SPRK_TODO_CHANNEL_NAME = 'sprk_todo:lifecycle';
-/** Message type posted after a successful create — lockstep with todo.registration.ts. */
+/** Message type posted after a successful create — imported by todo.registration.ts. */
 export const SPRK_TODO_CREATED = 'sprk_todo:created';
 
 /**

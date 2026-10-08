@@ -605,12 +605,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard, handleOpenPlaybookLibraryBrowse]
   );
 
-  // Get Started expand dialog: a card click closes the picker, then launches with NO
-  // arguments. Task 112 — the five Create wizards now open in-app (SprkModal), and a
-  // picker left open underneath would stack two modals (the platform dialog used to sit
-  // over it instead). Calling with no arguments also stops the dialog's onClick handing
-  // its MouseEvent to handlers that take optional ids (Summarize Files read it as
-  // `documentIds` and threw before launching; Find Similar sent `documentId=[object Object]`).
+  // Get Started expand dialog: a card click closes the picker, then launches. Task 112 —
+  // the five Create wizards now open in-app (SprkModal), and a picker left open underneath
+  // would stack two modals (the platform dialog used to sit over it instead).
   const expandCardClickHandlers = React.useMemo(() => {
     const wrapped: Partial<Record<string, () => void>> = {};
     for (const [id, handler] of Object.entries(cardClickHandlers)) {
