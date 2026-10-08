@@ -2,23 +2,23 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 — owner OKs: leftover tenant resource deleted; control-plane swap reset + Bicep slot fix (`21b96bf1e`) + both sites deployed and healthy; #1401 → T218f; **218e approved — in progress**, then T235.
+> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅ (SpaarkeMaster 1.2.0.0 complete in dev, exported to git `65eb1cb2b`); control plane deployed; T235 POML filed — next.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T218** — the complete Dataverse package. Plan `notes/t218-plan.md`; POMLs `tasks/218a…218e`, `257`. 218a ✅ `8b878d655`; 218b ✅ `3f41aab33`/`4f6c579ed`/`d3aa70726`; 218c ✅ `48b16bcb8`/`3eb20566e`/`3d280df7d`. |
-| **Step** | **218e in progress** (owner OK 2026-10-08 for the SpaarkeMaster changes in spaarkedev1). |
-| **Status** | in-progress. |
-| **Next Action** | On the owner's OK: `task-execute` 218e — (1) `Test-SolutionCompleteness.ps1 -FailOnDrift:$false -SkipInventory` (read-only) → classify the 53 missing (ship / exclude with reason; the 4 April PCFs by form usage); (2) remove from SpaarkeMaster what is OUTSIDE THE RULE (5 Microsoft tables, 8 env-var values) + the Provisioning Registry role; (3) `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, then without (adds + re-adds the 8 shells, bumps the version); (4) `Export-SpaarkeMasterSource.ps1` (pac auth with access to spaarkedev1) → commit src/dataverse/solutions/SpaarkeMaster; then 218d (CI pack + publish). Without the OK: continue with T235. |
+| **Task** | **T235** — docs + governance match the dedicated Model 1 stamp (POML `tasks/235-docs-governance-dedicated-model1.poml`, filed 2026-10-08). T218: 218a/b/c/e ✅ (218e `082d839ef`/`65eb1cb2b`); 218d, 218f open. |
+| **Step** | T235 not started: begin step 1 (inventory the shared-Model-1 statements — ~30 files, 2026-10-08 grep). |
+| **Status** | not-started. |
+| **Next Action** | `task-execute` T235 (owner: continue with it). Then 218d (CI pack + publish SpaarkeMaster from git; the first publish to `sprkcpartifactsdev` needs the owner's OK), 218f. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
-| **Order** | 218e → T235 (owner: continue with it) → 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
+| **Order** | T235 → 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b now also CREATES the Secure Record Owner role — see its POML note) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
-### T218 facts for 218e/218d (details in 218c's POML notes)
-- Live SpaarkeMaster in dev (2026-10-08, read-only): 520 in scope, 18 excluded, **53 missing**, **8 sprk_ tables packaged as shells** (incl. sprk_signal, sprk_noaccessentry, sprk_policy), Provisioning Registry role packaged though excluded, **13 outside the rule** (5 Microsoft tables dragged in by the 2026-08-23 rebuild, 8 env-var values).
-- Roles: "Spaarke Basic User" (H11 default) EXISTS and is in SpaarkeMaster; "Secure Record Owner" lives in the child unit "Secure Record" by design and is NOT packaged — H7b (T256) creates it per environment. (Two earlier wrong notes came from 20-row-capped MCP queries — pass `top` or use the scripts.)
-- The store `sprkcpartifactsdev/provisioning-artifacts` holds the hand-made old-format manifest → a real run fails at H6 (missing-solution-zips) until 218d publishes. Manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
+### T218 facts for 218d/218f
+- Dev SpaarkeMaster **1.2.0.0** (2026-10-08): no drift; source in `src/dataverse/solutions/SpaarkeMaster` (managed + unmanaged unpack). Re-export after any dev change with `Export-SpaarkeMasterSource.ps1` (output folder ≤ 140 chars). Roles come from the ROOT business unit only; Secure Record Owner is created per environment by H7b (T256).
+- The store `sprkcpartifactsdev/provisioning-artifacts` still holds the hand-made old-format manifest → a real run fails at H6 (missing-solution-zips) until 218d publishes. Manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
+- Relay: `notes/coordination/2026-10-08-to-uac-r2-2.md` (Secure Record Owner stays contained; H7b creates it) — handed to the owner 2026-10-08.
 
 ### T240b (unblocked 2026-10-08)
 The AADSTS700016 consent failure is fixed on the add-in side: word-add-in-r1 task 115 (master `849bac800`, owner decision 2026-10-08) ships package **1.1.2 without `webApplicationInfo`**; both add-in apps (dev `c1258e2d…`, production `1958aec2…`) stay single-tenant. Next (owner, live): upload 1.1.2 in the test tenant's Integrated apps, then the guest runs the Diagnostics view in Outlook/Word (expect `acct` 1 = guest) and a BFF call. Customer BFFs pre-authorize `1958aec2` (Worker Bicep, `4d41cb026`) — still needed for NAA without a consent prompt.

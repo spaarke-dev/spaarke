@@ -185,7 +185,7 @@ $stillUnexplained = if ($RemoveUnexplained) { @($after.ExcludedButInPackage).Cou
 if (@($after.MissingFromPackage).Count -gt 0 -or @($after.PackagedAsShell).Count -gt 0 -or $stillUnexplained -gt 0) {
     @($after.MissingFromPackage) + @($after.PackagedAsShell) | ForEach-Object { Write-Warning "Still not packaged in full: $($_.TypeName) $($_.Name)" }
     if ($stillUnexplained -gt 0) { Write-Warning "$stillUnexplained unexplained component(s) are still in the solution after removal." }
-    Write-Error "The adds did not take effect for every component - version NOT bumped. Investigate (a shell may need removing and re-adding), then re-run."
+    Write-Error "The adds or removals did not take effect for every component - version NOT bumped. Investigate (a shell may need removing and re-adding; a removal may need a second run), then re-run."
     exit 1
 }
 Invoke-DataverseWrite "solutions($($master.solutionid))" 'PATCH' @{ version = $newVersion } | Out-Null

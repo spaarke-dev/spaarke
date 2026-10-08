@@ -77,8 +77,12 @@ Manifest schema read by H6:
    without `-WhatIf`. It adds what the rule finds missing and re-adds tables packaged as shells, each custom table WITH
    all its subcomponents; it never pulls in dependencies (`AddRequiredComponents = false` — with `true`, the 2026-08-23
    rebuild dragged five Microsoft tables into SpaarkeMaster); OOB tables go in metadata-only. It bumps the version only
-   when every add succeeded. Anything packaged outside the rule is reported for an owner-approved removal. Bump the version (semver: Major = breaking schema change; Minor = new table/feature; Build =
-   additive content; Revision = a fix for one customer stamp).
+   when every add succeeded. Anything packaged outside the rule, and any excluded component still packaged, is
+   reported; `-RemoveUnexplained` (owner-approved) takes it out of the solution — nothing is deleted from dev, but a
+   component dropped from the package is deleted from an environment on its next managed upgrade (ADR-027 §4). Bump
+   the version with `-VersionBumpKind` (semver: Major = breaking schema change; Minor = new table/feature; Build =
+   additive content; Revision = a fix for one customer stamp) or set it with `-Version`, which must be higher than the
+   current one (H6 refuses a downgrade; 1.2.0.0 on 2026-10-08 sits above the 1.1.0.0 shipped on 2026-08-21).
 5. **Export to source**: `./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1` exports managed + unmanaged,
    unpacks into `src/dataverse/solutions/SpaarkeMaster/`, strips environment-variable values, and **fails if
    `Other/Solution.xml` lists a missing dependency on `solution="Active"`** — the F12 leak: a Spaarke component the
