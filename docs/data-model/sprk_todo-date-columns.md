@@ -66,7 +66,7 @@ Dependency review, before step 3:
 
 Run it once per environment, as **System Administrator**. It is `sprk_event-date-columns.md` §4 with these values:
 
-**Ship the code and the schema change together.** Deploy task 106's PR (BFF, SmartTodo Code Page, Console/Workspace bundles carrying `@spaarke/smart-todo-components`, `@spaarke/daily-briefing-components` and LegalWorkspace, the external SPA) in the same window. Before it, the quick-add and Daily Briefing "Add to To Do" send a timestamp, which a converted column refuses with HTTP 400; the external app's earlier builds are covered by the BFF (it normalises their noon-UTC timestamp).
+**Ship the code and the schema change together.** Deploy task 106's PR (BFF, the Console/Workspace bundles carrying `@spaarke/smart-todo-components`, `@spaarke/daily-briefing-components` and LegalWorkspace, the SmartTodo Code Page, the external SPA) in the same window. Before it, the quick-add and Daily Briefing "Add to To Do" send a timestamp, which a converted column refuses with HTTP 400; the external app's earlier builds are covered by the BFF (it normalises their noon-UTC timestamp).
 
 1. **Analyse before anything changes** (order-critical: afterwards the time portion is gone):
    ```
@@ -100,13 +100,14 @@ Inventoried 2026-10-08 by searching `src/` for `sprk_todo` and `sprk_duedate`. L
 
 | Surface | Kind | Change |
 |---|---|---|
-| SmartTodo quick-add — `SmartTodoWidget` (Console/Workspace) and the SmartTodo Code Page listener | write (BFF child-record route) | Sent `toISOString()` of 23:59 local (HTTP 400 now; the next UTC day from 20:00 Eastern before). Both now build the payload with one function, `buildQuickAddTodoPayload` (`@spaarke/smart-todo-components`), which sends the picked `yyyy-MM-dd`. |
+| SmartTodo quick-add — `SmartTodoWidget` (Console/Workspace) | write (BFF child-record route) | Sent `toISOString()` of 23:59 local (HTTP 400 now; the next UTC day from 20:00 Eastern before). Now sends the picked `yyyy-MM-dd` through `buildQuickAddTodoPayload` (package-internal); the default is today's local day (`formatDateOnly`). The SmartTodo Code Page's `QUICK_ADD_TODO_EVENT` listener had the same defect and is fixed the same way, but no surface dispatches that event any more. |
 | Daily Briefing "Add to To Do" (`useInlineTodoCreate.computeDueDate`) | write (BFF child-record route) | Returned `toISOString()` (HTTP 400 now). Returns the local calendar day: a bare date as is, a timestamp as its local day, the default as today + 3 local days. |
-| External app To Do create / reschedule (`SmartTodo.tsx` → `ExternalDataService`) | write | The SPA sends the date input's `yyyy-MM-dd` (it sent noon UTC). The BFF normalises with `DataverseDateOnly` on create **and** update (earlier SPA builds keep working) and refuses a non-date with 400 instead of Dataverse's 400 behind a 500. |
+| External app To Do create (`SmartTodo.tsx` → `ExternalDataService`) | write | The SPA sends the date input's `yyyy-MM-dd` (it sent noon UTC). The BFF normalises with `DataverseDateOnly` on create **and** on the PATCH route (which accepts a due date, though the SPA has no reschedule UI), so earlier SPA builds keep working, and refuses a non-date with 400 instead of Dataverse's 400 behind a 500. |
 | External app "Mark as complete / incomplete" (`UpdateTodoAsync` with `statuscode`) | write | **Pre-existing defect found by the live leg:** it sent `statuscode` alone, which Dataverse refuses (`2 is not a valid status code for state code sprk_TodoState.Active`, HTTP 400) — completing a To Do from the external app never worked. The BFF now writes the matching `statecode` and refuses a status reason that is not a To Do one. |
 | External app To Do list (`SmartTodo.tsx`) | read | Due date shown with `parseDueDate` (it showed the previous day west of UTC); overdue only once the due day has passed (it was overdue from local midnight of the due day). |
 | SmartTodo Code Page toolbar "Email" (`ToolbarActions.handleEmail`) | read | `(due …)` uses `parseDueDate` (it said the previous day west of UTC). |
 | LegalWorkspace Quick Summary "Open Tasks" overdue badge | read (`$filter`) | `sprk_duedate lt <local today yyyy-MM-dd>`; it compared with `new Date().toISOString()`, i.e. the UTC date, so from 20:00 Eastern a To Do due today counted as overdue. |
+| `sprk_event` "Overdue" feed filter (`buildEventCategoryFilter`, LegalWorkspace and the SmartTodo Code Page copy) | read (`$filter`) | Same defect class on the **event** due date (task 098's column), found by this task's review: `lt <UTC midnight ISO>` → `lt <local today>`. |
 
 **Already correct for a calendar date (no change)**
 

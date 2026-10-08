@@ -1,14 +1,15 @@
 /**
  * quickAddTodoPayload — the `sprk_todo` create payload of the three-field quick-add (title, due date, assigned to).
  *
- * ONE builder for both quick-add surfaces: `SmartTodoWidget` and the SmartTodo Code Page's `QUICK_ADD_TODO_EVENT`
- * listener (`src/solutions/SmartTodo/src/components/SmartToDo.tsx`), which each built the same payload inline
- * (spaarke-ontology-platform-r1 task 106).
+ * Used by `SmartTodoWidget`'s quick-add (spaarke-ontology-platform-r1 task 106). Package-internal: it is not exported
+ * from the barrel. (The SmartTodo Code Page's `QUICK_ADD_TODO_EVENT` listener builds the same shape inline, but no
+ * surface dispatches that event any more — see `components/Header/Header.tsx`.)
  *
- * Why it moved here: `sprk_todo.sprk_duedate` is a Dataverse **Date Only** column (task 106). The Web API accepts only
- * `"YYYY-MM-DD"` for it and refuses a timestamp with HTTP 400. Both copies sent `toISOString()` of 23:59 LOCAL on the
- * picked day — refused now, and before the conversion the NEXT day in UTC from 20:00 Eastern. The date input's own
- * `"YYYY-MM-DD"` is the calendar day the user picked, so it is sent as it is.
+ * Why it is a function: `sprk_todo.sprk_duedate` is a Dataverse **Date Only** column (task 106). The Web API accepts
+ * only `"YYYY-MM-DD"` for it and refuses a timestamp with HTTP 400. The widget sent `toISOString()` of 23:59 LOCAL on
+ * the picked day — refused now, and before the conversion the NEXT day in UTC from 20:00 Eastern. The date input's own
+ * `"YYYY-MM-DD"` is the calendar day the user picked, so it is sent as it is; a pure function makes that testable
+ * without mounting the widget.
  */
 
 /** Input of {@link buildQuickAddTodoPayload}. */

@@ -698,8 +698,8 @@ public sealed class EventRoutesLiveTests
         r.EnsureSuccessStatusCode();
         if (!r.Headers.TryGetValues("OData-EntityId", out var values))
         {
-            // #1402 (ISS-011): a created row we cannot name would leak (and created[^1] would be an EVENT id): find it by
-            // its zz name for cleanup, then fail loudly — the Briefing leg's pattern.
+            // #1402 (ISS-011): a created row we cannot name would leak (and created[^1] would be an earlier analysis id, or
+            // throw on an empty list): find it by its zz name for cleanup, then fail loudly — the Briefing leg's pattern.
             var found = await dv.GetFromJsonAsync<JsonElement>(
                 $"sprk_analysises?$select=sprk_analysisid&$filter=sprk_name eq '{name}'");
             var foundIds = found.GetProperty("value").EnumerateArray().Select(e => e.GetProperty("sprk_analysisid").GetGuid()).ToList();

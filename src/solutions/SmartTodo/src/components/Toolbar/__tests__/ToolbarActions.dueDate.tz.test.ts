@@ -17,6 +17,8 @@ jest.mock('@spaarke/smart-todo-components', () => ({ computeDueLabel: jest.fn() 
 
 import { createToolbarActions, type ToolbarActionContext } from '../ToolbarActions';
 import type { ITodo } from '../../../types/entities';
+import { buildEventCategoryFilter } from '../../../services/queryHelpers';
+import { EventFilterCategory } from '../../../types/enums';
 
 const todo = (id: string, name: string, due?: string): ITodo =>
   ({ sprk_todoid: id, sprk_name: name, sprk_duedate: due, statuscode: 1, statecode: 0, sprk_todopinned: false }) as ITodo;
@@ -51,5 +53,17 @@ describe('handleEmail — due dates are calendar days (America/New_York)', () =>
   it('a To Do without a due date has no "(due …)" suffix', () => {
     expect(emailBody([todo('b', 'Call client')])).toContain('- Call client');
     expect(emailBody([todo('b', 'Call client')])).not.toContain('(due');
+  });
+});
+
+describe('buildEventCategoryFilter(Overdue) — the LOCAL day, at 21:00 New York (task 106 review)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(Date.parse('2026-10-06T01:00:00Z'))); // 21:00 on Oct 5 in New York
+  });
+  afterEach(() => jest.useRealTimers());
+
+  it('compares sprk_duedate with the local today, not a UTC-midnight timestamp (tomorrow, here)', () => {
+    expect(buildEventCategoryFilter(EventFilterCategory.Overdue)).toBe('sprk_duedate lt 2026-10-05 and statuscode eq 1');
   });
 });

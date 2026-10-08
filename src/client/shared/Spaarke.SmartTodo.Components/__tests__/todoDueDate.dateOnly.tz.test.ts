@@ -21,6 +21,8 @@ jest.mock('@spaarke/ui-components', () => ({
 
 import { buildQuickAddTodoPayload } from '../src/utils/quickAddTodoPayload';
 import { QUICK_SUMMARY_CARDS } from '../../../../solutions/LegalWorkspace/src/components/QuickSummary/quickSummaryConfig';
+import { buildEventCategoryFilter } from '../../../../solutions/LegalWorkspace/src/services/queryHelpers';
+import { EventFilterCategory } from '../../../../solutions/LegalWorkspace/src/types/enums';
 
 const NOW = new Date(Date.parse('2026-10-06T01:00:00Z'));
 
@@ -61,6 +63,12 @@ describe('To Do due dates are calendar dates (task 106, America/New_York 21:00)'
 
     it('never compares the Date Only column with a timestamp (read by its UTC date: tomorrow, here)', () => {
       expect(openTasks.badgeFilter!(ctx)).not.toMatch(/sprk_duedate lt \d{4}-\d{2}-\d{2}T/);
+    });
+  });
+
+  describe('LegalWorkspace feed "Overdue" event filter (same defect class on sprk_event, found by the 106 review)', () => {
+    it('is overdue only before the LOCAL today, never a UTC-midnight timestamp', () => {
+      expect(buildEventCategoryFilter(EventFilterCategory.Overdue)).toBe('sprk_duedate lt 2026-10-05 and statuscode eq 1');
     });
   });
 });

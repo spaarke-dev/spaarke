@@ -118,8 +118,10 @@ public sealed class ExternalTodoDto
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
-    /// <summary>The to-do due date (<c>sprk_todo.sprk_duedate</c>) as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse
-    /// Date Only). Parse it as a local calendar date (<c>parseDueDate</c>), never <c>new Date(value)</c>.</summary>
+    /// <summary>The to-do due date (<c>sprk_todo.sprk_duedate</c>) as Dataverse returns it: a calendar date, <c>yyyy-MM-dd</c>,
+    /// once the environment's column is Date Only (task 106); a UTC timestamp before that (not normalised here — before
+    /// the conversion its UTC date is not always the picked day). Read it with <c>parseDueDate</c>, never
+    /// <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
