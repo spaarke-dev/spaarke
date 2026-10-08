@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13619861304231825758"
+      "templateHash": "7828909415565352353"
     }
   },
   "parameters": {
@@ -1187,7 +1187,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2515857833466178412"
+              "templateHash": "9198315704373949356"
             }
           },
           "parameters": {
@@ -1307,6 +1307,70 @@
               }
             }
           },
+          "variables": {
+            "appSettings": [
+              {
+                "name": "AzureAd__Audience",
+                "value": "[parameters('jwtAudience')]"
+              },
+              {
+                "name": "AzureAd__TenantId",
+                "value": "[parameters('jwtTenantId')]"
+              },
+              {
+                "name": "AzureAd__ClientId",
+                "value": "[parameters('controlPlaneAppRegClientId')]"
+              },
+              {
+                "name": "AzureAd__Instance",
+                "value": "[parameters('aadLoginEndpoint')]"
+              },
+              {
+                "name": "Cosmos__AccountEndpoint",
+                "value": "[parameters('cosmosAccountEndpoint')]"
+              },
+              {
+                "name": "Cosmos__DatabaseName",
+                "value": "[parameters('cosmosDatabaseName')]"
+              },
+              {
+                "name": "Cosmos__ContainerName",
+                "value": "[parameters('cosmosRunsContainerName')]"
+              },
+              {
+                "name": "ServiceBus__FullyQualifiedNamespace",
+                "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
+              },
+              {
+                "name": "ServiceBus__QueueName",
+                "value": "[parameters('serviceBusQueueName')]"
+              },
+              {
+                "name": "AZURE_CLIENT_ID",
+                "value": "[parameters('uamiClientId')]"
+              },
+              {
+                "name": "ManagedIdentity__ClientId",
+                "value": "[parameters('uamiClientId')]"
+              },
+              {
+                "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
+                "value": "[parameters('adminDataverseEnvironmentUrl')]"
+              },
+              {
+                "name": "CustomerRunGuard__Enabled",
+                "value": "[string(parameters('customerRunGuardEnabled'))]"
+              },
+              {
+                "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                "value": "[parameters('appInsightsConnectionString')]"
+              },
+              {
+                "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+                "value": "~3"
+              }
+            ]
+          },
           "resources": [
             {
               "type": "Microsoft.Web/sites",
@@ -1332,68 +1396,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": [
-                    {
-                      "name": "AzureAd__Audience",
-                      "value": "[parameters('jwtAudience')]"
-                    },
-                    {
-                      "name": "AzureAd__TenantId",
-                      "value": "[parameters('jwtTenantId')]"
-                    },
-                    {
-                      "name": "AzureAd__ClientId",
-                      "value": "[parameters('controlPlaneAppRegClientId')]"
-                    },
-                    {
-                      "name": "AzureAd__Instance",
-                      "value": "[parameters('aadLoginEndpoint')]"
-                    },
-                    {
-                      "name": "Cosmos__AccountEndpoint",
-                      "value": "[parameters('cosmosAccountEndpoint')]"
-                    },
-                    {
-                      "name": "Cosmos__DatabaseName",
-                      "value": "[parameters('cosmosDatabaseName')]"
-                    },
-                    {
-                      "name": "Cosmos__ContainerName",
-                      "value": "[parameters('cosmosRunsContainerName')]"
-                    },
-                    {
-                      "name": "ServiceBus__FullyQualifiedNamespace",
-                      "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
-                    },
-                    {
-                      "name": "ServiceBus__QueueName",
-                      "value": "[parameters('serviceBusQueueName')]"
-                    },
-                    {
-                      "name": "AZURE_CLIENT_ID",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "ManagedIdentity__ClientId",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
-                      "value": "[parameters('adminDataverseEnvironmentUrl')]"
-                    },
-                    {
-                      "name": "CustomerRunGuard__Enabled",
-                      "value": "[string(parameters('customerRunGuardEnabled'))]"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
-                      "value": "~3"
-                    }
-                  ]
+                  "appSettings": "[variables('appSettings')]"
                 }
               }
             },
@@ -1419,7 +1422,8 @@
                   "http20Enabled": true,
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
-                  "healthCheckPath": "/healthz"
+                  "healthCheckPath": "/healthz",
+                  "appSettings": "[variables('appSettings')]"
                 }
               },
               "dependsOn": [
