@@ -1,6 +1,7 @@
-import type { AuthenticationResult, Configuration, PublicClientApplication } from '@azure/msal-browser';
+import type { AccountInfo, AuthenticationResult, Configuration, PublicClientApplication } from '@azure/msal-browser';
 import type { IAuthConfig, TokenResult } from '../types';
 import type { AuthStrategy } from './AuthStrategy';
+import { normalizeTenant, sameTenant, tenantFromAuthority } from '../tenant';
 
 /** Buffer (ms) before token expiry to consider it stale. Matches config.TOKEN_EXPIRY_BUFFER_MS. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
@@ -13,8 +14,9 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
  * Schroeder") fails with AADSTS50058 → ssoSilent returns null → popup fires.
  *
  * Resolution order:
- *   1. MSAL's own `getAllAccounts()[0].username` (UPN — authoritative when MSAL
- *      has any cached account)
+ *   1. `username` of the account chosen by `BrowserMsalStrategy._pickAccount`
+ *      (UPN — authoritative when MSAL has any cached account; the account that
+ *      matches the resolved tenant, not merely the first one cached — #1453)
  *   2. `Xrm.userSettings.userPrincipalName` via frame-walk (UPN per Dataverse SDK)
  *
  * If neither source yields a UPN, returns `undefined` — `ssoSilent` will then
@@ -31,12 +33,9 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
  * where `userPrincipalName` is undefined. Fix (task 011 post-mortem): the
  * fallback is removed entirely.
  */
-function resolveLoginHint(msal: PublicClientApplication | null): string | undefined {
-  if (msal) {
-    const accounts = msal.getAllAccounts();
-    if (accounts.length > 0 && accounts[0].username) {
-      return accounts[0].username;
-    }
+function resolveLoginHint(account: AccountInfo | null): string | undefined {
+  if (account?.username) {
+    return account.username;
   }
 
   if (typeof window === 'undefined') return undefined;
@@ -93,6 +92,12 @@ function decodeJwtExpMs(jwt: string): number {
  *   2. `ssoSilent` with a UPN login hint (uses AAD session cookie)
  *   3. `acquireTokenPopup` (interactive — last resort, expected NOT to fire in steady state)
  *
+ * The cached account is chosen, not taken by position (#1453) — see _pickAccount.
+ * A browser that also holds a home-tenant session (a B2B guest) would otherwise
+ * retry the wrong account on every acquire and loop through popups; a browser
+ * shared by two users of the same tenant would otherwise run silently as
+ * whichever user signed in first.
+ *
  * The returned token's `expiresOn` is the JWT `exp` claim (preferred) or MSAL's reported
  * `expiresOn` (fallback). Callers validate freshness against a 5-min buffer; if a token
  * acquisition somehow returns an already-stale token, an empty result is returned so
@@ -100,15 +105,16 @@ function decodeJwtExpMs(jwt: string): number {
  *
  * Regression invariants (preserved by literal MSAL config lift from SpaarkeAuthProvider:44-68):
  *   - INV-1: cacheLocation 'localStorage'   — survives tab/browser close
- *   - INV-2: storeAuthStateInCookie true    — ssoSilent works under 3rd-party cookie blocking
- *   - INV-3: tenant-specific authority      — config.authority is resolved by resolveDefaultAuthority()
+ *   - INV-2: storeAuthStateInCookie true    — see the note at the cache config below
+ *   - INV-3: tenant-specific authority      — config.authority comes from resolveConfig(), which
+ *            never yields a non-tenant authority inside a Dataverse host (#1453)
  *
  * v2 bug fix (vs. pre-v2 MsalSilentStrategy.resolveLoginHint):
  *   The pre-v2 code passed `Xrm.userSettings.userName` (display name) as loginHint,
  *   which AAD couldn't match (AADSTS50058) on tenants where userName != UPN. That bug
- *   was the proximate cause of popup-on-every-browser-startup. This impl prefers
- *   `getAllAccounts()[0].username` (always the UPN) and falls back to
- *   `userSettings.userPrincipalName` before the legacy `userName` field.
+ *   was the proximate cause of popup-on-every-browser-startup. This impl uses the
+ *   chosen account's `username` (always the UPN), then `userSettings.userPrincipalName`,
+ *   and never the display-name `userName` field.
  */
 export class BrowserMsalStrategy implements AuthStrategy {
   readonly name = 'browser-msal';
@@ -116,6 +122,14 @@ export class BrowserMsalStrategy implements AuthStrategy {
   private readonly _msalConfig: Configuration;
   private readonly _scope: string;
   private readonly _requireSilentOnly: boolean;
+  /** Tenant of the authority; '' when the authority is not tenant-specific. */
+  private readonly _tenant: string;
+  /**
+   * The account that last produced a token on THIS page (homeAccountId + tenantId).
+   * In memory only: MSAL's persisted active account is deliberately not used,
+   * because on a shared browser it would carry user A's choice over to user B.
+   */
+  private _pageAccount: { homeAccountId: string; tenantId: string } | null = null;
   private _instance: PublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
 
@@ -128,7 +142,10 @@ export class BrowserMsalStrategy implements AuthStrategy {
       },
       cache: {
         cacheLocation: 'localStorage', // INV-1 — MUST be localStorage
-        storeAuthStateInCookie: true, // INV-2 — MUST be true for ssoSilent
+        // INV-2 — MUST stay true (pinned in spaarke-sso-binding.md). Per the MSAL docs it stores the
+        // auth request state needed to validate auth flows in cookies as well; it does not by itself
+        // make ssoSilent succeed (that depends on the tenant-specific authority, INV-3).
+        storeAuthStateInCookie: true,
       },
       system: {
         loggerOptions: {
@@ -139,6 +156,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
     };
     this._scope = config.bffApiScope;
     this._requireSilentOnly = config.requireSilentOnly;
+    this._tenant = tenantFromAuthority(config.authority) ?? normalizeTenant(config.tenantId) ?? '';
   }
 
   async acquire(): Promise<TokenResult> {
@@ -146,14 +164,14 @@ export class BrowserMsalStrategy implements AuthStrategy {
     if (!msal) return { accessToken: '', expiresOn: 0 };
 
     const scopes = [this._scope];
+    const account = this._pickAccount(msal);
 
     // 1. acquireTokenSilent — refresh-token-backed silent renewal
     try {
-      const accounts = msal.getAllAccounts();
-      console.info('[BrowserMsalStrategy] cached accounts:', accounts.length, 'scope:', this._scope);
-      if (accounts.length > 0) {
-        const result = await msal.acquireTokenSilent({ scopes, account: accounts[0] });
-        const token = this._validate(result);
+      console.info('[BrowserMsalStrategy] cached account:', account ? 'yes' : 'none', 'scope:', this._scope);
+      if (account) {
+        const result = await msal.acquireTokenSilent({ scopes, account });
+        const token = this._accept(result);
         if (token) return token;
       }
     } catch (err) {
@@ -162,10 +180,10 @@ export class BrowserMsalStrategy implements AuthStrategy {
 
     // 2. ssoSilent with UPN hint
     try {
-      const loginHint = resolveLoginHint(msal);
+      const loginHint = resolveLoginHint(account);
       console.info('[BrowserMsalStrategy] ssoSilent', loginHint ? `hint=${loginHint}` : '(no hint)');
       const result = await msal.ssoSilent({ scopes, loginHint });
-      const token = this._validate(result);
+      const token = this._accept(result);
       if (token) return token;
     } catch (err) {
       console.warn('[BrowserMsalStrategy] ssoSilent failed:', err);
@@ -187,10 +205,10 @@ export class BrowserMsalStrategy implements AuthStrategy {
     }
 
     try {
-      const loginHint = resolveLoginHint(msal);
+      const loginHint = resolveLoginHint(account);
       console.warn('[BrowserMsalStrategy] falling back to acquireTokenPopup (regression in steady state)');
       const result = await msal.acquireTokenPopup({ scopes, loginHint });
-      const token = this._validate(result);
+      const token = this._accept(result);
       if (token) return token;
     } catch (err) {
       console.warn('[BrowserMsalStrategy] acquireTokenPopup failed:', err);
@@ -223,7 +241,7 @@ export class BrowserMsalStrategy implements AuthStrategy {
     const msal = await this._ensureInitialized();
     if (!msal) return;
 
-    const account = msal.getAllAccounts()[0];
+    const account = this._pickAccount(msal) ?? undefined;
     try {
       await msal.logoutPopup({ account });
     } catch (err) {
@@ -242,6 +260,42 @@ export class BrowserMsalStrategy implements AuthStrategy {
   /** Expose the underlying MSAL instance so SpaarkeAuthProvider can resolve tenant ID from accounts. */
   getMsalInstance(): PublicClientApplication | null {
     return this._instance;
+  }
+
+  /**
+   * Choose the cached account for silent acquisition and the login hint (#1453):
+   *   1. the account that already produced a token on this page, if still cached;
+   *   2. the only cached account in the resolved tenant (or, when none is in the
+   *      tenant, the only cached account at all — a guest's home account can
+   *      still be redeemed silently for the tenant);
+   *   3. otherwise `null`: with several candidates the library cannot tell which
+   *      is the signed-in user (Xrm exposes no UPN or Entra object id —
+   *      `userSettings` has only the systemuser id and display name), so step 2
+   *      of acquire() lets ssoSilent use the browser's own Entra session instead.
+   * Outside a tenant authority (the degraded /organizations fallback) the first
+   * cached account is used, as before.
+   */
+  private _pickAccount(msal: PublicClientApplication): AccountInfo | null {
+    const accounts = msal.getAllAccounts();
+    const page = this._pageAccount;
+    if (page) {
+      const same = accounts.find(a => a.homeAccountId === page.homeAccountId && sameTenant(a.tenantId, page.tenantId));
+      if (same) return same;
+    }
+    if (!this._tenant) return accounts[0] ?? null;
+
+    const inTenant = accounts.filter(a => sameTenant(a.tenantId, this._tenant));
+    const candidates = inTenant.length > 0 ? inTenant : accounts;
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  /** Validate a result and, when it is usable, remember its account for this page. */
+  private _accept(result: AuthenticationResult | null): TokenResult | null {
+    const token = this._validate(result);
+    if (token && result?.account?.homeAccountId) {
+      this._pageAccount = { homeAccountId: result.account.homeAccountId, tenantId: result.account.tenantId };
+    }
+    return token;
   }
 
   /**
