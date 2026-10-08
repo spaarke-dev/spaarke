@@ -29,7 +29,9 @@ $ids = @(
   'b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
   'b!6BMp2UkK50GCP66tPeRxURG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
   'b!R6QrqcsZ_02U89YmOYM8qBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate 163b secure matter (deleted)
-  'b!juvuYNOcskGRJ96iMUBTeRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN'   # 2026-10-08 gate 166d secure project (deleted)
+  'b!juvuYNOcskGRJ96iMUBTeRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate 166d secure project (deleted)
+  'b!CtWYdqDTo0GSJGqApjHauRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate #1410 secure parent M (deleted)
+  'b!HMt6g1HOGEe9Jp1UZUDQrxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN'   # 2026-10-08 gate #1410 secure work assignment W1 (deleted)
 )
 foreach ($id in $ids) {
   try {
