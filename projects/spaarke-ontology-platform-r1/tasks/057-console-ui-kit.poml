@@ -4,7 +4,7 @@
     <title>Console UI kit in @spaarke/ui-components: reuse first, then EvidenceLine, StatusBar, RecordRow, AggregateCard</title>
     <phase>5 The worklist surface</phase>
     <gate>startable (012 complete)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared UI components; each must pass the section 11 gate individually.</rigor-reason>
     <model-tier>sonnet</model-tier>

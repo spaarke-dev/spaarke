@@ -33,9 +33,9 @@
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) final round | agent `a67ad20f7bead7126` | Main session reads the diff → ask owner to merge → mark 098 ✅ (065 lands with it) → start **106** and **068** (`a17154f00e69eeced`) |
-| **#1382** (057) round 2 | agent `a18a719c189250af3` | Read diff → ask owner to merge → 057 ✅ |
-| **#1384** (060) round 2 | agent `a17154f00e69eeced` | Read diff → ask owner to merge (after #1359; one header-comment conflict) → 060 ✅ |
-| **056** WizardShell on SprkModal | agent `af7588b2ed6612c5f` (own PR) | Review → ask owner → then 111/112/113/114 |
+| ~~#1382 (057)~~ | **MERGED** `418914d69` (owner-approved) | 057 ✅ |
+| **#1384** (060) round 2 DONE `e69e99ab1`, CI green (High Priority now IsOpenWork too) | #1359 merging first | Rebase onto master (header-comment conflict: keep #1359 wording + "open work (IsOpenWork)") → ask owner to merge → 060 ✅ |
+| **056** → **PR #1386** green; deviations D1 dashed ring for skipped steps (owner-visible), D2 `legacySize` Path A (111 removes), D3 no onBeforeClose; filed #1388, #1392 | **independent review running** (`ad2f766533241683a`) | Owner-visible changes + merge question → then 111/112/113/114 |
 
 ### Agent IDs (SendMessage resumes a finished agent with its context)
 
