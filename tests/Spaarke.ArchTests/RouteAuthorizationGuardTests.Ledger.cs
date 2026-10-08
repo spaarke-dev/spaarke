@@ -353,6 +353,11 @@ public partial class RouteAuthorizationGuardTests
             "POST /no-access/enforce under the DelegationRuleFilter admin group (task 143): removes the direct POA shares one No "
             + "Access entry walls off; the filter's NoAccessEnforceRequest target is the sprk_noaccessentries row (Write on "
             + "the ENTRY; an absent entry and an unwritable one are the same 403)."),
+        new GovernedFile("Api/ExternalAccess/RecordNoAccessEndpoint.cs", Scope.RouteLevelGate,
+            "GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access (task 064, owner round 59 "
+            + "item 3): each route carries RecordRouteAccessAuthorizationFilter on its fixed entity set with the 'read' key "
+            + "(no Read, an absent record and any probe fault are the uniform 404); the entries are added only when the rights "
+            + "that same probe returned include Write (owner O2). Not on the admin group: DelegationRuleFilter demands Write."),
         new GovernedFile("Api/ExternalAccess/AssignedAccessSyncEndpoint.cs", Scope.GroupGated,
             "POST /assigned-access/sync, GET /assigned-access and POST /assigned-access/dismiss under the DelegationRuleFilter "
             + "admin group (task 142): the Assigned-To rule for one root record — Write on the RECORD; an unknown id and an "
@@ -656,7 +661,15 @@ public partial class RouteAuthorizationGuardTests
     // EndpointFiles() now selects by the scanner's own registration vocabulary (Map{Verb}, MapMethods, MapHealthChecks — a
     // file registering only MapMethods would have been invisible), and it reads code with comments AND string literals
     // blanked (a log message naming ".MapGet(" no longer counts).
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 118 (2026-10-08, unified-access-control-r2 task 064, owner round 59 item 3):
+    //
+    //   064  +1  Api/ExternalAccess/RecordNoAccessEndpoint.cs ADDED — GET /api/v1/records/{type}/{recordId}/no-access for
+    //            project, matter and work assignment: whether the record is Secure and under No Access (every caller with
+    //            Read; task 153's banner) and, for a caller who also holds Write, the covering entries (task 067). Governed
+    //            RouteLevelGate: each of its three routes carries RecordRouteAccessAuthorizationFilter on a constant entity
+    //            set. Pinned through the real pipeline by tests/integration/auth/UnifiedAccessControl/RecordNoAccessEndpointTests.cs.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

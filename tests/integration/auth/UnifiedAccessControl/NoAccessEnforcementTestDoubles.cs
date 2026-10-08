@@ -114,9 +114,13 @@ internal static class NoAccessEnforcementTestDoubles
                 ids.Count > limit ? (ids.Take(limit).ToList(), true) : (ids, false));
         }
 
+        /// <summary>Task 064: runs as the covering-entry query answers — throw to fault it, or change rows after it.</summary>
+        public Action? CoveringHook { get; set; }
+
         internal override Task<(IReadOnlyList<Guid> Ids, bool Truncated)> ReadActiveEntryIdsCoveringAsync(
             Guid recordId, IReadOnlyCollection<Guid> organizationIds, int max, CancellationToken ct)
         {
+            CoveringHook?.Invoke();
             var ids = Entries.Values
                 .Where(e => e.IsActive
                             && (e.Row.sprk_objectrecordid == recordId.ToString()
