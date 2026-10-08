@@ -58,11 +58,14 @@ export function buildInitialShellState(
  *   - indices < activeIndex  -> 'completed'
  *   - index === activeIndex  -> 'active'
  *   - indices > activeIndex  -> 'pending'
+ * A step already marked 'skipped' keeps that mark wherever it sits, unless it is the active step
+ * (ontology task 056 — a skipped step must not show a tick).
  */
 function rebuildStatuses(steps: IWizardShellStep[], activeIndex: number): IWizardShellStep[] {
   return steps.map((step, i) => {
-    if (i < activeIndex) return { ...step, status: 'completed' };
     if (i === activeIndex) return { ...step, status: 'active' };
+    if (step.status === 'skipped') return step;
+    if (i < activeIndex) return { ...step, status: 'completed' };
     return { ...step, status: 'pending' };
   });
 }
@@ -107,6 +110,22 @@ export function wizardShellReducer(state: IWizardShellState, action: WizardShell
       };
     }
 
+    // ----- SKIP_STEP --------------------------------------------------------
+    // Like NEXT_STEP, but the step being left is marked 'skipped' (no tick).
+    case 'SKIP_STEP': {
+      const nextIndex = state.currentStepIndex + 1;
+      if (nextIndex >= state.steps.length) return state; // already at last step
+
+      const marked = state.steps.map((s, i) =>
+        i === state.currentStepIndex ? { ...s, status: 'skipped' as const } : s
+      );
+      return {
+        ...state,
+        currentStepIndex: nextIndex,
+        steps: rebuildStatuses(marked, nextIndex),
+      };
+    }
+
     // ----- PREV_STEP --------------------------------------------------------
     case 'PREV_STEP': {
       const prevIndex = state.currentStepIndex - 1;
@@ -122,11 +141,14 @@ export function wizardShellReducer(state: IWizardShellState, action: WizardShell
     // ----- GO_TO_STEP -------------------------------------------------------
     case 'GO_TO_STEP': {
       const targetIndex = Math.max(0, Math.min(action.stepIndex, state.steps.length - 1));
+      const source = action.clearSkipped
+        ? state.steps.map(s => (s.status === 'skipped' ? { ...s, status: 'pending' as const } : s))
+        : state.steps;
 
       return {
         ...state,
         currentStepIndex: targetIndex,
-        steps: rebuildStatuses(state.steps, targetIndex),
+        steps: rebuildStatuses(source, targetIndex),
       };
     }
 
