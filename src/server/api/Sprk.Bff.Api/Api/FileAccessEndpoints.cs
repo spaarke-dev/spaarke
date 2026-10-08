@@ -396,6 +396,31 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        // POST /api/documents/resolve-email-identity — spaarkeai-word-add-in-r1 task 120 (UAT round 12 O6). The same
+        // DocumentIdentityResponse as resolve-identity, for the email open in Outlook: is it already saved to Spaarke,
+        // and to which record? The keys travel in the body (they identify a message in the caller's mailbox).
+        //
+        // Same two-filter shape as resolve-identity, and the order is the design:
+        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true,
+        //      sprk_emailmessageid = either key; app-only read). None: it returns 200 {resolved:false,
+        //      reason:"not_saved"} itself. Otherwise it writes that id into the route values as `documentId`.
+        //   2. DocumentAuthorizationFilter("read") — 403 with no metadata when the caller may not read THAT row. An older
+        //      copy the caller could read is not searched (no oracle; one authorization per request).
+        // No rate-limit policy, matching the sibling routes: the pane calls this once per open and after a save.
+        docs.MapPost("/resolve-email-identity", ResolveEmailIdentity)
+            .AddEndpointFilter<DocumentEmailIdentityFilter>()
+            .AddDocumentAuthorizationFilter("read")
+            .WithName("ResolveEmailDocumentIdentity")
+            .WithTags("File Access")
+            .WithDescription("Find the saved Spaarke document (.eml) of an Outlook email by its message id. " +
+                "resolved=false with reason not_saved (200) means it is not saved; 403 means the newest saved copy " +
+                "is not readable by the caller; 503 means it could not be determined.")
+            .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         return app;
 
         // Static local functions (method groups)
@@ -424,6 +449,30 @@ public static class FileAccessEndpoints
                 // Reachable only if this route's filters were removed or reordered.
                 throw new InvalidOperationException(
                     "resolve-identity reached its handler without a filter-resolved identity.");
+            }
+
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+        }
+
+        /// <summary>
+        /// POST /api/documents/resolve-email-identity (task 120). Reached only after
+        /// <see cref="DocumentEmailIdentityFilter"/> found the email's saved <c>.eml</c> AND
+        /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it; like <c>ResolveIdentity</c> it performs
+        /// no access check of its own (ADR-008). <paramref name="request"/> is bound so the filter can read it.
+        /// </summary>
+        static async Task<IResult> ResolveEmailIdentity(
+            ResolveEmailIdentityRequest? request,
+            IGenericEntityService dataverse,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            if (context.Items[DocumentUrlIdentityFilter.ResolutionItemKey]
+                is not Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity)
+            {
+                // Reachable only if this route's filters were removed or reordered.
+                throw new InvalidOperationException(
+                    "resolve-email-identity reached its handler without a filter-resolved identity.");
             }
 
             return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));

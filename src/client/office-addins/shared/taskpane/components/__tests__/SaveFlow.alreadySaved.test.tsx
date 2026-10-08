@@ -257,13 +257,13 @@ describe('SaveFlow — a document already in Spaarke (task 111)', () => {
   });
 
   describe('Copy Link', () => {
-    it('is hidden when there is neither a saved URL nor ORG_URL for the record link', () => {
+    it('is hidden without ORG_URL for the record link', () => {
       render(<Pane initial={FILED} />);
 
       expect(screen.queryByRole('button', { name: 'Copy Link' })).toBeNull();
     });
 
-    it("copies the document's Spaarke record link when no save happened this session", async () => {
+    it("copies the document's Spaarke record link", async () => {
       process.env.ORG_URL = ORG_URL;
       const writeText = jest.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useContext } from 'react';
 import type { EntitySearchResult } from './useEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
@@ -12,6 +12,8 @@ import {
 import { createSseConnection, type SseConnection, type SseEvent } from '../services/SseClient';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { toDocxFileName } from '../utils/documentFileName';
+import { EmailContentCaptureContext } from './emailContentCaptureContext';
+import type { EmailContentCapture } from '../services/emailContentCapture';
 
 /** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */
 const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -193,7 +195,10 @@ export interface SaveFlowContext {
   documentName?: string;
   /** Available attachments (Outlook only) */
   attachments: AttachmentInfo[];
-  /** Email body content (Outlook only) */
+  /**
+   * Email body content (Outlook only). NOT what the save sends: since task 116a the body is read live at submit
+   * through `EmailContentCaptureContext` (see `hooks/emailContentCaptureContext.ts`). Kept for `SaveFlow`'s prop.
+   */
   emailBody?: string;
   /** Sender email address (Outlook only) */
   senderEmail?: string;
@@ -395,6 +400,18 @@ export function buildIdempotencyCanonical(request: SaveRequest, version?: Versio
   });
 }
 
+/**
+ * `JSON.stringify` replacer for the request log: the email's text and every file's base64 are replaced by their
+ * length. The log is for the request's SHAPE; it must not copy a whole email or attachment into the console
+ * (task 116a — the email body and attachments now travel in the request).
+ */
+function redactContent(key: string, value: unknown): unknown {
+  if ((key === 'body' || key === 'contentBase64') && typeof value === 'string') {
+    return `[${value.length} chars]`;
+  }
+  return value;
+}
+
 /** Lowercase-hex SHA-256 of a string's UTF-8 bytes. */
 async function sha256Hex(text: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -488,6 +505,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   } | null>(null);
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
   const [savedDocumentUrl, setSavedDocumentUrl] = useState<string | null>(null);
+
+  // Task 116a: reads the email's body + attachments at submit, when the pane supplies a reader (SaveView).
+  const captureEmailContent = useContext(EmailContentCaptureContext);
 
   // Refs
   const sseConnectionRef = useRef<SseConnection | null>(null);
@@ -1025,14 +1045,25 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
               name: r.displayName,
             })) || [];
 
-          // Note: Email body and attachment content are retrieved server-side via Graph API
-          // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
+          // Task 116a: the body and the attachments (ALL of them — the .eml is the complete email; only the TICKED ones
+          // become Documents, via selectedAttachmentFileNames) are read HERE, in the add-in, at the moment this save
+          // submits (first Save and every retry). The server used to fetch them from the mailbox through Graph, which
+          // cannot reach a B2B guest's home-tenant mailbox — a guest's save stored a header-only .eml and no
+          // attachment documents. The server already prefers content the client sends and falls back to Graph only
+          // when the body is absent, which is what still happens when no reader is provided (older hosts, tests).
+          // A read failure THROWS here, inside the existing try/catch, so it surfaces as an ordinary save error and
+          // nothing is sent. Attachments that cannot be carried (too large, cloud links) come back in
+          // `captured.skipped`, which the provider (SaveView) shows; the rest of the save goes ahead.
+          const captured: EmailContentCapture | undefined = captureEmailContent
+            ? await captureEmailContent(context.attachments, selectedAttachmentIds)
+            : undefined;
 
-          // Get selected attachment filenames (for creating as Documents)
-          // Always send the list if email has attachments (even if empty array for "create no Documents")
-          // Send undefined only if email has no attachments at all
-          const selectedAttachmentFileNames =
-            context.attachments.length > 0
+          // Which attachments become Documents. Always sent when the email has attachments (an empty array means
+          // "create no Documents"); undefined only when it has none at all. With a capture, these are the names
+          // of the attachments actually sent (a skipped one is not in the .eml, so it cannot become a Document).
+          const selectedAttachmentFileNames = captured
+            ? captured.selectedAttachmentFileNames
+            : context.attachments.length > 0
               ? Array.from(selectedAttachmentIds)
                   .map(id => context.attachments.find(a => a.id === id)?.name)
                   .filter((name): name is string => !!name)
@@ -1049,9 +1080,13 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             senderName: context.senderDisplayName,
             recipients,
             sentDate: context.sentDate?.toISOString(),
-            body: undefined, // Retrieved server-side via Graph API
+            // Task 116a: read in the add-in. Undefined only without a reader — the server then fetches from Graph.
+            body: captured?.body,
             isBodyHtml: true,
-            internetMessageId: context.itemId, // Server uses this to fetch email via Graph
+            ...(captured ? { attachments: captured.attachments } : {}),
+            // Still sent: the server's idempotency key and the communication record use it, and it is the Graph
+            // fallback's lookup key when no content was captured.
+            internetMessageId: context.itemId,
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
           };
         } else if (contentType === 'Document') {
@@ -1143,7 +1178,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Task 040 / FR-B0: this is plain JSON, not SSE/XHR — routed through
         // `authenticatedJsonFetch` for a single-retry-on-401 (was a raw `fetch`
         // + Bearer literal with no retry).
-        console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
+        console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, redactContent, 2));
         const saveToken = await getAccessToken();
         const response = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/save`,
@@ -1239,6 +1274,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     },
     [
       apiBaseUrl,
+      captureEmailContent,
       cleanup,
       getAccessToken,
       includeBody,

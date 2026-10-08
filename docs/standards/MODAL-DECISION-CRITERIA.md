@@ -13,7 +13,7 @@
 Spaarke supports exactly **two** modal layouts across every surface. Everything else is either a variant, a wizard (separate concern), or an anti-pattern.
 
 - **Layout 1 (canonical default)** — `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName, entityId, formId? }, { target: 2, position: 1, width: {value: 85, unit: '%'}, height: {value: 85, unit: '%'} })`. OOB Dataverse form dialog at a **single fixed size (85% × 85%)** for every entity — do NOT vary per-entity. Used for every entity record row-click across Spaarke workspaces (Documents, Matters, Projects, Invoices, Work Assignments, Communications, To Do). The Spaarke DataGrid framework's `defaultRecordOpen` emits exactly this shape (see [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)).
-- **Layout 2 (justified exception)** — `RecordNavigationModalShell` + proprietary Fluent v9 content. Dimensions are content-driven, NOT the 85% × 85% Layout 1 standard. Reference case: [`RichFilePreviewDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx) for document preview (portrait shape `max-width: 1280px; height: 85vh` — matches PDF/Word paper aspect ratio). Layout 2 is justified by the "browse-in-context" or "content-shaped surface" cases; Layout 1 alone cannot serve them.
+- **Layout 2 (justified exception)** — `BrowseModal` / `PreviewModal` (the `SprkModal` family) + proprietary Fluent v9 content. Dimensions are content-driven, NOT the 85% × 85% Layout 1 standard. Reference case: [`RichFilePreviewDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx) for document preview (portrait shape `max-width: 1280px; height: 85vh` — matches PDF/Word paper aspect ratio). Layout 2 is justified by the "browse-in-context" or "content-shaped surface" cases; Layout 1 alone cannot serve them.
 - **Retired anti-pattern (Layout 3)** — iframe-hosted OOB `main.aspx` inside a proprietary shell. Contractually unsupported by Microsoft (see anti-pattern §4 below). The `SmartTodoModal` (retired 2026-07-01 by R2 FR-14) was the last Spaarke consumer.
 
 If you are opening a record and it does NOT fit Layout 1 or Layout 2, you are proposing new surface — surface a design conversation before shipping.
@@ -27,12 +27,14 @@ Read the question. Pick the first matching row.
 | Question | Modal to use |
 |---|---|
 | User needs the **full OOB main form** — business rules, subgrids, native ribbon, form scripts, save/save-and-close as authored by the maker? | **OOB `navigateTo`** (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" }, { target: 2 })`). No browse-in-context. Skip the rest. |
-| User needs to **page across a collection of records** (documents, tasks, matters) without close/reopen — read AND/OR light-edit? | **Proprietary Fluent v9 Dialog + [`RecordNavigationModalShell`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md)**. Compose per shell README quick start. |
+| User needs to **page across a collection of records** (documents, tasks, matters) without close/reopen — read AND/OR light-edit? | **`BrowseModal`** (`@spaarke/ui-components`) with `nav` + `onBeforeNavigate`; [`RecordNavigationModalShell`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md) supplies only the dirty-check protocol behind `onBeforeNavigate` (ADR-050, amended 2026-10-07). |
 | User needs to **preview a single document / file** with metadata sidebar and (optionally) 3-dot actions? | **[`RichFilePreviewDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx)** — already consumes the shell when nav props are supplied. Passes-through to browse when caller provides a collection. |
 | User needs to **choose between 2–4 mutually exclusive options** (e.g. "Create matter / Create project / Cancel")? | **[`ChoiceDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx)** (ADR-023 pattern). |
-| User needs a **multi-step wizard** with progressive disclosure (Create Matter, Create Todo, Work Assignment)? | **`WizardShell` from `@spaarke/legal-workspace`** (CreateRecordWizard family). NOT this doc's concern — see wizard patterns. |
-| User needs a **simple yes/no confirm**? | Fluent v9 `Dialog` with two buttons. Do NOT wrap `ChoiceDialog` for this. |
+| User needs a **multi-step wizard** with progressive disclosure (Create Matter, Create Todo, Work Assignment)? | **`WizardShell` from `@spaarke/ui-components`** — the ADR-050 wizard preset (amended 2026-10-07). See [`MODAL-DESIGN-SYSTEM.md`](MODAL-DESIGN-SYSTEM.md). |
+| User needs a **simple yes/no confirm**? | **`ConfirmModal`** (`@spaarke/ui-components`). Do NOT wrap `ChoiceDialog` for this. |
 | Default if no row above matched | **Ask.** Do not "just pick one." |
+
+**Launching** (ADR-050, amended 2026-10-07): from a Spaarke React surface (Console widgets, code pages, PCFs) open the modal or wizard **in-app** via the `SprkModal` family; from a model-driven **ribbon/command script** (no React host) use `navigateTo` — which draws white, light-only platform chrome that cannot be themed.
 
 If the answer is a proprietary Fluent v9 dialog, load [`.claude/patterns/ui/fluent-v9-component-authoring.md`](../../.claude/patterns/ui/fluent-v9-component-authoring.md) and the theming/portal patterns before writing new dialog code.
 
@@ -82,7 +84,7 @@ Every Spaarke modal falls into one of these three families. Know which family a 
 **Canonical examples**:
 - [`RichFilePreviewDialog.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx) — single-doc mode when nav props omitted
 - [`ChoiceDialog.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx) — 2–4 rich choices
-- [`FindSimilarDialog.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/) — near-fullscreen iframe of a Code Page
+- [`FindSimilarDialog.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/FindSimilarViewer/) — near-fullscreen iframe of a Code Page
 
 **Capabilities**:
 - ✅ Full control of chrome, layout, action bar, sizing
@@ -92,16 +94,17 @@ Every Spaarke modal falls into one of these three families. Know which family a 
 
 **Use when**: the content is a preview, a picker, a confirm, a custom UX surface, or an operation that doesn't map to a single Dataverse form.
 
-### Family 3 — Proprietary Fluent v9 dialog + `RecordNavigationModalShell` (browse across a set)
+### Family 3 — `BrowseModal` + `onBeforeNavigate` (browse across a set)
 
-**Entry point**: caller wraps [`RecordNavigationModalShell`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md) inside a Fluent v9 `<Dialog>` (or hosts the shell in a `Xrm.Navigation.navigateTo` Code Page modal per FR-17 launch context).
+*(Updated 2026-10-07 per the ADR-050 amendment, D-26.)*
 
-**What the shell provides**: `<` / `>` navigator + "N of M" counter + title + optional action-bar slot + cross-frame dirty-check protocol (with 1000ms timeout fallback).
+**Entry point**: `BrowseModal` from `@spaarke/ui-components` — the `SprkModal` preset whose header owns the `<` / `>` navigator and "N of M" counter (a single title/counter source). Launch in-app from a Spaarke React surface; `navigateTo` only from hostless ribbon scripts.
 
-**What the shell does NOT own**: the modal envelope, the content, or the record source. Caller supplies:
-- `currentIndex` + `navigationTotal` (from the caller's collection state)
-- `onNavigate(dir)` (updates caller's state → child content rebuilds)
-- Optional `dirtyCheckTargetWindow` (iframe `contentWindow`) if the child can veto navigation
+**Dirty-check**: [`RecordNavigationModalShell`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md)'s cross-frame dirty-check protocol (1000 ms timeout fallback) is wired through `BrowseModal.onBeforeNavigate`. The shell is a **protocol library**, not an envelope — do not nest it (that doubles the chrome); it has zero live envelope consumers.
+
+**The caller supplies**:
+- `nav={{ index, total, onNavigate }}` (from the caller's collection state)
+- optional `onBeforeNavigate` — veto navigation when the child has unsaved changes (e.g. via the iframe `contentWindow` dirty-check)
 
 **Capabilities**:
 - ✅ Browse-in-context across a collection (documents, tasks, matters, events)
@@ -175,13 +178,13 @@ Xrm.Navigation.navigateTo(
 
 ---
 
-## Worked example 2 — Family 3 (Proprietary + `RecordNavigationModalShell`)
+## Worked example 2 — Family 3 (browse across a set)
 
 **Surface**: LegalWorkspace matter dashboard; user clicks a document tile in the Documents widget.
 **Need**: preview the document with metadata sidebar, prev/next browse across the 25 documents on the matter, close-only from the dialog (no deep edit here — the user views, browses, closes).
 
 ```tsx
-// Consumer wraps RichFilePreviewDialog, which internally composes RecordNavigationModalShell
+// Consumer renders RichFilePreviewDialog with nav props for browse
 <RichFilePreviewDialog
   open={isOpen}
   onClose={handleClose}
@@ -238,7 +241,7 @@ The user's canonical ask: **"browse records in context without close/reopen for 
 
 The recommended composition:
 
-1. Family 3 (`RecordNavigationModalShell`) hosts the browse UX. Prev/next chevrons + counter + a **proprietary lightweight form** (read/light-edit) as the child content.
+1. Family 3 (`BrowseModal`) hosts the browse UX. Prev/next chevrons + counter + a **proprietary lightweight form** (read/light-edit) as the child content.
 2. The shell's `actionBar` slot renders an **"Open full form"** button.
 3. Clicking it calls `Xrm.Navigation.navigateTo(...)` to launch Family 1 (the OOB form) for the current record.
 4. On close of the OOB modal, the caller optionally refetches the current record's fields to reflect edits made in Family 1 back into the browse pane.
@@ -255,15 +258,15 @@ These are the failure modes this document exists to prevent.
 
 ### 1. Do not use OOB `navigateTo` when browse-in-context is the actual UX need
 
-If the user's task is "page through documents on this matter" and you open each one via `navigateTo`, you have forced the close/reopen pattern that Family 3 exists to eliminate. Use `RecordNavigationModalShell` — it is already built, tested, and shipped.
+If the user's task is "page through documents on this matter" and you open each one via `navigateTo`, you have forced the close/reopen pattern that Family 3 exists to eliminate. Use `BrowseModal` — it is already built, tested, and shipped.
 
 ### 2. Do not rebuild the "1 of N + prev/next" chrome per surface
 
-`RecordNavigationModalShell` provides it. Composing it takes a dozen lines. Rebuilding it per-surface fragments UX, duplicates accessibility work, and misses the dirty-check protocol.
+`BrowseModal`'s header provides it (with `RecordNavigationModalShell`'s dirty-check protocol behind `onBeforeNavigate`). Configuring it takes a dozen lines. Rebuilding it per-surface fragments UX, duplicates accessibility work, and misses the dirty-check protocol.
 
 ### 3. Do not use `ChoiceDialog` for yes/no confirms
 
-Use a plain Fluent v9 `Dialog` with two buttons. `ChoiceDialog` is for 2–4 rich options with icon + title + description (per ADR-023). A yes/no confirm has no icons and no descriptions — the visual weight is wrong.
+Use `ConfirmModal` (`@spaarke/ui-components`). `ChoiceDialog` is for 2–4 rich options with icon + title + description (per ADR-023). A yes/no confirm has no icons and no descriptions — the visual weight is wrong.
 
 ### 4. Do not iframe-embed OOB `main.aspx` as a standard pattern
 
@@ -307,7 +310,7 @@ The three checks below validate the criteria reach the right answer:
 - Consistency? Fluent v9 surrounds.
 - Support? Owned.
 
-**Verdict: Family 3 (`RichFilePreviewDialog` + `RecordNavigationModalShell`).** Screenshot 1 in the original conversation was correct usage for this scenario.
+**Verdict: Family 3 (`RichFilePreviewDialog` / `BrowseModal`).** Screenshot 1 in the original conversation was correct usage for this scenario.
 
 ### Scenario C — Corporate Workspace: user browses To Dos on a matter and needs to edit one
 
@@ -326,8 +329,8 @@ The three checks below validate the criteria reach the right answer:
 - **Record browser shell (component reference)** — [`RecordNavigationModalShell/README.md`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md) — authoritative component doc including dirty-check protocol and iframe-side contract
 - **Pattern pointer** — [`.claude/patterns/ui/record-modal-selection.md`](../../.claude/patterns/ui/record-modal-selection.md)
 - **Sibling data-access decision** — [`DATA-ACCESS-DECISION-CRITERIA.md`](DATA-ACCESS-DECISION-CRITERIA.md) (often paired: modal-triggering commands also decide `Xrm.WebApi` vs BFF)
-- **Shared-lib boundary** — [`ADR-012`](../../.claude/adr/ADR-012-shared-component-library.md) (shell components live in `@spaarke/ui-components`, NOT duplicated per solution)
-- **Fluent v9 constraint** — [`ADR-021`](../../.claude/adr/ADR-021-fluent-ui-v9.md) (all modals use Fluent v9 exclusively; no v8)
+- **Shared-lib boundary** — [`ADR-012`](../../.claude/adr/ADR-012-shared-components.md) (shell components live in `@spaarke/ui-components`, NOT duplicated per solution)
+- **Fluent v9 constraint** — [`ADR-021`](../../.claude/adr/ADR-021-fluent-design-system.md) (all modals use Fluent v9 exclusively; no v8)
 - **Choice-dialog pattern** — [`.claude/patterns/ui/choice-dialog-pattern.md`](../../.claude/patterns/ui/choice-dialog-pattern.md) (Family 2 / ADR-023)
 - **Fluent v9 portal gotcha** — [`.claude/patterns/ui/fluent-v9-portal-gotcha.md`](../../.claude/patterns/ui/fluent-v9-portal-gotcha.md) (dialog portal behavior)
 - **Anti-patterns catalog** — [`docs/standards/ANTI-PATTERNS.md`](ANTI-PATTERNS.md)

@@ -757,9 +757,10 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
       }
       if (detail.dueDate) {
-        const [y, m, d] = detail.dueDate.split('-').map(Number);
-        const dt = new Date(y, m - 1, d, 23, 59, 0);
-        payload['sprk_duedate'] = dt.toISOString();
+        // detail.dueDate is the picked calendar day, "YYYY-MM-DD" — the only shape the Date Only sprk_duedate accepts
+        // (spaarke-ontology-platform-r1 task 106; it sent toISOString() of 23:59 local). No surface dispatches
+        // QUICK_ADD_TODO_EVENT any more (Header.tsx) — the widget's quick-add is the live path.
+        payload['sprk_duedate'] = detail.dueDate;
       }
       void (async () => {
         try {

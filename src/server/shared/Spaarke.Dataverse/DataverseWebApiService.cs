@@ -390,7 +390,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardinginvoice_value,"
         + "_sprk_regardinganalysis_value,_sprk_regardingaccount_value,_sprk_regardingcontact_value,"
         + "_sprk_regardingworkassignment_value,_sprk_regardingbudget_value,"
-        + "sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,"
+        // Task 098: all six Date Only columns (calendar dates, read with DataverseDateOnly).
+        + "sprk_basedate,sprk_duedate,sprk_finalduedate,sprk_completeddate,sprk_approveddate,sprk_meetingdate,"
+        + "statecode,statuscode,sprk_priority,sprk_source,"
         + "createdon,modifiedon";
 
     /// <summary>
@@ -635,10 +637,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
 
         if (request.BaseDate.HasValue)
-            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
+            payload["sprk_basedate"] = DataverseDateOnly.Format(request.BaseDate.Value);
 
         if (request.DueDate.HasValue)
-            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
+            payload["sprk_duedate"] = DataverseDateOnly.Format(request.DueDate.Value);
 
         if (request.Priority.HasValue)
             payload["sprk_priority"] = request.Priority.Value;
@@ -720,19 +722,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     // ── sprk_event status: the live option set and its statecode pairing have ONE home, EventStatusCode (Models.cs) ──
     // (task 097 and unified-access-control-r2 task 159 fixed the same values independently; merged into one.)
 
-    public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+    public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateOnly? completedDate = null, CancellationToken ct = default)
     {
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["statuscode"] = statusCode
-        };
-
-        // The statecode the live statuscode belongs to (task 159); an unknown value throws (task 097).
-        payload["statecode"] = EventStatusCode.GetStateCode(statusCode);
-
-        if (completedDate.HasValue)
-            payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
+        var payload = BuildUpdateEventStatusPayload(statusCode, completedDate);
 
         _logger.LogInformation("Updating event status: {Id} -> {StatusCode}", id, statusCode);
 
@@ -740,6 +732,25 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event status updated: {Id}", id);
+    }
+
+    /// <summary>
+    /// The PATCH body for a status change. The statecode the live statuscode belongs to (task 159); an unknown value
+    /// throws (task 097). <c>sprk_completeddate</c> is Date Only (task 098): invariant <c>yyyy-MM-dd</c>, the only shape
+    /// the Web API accepts. Internal for tests.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildUpdateEventStatusPayload(int statusCode, DateOnly? completedDate)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["statuscode"] = statusCode,
+            ["statecode"] = EventStatusCode.GetStateCode(statusCode),
+        };
+
+        if (completedDate.HasValue)
+            payload["sprk_completeddate"] = DataverseDateOnly.Format(completedDate.Value);
+
+        return payload;
     }
 
     /// <summary><c>sprk_eventlog.sprk_eventlogname</c> length (live metadata).</summary>
@@ -2195,12 +2206,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? etName.GetString() : null,
             StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
             StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 1,
-            BaseDate = data.TryGetValue("sprk_basedate", out var bd) && bd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(bd.GetString()!) : null,
-            DueDate = data.TryGetValue("sprk_duedate", out var dd) && dd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(dd.GetString()!) : null,
-            CompletedDate = data.TryGetValue("sprk_completeddate", out var cd) && cd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(cd.GetString()!) : null,
+            // Task 098: calendar dates, read without local conversion ("yyyy-MM-dd"; a timestamp from a column not yet
+            // converted reads as its UTC date — the day the conversion keeps). DateTime.Parse moved them to server-local time.
+            BaseDate = DataverseDateOnly.Read(data, "sprk_basedate"),
+            DueDate = DataverseDateOnly.Read(data, "sprk_duedate"),
+            FinalDueDate = DataverseDateOnly.Read(data, "sprk_finalduedate"),
+            CompletedDate = DataverseDateOnly.Read(data, "sprk_completeddate"),
+            ApprovedDate = DataverseDateOnly.Read(data, "sprk_approveddate"),
+            MeetingDate = DataverseDateOnly.Read(data, "sprk_meetingdate"),
             Priority = data.TryGetValue("sprk_priority", out var pri) && pri.ValueKind != JsonValueKind.Null
                 ? pri.GetInt32() : null,
             Source = data.TryGetValue("sprk_source", out var src) && src.ValueKind != JsonValueKind.Null

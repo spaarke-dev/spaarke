@@ -319,6 +319,45 @@ public class NoAccessShareEnforcerTests
         _h.Shares.Writes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("{14314314-3143-1431-4314-314314314301}")] // braces: the record filter never matches it
+    [InlineData("14314314314314314314314314314301")]       // 32 digits, no hyphens
+    [InlineData(" 14314314-3143-1431-4314-314314314301")]  // leading space: the record filter never matches it
+    [InlineData("14314314-3143-1431-4314-314314314301\t")] // trailing tab: significant to Dataverse's comparison
+    public async Task Enforce_ARecordIdNotInTheCanonicalForm_IsMalformed_AndRemovesNothing(string storedId)
+    {
+        // Task 154: before, Guid.TryParse accepted these, so the share was removed while the read-time veto (string
+        // equality on the canonical id) never matched the entry: a wall that looked enforced and walled nothing.
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(
+            subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author, objectRecordIdText: storedId);
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Malformed);
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    [Theory]
+    [InlineData("14314314-3143-1431-4314-314314314301", "upper")]        // upper case: case-insensitive
+    [InlineData("14314314-3143-1431-4314-314314314301  ", "")]           // trailing spaces: padding
+    [InlineData("14314314-3143-1431-4314-314314314301\u3000", "")]      // trailing U+3000: width-insensitive padding
+    public async Task Enforce_ARecordIdTheVetoMatches_IsEnforced(string storedId, string casing)
+    {
+        // Dataverse's string comparison (measured live, task 154) matches these, so the read-time veto honours the entry
+        // and the enforcer must too: refusing them would make a working wall stop removing shares.
+        var stored = casing == "upper" ? storedId.ToUpperInvariant() : storedId;
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(
+            subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author, objectRecordIdText: stored);
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Evaluated);
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled && r.RecordId == SecureProject);
+    }
+
     [Fact]
     public async Task Enforce_WhenTheSharesCannotBeRead_IsAFailure_AndNothingIsReportedClean()
     {

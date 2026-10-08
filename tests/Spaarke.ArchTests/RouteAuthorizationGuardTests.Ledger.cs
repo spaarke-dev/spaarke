@@ -67,9 +67,10 @@ public partial class RouteAuthorizationGuardTests
     {
         // ---- the document / file-byte surface (task 074's original RouteLevelGate set) ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all eleven routes carry "
+            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all twelve routes carry "
             + "AddDocumentAuthorizationFilter (share-link since task 072; resolve-identity pairs DocumentUrlIdentityFilter "
-            + "with it; GET /{documentId}/identity since word-add-in task 112)."),
+            + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
+            + "DocumentEmailIdentityFilter with it since word-add-in task 120)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "
@@ -353,6 +354,11 @@ public partial class RouteAuthorizationGuardTests
             "POST /no-access/enforce under the DelegationRuleFilter admin group (task 143): removes the direct POA shares one No "
             + "Access entry walls off; the filter's NoAccessEnforceRequest target is the sprk_noaccessentries row (Write on "
             + "the ENTRY; an absent entry and an unwritable one are the same 403)."),
+        new GovernedFile("Api/ExternalAccess/RecordNoAccessEndpoint.cs", Scope.RouteLevelGate,
+            "GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access (task 064, owner round 59 "
+            + "item 3): each route carries RecordRouteAccessAuthorizationFilter on its fixed entity set with the 'read' key "
+            + "(no Read, an absent record and any probe fault are the uniform 404); the entries are added only when the rights "
+            + "that same probe returned include Write (owner O2). Not on the admin group: DelegationRuleFilter demands Write."),
         new GovernedFile("Api/ExternalAccess/AssignedAccessSyncEndpoint.cs", Scope.GroupGated,
             "POST /assigned-access/sync, GET /assigned-access and POST /assigned-access/dismiss under the DelegationRuleFilter "
             + "admin group (task 142): the Assigned-To rule for one root record — Write on the RECORD; an unknown id and an "
@@ -656,7 +662,15 @@ public partial class RouteAuthorizationGuardTests
     // EndpointFiles() now selects by the scanner's own registration vocabulary (Map{Verb}, MapMethods, MapHealthChecks — a
     // file registering only MapMethods would have been invisible), and it reads code with comments AND string literals
     // blanked (a log message naming ".MapGet(" no longer counts).
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 118 (2026-10-08, unified-access-control-r2 task 064, owner round 59 item 3):
+    //
+    //   064  +1  Api/ExternalAccess/RecordNoAccessEndpoint.cs ADDED — GET /api/v1/records/{type}/{recordId}/no-access for
+    //            project, matter and work assignment: whether the record is Secure and under No Access (every caller with
+    //            Read; task 153's banner) and, for a caller who also holds Write, the covering entries (task 067). Governed
+    //            RouteLevelGate: each of its three routes carries RecordRouteAccessAuthorizationFilter on a constant entity
+    //            set. Pinned through the real pipeline by tests/integration/auth/UnifiedAccessControl/RecordNoAccessEndpointTests.cs.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -905,6 +919,7 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddOfficeRateLimitFilter", "Office throughput limiter, explicitly fail-OPEN."),
         new NotAuthorizationForm("AddIdempotencyFilter", "Replays a cached response for a repeated client key."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentUrlIdentityFilter>", "Resolves a document URL to an id; the route's decision is its AddDocumentAuthorizationFilter."),
+        new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter(lambda)", "The one inline filter (OfficeEndpoints.cs:1521) validates Guid.Empty. An inline lambda is NEVER credited."),
         new NotAuthorizationForm("WithMetadata(new RequestSizeLimitAttribute)", "A request body size limit on the Compose save/mount routes."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateCreateEventRequestAsync)",
