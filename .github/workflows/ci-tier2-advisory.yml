@@ -600,12 +600,23 @@ jobs:
           }
           & pwsh -File $script
 
+      # Paths named in agent instruction files (CLAUDE.md, .claude/rules|constraints|patterns|adr, skills)
+      # must exist. Ratcheted: scripts/quality/instruction-paths.baseline.txt lists the known ones; only a
+      # NEW missing path fails. Root CLAUDE.md §16 "Enforcement ladder".
+      - name: Check paths named in instruction files
+        id: instrpaths
+        continue-on-error: true
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/quality/Test-InstructionPaths.ps1
+
       - name: Report result
         id: report
         if: always()
         shell: pwsh
         run: |
-          if ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
+          if ("${{ steps.instrpaths.outcome }}" -eq "failure") {
+            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
             "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {
             "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

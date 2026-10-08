@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-08 — Enforcement ladder: rules enforced by the build, not prose (enforcement-ladder-r1); root CLAUDE.md +955 bytes (17,606 injected, 186 lines)
+
+The common root cause behind the 2026-10 findings (dead `res.ok` branches after `authenticatedFetch`, detached tests, #975's 3-of-47 fix, module CLAUDE.md drift, the shared-stash incident): a rule in prose drifts and competes for attention, while a rule the build enforces reaches the agent at the line it just wrote. This makes that the default.
+
+- **Root §16 "Enforcement ladder"**: for any new rule, use the strongest mechanism that works — type → lint rule (`PostToolUse` lint shows it after every edit) → ArchTest/guard (`Stop` hook, CI) → hook/permission → prose with a reason. Record "Enforced by: …". New guards carry must-fire/must-not-fire controls and a ratchet baseline. Full checklist: `ai-procedure-maintenance` **Checklist G**; Checklist A (new ADR) gains item 12, Checklist F runs the path check.
+- **`task-execute` Step 9.5 rule 6 "Fix the class, not the instance"**: a pattern defect is searched repo-wide and fixed, guarded or listed.
+- **`code-review` Step 6.55 "Enforcement check"**: flags a new rule with no mechanism, a guard with no must-fire control, and a pattern fix with no class search.
+- **New check `scripts/quality/Test-InstructionPaths.ps1`** (CI Tier 2, advisory; also in `doc-drift-audit`): every backticked repo path in every instruction file must exist. Ratcheted — `scripts/quality/instruction-paths.baseline.txt` records the 37 dead paths found today (deleted PCFs, moved files); a new one fails. Gitignored build output, placeholders and package-relative `src/…` are skipped. Its own must-fire test caught a bug in it (every `src/` path was being skipped).
+- **`permissions.ask` on `git stash pop/apply/drop/clear`** (Bash + PowerShell, including `git -C <path> stash …`): the stash stack is shared by every worktree; a pop applied another session's stash on 2026-10-08. New **FAILURE-MODES G-18**.
+
+---
 ###### 2026-10-07 — Procedure calibration: guardrails, not caps (procedure-calibration-r1)
 
 The owner's rule: *"we want guardrails but not such strong constraints that we cause problems. A hard limit like 'maximum 2 fixes' or 'maximum 20 KB' limits the judgement that there may be legitimate situations that require the added resources."* An independent review sorted every numeric limit and absolute in the instruction set into platform fact / owner hard stop / trigger-written-as-cap / unbounded / fine. This entry fixes the caps and the open loops; safety rules (secrets and Key Vault, endpoint auth, the no-client-secret guard, tenant isolation, fail-closed, no plugins, "never drop a real defect") stay absolute.

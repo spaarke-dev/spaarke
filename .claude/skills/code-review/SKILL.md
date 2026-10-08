@@ -715,6 +715,21 @@ FLAG SEVERITIES:
 
 See: [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md) for full rules; [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) for the evidence base.
 
+### Step 6.55: Enforcement Check (Universal — CLAUDE.md §16 enforcement ladder)
+
+```
+WHEN the change adds or changes a RULE (an ADR MUST/MUST NOT, a constraint, a FAILURE-MODES entry,
+a project standing directive) OR fixes a defect caused by a repeatable pattern:
+  - Is the rule enforced by the strongest mechanism that works (type → lint → ArchTest/guard →
+    hook/permission → prose)? Prose-only needs a one-line reason it cannot be mechanised.
+  - Does a new guard carry must-fire and must-not-fire controls, and a ratchet baseline if it found
+    existing violations?
+  - For a pattern fix: did the author search for other instances and fix, guard or list them
+    (task-execute Step 9.5 rule 6)?
+FLAG: missing mechanism or missing class search → Warning (Suggestion when the rule is genuinely
+  unmechanisable and says why). A guard with no must-fire control → Warning: it may never fire.
+```
+
 ### Step 6.6: Component Justification Check (Universal — CLAUDE.md §11)
 
 **This step extends Step 6.5 (BFF Hygiene) to ANY new component, not just BFF.** It enforces root CLAUDE.md §11 "Component Justification — Default to Reuse" at code-review time.

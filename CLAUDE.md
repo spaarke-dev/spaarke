@@ -176,11 +176,11 @@ For Microsoft and AI platform topics where training data may be stale (Azure AI 
 Configured in `.claude/settings.json`:
 - `PostToolUse` on Edit runs `scripts/quality/post-edit-lint.sh`; `Stop` runs `scripts/quality/task-quality-gate.sh`.
 - `SessionStart` with the `compact` matcher runs `.claude/hooks/reinject-project-state.ps1`, which re-injects the current project's `current-task.md` and its standing-directive and gotcha sections after compaction. It finds the project from the `work/<project>` branch or the `spaarke-wt-<project>` worktree folder.
-- `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9).
+- `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9), and `git stash pop/apply/drop/clear` — the stash stack is shared by every worktree, so a pop can apply another session's work.
 
 Other enforcement runs in skills (`task-execute`, `code-review`, `adr-check`), CI (`.github/workflows/`) and `doc-drift-audit` at project transitions.
 
-Add a hook or permission rule only for a narrow, high-frequency check that runs in under 5 seconds with no false positives. Prefer an `ask` rule (the human confirms) over `deny` for policies that change over time.
+**Enforcement ladder.** A rule in prose drifts and competes for attention; a rule the build enforces reaches the agent at the line it just wrote. When a lesson, ADR rule, constraint or bug fix creates a rule, enforce it with the strongest mechanism that works: a **type** the compiler checks → a **lint rule** (shown after every edit by the `PostToolUse` hook) → an **ArchTest / source-scan guard** (`Stop` hook and CI) → a **hook or permission rule** → **prose**, only with a one-line reason it cannot be mechanised. Record it with the rule ("Enforced by: …"). A new guard ships with must-fire and must-not-fire controls and, when it finds existing violations, a ratchet baseline (new violations fail; known ones are listed and worked down). Hooks and permission rules stay narrow — under 5 seconds, no false positives — and prefer `ask` over `deny` for policies that change over time. Detail: `ai-procedure-maintenance` Checklist G.
 
 ## 17. Before you … read … (triggers)
 

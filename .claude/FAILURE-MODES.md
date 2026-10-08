@@ -1123,3 +1123,16 @@ every read that carries a value — and in-memory doubles that serialize the sha
 **Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
 
 ---
+
+### G-18: `git stash pop` in one worktree applies ANOTHER session's stash
+
+> **Added 2026-10-08** by the module-CLAUDE.md / procedure-calibration work. **Class**: shared mutable state between parallel agents.
+
+**What happens.** The stash stack lives in the shared `.git` directory, so every worktree and every session sees one stack. A session that pushes its own stash and then pops "the top" can get a stash another session pushed in between. On 2026-10-08 a verification agent's before/after script did exactly that: its `pop` applied the customer-provisioning session's stash (seven files) into the agent's worktree and removed it from the list. Nothing was lost only because that session had already committed the same work. The stash list showed hundreds of dropped stashes from four parallel projects that week.
+
+**Rule.**
+- Agents and workflow scripts never use `git stash`. To set changes aside, copy files or make a temporary WIP commit on your own branch.
+- A human session that must stash uses `git stash push -u -m "<unique-tag>"`, records the SHA, restores with `git stash apply <sha>`, and drops its own entry by tag.
+- **Enforced by:** `permissions.ask` on `git stash pop/apply/drop/clear` (`.claude/settings.json`, root §16) — the human confirms each one.
+
+---

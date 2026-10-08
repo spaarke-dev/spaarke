@@ -58,7 +58,15 @@
       "PowerShell(Remove-AzKeyVaultSecret *)",
       "PowerShell(Undo-AzKeyVaultSecretRemoval *)",
       "PowerShell(Set-AzKeyVaultSecret *ClientSecret*)",
-      "PowerShell(Set-AzKeyVaultSecret *client-secret*)"
+      "PowerShell(Set-AzKeyVaultSecret *client-secret*)",
+      "Bash(git *stash pop*)",
+      "Bash(git *stash apply*)",
+      "Bash(git *stash drop*)",
+      "Bash(git *stash clear*)",
+      "PowerShell(git *stash pop*)",
+      "PowerShell(git *stash apply*)",
+      "PowerShell(git *stash drop*)",
+      "PowerShell(git *stash clear*)"
     ],
     "allow": [
       "Read(**)",
