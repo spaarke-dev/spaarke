@@ -1082,19 +1082,21 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        run.Writes++;
         if (outcome.Warning is { } warning)
         {
-            // ADR-003: the core wrote, but the grant does not confer access (a row lapsed between this read and the
-            // core's). Never reported as Granted: a failure, and nothing in the ledger changes, so the next pass decides
-            // again from fresh reads.
+            // ADR-003: the grant does not confer access (a row lapsed between this read and the core's). This call sends
+            // no date then (a date is sent only when nothing conferred), so since task 113 the core refused before
+            // writing: nothing changed. Never reported as Granted: a failure, and nothing in the ledger changes, so the
+            // next pass decides again from fresh reads (and, seeing nothing conferring, sends a date).
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was written but confers no access ({Warning}); " +
-                "not recorded as granted.", run.Logical, run.RootId, subject, warning);
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was not written — the existing grant has lapsed " +
+                "and confers no access ({Warning}); not recorded as granted.", run.Logical, run.RootId, subject, warning);
             run.Fail(subject, "grant-not-conferring",
-                $"Access for {subject} on this record was written but does not take effect yet. The next update will try again.");
+                $"Access for {subject} on this record was not put in place yet: their existing grant has lapsed. The next update will try again.");
             return;
         }
+
+        run.Writes++;
 
         var survivorExpiry = expiry
             ?? (active.Count > 0
