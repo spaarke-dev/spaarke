@@ -4,6 +4,7 @@ import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-ico
 import { ModalWindowControls } from '../ModalWindowControls/ModalWindowControls';
 import { ModalScrollArea } from './ModalScrollArea';
 import { getSurfaceStyle, SIZE_SPEC, type SprkModalSize, type SprkModalLayout } from './sizes';
+import { useSidePaneLayering } from './sidePaneLayering';
 import type { SprkModalProps } from './SprkModal.types';
 
 export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProps } from './SprkModal.types';
@@ -35,16 +36,21 @@ let sprkModalTitleIdCounter = 0;
 // Room left at the right edge for the platform's lookup side pane while
 // `yieldToSidePane` is on: at least the pane's width, more on wide windows.
 const SIDE_PANE_CLEARANCE = 'max(440px, 34vw)';
-const SIDE_PANE_YIELD_STYLE: React.CSSProperties = {
-  marginLeft: 'auto',
-  marginRight: SIDE_PANE_CLEARANCE,
-  maxWidth: `calc(100vw - ${SIDE_PANE_CLEARANCE} - 16px)`,
+// Dimmed and click-through while yielding, wherever the modal sits.
+const SIDE_PANE_DIM_STYLE: React.CSSProperties = {
   // `filter`, not `opacity`: newer Fluent animates the surface's opacity with a persisted Web Animation, which
   // overrides an inline opacity. Brightness, not opacity: the surface stays solid (owner test 2026-10-07 — a
   // see-through modal let the form's text show through it). Works in light and dark themes. Pointer input is
   // blocked here; keyboard focus is blocked by `inert` (see below).
   filter: 'brightness(0.75)',
   pointerEvents: 'none',
+};
+// The fallback when the lookup pane cannot be placed above the modal: dock left of it.
+const SIDE_PANE_DOCK_STYLE: React.CSSProperties = {
+  ...SIDE_PANE_DIM_STYLE,
+  marginLeft: 'auto',
+  marginRight: SIDE_PANE_CLEARANCE,
+  maxWidth: `calc(100vw - ${SIDE_PANE_CLEARANCE} - 16px)`,
 };
 
 const useStyles = makeStyles({
@@ -173,6 +179,8 @@ export const SprkModal: React.FC<SprkModalProps> = ({
     if (surfaceInert) el.setAttribute('inert', '');
     else el.removeAttribute('inert');
   }, [surfaceInert, open]);
+  // Owner test 2026-10-07: the lookup pane opens ON TOP of the modal when it can be layered above it; else dock left.
+  const layering = useSidePaneLayering(surfaceInert && open, surfaceRef);
 
   React.useEffect(() => {
     if (!open) setMaximized(false);
@@ -233,13 +241,13 @@ export const SprkModal: React.FC<SprkModalProps> = ({
         ref={surfaceRef}
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
         // `hidden` keeps the surface mounted (state preserved) but out of the way
-        // of a page-level native lookup pane; `yieldToSidePane` keeps it visible,
-        // docked left of the pane and dimmed — see the two prop docs.
+        // of a page-level native lookup pane; `yieldToSidePane` keeps it visible
+        // and dimmed, under the pane or docked left of it — see the two prop docs.
         style={
           hidden
             ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' }
             : yieldToSidePane
-              ? { ...surfaceStyle, ...SIDE_PANE_YIELD_STYLE }
+              ? { ...surfaceStyle, ...(layering === 'dock' ? SIDE_PANE_DOCK_STYLE : SIDE_PANE_DIM_STYLE) }
               : surfaceStyle
         }
         aria-labelledby={titleId}

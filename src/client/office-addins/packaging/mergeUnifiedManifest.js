@@ -226,7 +226,9 @@ function assertPackageInvariants(manifest) {
   const assertSingleScope = (label, node) => {
     const nodeScopes = node.requirements && node.requirements.scopes;
     if (!Array.isArray(nodeScopes) || nodeScopes.length !== 1 || !scopes.includes(nodeScopes[0])) {
-      throw new ManifestMergeError(`${label} must be scoped to exactly one of the package's hosts (${scopes.join(', ')}).`);
+      throw new ManifestMergeError(
+        `${label} must be scoped to exactly one of the package's hosts (${scopes.join(', ')}).`
+      );
     }
   };
 
@@ -244,7 +246,9 @@ function assertPackageInvariants(manifest) {
         for (const control of group.controls || []) {
           claim('control', control.id);
           if (control.actionId && !seen.action.has(control.actionId)) {
-            throw new ManifestMergeError(`Control "${control.id}" points at action "${control.actionId}", which no runtime declares.`);
+            throw new ManifestMergeError(
+              `Control "${control.id}" points at action "${control.actionId}", which no runtime declares.`
+            );
           }
         }
       }
@@ -259,7 +263,10 @@ function assertPackageInvariants(manifest) {
  * @param {object} word     Word unified manifest, placeholders already substituted
  * @param {object} options
  * @param {string} options.appId     the PACKAGE id — a GUID of its own (not an XML add-in id, not the Entra id)
- * @param {string} options.clientId  the Entra app registration (client) id — goes in webApplicationInfo.id ONLY
+ * @param {string} options.clientId  the Entra app registration (client) id — used ONLY to refuse it as the package id.
+ *   The package carries no `webApplicationInfo` (task 115): the add-in never uses Office SSO (sign-in is
+ *   @spaarke/auth NAA), and that entry made a customer tenant's deployment ask to consent to Spaarke's
+ *   single-tenant app (AADSTS700016). Tokens are issued by Spaarke's tenant, where the consent already exists.
  * @param {string} options.version   3-part version (the unified manifest rejects 4-part)
  * @param {{mail: string, document: string}} options.legacyXmlIds  the <Id> of each host's LIVE XML add-in, to hide
  * @param {{mail: string, document: string}} options.legacyXmlPermissions  each live XML add-in's <Permissions> value;
@@ -274,12 +281,16 @@ function mergeUnifiedManifest(outlook, word, options) {
     );
   }
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new ManifestMergeError(`Package version "${version}" must be 3-part (e.g. 1.1.0); the unified manifest rejects 4-part.`);
+    throw new ManifestMergeError(
+      `Package version "${version}" must be 3-part (e.g. 1.1.0); the unified manifest rejects 4-part.`
+    );
   }
   const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   for (const [host, id] of Object.entries({ mail: legacyXmlIds.mail, document: legacyXmlIds.document })) {
     if (!guid.test(id || '')) {
-      throw new ManifestMergeError(`legacyXmlIds.${host} must be the GUID <Id> of the live ${host} XML add-in; got "${id}".`);
+      throw new ManifestMergeError(
+        `legacyXmlIds.${host} must be the GUID <Id> of the live ${host} XML add-in; got "${id}".`
+      );
     }
   }
   const reserved = new Set([clientId, legacyXmlIds.mail, legacyXmlIds.document].map(v => String(v).toLowerCase()));
@@ -288,15 +299,6 @@ function mergeUnifiedManifest(outlook, word, options) {
       `The package id ${appId} must be its OWN GUID — not the Entra client id and not a live XML add-in id. ` +
         `Reusing an XML id is unsupported for the unified manifest, and reusing the client id is the ` +
         `conflation task 078 removed.`
-    );
-  }
-
-  const outlookResource = outlook.webApplicationInfo && outlook.webApplicationInfo.resource;
-  const wordResource = word.webApplicationInfo && word.webApplicationInfo.resource;
-  if (outlookResource !== wordResource) {
-    throw new ManifestMergeError(
-      `Outlook and Word call different BFF resources (${outlookResource} vs ${wordResource}); one package ` +
-        `carries one webApplicationInfo, so they must agree.`
     );
   }
 
@@ -363,8 +365,12 @@ function mergeUnifiedManifest(outlook, word, options) {
     authorization: {
       permissions: {
         resourceSpecific: unionPermissions(
-          (outlook.authorization && outlook.authorization.permissions && outlook.authorization.permissions.resourceSpecific) || [],
-          (word.authorization && word.authorization.permissions && word.authorization.permissions.resourceSpecific) || []
+          (outlook.authorization &&
+            outlook.authorization.permissions &&
+            outlook.authorization.permissions.resourceSpecific) ||
+            [],
+          (word.authorization && word.authorization.permissions && word.authorization.permissions.resourceSpecific) ||
+            []
         ),
       },
     },
@@ -391,13 +397,15 @@ function mergeUnifiedManifest(outlook, word, options) {
         ],
       },
     ],
-    webApplicationInfo: {
-      // The Entra client id. Deliberately NOT the package id: the two are different things that happened to
-      // share one value in the standalone Outlook manifest (see webpack.config.js).
-      id: clientId,
-      resource: outlookResource,
-    },
   };
+  // Task 115: no `webApplicationInfo` — see the clientId note above. A source manifest that brings one back would
+  // re-break customer-tenant deployment, so it is refused rather than silently dropped.
+  if (outlook.webApplicationInfo || word.webApplicationInfo) {
+    throw new ManifestMergeError(
+      'A source manifest declares webApplicationInfo. The package must not: it makes deployment in a customer ' +
+        "tenant ask to consent to Spaarke's single-tenant app (AADSTS700016), and the add-in does not use Office SSO."
+    );
+  }
 
   assertPermissionParity(merged.authorization.permissions.resourceSpecific, legacyXmlPermissions);
   if (merged.validDomains.length === 0) delete merged.validDomains;

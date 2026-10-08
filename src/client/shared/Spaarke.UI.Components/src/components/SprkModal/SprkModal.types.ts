@@ -68,9 +68,11 @@ export interface SprkModalProps {
   /**
    * When `true`, the modal stays MOUNTED and VISIBLE while a page-level native
    * side pane (the `Xrm.Utility.lookupObjects` advanced-lookup pane, which opens
-   * at the right edge of the window) is open: the surface moves left so its
-   * right edge clears the pane, narrows to fit, dims, and is `inert` (no pointer
-   * or keyboard input) until the flag is cleared. The modal reads as sitting behind the lookup
+   * at the right edge of the window) is open: it dims and is `inert` (no pointer
+   * or keyboard input) until the flag is cleared, and its page layer drops just
+   * below the pane's so the pane opens ON TOP of it (`sidePaneLayering.ts`).
+   * When the pane cannot be layered above it, the surface moves left so its
+   * right edge clears the pane instead. The modal reads as sitting behind the lookup
    * instead of disappearing (owner test feedback 2026-10-07, Manage Access).
    * Used together with `nonBlocking`. Ignored when `hidden` is `true`. Default `false`.
    */
