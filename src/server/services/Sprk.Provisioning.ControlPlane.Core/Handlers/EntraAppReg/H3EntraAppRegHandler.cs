@@ -40,11 +40,9 @@
 //     would either (a) produce cross-customer BU membership, or (b) rely on a filter that
 //     the D-12 §3 "filter, not a boundary" rule rejects everywhere else. Full mechanism +
 //     rejected counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
-//   - `Model1Shared` const (line ~129) + `IsRecognizedTenancyModel` acceptance of it are
-//     UNCHANGED — post-task-222 the tenancy STRING remains valid, and H3 routes both
-//     values through the same per-customer creation path. Item 2 (the shared TenancyModel
-//     enum + parse-or-reject) is a separate atomic change that removes the string
-//     literal comparisons everywhere.
+//   - (Task 222 kept the `Model1Shared` const and `IsRecognizedTenancyModel`; task 223
+//     deleted both — see the note above the options field below. Tenancy is parsed once
+//     by TenancyModelParser; H3 has one per-customer creation path for both models.)
 //
 // SCOPE DEVIATION #1 (14 AppRoleAssignedTo grants — Path C, comply with the
 // MORE AUTHORITATIVE source): design.md §4.1's H3 SDK-surface table (line

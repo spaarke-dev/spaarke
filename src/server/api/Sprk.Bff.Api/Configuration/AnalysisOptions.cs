@@ -193,8 +193,9 @@ public class AnalysisOptions
 public enum RagDeploymentModel
 {
     /// <summary>
-    /// Shared index with tenant filtering (Model 1).
-    /// Cost-effective for small to mid-size customers.
+    /// The configured knowledge index (AiSearch:KnowledgeIndexName) with tenant filtering. Every customer
+    /// stamp runs this (the default): its index is the stamp's own canonical index, created by H2b. The name
+    /// predates D-12, when Model 1 shared one index across customers.
     /// </summary>
     Shared,
 

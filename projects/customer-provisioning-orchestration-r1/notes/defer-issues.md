@@ -128,6 +128,27 @@ UAC-r2 decides the marker identity (or a demo prefix the standing pass ignores) 
 `RemoveMarkedGrantAsync`. Provisioning side (ours): configuring a demo container also needs it owned by the hosting
 BFF (`SharePointEmbedded__OwnedContainerIds` or the `spaarkeCustomerId` marker), or Step 8 is skipped (T227d).
 
+### ISS-006 — RAG `DefaultRagModel = Dedicated` reads an index nothing creates
+
+| Field | Value |
+|---|---|
+| **Status** | Open — BFF code (not this project's surface) |
+| **Urgency** | before anyone sets `Analysis__DefaultRagModel` on a stamp |
+| **Filed** | 2026-10-08 (found in T235) |
+| **Source** | T235 doc sweep — the BYOK guide told operators to set `Dedicated` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1432 |
+
+**Description**
+
+`Shared` (the default) reads `AiSearch:KnowledgeIndexName` (`spaarke-files-index`, created by H2b in the stamp's own
+AI Search). `Dedicated` reads `{tenantId}-knowledge`, which nothing creates, so setting it breaks every RAG search that
+does not name its index. No stamp sets it today. The two docs that advised it were corrected in T235.
+
+**Suggested fix**
+
+Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
+`AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
+
 ---
 
 ## Resolved

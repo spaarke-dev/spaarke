@@ -38,7 +38,7 @@ namespace Sprk.Provisioning.ControlPlane.Models;
 /// per <c>customer.bicep</c>; the former Model 1 shared vault is retired).
 /// </param>
 /// <param name="SecretName">
-/// Secret name inside the vault (e.g. <c>customer-{customerId}-bff-client-secret</c>
+/// Secret name inside the vault (e.g. <c>Communication-Webhook-SigningKey</c>
 /// per the canonical KV secret naming from r3 task 063).
 /// </param>
 /// <param name="VersionId">

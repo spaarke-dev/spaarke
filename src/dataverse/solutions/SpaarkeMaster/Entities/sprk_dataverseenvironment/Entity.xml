@@ -1661,6 +1661,7 @@
           <IsFilterable>0</IsFilterable>
           <IsRetrievable>0</IsRetrievable>
           <IsLocalizable>0</IsLocalizable>
+          <AppDefaultValue>-1</AppDefaultValue>
           <optionset Name="new_sprk_dataverseenvironment_sprk_tenancymodel">
             <OptionSetType>picklist</OptionSetType>
             <IntroducedVersion>1.0</IntroducedVersion>
@@ -1694,7 +1695,7 @@
             <displayname description="Tenancy Model" languagecode="1033" />
           </displaynames>
           <Descriptions>
-            <Description description="Deployment tenancy tier. Model1Shared (trial/SMB — shared platform floors per §3A A1). Model2Dedicated (regulated/enterprise — dedicated stamp per D3). Drives Bicep stack composition (model1-shared.bicep vs model2-full.bicep) + handler behavior differences (§4.1a). FR-26 v3 addition (design.md §3A A1 / §6.1)." languagecode="1033" />
+            <Description description="Deployment tenancy tier per D-12. Model1 (Spaarke-hosted dedicated stamp — customer environment lives in Spaarke's Azure tenant + subscription; Profile 'spaarke-hosted-model2'). Model2 (customer-hosted dedicated stamp — customer environment lives in the customer's Azure tenant + subscription; Profile 'customer-owned-model2'). Drives handler behavior differences (§4.1a). Renamed 2026-09-29 by Task 224 (INCOMING §5 Item 3) from pre-D-12 labels 'Model1Shared'/'Model2Dedicated'; integer values 0/1 preserved for schema stability. FR-26 v3 addition (design.md §3A A1 / §6.1)." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_tenantid">

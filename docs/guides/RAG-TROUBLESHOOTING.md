@@ -928,7 +928,7 @@ az rest --method PUT \
 
 **Cause**: The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
-**Resolution**: Set `Analysis__DefaultRagModel=Dedicated` and point `AiSearch:Endpoint` at the stamp's own AI Search service.
+**Resolution**: Remove the `Analysis__DefaultRagModel` setting (the default `Shared` reads the stamp's own `AiSearch:KnowledgeIndexName`, which H2b creates) and point `AiSearch:Endpoint` at the stamp's own AI Search service. Do not set `Dedicated`: it reads `{tenantId}-knowledge`, which no provisioning step creates (corrected 2026-10-08, T235).
 
 ---
 
