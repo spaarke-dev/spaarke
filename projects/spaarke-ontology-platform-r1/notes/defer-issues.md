@@ -259,6 +259,71 @@ unreachable, delete `useKeyboardShortcuts.ts` + `PageChrome/CommandBar.tsx` + it
 
 ---
 
+### ISS-008 — `OntologyPlatformSolution` held 11 core tables whole (export would overwrite them)
+
+> Numbered ISS-008 because ISS-007 is already used in the main worktree's uncommitted copy of this file.
+
+| Field | Value |
+|---|---|
+| **Status** | Done (fixed 2026-10-08 00:09 UTC, owner decision D-60) |
+| **Urgency** | now |
+| **Filed** | 2026-10-07 |
+| **Source** | Stream C2, task 047 live describe of `sprk_workassignment` (its solution list) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1385 (closed, completed) |
+
+**Description**
+
+In spaarkedev1, `OntologyPlatformSolution` held `sprk_budget`, `sprk_communication`, `sprk_document`, `sprk_event`,
+`sprk_invoice`, `sprk_matter`, `sprk_project`, `sprk_recordtype_ref`, `sprk_servicerequest`, `sprk_todo` and
+`sprk_workassignment` as whole-entity components with rootcomponentbehavior 0. They were added when this project's
+lookups to them were created under the solution header. **Failure mode**: an export ships those tables' every column,
+form, view and ribbon as they are in dev. An unmanaged import overwrites the target's customizations; a managed import
+layers over core tables this project does not own.
+
+**Fix (done)**: `RemoveSolutionComponent` ×11 (references only; nothing deleted). The project's own
+`sprk_servicerequest` columns from task 001 were re-added as attribute components. 17 → 10 components. Evidence:
+[`d60-solution-hygiene.md`](d60-solution-hygiene.md).
+
+**Entry-points**: `GET /api/data/v9.2/solutioncomponents?$filter=_solutionid_value eq f258ed0a-a6be-f111-aaad-7c1e520a989f`
+
+**Prevention**: when a lookup from an ontology table to another domain's table is created under
+`MSCRM.SolutionUniqueName: OntologyPlatformSolution`, re-check the solution's component list afterwards. Remove any
+foreign table it picked up with rcb 0.
+
+**Estimated effort**: done (≈1 hour)
+**Blockers**: none
+**Related**: D-60 · task 047 · `notes/007-schema-verification.md` (solution membership)
+
+---
+
+### ISS-009 — G5 AppendTo check denies every business-owned lookup target (systemuser/`team)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owned by unified-access-control-r2) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-07 |
+| **Source** | Stream C2, follow-up to PR #1391 (D-68) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1399 |
+
+**Description**
+
+After #1391, OwnedChildWrite.CheckCallerMayAppendToAsync answers AppendTo for user/team-owned targets
+(RetrievePrincipalAccess) and organization-owned targets (table AppendTo privilege + a caller read). Business-owned
+tables (systemuser, `team, `businessunit, measured live in spaarkedev1) fit neither path, so a lookup to them is
+denied with the uniform not-found for every caller. **Failure mode**: fails closed (nothing over-granted). No current
+browser create sends such a lookup; the chat dataverse.create_record tool and any future create that does will be refused.
+
+**Why not in #1391**: for business-owned tables Dataverse checks AppendTo at a depth relative to the target's business
+unit; choosing that rule is uac-r2's access-model call, and getting it wrong over-grants. The issue carries a suggested fix.
+
+**Entry-points**: src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs (CheckCallerMayAppendToAsync)
+
+**Estimated effort**: small once uac-r2 picks the depth rule
+**Blockers**: uac-r2 decision
+**Related**: #1391 · D-68 · task 046 (work-assignment create, if it sends a user/team lookup) · task 048 (moves this file)
+
+---
 ## Deferred scope
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
@@ -288,7 +353,9 @@ Not built in R1: per-source freshness (sources, last sync, cadence) and the land
 | **C-17** to-do due-date tier scheme | **3/7/10 days.** | This branch (Do lane). |
 | Cleanup placement rule | Fix everything, never defer to issues; items unrelated to ontology go to their own PRs grouped by area. | See `notes/cleanup-placement-plan.md`. |
 
-### ISS-007 — Triage category resolution ignores `statecode` and `sprk_enabled`
+### ISS-010 — Triage category resolution ignores `statecode` and `sprk_enabled`
+
+> Renumbered from a duplicate ISS-007 on 2026-10-07 (ISS-007 is the source-freshness deferral, #1381; ISS-008/009 were taken).
 
 | Field | Value |
 |---|---|
