@@ -30,15 +30,18 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
     private readonly ITemplateEngine _templateEngine;
     private readonly IGenericEntityService _entityService;
     private readonly ILogger<QueryDataverseNodeExecutor> _logger;
+    private readonly TimeProvider _clock;
 
     public QueryDataverseNodeExecutor(
         ITemplateEngine templateEngine,
         IGenericEntityService entityService,
-        ILogger<QueryDataverseNodeExecutor> logger)
+        ILogger<QueryDataverseNodeExecutor> logger,
+        TimeProvider? clock = null)
     {
         _templateEngine = templateEngine;
         _entityService = entityService;
         _logger = logger;
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions need not supply one
     }
 
     /// <inheritdoc />
@@ -140,7 +143,28 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
 
             var config = JsonSerializer.Deserialize<QueryDataverseNodeConfig>(context.Node.ConfigJson!, JsonOptions)!;
             var userId = ResolveUserId(context);
-            var resolvedFetchXml = ResolveFetchXmlVariables(config.FetchXml!, config.Parameters, userId);
+            // Task 098: {{todayUtc}} / {{dueSoonWindowUtc}} feed Date Only comparisons — the run's USER's local
+            // calendar date (Dataverse time zone), when the run has a user; otherwise the UTC date. In orchestrated
+            // runs the orchestrator renders these tokens from the run parameters first (PlaybookSchedulerJob supplies
+            // them per user), so this applies only when the tokens reach the executor unrendered — and the zone is
+            // read only then, never on every run.
+            var now = _clock.GetUtcNow();
+            var today = DateOnly.FromDateTime(now.UtcDateTime);
+            var usesDateToken = config.FetchXml!.Contains("{{todayUtc}}", StringComparison.Ordinal)
+                || config.FetchXml.Contains("{{dueSoonWindowUtc}}", StringComparison.Ordinal);
+            if (usesDateToken && Guid.TryParse(userId, out var userGuid) && userGuid != Guid.Empty)
+            {
+                string? fallback;
+                (today, fallback) = await Spaarke.Dataverse.DataverseUserTimeZone
+                    .TodayForUserAsync(_entityService, userGuid, now, cancellationToken).ConfigureAwait(false);
+                if (fallback is not null)
+                {
+                    _logger.LogWarning(
+                        "QueryDataverse node {NodeId}: the run user's time zone could not be read; {{todayUtc}} is the UTC date ({Reason})",
+                        context.Node.Id, fallback);
+                }
+            }
+            var resolvedFetchXml = ResolveFetchXmlVariables(config.FetchXml!, config.Parameters, userId, today, now);
 
             if (userId is not null)
                 resolvedFetchXml = ReplaceEqUserIdOperator(resolvedFetchXml, userId);
@@ -207,16 +231,22 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
         return null;
     }
 
-    private static string ResolveFetchXmlVariables(string fetchXml, QueryParameters? parameters, string? userId)
+    /// <summary>
+    /// Substitutes the FetchXML template variables. <paramref name="today"/> is the run user's local calendar date
+    /// (task 098) — <c>{{todayUtc}}</c> keeps its name because live node configs use it; <c>{{timeWindowStartUtc}}</c>
+    /// stays an instant (it filters date-and-time columns). Internal for tests.
+    /// </summary>
+    internal static string ResolveFetchXmlVariables(
+        string fetchXml, QueryParameters? parameters, string? userId, DateOnly today, DateTimeOffset now)
     {
-        var now = DateTime.UtcNow;
         var dueSoonDays = parameters?.DueSoonDays ?? DefaultDueSoonDays;
         var timeWindowHours = parameters?.TimeWindowHours ?? DefaultTimeWindowHours;
         var resolved = fetchXml;
-        resolved = resolved.Replace("{{todayUtc}}", now.ToString("yyyy-MM-dd"));
-        resolved = resolved.Replace("{{dueSoonWindowUtc}}", now.AddDays(dueSoonDays).ToString("yyyy-MM-dd"));
-        resolved = resolved.Replace("{{timeWindowHours}}", timeWindowHours.ToString());
-        resolved = resolved.Replace("{{timeWindowStartUtc}}", now.AddHours(-timeWindowHours).ToString("yyyy-MM-ddTHH:mm:ssZ"));
+        resolved = resolved.Replace("{{todayUtc}}", Spaarke.Dataverse.DataverseDateOnly.Format(today));
+        resolved = resolved.Replace("{{dueSoonWindowUtc}}", Spaarke.Dataverse.DataverseDateOnly.Format(today.AddDays(dueSoonDays)));
+        resolved = resolved.Replace("{{timeWindowHours}}", timeWindowHours.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        resolved = resolved.Replace("{{timeWindowStartUtc}}",
+            now.UtcDateTime.AddHours(-timeWindowHours).ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture));
         if (userId is not null)
             resolved = resolved.Replace("{{run.userId}}", userId);
         return resolved;

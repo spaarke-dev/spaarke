@@ -28,7 +28,10 @@ public sealed record EntityMetadataDto(
 /// <remarks>
 /// <c>Format</c> is the attribute's format (e.g., <c>Text</c>, <c>Email</c>, <c>Url</c>, <c>DateOnly</c>) when
 /// the SDK exposes one for the attribute type; <c>null</c> otherwise. <c>OptionSet</c> is populated only for
-/// picklist/state/status attributes; <c>null</c> for everything else.
+/// picklist/state/status attributes; <c>null</c> for everything else. <c>DateTimeBehavior</c> is the DateTime column's
+/// behaviour (<c>UserLocal</c> / <c>DateOnly</c> / <c>TimeZoneIndependent</c>), <c>null</c> for other types: a
+/// <c>DateOnly</c>-behaviour value is a calendar date (<c>yyyy-MM-dd</c>) the grid must not read as a UTC instant
+/// (spaarke-ontology-platform-r1 task 098). <c>Format = DateOnly</c> alone does not say that.
 /// </remarks>
 public sealed record AttributeDto(
     string LogicalName,
@@ -36,7 +39,8 @@ public sealed record AttributeDto(
     string? Format,
     bool IsPrimaryName,
     bool IsPrimaryId,
-    OptionSetDto? OptionSet);
+    OptionSetDto? OptionSet,
+    string? DateTimeBehavior = null);
 
 /// <summary>
 /// Projected option-set metadata. Only <c>Value</c>, <c>Label</c>, and <c>Color</c> are kept; localized

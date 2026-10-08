@@ -104,17 +104,10 @@ public class TodoGenerationServiceTests
             _loggerMock.Object,
             options ?? _defaultOptions);
 
-        // Eagerly set the private _dataverse field via reflection so that internal
-        // methods (TodoExistsAsync, RunGenerationPassAsync, CreateTodoAsync) can
-        // exercise the Dataverse mock without running the full BackgroundService loop.
-        var dataverseField = typeof(TodoGenerationService)
-            .GetField("_dataverse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        dataverseField.SetValue(svc, _dataverseMock.Object);
-
-        // Same for _events (IEventDataverseService) — the real source for Rules 1 & 3.
-        var eventsField = typeof(TodoGenerationService)
-            .GetField("_events", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        eventsField.SetValue(svc, _eventsMock.Object);
+        // The internal seam (tests/CLAUDE.md B8 — no reflection into private fields) injects the Dataverse client and
+        // the event source (IEventDataverseService, the real source for Rules 1 & 3) that ExecuteAsync resolves lazily,
+        // so internal methods (TodoExistsAsync, RunGenerationPassAsync, CreateTodoAsync) run without the job host.
+        svc.SetDataverseForTest(_dataverseMock.Object, _eventsMock.Object);
 
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
@@ -141,7 +134,7 @@ public class TodoGenerationServiceTests
             Id = id ?? Guid.NewGuid(),
             Name = name,
             StatusCode = statusCode,
-            DueDate = dueDate,
+            DueDate = dueDate is { } due ? DateOnly.FromDateTime(due) : null, // task 098: EventEntity dates are DateOnly
             CreatedOn = DateTime.UtcNow,
             ModifiedOn = DateTime.UtcNow
         };

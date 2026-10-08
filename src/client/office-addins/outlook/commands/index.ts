@@ -14,6 +14,13 @@ import {
   type QuickSaveEmailContext,
   type QuickSaveRecipient,
 } from '@shared/taskpane/services/quickSaveHelpers';
+import {
+  captureEmailContent,
+  hostAdapterEmailReader,
+  EmailCaptureError,
+  type EmailContentCapture,
+} from '@shared/taskpane/services/emailContentCapture';
+import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 
 // Register global functions for Office to call
 declare global {
@@ -110,6 +117,31 @@ function readEmailContext(): QuickSaveEmailContext | null {
   };
 }
 
+/**
+ * Task 116a: read the email's body and attachments here, in the add-in, for the save — the server's Graph fetch
+ * cannot reach a B2B guest's home-tenant mailbox. Every attachment goes into the `.eml` (the complete email); the
+ * non-inline ones also become documents (inline images are part of the body, not files the sender attached).
+ * `undefined` when the host cannot read attachment content (no Mailbox 1.8 read access): then nothing is read and the
+ * server fetches the email through Graph as before — sending a body alone would switch that fetch off and lose the
+ * attachments.
+ */
+async function readEmailContent(): Promise<EmailContentCapture | undefined> {
+  const adapter = new OutlookAdapter();
+  await adapter.initialize();
+  if (!adapter.getCapabilities().canGetAttachments) return undefined;
+  const attachments = await adapter.getAttachments();
+  const documentsToCreate = new Set(attachments.filter(a => !a.isInline).map(a => a.id));
+  return captureEmailContent(hostAdapterEmailReader(adapter), attachments, documentsToCreate);
+}
+
+/** The outcome notice; names how many attachments were left out of the saved email — never silent. */
+function filedNotice(recordName: string, content: EmailContentCapture | undefined): string {
+  const filed = `Filed to ${notifiedName(recordName)}.`;
+  const skipped = content?.skipped.length ?? 0;
+  if (skipped === 0) return filed;
+  return `${filed} ${skipped === 1 ? '1 attachment was' : `${skipped} attachments were`} left out: too large, a cloud link or unreadable.`;
+}
+
 /** Open the taskpane programmatically, where the host supports it. */
 async function openTaskpane(): Promise<void> {
   try {
@@ -171,15 +203,29 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
       return;
     }
 
+    let content: EmailContentCapture | undefined;
+    try {
+      content = await readEmailContent();
+    } catch (error) {
+      // A read failure stops the save: nothing is posted (task 116a — never save an email without the content).
+      console.error('Quick save could not read the email:', error);
+      notifyError(
+        error instanceof EmailCaptureError
+          ? "Couldn't read this email or an attachment, so nothing was saved. Open Spaarke to try again."
+          : 'Could not read the current email.'
+      );
+      return;
+    }
+
     const idempotencyKey = await computeQuickSaveIdempotencyKey({
       kind: 'email',
       internetMessageId: context.internetMessageId,
       target: pre.predicted,
     });
-    const request = buildEmailSaveRequest(context, pre.predicted, idempotencyKey);
+    const request = buildEmailSaveRequest(context, pre.predicted, idempotencyKey, content);
     await apiClient.post('/api/office/save', request);
 
-    notifyInfo('spaarke_save', `Filed to ${notifiedName(pre.predicted.name)}.`);
+    notifyInfo('spaarke_save', filedNotice(pre.predicted.name, content));
   } catch (error) {
     console.error('Quick save failed:', error);
     notifyError('Failed to save email. Open Spaarke to try manually.');

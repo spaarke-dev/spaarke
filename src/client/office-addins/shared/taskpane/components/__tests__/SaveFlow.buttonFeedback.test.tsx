@@ -151,13 +151,16 @@ describe('SaveFlow — post-save button feedback (task 105)', () => {
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
   });
 
-  it('Copy Link: a clipboard failure shows "Couldn\'t copy" and announces the failure', async () => {
+  it('Copy Link: when every copy route fails, shows "Couldn\'t copy", announces it and shows the link to copy by hand', async () => {
     await saveAndWaitForSavedState();
     writeText.mockRejectedValue(new Error('denied'));
+    // Task 116: the selection-based fallback fails too.
+    document.execCommand = jest.fn(() => false);
 
     jest.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
     await act(async () => {
+      await Promise.resolve();
       await Promise.resolve();
     });
 
@@ -165,12 +168,28 @@ describe('SaveFlow — post-save button feedback (task 105)', () => {
     act(() => {
       jest.advanceTimersByTime(20);
     });
-    expect(screen.getByText('Failed to copy link')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't copy here. The link is shown below to copy by hand.")).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Document link — select and copy' })).toHaveValue(
+      'https://contoso.sharepoint.com/contentstorage/x/Brief.docx'
+    );
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
     act(() => {
       jest.advanceTimersByTime(2100);
     });
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
+  });
+
+  it('Copy Link: when Outlook on the web blocks the Clipboard API, the selection copy still copies (task 116)', async () => {
+    await saveAndWaitForSavedState();
+    writeText.mockRejectedValue(new DOMException('blocked by permissions policy', 'NotAllowedError'));
+    const execCommand = jest.fn(() => true);
+    document.execCommand = execCommand;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
+
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(execCommand).toHaveBeenCalledWith('copy');
+    expect(screen.queryByRole('textbox', { name: 'Document link — select and copy' })).not.toBeInTheDocument();
   });
 
   it('View Document: opens the record, shows "Opened", then reverts', async () => {

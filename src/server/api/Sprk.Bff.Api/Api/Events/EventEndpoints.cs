@@ -250,7 +250,7 @@ public static class EventEndpoints
     }
 
     private static IResult? ValidateCommonFields(
-        int? priority, int? regardingRecordType, Guid? regardingRecordId, DateTime? scheduledStart, DateTime? scheduledEnd)
+        int? priority, int? regardingRecordType, Guid? regardingRecordId, DateOnly? scheduledStart, DateOnly? scheduledEnd)
     {
         // Validate priority if provided — against the LIVE sprk_priority option set (task 097: the former 0..3 range is
         // not an option of the column, so every create carrying a priority was a Dataverse 400).
@@ -572,7 +572,7 @@ public static class EventEndpoints
     /// <summary>
     /// Gets a single event by its ID. The filter has established Read on sprk_events({id}).
     /// </summary>
-    private static async Task<IResult> GetEventByIdAsync(
+    internal static async Task<IResult> GetEventByIdAsync( // internal: EventDateOnlyTests executes the real handler (task 098)
         Guid id,
         HttpContext httpContext,
         IEventDataverseService dataverseService,
@@ -752,7 +752,10 @@ public static class EventEndpoints
                 : null,
             BaseDate = entity.BaseDate,
             DueDate = entity.DueDate,
+            FinalDueDate = entity.FinalDueDate,
             CompletedDate = entity.CompletedDate,
+            ApprovedDate = entity.ApprovedDate,
+            MeetingDate = entity.MeetingDate,
             StateCode = entity.StateCode,
             StatusCode = entity.StatusCode,
             Status = EventStatusCode.GetDisplayName(entity.StatusCode),
@@ -1157,6 +1160,8 @@ public static class EventEndpoints
         HttpContext httpContext,
         IEventDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        ICallerSystemUserResolver callerResolver,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1192,8 +1197,14 @@ public static class EventEndpoints
             var previousStatus = existing.Status;
             var actionTimestamp = DateTime.UtcNow;
 
+            // Task 098: sprk_completeddate is a calendar date — today in the completing user's own time zone, not the
+            // UTC date (a 23:49 Eastern completion was dated the next day). See EventCompletionDate.
+            var completedDate = await EventCompletionDate.ForCallerAsync(
+                httpContext.User, callerResolver, genericEntityService,
+                httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System, logger, ct);
+
             // Update status to Completed and set completed date
-            await UpdateEventStatusAsync(dataverseService, id, EventStatusCode.Completed, ct);
+            await UpdateEventStatusAsync(dataverseService, id, EventStatusCode.Completed, completedDate, ct);
 
             var newStatusDisplay = EventStatusCode.GetDisplayName(EventStatusCode.Completed);
 
@@ -1250,21 +1261,16 @@ public static class EventEndpoints
     /// Updates an event's status in Dataverse.
     /// </summary>
     /// <remarks>
-    /// Updates the statuscode field and, for completion, sets the completeddate.
+    /// Updates the statuscode field and, for completion, the completeddate the caller resolved
+    /// (<see cref="EventCompletionDate"/>, task 098).
     /// </remarks>
-    private static async Task UpdateEventStatusAsync(
+    private static Task UpdateEventStatusAsync(
         IEventDataverseService dataverseService,
         Guid id,
         int newStatusCode,
-        CancellationToken ct)
-    {
-        // Set completed date for completion status
-        DateTime? completedDate = newStatusCode == EventStatusCode.Completed
-            ? DateTime.UtcNow
-            : null;
-
-        await dataverseService.UpdateEventStatusAsync(id, newStatusCode, completedDate, ct);
-    }
+        DateOnly? completedDate,
+        CancellationToken ct) =>
+        dataverseService.UpdateEventStatusAsync(id, newStatusCode, completedDate, ct);
 
     /// <summary>
     /// Creates an Event Log entry for a state transition.
