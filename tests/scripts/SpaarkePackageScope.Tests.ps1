@@ -327,6 +327,9 @@ Describe 'Resolve-PackageImportPlan (T218f — H6 rules for Spaarke environments
         $a.Action | Should Be 'Refuse'; $a.Refusal | Should Be 'package-type-mismatch'
         (Resolve-PackageImportPlan -Installed (& $inst '1.0.0.0' $true) -PackageVersion '1.2.0.0' -Managed $false).Refusal | Should Be 'package-type-mismatch'
     }
+    It 'refuses an unreadable package version even when nothing is installed (as H6 does)' {
+        { Resolve-PackageImportPlan -Installed $null -PackageVersion 'latest' -Managed $true } | Should Throw 'Not a version'
+    }
     It 'refuses a downgrade' {
         $d = Resolve-PackageImportPlan -Installed (& $inst '1.10.0.0' $true) -PackageVersion '1.9.0.0' -Managed $true
         $d.Action | Should Be 'Refuse'; $d.Refusal | Should Be 'downgrade-refused'

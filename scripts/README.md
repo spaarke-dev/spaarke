@@ -645,7 +645,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 - `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
 - `-SkipBuild` — Shortcut for `-SkipPhase Build`
 - `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
-- `-ClientSecret` — Service principal client secret for Dataverse solution import (falls back to `SPAARKE_SP_CLIENT_SECRET` env var)
+- `-ClientSecret` — ignored since T218f (warns): Phase 3 imports SpaarkeMaster with your own az/pac sign-in
 
 **Pipeline Phases:**
 | Phase | Script Called | Description |

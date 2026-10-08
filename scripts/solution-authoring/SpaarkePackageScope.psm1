@@ -452,6 +452,8 @@ function Resolve-PackageImportPlan {
     #>
     param($Installed, [Parameter(Mandatory)][string]$PackageVersion, [Parameter(Mandatory)][bool]$Managed)
     $type = if ($Managed) { 'managed' } else { 'unmanaged' }
+    # H6 validates the package version before anything else, so an unreadable one is refused even on a fresh install.
+    [void](Compare-PackageVersion -A $PackageVersion -B $PackageVersion)
     $plan = { param($action, $refusal, $stage, $message) [PSCustomObject]@{ Action = $action; Refusal = $refusal; StageAndUpgrade = $stage; Message = $message } }
     if ($null -eq $Installed) { return & $plan 'Install' $null $false "Install SpaarkeMaster $PackageVersion ($type)." }
     $installedType = if ($Installed.Managed) { 'managed' } else { 'unmanaged' }

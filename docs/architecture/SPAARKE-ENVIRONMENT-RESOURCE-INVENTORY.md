@@ -96,8 +96,10 @@ the run's `solutionPackageType` is `unmanaged`, refuses a type switch and a down
 ship (H7). Binding rule: [ADR-027 §3–§4](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md);
 runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md); evidence:
 `projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`. **Replaced** (218b, 2026-10-07): H6's 9-entry
-`CanonicalSolutionCatalog`, 6 of whose solutions existed nowhere. `Deploy-DataverseSolutions.ps1` (used by `Deploy-Release.ps1`
-for Spaarke's own environments) still carries that list — filed as ISS-005.
+`CanonicalSolutionCatalog`, 6 of whose solutions existed nowhere. Spaarke's own environments followed in T218f
+(2026-10-08): `Deploy-Release.ps1` Phase 3 imports the same published package with H6's rules
+(`Import-SpaarkeMasterPackage.ps1`, typed by `config/environments.json`); `Deploy-DataverseSolutions.ps1` and its list are
+deleted (ISS-005 / #1401 resolved).
 
 ## Registry row (admin environment — Shared)
 

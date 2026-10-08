@@ -77,7 +77,7 @@ cross-*subscription* prohibition is load-bearing here.
 ## Constraints
 
 - **MUST** version-bump solutions before export
-- **MUST** import customer environments through provisioning H6 (the one package, typed per run); never by hand *(amended 2026-10-07 — replaces "MUST use `Deploy-DataverseSolutions.ps1`")*
+- **MUST** import customer environments through provisioning H6 (the one package, typed per run); never by hand *(amended 2026-10-07 — replaces "MUST use `Deploy-DataverseSolutions.ps1`")*. The interim/manual paths that predate a provisioning run (`Provision-Customer.ps1` step 7, the deployment guide's manual sequence) use `Import-SpaarkeMasterPackage.ps1` — the same published package and H6's rules, never a solution picked by hand *(2026-10-08, T218f)*
 - **MUST** import Spaarke's own environments (demo, …) from the same CI-published SpaarkeMaster, with H6's rules —
   `scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1` via `Deploy-Release.ps1` Phase 3, typed by
   `config/environments.json` `solutionPackageType` (`none` for the authoring environment). **MUST NOT** import into any

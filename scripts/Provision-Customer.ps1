@@ -928,6 +928,8 @@ function Invoke-Step7_ImportSolutions {
     }
 
     Write-Log "Target environment: $envUrl"
+    # Identities: the script READS the environment with your az sign-in and IMPORTS with pac's active profile — step 5
+    # makes that the service principal's profile for this environment. Both must reach the new environment.
     Write-Log "Calling Import-SpaarkeMasterPackage.ps1 (managed)..."
 
     & $deployScript -EnvironmentUrl $envUrl -PackageType managed

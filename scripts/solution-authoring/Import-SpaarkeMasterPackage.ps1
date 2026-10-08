@@ -20,7 +20,8 @@
        and fails unless it holds exactly that version and type.
 
     Identity: the operator's own az and pac sign-in (NFR-11) — no service principal, no secret. The storage read uses
-    `--auth-mode login` (Storage Blob Data Reader on the store); pac must be signed in with access to the target.
+    `--auth-mode login` (Storage Blob Data Reader on the store); the Dataverse reads use your az sign-in; the import
+    runs as pac's ACTIVE auth profile for the target — make sure both identities reach the environment.
 
 .PARAMETER EnvironmentUrl
     Target Dataverse environment URL. Never the authoring environment (spaarkedev1): SpaarkeMaster is authored there.
@@ -52,7 +53,8 @@ Import-Module (Join-Path $PSScriptRoot 'SpaarkePackageScope.psm1') -Force
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $managed = $PackageType -eq 'managed'
 
-if ($EnvironmentUrl -ieq $AuthoringEnvironmentUrl.TrimEnd('/')) {
+$hostOf = { param($u) ([Uri]$u).Host.ToLowerInvariant() -replace '\.api\.crm', '.crm' }
+if ((& $hostOf $EnvironmentUrl) -eq (& $hostOf $AuthoringEnvironmentUrl)) {
     throw "$EnvironmentUrl is the authoring environment — SpaarkeMaster is authored there and is never imported into it."
 }
 
@@ -79,10 +81,14 @@ Write-Host "    Published: SpaarkeMaster $($entry.version) — $blobName"
 
 # 2. The environment.
 Write-Host "==> Reading the installed SpaarkeMaster in $EnvironmentUrl" -ForegroundColor Cyan
-$token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
-if ($LASTEXITCODE -ne 0 -or -not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' first." }
-$headers = @{ Authorization = "Bearer $token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
-$get = { param($endpoint) Invoke-RestMethod -Uri "$EnvironmentUrl/api/data/v9.2/$endpoint" -Headers $headers -Method Get }.GetNewClosure()
+# A fresh token per read: the post-import check can run an hour after the first read (pac --async).
+$get = {
+    param($endpoint)
+    $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' with an identity that can read it." }
+    $headers = @{ Authorization = "Bearer $token"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    Invoke-RestMethod -Uri "$EnvironmentUrl/api/data/v9.2/$endpoint" -Headers $headers -Method Get
+}.GetNewClosure()
 $installed = Get-InstalledPackage -Get $get
 Write-Host ("    Installed: " + $(if ($installed) { "SpaarkeMaster $($installed.Version) ($(if ($installed.Managed) { 'managed' } else { 'unmanaged' }))" } else { 'none' }))
 
@@ -94,7 +100,10 @@ if ($plan.Action -eq 'AlreadyCurrent') { exit 0 }
 
 # 4. Import.
 $zip = Join-Path $work $blobName
-$pacArgs = @('solution', 'import', '--environment', $EnvironmentUrl, '--path', $zip, '--async', '--max-async-wait-time', "$MaxAsyncWaitMinutes")
+# The same options as H6's ImportSolutionAsync/StageAndUpgradeAsync: OverwriteUnmanagedCustomizations = true
+# (--force-overwrite) and PublishWorkflows = true (--activate-plugins) — DataverseWebApiSolutionImporter.
+$pacArgs = @('solution', 'import', '--environment', $EnvironmentUrl, '--path', $zip, '--async', '--max-async-wait-time', "$MaxAsyncWaitMinutes",
+    '--force-overwrite', '--activate-plugins')
 if ($plan.StageAndUpgrade) { $pacArgs += '--stage-and-upgrade' }
 if (-not $managed) { $pacArgs += '--publish-changes' }   # unmanaged changes take effect only once published
 
