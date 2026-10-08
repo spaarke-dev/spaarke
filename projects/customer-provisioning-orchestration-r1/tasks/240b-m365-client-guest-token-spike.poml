@@ -47,5 +47,7 @@
     <criterion testable="true">`notes/t240-plan.md` states the confirmed or changed discovery design.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-07">Test organization ready: Dewey Cheatham &amp; Howe PC (deweycheatham.onmicrosoft.com, tenant bc3aa7f4-…); guest ralph@deweycheatham.onmicrosoft.com Accepted in Spaarke's tenant (federated/ExternalAzureAD) and added to dev Dataverse by the owner. Remaining: Business Standard for desktop Outlook/Word; word-add-in-r1's diagnostics build; installing that manifest in the Dewey Cheatham tenant (Integrated apps). Details: notes/t240-plan.md "Test organization".</note>
+  </notes>
 </task>

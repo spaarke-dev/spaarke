@@ -77,6 +77,20 @@ invited as a guest to Spaarke's tenant. Finding: a Model 1 user's Outlook/Word r
 add-in must be installed there (by the customer's admin, Integrated apps) — a customer onboarding step to document in
 240c, and the test tenant exercises it.
 
+### Test organization — set up 2026-10-07 (owner, in the portals; checked read-only):**
+
+| Item | Value |
+|---|---|
+| Test organization (workforce tenant) | **Dewey Cheatham & Howe PC** · `deweycheatham.onmicrosoft.com` · tenant `bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b` · admin `admin@deweycheatham.onmicrosoft.com` |
+| Licenses | Microsoft 365 Business Basic × 2 (web/mobile Office only). Desktop Outlook/Word need Business Standard (recommended trial). |
+| Test user | `ralph@deweycheatham.onmicrosoft.com` (Ralph Dewey), licensed in the home tenant |
+| Guest in Spaarke's tenant | object `bc596ecd-b61c-43f7-8664-0f27a2267a67`, UPN `ralph_deweycheatham.onmicrosoft.com#EXT#@spaarke.onmicrosoft.com`, invitation **Accepted**, identity `federated/ExternalAzureAD`; no group membership |
+| Dataverse (dev) | added by the owner with a license and roles Spaarke Core User + Spaarke Add In User |
+| CLI access | private `AZURE_CONFIG_DIR` in the session scratchpad (never the shared az context) |
+
+The first test tenant (`spaarketestpartner`) was created as an External ID (CIAM) tenant by mistake — no Microsoft 365
+possible; the owner is deleting it (Azure resource in `rg-spaarke-dev`, next to the real `spaarkeextid`, which stays).
+
 ## Live actions (each owner-approved)
 
 | Date | Action | Result |
