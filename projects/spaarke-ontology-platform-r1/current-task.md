@@ -49,7 +49,7 @@
 | a17154f00e69eeced | 060/068 author — applying D-73 on #1413 | running |
 | aee49df31b5a7dc81 | Reviewer: #1384 rebase + #1413 | running |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
-| aa80f91b9ac7b3b76 | 112 author — text fixes F2-1/F2-2 on #1422 | running |
+| aa80f91b9ac7b3b76 | 112 author — #1422 accepted at `96b9d884f`; next: merge master after #1424, then owner merge question | idle |
 | a747ef8af51f83500 | Reviewer: PR #1422 (112) — done (text fixes F2-1/F2-2) | idle |
 | a9b2dd472c21a670c | 111 author — deployed; waits for owner live checks | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) — done | idle |

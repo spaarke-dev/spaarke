@@ -28,14 +28,12 @@ This note records the deviations required by POML step 7. Each entry gives what 
 | `CreateTodoWizard/todoWizardHostSupport.ts` (new), `src/solutions/CreateTodoWizard/src/main.tsx`, `LegalWorkspace/.../todo.registration.ts` | The To Do create broadcast and default-assignee lookup were inline in the code page. The in-app host needs both, so they moved verbatim into a shared module rather than being copied. The To Do widget shim imports the channel constants, replacing the "keep in lockstep" comment. |
 | `WorkspaceShell/index.ts`, `components/index.ts`, `CreateTodoWizard/index.ts` | Barrel exports. `InAppWizardHost` is exported from `components/index.ts`, not from the domain-free `Wizard` barrel, because it imports the five Create wizards. |
 
-## D4 — Fixed in passing (pre-existing defects found during review)
+## D4 — Review fixes
 
-- **`CreateRecordWizard`**: `config.resolveSpeContainerId().then(...)` had no `.catch`, so a failed lookup was an unhandled rejection in every host. It is now caught and logged; the id stays `''`. A test and a mutation check cover it.
-- **LegalWorkspace Get Started expand dialog**: `onClick={onCardClick[id]}` passed the MouseEvent as the first argument.
-  - Summarize Files read the event as `documentIds`, threw on `.join`, and never opened.
-  - Find Similar sent `documentId=[object Object]`.
-  - The dialog now closes first, then calls the handler with no arguments, so an in-app wizard no longer stacks over the open picker.
+- **`CreateRecordWizard`** (pre-existing, found in passing): `config.resolveSpeContainerId().then(...)` had no `.catch`, so a failed lookup was an unhandled rejection in every host. It is now caught and logged; the id stays `''`. A test and a mutation check cover it.
+- **LegalWorkspace Get Started expand dialog** (a consequence of in-app hosting, not a pre-existing defect): a card click now closes the picker before opening the wizard. Otherwise an in-app wizard would stack over the open picker, where the platform dialog used to sit over it. Nothing else about the cards changed.
   - No unit test: LegalWorkspace has no jest setup. Verified by build and by reading the code.
+  - **Correction (independent review of #1422, F2-1).** An earlier version of this note, the code comment, the PR body and the POML said the dialog passed its click event to the handlers, so that Summarize Files never opened and Find Similar sent `documentId=[object Object]`. That was wrong. `LegalWorkspace/src/components/GetStarted/ActionCard.tsx` calls `onClick()` with no arguments (:115-118, :125), on master too. Summarize Files already opened, and Find Similar already sent an empty `documentId`. All descriptions are corrected.
 - **WorkspaceGrid**: `getBffBaseUrl()` stays inside a try, as before, so an uninitialised config cannot become an unhandled rejection.
 
 ## D5 — Decisions inside the host
