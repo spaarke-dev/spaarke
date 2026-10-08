@@ -1448,7 +1448,7 @@ RUN PLAN
     H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201; incl. CORS shared client origins, T240a)
     H5        adopt the operator's Dataverse environment (URL rule + WhoAmI as the Worker identity; never creates — T228)
     H10       Dataverse application users + Graph parity (T228: before H6, which signs in as the BFF app it registers)
-    H6        Dataverse solutions import (8 solutions, dependency-ordered)
+    H6        Dataverse package import — ONE solution, SpaarkeMaster, managed by default (ADR-027 §3 amended 2026-10-07; T218b)
     H7        env-var writes to customer env
     H8        SPE root container in the model's container type (create or reuse; bound + marked; T227e)
     H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4 + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)

@@ -10,6 +10,11 @@
 > - [PRODUCTION-DEPLOYMENT-GUIDE.md](../guides/PRODUCTION-DEPLOYMENT-GUIDE.md) — First-time platform setup
 > - [INCIDENT-RESPONSE.md](../guides/INCIDENT-RESPONSE.md) — Production troubleshooting
 
+> ⚠️ **Customer environments (2026-10-07)**: customer environments receive SpaarkeMaster **managed by default** through
+> provisioning H6, never by a manual export/import (ADR-027 §3–§4, amended 2026-10-07). The unmanaged export/import in
+> this procedure applies only to Spaarke's own non-customer environments. Package, release, IAM and upgrade:
+> [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md).
+
 ---
 
 ## Overview

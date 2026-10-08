@@ -3,7 +3,7 @@
   <metadata>
     <title>ADR-027 §3 amended (managed by default, unmanaged on explicit instruction) + one "Managed solution IAM and upgrade runbook" replacing the contradicting package docs</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, D8, G11, G15); notes/t218-plan.md</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation and one ADR amendment; no code.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -63,5 +63,7 @@
     <criterion testable="true">The runbook covers scope rule, release, first import, upgrade (incl. removals, downgrade/type-switch refusal, H6-before-H9) and IAM.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-07">COMPLETED (SESSION 43). ADR-027 concise §3-§4 + constraints + key patterns rewritten; full ADR gains a 2026-10-07 amendment block (path B, D8) and marks the 2026-06-02 block superseded for Decisions 3+4 (body kept as history). SPAARKE-SOLUTION-RELEASE-PROCESS.md rewritten as the release/IAM/upgrade runbook (scope rule, git source, release steps, first import, upgrade table, IAM table, governance); behaviour not yet built is marked (218b-e) with today's state beside it. Corrected: deployment guide H6 row + §7.4, ci-cd-workflow.md (workflow row + section flagged as being replaced — it still describes the current file), production-release.md banner (customer envs = managed via H6), version-compatibility-matrix §3.2, provision-environment skill H6 line, inventory solution section + roles row (Copilot agent → T257). Remaining "8 solutions" lines are the matrix's dated v1 cell and the CI doc's description of the current workflow. IAM check: H10 registers the BFF app registration as System Administrator before H6 (H10DataverseAppUserGraphParityHandler.cs:300). Found for 218b: H13 writes sprk_solutionversion as a 32-hex fingerprint of ImportedSolutions (owner D17), so the package type needs its own place on the registry row or a fingerprint change.</note>
+  </notes>
 </task>

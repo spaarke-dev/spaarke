@@ -2,12 +2,48 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Accepted (amended 2026-06-02, 2026-09-28) |
+| **Status** | Accepted (amended 2026-06-02, 2026-09-28, 2026-10-07) |
 | **Date** | 2026-03-13 |
-| **Amended** | 2026-06-02 — managed-solution prescriptions softened to "future direction" (see amendment block below)<br>2026-09-28 — **Decision 1 replaced**: subscriptions are now separated **per customer**, not per environment. Answers this ADR's own open Context question 4. See the amendment block below. |
+| **Amended** | 2026-06-02 — managed-solution prescriptions softened to "future direction" (see amendment block below)<br>2026-09-28 — **Decision 1 replaced**: subscriptions are now separated **per customer**, not per environment. Answers this ADR's own open Context question 4. See the amendment block below.<br>2026-10-07 — **Decisions 3 + 4 replaced**: one solution `SpaarkeMaster`, **managed by default in customer environments, unmanaged only on explicit instruction**; git holds the unpacked source and CI publishes the zips. Supersedes the 2026-06-02 amendment. See the amendment block below. |
 | **Decision Makers** | Ralph Schroeder |
 | **Supersedes** | None |
 | **Related** | ADR-001 (Minimal API), ADR-006 (PCF over webresources), ADR-026 (Full-Page Custom Page) |
+
+---
+
+## 🟡 AMENDMENT 2026-10-07 — One package, managed by default (supersedes Decisions 3 + 4 and the 2026-06-02 amendment)
+
+> **Path**: CLAUDE.md §6.5 **path B**. **Decision**: owner D8, 2026-09-30 (customer-provisioning-orchestration-r1,
+> `notes/model1-dedicated-remediation-plan.md`). **Analysis**: `notes/t218-plan.md` in that project.
+
+### The amendment
+
+| Topic | Rule |
+|---|---|
+| Package | **One solution, `SpaarkeMaster`** (Microsoft ALM "single solution" pattern). Replaces the SpaarkeCore → SpaarkeWebResources → Tier 3 set. |
+| Scope | A **rule**, not a list: every `sprk` component in the authoring environment (spaarkedev1) + the `sprk_` columns on OOB tables − a committed exclusion list with a reason per entry. Drift is checked in both directions. |
+| Type | **Customer environments: managed by default.** Unmanaged **only on explicit instruction** (run parameter `solutionPackageType = unmanaged`, recorded on the registry row). **Dev: unmanaged.** |
+| Safety | Provisioning (H6) refuses to switch an environment's type and refuses a downgrade; nothing is imported. |
+| Values | Environment-variable **definitions** ship; **values never ship** (H7 writes them per customer). |
+| Source | Git holds the release **unpacked** (`src/dataverse/solutions/SpaarkeMaster/`, both types); CI packs the zips and publishes them with a manifest to the provisioning-artifacts store. No hand-built artifact. |
+| Upgrade | Re-run H6: `StageAndUpgrade`; a component removed from the package is deleted in managed environments, so every release note lists removals. The BFF deploy (H9) waits for H6. |
+| Import | Only through provisioning H6 — `Deploy-DataverseSolutions.ps1` retires. |
+
+### Why the 2026-06-02 practice is withdrawn
+
+The 2026-06-02 amendment recorded actual practice (unmanaged everywhere) when no customer environment existed. Customer
+environments now exist per customer (Decision 1), are run by Spaarke, and must not be edited in place; managed gives a
+locked, cleanly upgradable install. The owner decided managed by default with an explicit unmanaged exception for
+environments that must stay editable (D8).
+
+### What stays
+
+Decision 3's managed-for-customer intent and its migration caution: an environment already holding unmanaged
+SpaarkeMaster is not converted silently — H6 refuses, and a conversion is an owner-approved, backed-up operation.
+The 9/8-solution lists, `Deploy-DataverseSolutions.ps1` and the Phase 1–4 table below are history.
+
+Runbook: [`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md).
+Implementation: customer-provisioning-orchestration-r1 tasks 218b–218e (until they land, H6 still reads its old catalog).
 
 ---
 
@@ -124,7 +160,7 @@ subscriptions · Azure subscription-count limits become a real ceiling to track 
 
 ---
 
-## 🟡 AMENDMENT 2026-06-02 — Read this BEFORE the body
+## 🟡 AMENDMENT 2026-06-02 — ⛔ SUPERSEDED 2026-10-07 for Decisions 3 + 4 (see the 2026-10-07 block above); kept as history
 
 **Spaarke does NOT currently use Power Platform managed solutions in any environment.** All Dataverse customizations are deployed as unmanaged solutions, even in test/staging/prod.
 

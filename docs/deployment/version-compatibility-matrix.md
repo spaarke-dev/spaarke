@@ -79,11 +79,8 @@ Derived from the deployed `Sprk.Bff.Api` binary. Format:
 
 ### 3.2 Solution-set version (`sprk_solutionversion`)
 
-An **aggregate tag** representing the coordinated shipped combination of the 8 managed solutions per [design.md §11.1a](../../projects/customer-provisioning-orchestration-r1/design.md):
-
-- SpaarkeCore (Tier 1)
-- SpaarkeWebResources (Tier 2)
-- CalendarSidePane, DocumentUploadWizard, EventRibbons, EventDetailSidePane, EventsPage, LegalWorkspace (all Tier 3)
+An **aggregate tag** for the shipped Dataverse content. *(2026-10-07: the content is now ONE solution, `SpaarkeMaster`
+— ADR-027 §3 amended; the 8-solution set below the v1 cell is history. The tag then tracks the SpaarkeMaster version.)*
 
 Format: `S<YYYY>.<MM>[.<seq>]` — e.g. `S2026.08` is the August-2026 shipped set. Sequenced (`.1`, `.2`) if multiple sets ship in the same month. Individual solutions carry their own `<Version>` inside each `Other/Solution.xml` (Dataverse-visible); the aggregate is what H6 pins to the customer.
 

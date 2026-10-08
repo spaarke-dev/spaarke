@@ -76,7 +76,7 @@ Created by the operator before the provisioning run; the run verifies them and n
 | App user — the customer's **BFF app registration** (D-13) | Dedicated | `systemuser` where `applicationid` = the customer's `spaarke-bff-api-{customerId}` appId; System Administrator, root BU | **H10** | ✅ H3 creates one app registration per customer unconditionally (task 222, `H3EntraAppRegHandler.cs`) |
 | App user — the customer's **UAMI** | Dedicated | `systemuser` where `azureactivedirectoryobjectid` = UAMI **principalId** (never clientId); System Administrator, root BU | **H10** post-step; trap **T2** query verifies exactly one row | ✅ per-customer UAMI `mi-spaarke-{customerId}-prod` (`customer.bicep:214`) |
 | Graph app-role grants on the UAMI (~15) | Dedicated | Per [`GraphAppRoles.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs) | **H10** (trap **T3**) | ✅ — 11 of 14 null `AppRoleId` GUIDs must be completed before the first production customer (project MUST rule) |
-| Custom security roles `Spaarke User`, `Spaarke AI Analysis User`, `Spaarke AI Analysis Admin` | Dedicated (shipped in the solution) | Defined in the solution package | **H6** (solution import) | 🔲 **T218** — the package that ships them is being redefined (D7) |
+| Custom security roles `Spaarke User`, `Spaarke AI Analysis User`, `Spaarke AI Analysis Admin` | Dedicated (shipped in the solution) | Defined in the solution package | **H6** (solution import) | 🔲 **T218e** — roles ship in SpaarkeMaster; the hand-made "Spaarke Office Add In User" and "Secure Record Owner" move into it |
 | Customer users | Dedicated (guest accounts in Spaarke's tenant) | **B2B guests** (D2); access paid **pay-as-you-go** on the stamp subscription (`PRQ-C-11`) | **H11** | ✅ **T232** — invites (an existing guest reused, no second mail), adds each redeemed guest to `sprk-{customerId}-users`, makes it a Dataverse user with the Spaarke role. Live behaviour (on-demand user add under PAYG) is a T186 check |
 | Environment security group `sprk-{customerId}-users` | Dedicated | Entra security group set on the Dataverse environment — keeps other customers' guests out | Operator (`PRQ-C-10`); H11 adds members | ✅ T232 |
 | Email (Graph API mailbox configuration) | Dedicated | — | Configured per customer **outside this project** (D2) | Out of scope |
@@ -85,23 +85,18 @@ Created by the operator before the provisioning run; the run verifies them and n
 
 | Resource | Deployment | Naming | Created by | Status vs target |
 |---|---|---|---|---|
-| Spaarke Dataverse solution package | Dedicated (imported into each customer environment) | **To be defined by T218** | **H6** | 🔲 **T218** (D7) — see below |
+| Spaarke Dataverse solution package | Dedicated (imported into each customer environment) | **One solution, `SpaarkeMaster`** (publisher `Spaarke`, prefix `sprk`) — **managed by default, unmanaged on explicit instruction** | **H6** | 🔲 **T218b–e** — defined 2026-10-07 (ADR-027 §3 amended); H6 still reads the old 9-entry catalog until 218b |
 | 7 environment-variable **values** | Dedicated | `sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId` | **H7** | ✅ — `sprk_BffApiAppId` / `sprk_MsalClientId` carry the **customer's own** BFF app registration (D-13); `sprk_TenantId` is Spaarke's tenant for every Model 1 customer (I1 still forbids a hard-coded default) |
-| Per-customer M365 Copilot agent | Dedicated | — | TBD (INCOMING §9 Q2 answered: per customer) | 🔲 **T218** |
+| Per-customer M365 Copilot agent | Dedicated | — | TBD (INCOMING §9 Q2 answered: per customer) | 🔲 **T257** — an M365 package, not Dataverse content (split from T218) |
 
-**The solution package is to be designed, not inherited (D7).** Current state, to be replaced: H6 imports the 9
-prebuilt zips listed in [`Deploy-DataverseSolutions.ps1:170-191`](../../scripts/Deploy-DataverseSolutions.ps1)
-(`SpaarkeCore` → `SpaarkeWebResources` → `CalendarSidePane`, `DocumentUploadWizard`, `EventRibbons`,
-`EventDetailSidePane`, `EventsPage`, `LegalWorkspace` → `SpaarkeCorporateCounselApp`), looked up as `bin/*.zip`
-(`:435-438`). Only `spaarke_insights` is unpacked in source; `SpaarkeCorporateCounselApp` has no source folder; most
-`src/solutions/*` folders are code pages deployed as web resources outside H6. T218 decides the solution set, which
-code pages ship in which solution, and retires unused ones.
-
-**Managed by default, unmanaged on instruction (owner D8, 2026-09-30).** Customer environments receive **managed**
-solutions unless the run is explicitly instructed to deploy **unmanaged** (some environments must be unmanaged);
-the choice is recorded per environment. ⚠️ This amends
-[ADR-027 §3](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md), which (amended
-2026-06-02) says *"use unmanaged solutions today; do not enforce managed"* — T218 carries the §6.5 path-B amendment.
+**Defined 2026-10-07 (T218, D7/D8).** The package is ONE solution, `SpaarkeMaster`; its scope is a rule — every `sprk`
+component in the authoring environment (incl. every code page) + the `sprk_` columns on OOB tables − a committed
+exclusion list. Git holds the unpacked source; CI publishes the managed and unmanaged zips; H6 imports managed unless
+the run's `solutionPackageType` is `unmanaged`, refuses a type switch and a downgrade; environment-variable values never
+ship (H7). Binding rule: [ADR-027 §3–§4](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md);
+runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md); evidence:
+`projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`. **Replaced** (being removed by 218b): the 9-zip
+catalog in `Deploy-DataverseSolutions.ps1` / `CanonicalSolutionCatalog`, 6 of whose solutions exist nowhere.
 
 ## Registry row (admin environment — Shared)
 
