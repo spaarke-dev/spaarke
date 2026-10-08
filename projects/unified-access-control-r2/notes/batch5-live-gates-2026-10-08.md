@@ -110,3 +110,40 @@ or entry since 15:00Z; no new ledger row).
 provisioned record orphans its container and JIT roles), #1441 (invitation-onboarding e2e cannot pass; found by the
 PR review). **Observation (by design):** close-project's email-keyed removal also drops the JIT role of the INTERNAL
 user who shares the contact's email (testuser1); JIT is re-granted on the next `open-links` while they hold Write.
+
+## Task 113: a refused /grant writes nothing (#1008) + owner round 80 (PR #1406, merged `d4bedd39c`), live gates 2026-10-08 17:33–17:34Z
+
+Run against spaarke-bff-dev (healthz 200, `/ping` pong) and spaarkedev1 with the existing identities only:
+- admin (`az` default, ralph.schroeder);
+- testuser1 (`AZURE_CONFIG_DIR=C:/tmp/az-uac-child`), given a Read/Write/Append/AppendTo/Share share on the gate project, with no Delete, so a Collaborate ceiling.
+
+Tokens: `api://1e40baad…/.default` for the BFF, and the admin `az` token for Dataverse set-up and read-back. No app-setting, Entra or Key Vault change. Script and raw log: session scratchpad `gate113/gate113.py`, `gate113.log`.
+
+**How "lapsed" and "live" are made.** A grant is created through the route. Admin then PATCHes `sprk_expiresdate` (and the level, where noted) to yesterday (2026-10-07) or to today + 12 (2026-10-20). Today is the UTC date 2026-10-08, so today + 90 = **2027-01-06**.
+
+**Throwaway records** (all created as admin):
+- project P `06af8650…` "zz-113-gate project …" (non-secure, Standard);
+- contact C `01131556…`;
+- C's grant G `9eeddc52…`;
+- the CIAM Test User's grant GI `96052360…`. That contact, `394fda9f…`, is bound on the External plane, so the invite is `AlreadyProvisioned`: no CIAM call, no email. Its `modifiedon` stays 2026-10-02.
+- No Access entry E `90b10d5c…` (subject C, object P);
+- testuser1's share on P.
+
+Clean-up: E was deleted after G3 (204 → 404). The share was revoked (204). GI, G, C and P were deleted (204 each) and all read back **404**. A final sweep found 0 `zz-113` projects, contacts or entries, and 0 new grant rows for the CIAM contact. The Assigned-To ledger held 0 rows for P throughout.
+
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| G1a | `/grant` re-add over a LAPSED grant, at a LOWER level (round 80) | **PASS** | Before: FullAccess, expired 2026-10-07. admin `/grant` ViewOnly, no date → 200 `grantedAccessLevel` 100000000, `narrowed` false, same `accessRecordId`. Row: ViewOnly, **2027-01-06**; 1 active row. |
+| G1b | Same, at a HIGHER level | **PASS** | Before: ViewOnly, expired. admin `/grant` FullAccess → 200 `grantedAccessLevel` 100000002. Row: FullAccess, 2027-01-06. |
+| G1c | Same, capped by the grantor ceiling | **PASS** | Before: ViewOnly, expired. testuser1 `/grant` FullAccess → 200 `grantedAccessLevel` 100000001, **`narrowed` true**. Row: **Collaborate**, 2027-01-06. |
+| G2 | Never-lower still holds over a lapsed higher grant | **PASS** | Before: FullAccess, expired. testuser1 `/grant` FullAccess (narrowed to Collaborate) → **409 `sdap.access.grant.would_lower_existing`** "…Nothing was changed…". The row is identical before and after (level, date, `versionnumber` 27275248, `modifiedon`). |
+| G3 | A refused `/grant` writes nothing (#1008) | **PASS** | Before: ViewOnly, expired, and C is on P's No Access list (E). admin `/grant` FullAccess → **422 `sdap.access.grant.grantee_denied`**. The row is identical (`versionnumber` 27275250). G2 shows the same for the 409. `expired_not_restored` is no longer reachable on `/grant` after round 80, so these two are the refusals left. |
+| G4 | A re-add over a LIVE grant keeps its date | **PASS** | Before: ViewOnly, 2026-10-20. admin `/grant` Collaborate → 200 Collaborate. Row: Collaborate, **2026-10-20** (unchanged). |
+| G5a | `/invite-and-grant` re-add over a LAPSED grant, LOWER, honest 200 | **PASS** | Seed invite FullAccess → 200 `AlreadyProvisioned`, GI. Lapsed (FullAccess, 2026-10-07). Invite ViewOnly → 200 `grantedAccessLevel` 100000000, same `accessRecordId`. Row: ViewOnly, 2027-01-06. |
+| G5b | Same, HIGHER | **PASS** | Lapsed ViewOnly → invite FullAccess → 200 `grantedAccessLevel` 100000002. Row: FullAccess, 2027-01-06. |
+| G5c | One row per key | **PASS** | 1 active row for C, and 1 for the CIAM contact, on P. |
+| G6 | The Assigned-To rule does not use the restore | **Covered offline (not observable live)** | The rule calls the core without `reAddRestoresLapsed` (`AssignedAccessMaterializer.WriteGrantAsync`). Live, it never sends a dateless request over a lapsed key: with nothing conferring it sends today + 90 itself. So the difference shows only in the lapse race between its read and the core's, which can't be staged live. Pinned by `AGrantThatLapsesBetweenTheRulesReadAndTheCoresRead_…` and the Q3 perturbation (forcing the restore on for every caller fails 6 tests). |
+
+**Defects found:** none. **Harness note:** the script's RetrievePrincipalAccess pre-check URL was malformed (404). G1c's `narrowed: true` restore at Collaborate shows the Collaborate ceiling directly.
+
+**113 can be marked done.** G1–G5 pass live. G6 is covered offline by design. The POML's ISS-023 half was cut (round 59).
