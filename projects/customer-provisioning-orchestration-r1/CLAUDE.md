@@ -87,6 +87,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - End state: provisioning runs E2E with no human interaction (2026-09-01). L2 has no web UI in r1.
 - T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30).
 - T218 defines the complete solution package and is a hard blocker for T186 (2026-09-28). All solutions ship to every customer (2026-09-01).
+- Every environment, Spaarke's own included, imports only the canonical SpaarkeMaster built by CI from git — never solutions the dev team creates or manages by hand (owner 2026-10-08, #1401 → T218f).
 - Every defect found is fixed in scope, or filed and reported. Review limits cap ceremony, never fixing (2026-10-06; task-execute Step 9.5).
 - Fix what can be fixed now, including drift and broken CI elsewhere. Implement the owner's design and absorb the follow-on work.
 - Decide a doubtful mechanism by necessity: needed → build it, otherwise remove it. Give one recommendation, not a menu of variants (2026-10-06).

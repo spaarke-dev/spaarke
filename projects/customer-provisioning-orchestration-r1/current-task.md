@@ -2,18 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 — owner answers recorded: relays all delivered; multi-tenant superseded (add-in package 1.1.2 has no webApplicationInfo); mistaken tenant deleted in Entra (its Azure link resource remains); T240c APPROVED. 218e still waits for the owner's OK.
+> **Last Updated**: 2026-10-08 SESSION 44 — owner OKs: leftover tenant resource deleted; control-plane swap reset + Bicep slot fix (`21b96bf1e`) + both sites deployed and healthy; #1401 → T218f; **218e approved — in progress**, then T235.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Task** | **T218** — the complete Dataverse package. Plan `notes/t218-plan.md`; POMLs `tasks/218a…218e`, `257`. 218a ✅ `8b878d655`; 218b ✅ `3f41aab33`/`4f6c579ed`/`d3aa70726`; 218c ✅ `48b16bcb8`/`3eb20566e`/`3d280df7d`. |
-| **Step** | Next: **218e** — content gaps + first source export. Every step writes to spaarkedev1's SpaarkeMaster → **owner OK first** (owner item 9). |
-| **Status** | waiting on the owner's OK for 218e's live dev changes. |
+| **Step** | **218e in progress** (owner OK 2026-10-08 for the SpaarkeMaster changes in spaarkedev1). |
+| **Status** | in-progress. |
 | **Next Action** | On the owner's OK: `task-execute` 218e — (1) `Test-SolutionCompleteness.ps1 -FailOnDrift:$false -SkipInventory` (read-only) → classify the 53 missing (ship / exclude with reason; the 4 April PCFs by form usage); (2) remove from SpaarkeMaster what is OUTSIDE THE RULE (5 Microsoft tables, 8 env-var values) + the Provisioning Registry role; (3) `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, then without (adds + re-adds the 8 shells, bumps the version); (4) `Export-SpaarkeMasterSource.ps1` (pac auth with access to spaarkedev1) → commit src/dataverse/solutions/SpaarkeMaster; then 218d (CI pack + publish). Without the OK: continue with T235. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
-| **Order** | 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
+| **Order** | 218e → T235 (owner: continue with it) → 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
 ### T218 facts for 218e/218d (details in 218c's POML notes)
 - Live SpaarkeMaster in dev (2026-10-08, read-only): 520 in scope, 18 excluded, **53 missing**, **8 sprk_ tables packaged as shells** (incl. sprk_signal, sprk_noaccessentry, sprk_policy), Provisioning Registry role packaged though excluded, **13 outside the rule** (5 Microsoft tables dragged in by the 2026-08-23 rebuild, 8 env-var values).
@@ -28,14 +28,13 @@ Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-
 
 ## Owner items
 
-1. **218e live steps (ASK NOW)**: changes to SpaarkeMaster in spaarkedev1 — add the missing components, remove the 5 Microsoft tables + 8 env-var values + Provisioning Registry role, re-add the 8 shell tables, bump the version, export to git. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
-2. **Control-plane deploy blocker (ASK)**: the dev L2 API site `spaarke-provisioning-controlplane-dev` (sub `484bc857…`, `rg-spaarke-platform-dev`) has a half-done "swap with preview" — ARM refuses every change to it ("configuration settings have been prepared for swap", last failure 2026-10-05). Recommendation: reset (cancel) the pending swap, then deploy the branch's control plane (Worker Bicep: `EntraAppRegOptions__SpaarkeTenantId`, `PreAuthorizedClientAppIds` = `1958aec2`; code: T218b H6, T240a H3, T227/T230/T251 changes). Both live actions; owner said "should be OK" on the deploy (2026-10-08) — confirm with the exact commands first.
-3. **Leftover Azure resource** `spaarketestpartner.onmicrosoft.com` (`Microsoft.AzureActiveDirectory/ciamDirectories`, `rg-spaarke-dev`, sub `484bc857…`): the tenant was deleted in Entra (owner 2026-10-08); the Azure link resource remains. Remove with OK. NEVER `spaarkeextid` beside it.
-4. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
-5. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
-6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
-7. **#1401 (ISS-005)**: `Deploy-Release.ps1` (Spaarke's own environments) and the legacy `Provision-Customer.ps1` still import a 9-solution list via `Deploy-DataverseSolutions.ps1`; 6 of the 9 do not exist. Recommendation: one SpaarkeMaster for Spaarke's own environments too, package type per environment in `config/environments.json`, from the CI-published zips (after 218d). (The owner asked about #1402 — that is ontology's ISS-011, not ours.)
-8. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
+1. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
+2. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
+3. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
+4. Board Status "Active" vs Status Reason "On hold" on Issue #438.
+5. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
+
+Done 2026-10-08 (owner OK): `spaarketestpartner.onmicrosoft.com` Azure link resource deleted (REST api 2025-08-01-preview; az's default version failed with AADB2C90063 because the tenant was already gone); control-plane API swap reset, Bicep `s44`/`s44b` Succeeded, Deploy-ControlPlane Both from `35c20287c` — Worker + Api healthy, Worker has `EntraAppRegOptions__SpaarkeTenantId` + `PreAuthorizedClientAppIds__0=1958aec2`.
 
 ## Cross-project deliveries (track until delivered)
 
@@ -47,7 +46,7 @@ Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-
 
 - Prod client sites (Standard SWAs, `rg-spaarke-shared-prod`, subscription `cd95fcec-6b89-49ea-8339-c2b579b12587`): `swa-spaarke-office-addins-prod` → `https://addins.spaarke.com`; `swa-spaarke-external-spa-prod` → `https://external.spaarke.com`. Both Ready, managed certs, empty.
 - Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master ≥ `c8b93b294`. T227d not on dev yet (OwnedContainerIds is set). Dev BFF MI holds application `full` on the Model 1 container type (owner option A).
-- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005).
+- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → T218f).
 
 ## Open items (no task yet)
 

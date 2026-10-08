@@ -40,7 +40,7 @@ answer into T256 handler work and T218 package content.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — outside H6 (Spaarke's own environments) |
+| **Status** | Scheduled — task 218f (owner 2026-10-08: canonical package only, in every environment) |
 | **Urgency** | before the next release to demo |
 | **Filed** | 2026-10-07 (found in T218b) |
 | **Source** | T218b — H6 left `Deploy-DataverseSolutions.ps1`; `Deploy-Release.ps1` still calls it |
