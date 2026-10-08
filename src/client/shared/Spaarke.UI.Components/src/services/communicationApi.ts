@@ -23,6 +23,10 @@
  *   - Does NOT import from `@spaarke/auth` directly — `authenticatedFetch`
  *     is injected so the shared library stays decoupled from a particular
  *     auth bootstrapping strategy (PCF vs. Code Page differ).
+ *   - Handles BOTH fetch shapes hosts inject: `@spaarke/auth`'s, which THROWS
+ *     `ApiError`/`AuthError` for a non-2xx, and the Outlook pane's / external
+ *     SPA's, which RETURNS the non-2xx response. Either becomes the same
+ *     {@link SendCommunicationError}.
  *   - Returns `{ communicationId }` extracted from the BFF's
  *     `SendCommunicationResponse` (which carries additional fields the UI
  *     does not currently consume).
@@ -44,6 +48,7 @@
  */
 
 import type { AuthenticatedFetchFn } from './EntityCreationService';
+import { isApiError, isAuthFailure, problemOf } from '../utils/thrownFetchError';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -226,16 +231,31 @@ export class SendCommunicationError extends Error {
       const ct = response.headers.get('content-type') ?? '';
       if (ct.includes('application/problem+json') || ct.includes('application/json')) {
         const body = (await response.json()) as IProblemDetailsBody;
-        const code = body.errorCode ?? body.code ?? `HTTP_${status}`;
-        const detail = body.detail ?? body.title ?? `HTTP ${status}`;
-        const correlationId = body.correlationId ?? body.traceId ?? body.instance;
-        return new SendCommunicationError(status, code, detail, correlationId);
+        return SendCommunicationError.fromProblem(status, body);
       }
       const text = await response.text();
       return new SendCommunicationError(status, `HTTP_${status}`, text || `HTTP ${status}`);
     } catch {
       return new SendCommunicationError(status, `HTTP_${status}`, `HTTP ${status}`);
     }
+  }
+
+  /**
+   * Build a {@link SendCommunicationError} from an already-parsed ProblemDetails body — the same
+   * mapping {@link SendCommunicationError.fromResponse} applies. Used for the failure
+   * `@spaarke/auth`'s authenticatedFetch THROWS (an `ApiError` whose body it has already consumed).
+   * `fallbackDetail` is used when there is no body (or it has neither `detail` nor `title`).
+   */
+  static fromProblem(
+    status: number,
+    body: IProblemDetailsBody | Record<string, unknown> | null,
+    fallbackDetail?: string
+  ): SendCommunicationError {
+    const b = (body ?? {}) as IProblemDetailsBody;
+    const code = b.errorCode ?? b.code ?? `HTTP_${status}`;
+    const detail = b.detail ?? b.title ?? fallbackDetail ?? `HTTP ${status}`;
+    const correlationId = b.correlationId ?? b.traceId ?? b.instance;
+    return new SendCommunicationError(status, code, detail, correlationId);
   }
 }
 
@@ -365,12 +385,28 @@ export async function sendCommunication(
   };
 
   const url = resolveUrl(client.bffBaseUrl);
-  const response = await client.authenticatedFetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
+  let response: Response;
+  try {
+    response = await client.authenticatedFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (err) {
+    // `@spaarke/auth`'s authenticatedFetch (every Dataverse host) THROWS for a non-2xx instead of
+    // returning it, so the `!response.ok` branch below never sees those failures. Give the thrown
+    // shape the same typed error, or the composer's `onError` never fires and a failed send is silent.
+    if (isApiError(err)) {
+      throw SendCommunicationError.fromProblem(err.status, problemOf(err), err.message);
+    }
+    if (isAuthFailure(err)) {
+      const message = err instanceof Error && err.message ? err.message : 'HTTP 401';
+      throw new SendCommunicationError(401, 'HTTP_401', message);
+    }
+    throw err;
+  }
 
+  // A fetch that RETURNS failures (the Outlook pane, the external SPA) arrives here.
   if (!response.ok) {
     throw await SendCommunicationError.fromResponse(response);
   }
