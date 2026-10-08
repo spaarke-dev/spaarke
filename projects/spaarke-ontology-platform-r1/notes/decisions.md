@@ -97,7 +97,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 
 | ID | Outcome | Status |
 |---|---|---|
-| D-57 | Draft events: **no data change**; the Daily Briefing uses `IsOpenWork` (task 060 re-scoped, own PR) | Binding |
+| D-57 | ~~Draft events: no data change; the Daily Briefing uses `IsOpenWork`~~ **SUPERSEDED by D-74 (2026-10-08)** | Superseded |
 | D-58 | Work-assignment response columns `sprk_respondedon` + `sprk_responseoutcome` approved by the owner as area owner | Binding (task 047) |
 | D-59 | Server-side work-assignment create on uac-r2's `RecordCreationService` (team-owned), under their review | Binding (task 046) |
 | D-60 | Remove the 11 foreign tables from `OntologyPlatformSolution` (reference only) | Binding |
@@ -110,6 +110,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
 | D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 | D-69 | WizardShell's skipped-step marker (dashed ring) is **opt-in** per wizard; existing wizards keep the tick for a skipped step; the 058 decision wizard opts in (from the #1386 review F1) | Binding (056, 058) |
+| D-74 | **Supersedes D-57.** The Daily Briefing task channels stay **Open only** (matches notifications, D-72); PR #1384 closed unmerged; task 060 returns to the data fix: classify the platform-created Draft `sprk_event` rows and move the wrongly-Draft ones to Open in dev (approved), never a blanket update (owner 2026-10-08) | Binding (060) |
 | D-72 | The overdue-task notification ("Query Overdue Tasks" playbook step) **keeps its Open-only status filter**: Draft / On Hold overdue tasks are not notified. A known, accepted difference from the Briefing's IsOpenWork (D-57) (owner 2026-10-08) | Binding (068) |
 | D-73 | The same step **orders by `sprk_duedate`**, not `sprk_finalduedate` first; the repo's due-soon playbook copy drops its either-date filter too, so Final Due Date decides nothing in notifications (D-63 everywhere; dev data change approved) | Binding (068) |
 | D-71 | Task 111 may deploy to **spaarkedev1** (SpaarkeAi, SmartTodo, DocumentRelationshipViewer, external SPA code pages + SemanticSearchControl PCF) and run the modal regression live; code in its own PR, owner merges (approved 2026-10-08) | Binding (111) |

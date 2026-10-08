@@ -30,6 +30,7 @@
   </context>
 
   <constraints>
+    <constraint source="owner">D-74 (2026-10-08, SUPERSEDES D-57): the Daily Briefing task channels stay OPEN ONLY (statuscode Open), as on master; PR #1384 (IsOpenWork) is closed unmerged. This task returns to its original data remediation: classify each Draft sprk_event row, move the ones that are really live work to Open in spaarkedev1 (approved dev data change), leave the legitimately Draft ones, and record every id and reason. Draft keeps meaning "not ready".</constraint>
     <constraint source="project">Scope: this is a DATA remediation, not a code change. The code fix (TaskActionCore setting statuscode Open) already landed in PR #1032 and is in master.</constraint>
     <constraint source="project">Scope: a domain owner must review the PR #1032 semantics, in particular TaskActionCore now setting statuscode Open for EVERY consumer. Do not widen that behaviour here.</constraint>
     <constraint source="project">Scope: re-count before and after. The number was 49 then 48; quoting a stale count is the same error class as quoting a stale publish-size baseline.</constraint>
@@ -84,9 +85,9 @@
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
   <completion>
-    <status>in-progress (PR open, awaiting merge)</status>
-    <date>2026-10-07</date>
-    <summary>RE-SCOPED by owner decision D-57 (2026-10-07): NO Dataverse data changes; the data-fix part is closed as not needed. The 49 Draft events (live re-count) are open work under EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned). Replacement deliverable: DailyBriefingCollector's Upcoming/Overdue task channels now filter statuscode by IsOpenWork instead of Open alone (the only briefing reader filtering events on Open; TodoGenerationService already used IsOpenWork). Shipped as its own PR #1384 to master (branch fix/briefing-open-work-060). New test CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses fails on the old filter. Live on spaarkedev1: zz-060- Draft/OnHold/Completed events, old filter returned [], new filter returned draft + onhold, Completed excluded, all test rows deleted. Publish size master 36.22 MB vs branch 36.22 MB (delta 0.00, 192 files each, Compress-Archive); no vulnerable packages. Issue 1050 to be closed on merge with the re-scope note.</summary>
+    <status>in-progress (D-74: back to the data remediation)</status>
+    <date>2026-10-08</date>
+    <summary>2026-10-08: owner decision D-74 supersedes D-57 below. PR #1384 closed unmerged; the Briefing stays Open-only; do steps 1-5 (classify and fix the Draft rows). HISTORY (superseded): RE-SCOPED by owner decision D-57 (2026-10-07): NO Dataverse data changes; the data-fix part is closed as not needed. The 49 Draft events (live re-count) are open work under EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned). Replacement deliverable: DailyBriefingCollector's Upcoming/Overdue task channels now filter statuscode by IsOpenWork instead of Open alone (the only briefing reader filtering events on Open; TodoGenerationService already used IsOpenWork). Shipped as its own PR #1384 to master (branch fix/briefing-open-work-060). New test CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses fails on the old filter. Live on spaarkedev1: zz-060- Draft/OnHold/Completed events, old filter returned [], new filter returned draft + onhold, Completed excluded, all test rows deleted. Publish size master 36.22 MB vs branch 36.22 MB (delta 0.00, 192 files each, Compress-Archive); no vulnerable packages. Issue 1050 to be closed on merge with the re-scope note.</summary>
     <needs>Merge of PR #1384; then set status completed and TASK-INDEX marker (main session). Possible trivial rebase against PR #1359 (same file, disjoint hunks).</needs>
   </completion>
 </task>

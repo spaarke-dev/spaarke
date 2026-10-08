@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-10-08, checkpoint 3 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
-> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-73). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-74). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -34,7 +34,8 @@
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
-| **#1384** (060) rebased `0f5a4dbd4`, CI green; **#1413** (068) live node condition done, `d6c60ff4b`; D-72 keep Open-only, D-73 order by due date (author applying) | review `aee49df31b5a7dc81` running (A: #1384 rebase, B: #1413) | #1384 → owner merge → 060 ✅; #1413 → re-check D-73 commits → owner merge → 068 ✅ |
+| **060** D-74 (supersedes D-57): Briefing stays Open-only, **#1384 closed unmerged**; data fix of the Draft rows running (`aa669e43432b512f5`, dev data change approved, escalate if any row unclassifiable) | — | Read classification → 060 ✅ |
+| **#1413** (068) round 2 `e5f55a418` (D-73 order, D-72 note); review: F1 live node lacks the repo's myMatters condition (068 regression or pre-existing?), F2 card shows "Today" for no-due-date rows | author fixing (`a17154f00e69eeced`) | Re-check → owner merge → 068 ✅ |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
 | **#1424** master compile fix (CS0411, #1418) | CI (background wait) | Owner PRE-APPROVED merge when fully green → verify master compiles → close #1418 |
@@ -46,8 +47,9 @@
 | a67ad20f7bead7126 | 098 author (#1359 merged) | idle |
 | a4aa08d7260331359 | 106 author (To Do dates Date Only, `C:\wts-106`) | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
-| a17154f00e69eeced | 060/068 author — applying D-73 on #1413 | running |
-| aee49df31b5a7dc81 | Reviewer: #1384 rebase + #1413 | running |
+| a17154f00e69eeced | 068 author — #1413 review fixes F1/F2 | running |
+| aa669e43432b512f5 | 060 data-fix author (D-74) | running |
+| aee49df31b5a7dc81 | Reviewer: #1384 + #1413 — done | idle |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
 | aa80f91b9ac7b3b76 | 112 author — #1422 accepted at `96b9d884f`; next: merge master after #1424, then owner merge question | idle |
 | a747ef8af51f83500 | Reviewer: PR #1422 (112) — done (text fixes F2-1/F2-2) | idle |
