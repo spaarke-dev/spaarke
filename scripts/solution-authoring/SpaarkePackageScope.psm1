@@ -357,6 +357,62 @@ function Get-NextPackageVersion {
     return ($next -join '.')
 }
 
+function Get-PackedSolutionInfo {
+    <#
+    .SYNOPSIS Reads a packed solution zip's solution.xml: unique name, version and whether it is managed (T218d —
+              the CI publish checks what it packed before uploading it).
+    #>
+    param([Parameter(Mandatory)][string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $ZipPath).Path)
+    try {
+        $entry = $zip.Entries | Where-Object { $_.FullName -ieq 'solution.xml' } | Select-Object -First 1
+        if (-not $entry) { throw "No solution.xml in $ZipPath." }
+        $reader = [System.IO.StreamReader]::new($entry.Open())
+        try { [xml]$xml = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $zip.Dispose() }
+    $manifest = $xml.ImportExportXml.SolutionManifest
+    [PSCustomObject]@{
+        UniqueName = [string]$manifest.UniqueName
+        Version    = [string]$manifest.Version
+        Managed    = ([string]$manifest.Managed) -eq '1'
+    }
+}
+
+function New-SpaarkeMasterManifest {
+    <#
+    .SYNOPSIS The artifact manifest H6 reads (T218d) — the ONE producer of its shape:
+              {"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}} plus audit fields
+              H6 ignores. DataverseWebApiSolutionImporter.ParsePackageEntry is the consumer; both sides are tested
+              against src/server/services/Sprk.Provisioning.ControlPlane.Tests/Fixtures/spaarkemaster-manifest.sample.json.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$ManagedBlobName,
+        [Parameter(Mandatory)][string]$UnmanagedBlobName,
+        [string]$ManagedSha256,
+        [string]$UnmanagedSha256,
+        [string]$BuildId,
+        [string]$SourceSha,
+        [string]$PublishedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    )
+    $entry = [ordered]@{
+        version           = $Version
+        managedBlobName   = $ManagedBlobName
+        unmanagedBlobName = $UnmanagedBlobName
+    }
+    if ($ManagedSha256) { $entry.managedSha256 = $ManagedSha256 }
+    if ($UnmanagedSha256) { $entry.unmanagedSha256 = $UnmanagedSha256 }
+    $doc = [ordered]@{
+        buildId     = $BuildId
+        sha         = $SourceSha
+        publishedAt = $PublishedAt
+        solutions   = [ordered]@{ SpaarkeMaster = $entry }
+    }
+    return ($doc | ConvertTo-Json -Depth 5)
+}
+
 Export-ModuleMember -Function Get-PackageComponentTypeCode, Read-PackageScope, Get-PackageRuleComponents, `
     Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies, `
-    Get-NextPackageVersion
+    Get-NextPackageVersion, `
+    Get-PackedSolutionInfo, New-SpaarkeMasterManifest

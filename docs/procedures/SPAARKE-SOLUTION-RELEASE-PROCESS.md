@@ -51,9 +51,9 @@ the M365 Copilot agent (task 257), BFF code (H9).
 | Stage | Location |
 |---|---|
 | Authoring | `spaarkedev1`, SpaarkeMaster **unmanaged** |
-| Source of record | `src/dataverse/solutions/SpaarkeMaster/` — unpacked, both types (`pac solution unpack --packagetype Both`), committed per release *(218c/218e; today: not in git — the 2026-08-21 export exists only as a zip)* |
-| Built artifacts | CI packs `SpaarkeMaster_{version}_managed.zip` and `_unmanaged.zip` from git *(218d)* |
-| Provisioning store | `sprkcpartifacts{env}` / container `provisioning-artifacts`: both zips + `dataverse-solutions-latest.json` *(218d; today: a hand-uploaded `SpaarkeMaster.zip` and a hand-written manifest from 2026-08-21)* |
+| Source of record | `src/dataverse/solutions/SpaarkeMaster/` — unpacked, both types (`pac solution unpack --packagetype Both`), committed per release (first: 1.2.0.0, 2026-10-08, T218e) |
+| Built artifacts | `publish-dataverse-solutions-manifest.yml` packs managed + unmanaged from git with pac (pinned to the version that unpacked the source) and keeps them as a run artifact |
+| Provisioning store | `sprkcpartifacts{env}` / container `provisioning-artifacts`: `dataverse-solution-SpaarkeMaster-{version}-managed.zip` / `-unmanaged.zip`, `dataverse-solutions-{buildId}.json`, `dataverse-solutions-latest.json` (what H6 reads) and `dataverse-solutions-latest.previous.json` (the rollback pointer). Until the first CI publish, the store holds the hand-made 2026-08-21 files, which H6 refuses (no `SpaarkeMaster` entry). |
 
 Manifest schema read by H6:
 
@@ -90,8 +90,14 @@ Manifest schema read by H6:
    commands; every export names `--environment` (default spaarkedev1).
 6. **PR**: the diff of the unpacked source is the release review. The release note lists **removed components**
    (they are deleted from managed customer environments on upgrade — §5).
-7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml`. CI packs both zips from git, fails if a zip
-   carries environment-variable values, uploads versioned blobs and rewrites `dataverse-solutions-latest.json` *(218d)*.
+7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml` — first with `publish: false` (dry run:
+   pack + checks + manifest as a run artifact; every pull request touching the package source runs this too), then
+   with `publish: true`. It refuses a zip whose name, version or managed flag is wrong, a zip with environment-variable
+   values, and a source with a missing dependency on `solution="Active"` (F12). **A version publishes once**: an
+   existing blob of that version refuses the run — bump with `Assemble-SpaarkeMasterSolution.ps1 -Version` and
+   re-export. It keeps the replaced manifest as `dataverse-solutions-latest.previous.json`, then moves
+   `dataverse-solutions-latest.json` and reads it back. Rollback: copy `latest.previous` over `latest`. Nothing is
+   deleted.
 8. **Roll out**: re-run provisioning per customer (§5).
 
 ## 4. First import (provisioning H6)
@@ -151,6 +157,7 @@ authored in a child unit, "root component Role is missing"). "Spaarke Office Add
 | 2026-08-20 | Established: one managed SpaarkeMaster; three authoring scripts; 217 components; `Spaarke.Plugins` removed from spaarkedev1. |
 | 2026-08-21 | SpaarkeMaster v1.1.0.0 exported (412 root components; 7 PCFs excluded by the owner) and hand-uploaded to the provisioning store. |
 | 2026-10-07 | ADR-027 amended (managed by default, unmanaged on explicit instruction). Scope rule replaces solution membership; git becomes the source of record; CI publishes; this document becomes the release/IAM/upgrade runbook (customer-provisioning-orchestration-r1 T218). |
+| 2026-10-08 | SpaarkeMaster 1.2.0.0 complete in dev and committed as source (T218e); the CI pack-and-publish workflow replaces the hand-uploaded zip and manifest (T218d). |
 
 ## Related
 

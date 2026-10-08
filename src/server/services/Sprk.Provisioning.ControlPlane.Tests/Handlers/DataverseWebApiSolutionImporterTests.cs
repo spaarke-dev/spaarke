@@ -588,6 +588,35 @@ public sealed class DataverseWebApiSolutionImporterTests
     // ---------- pure parsers ----------
 
     [Fact]
+    public void ParsePackageEntry_OnTheSampleTheCiPublisherProduces_ReadsAllThreeFields()
+    {
+        // T218d: publish-dataverse-solutions-manifest.yml writes the manifest with New-SpaarkeMasterManifest
+        // (scripts/solution-authoring/SpaarkePackageScope.psm1), whose Pester test pins its shape to this same
+        // sample — so producer and consumer cannot drift apart unnoticed.
+        var path = Path.Combine(RepoRoot(), "src", "server", "services", "Sprk.Provisioning.ControlPlane.Tests",
+            "Fixtures", "spaarkemaster-manifest.sample.json");
+
+        var entry = DataverseWebApiSolutionImporter.ParsePackageEntry(File.ReadAllText(path), "sample");
+
+        entry.Version.Should().Be("1.2.0.0");
+        entry.ManagedBlobName.Should().Be("dataverse-solution-SpaarkeMaster-1.2.0.0-managed.zip");
+        entry.UnmanagedBlobName.Should().Be("dataverse-solution-SpaarkeMaster-1.2.0.0-unmanaged.zip");
+    }
+
+    private static string RepoRoot()
+    {
+        // A worktree's .git is a FILE; a regular checkout's is a directory (parity with ArmTemplateInspectorTests).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var gitMarker = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitMarker) || File.Exists(gitMarker)) return dir.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException($"Could not locate the repo root walking up from '{AppContext.BaseDirectory}'.");
+    }
+
+    [Fact]
     public void ParsePackageEntry_ReadsAllThreeFields()
     {
         var entry = DataverseWebApiSolutionImporter.ParsePackageEntry(ManifestJson("1.2.0.0"), "m.json");

@@ -267,6 +267,45 @@ Describe 'Get-NextPackageVersion (T218e)' {
     }
 }
 
+Describe 'New-SpaarkeMasterManifest (T218d — the shape H6 parses)' {
+    $sample = Get-Content (Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Tests/Fixtures/spaarkemaster-manifest.sample.json') -Raw | ConvertFrom-Json
+    $made = New-SpaarkeMasterManifest -Version '1.2.0.0' -ManagedBlobName 'm.zip' -UnmanagedBlobName 'u.zip' `
+        -ManagedSha256 'a' -UnmanagedSha256 'b' -BuildId 'x' -SourceSha 'y' | ConvertFrom-Json
+
+    It 'has the same top-level and SpaarkeMaster keys as the sample the C# parser test reads' {
+        (@($made.PSObject.Properties.Name) -join ',') | Should Be (@($sample.PSObject.Properties.Name) -join ',')
+        (@($made.solutions.SpaarkeMaster.PSObject.Properties.Name) -join ',') |
+            Should Be (@($sample.solutions.SpaarkeMaster.PSObject.Properties.Name) -join ',')
+    }
+
+    It 'writes the values it is given under solutions.SpaarkeMaster' {
+        $made.solutions.SpaarkeMaster.version | Should Be '1.2.0.0'
+        $made.solutions.SpaarkeMaster.managedBlobName | Should Be 'm.zip'
+        $made.solutions.SpaarkeMaster.unmanagedBlobName | Should Be 'u.zip'
+    }
+}
+
+Describe 'Get-PackedSolutionInfo (T218d)' {
+    It 'reads name, version and the managed flag from a zip, and refuses a zip without solution.xml' {
+        $src = Join-Path $TestDrive 'pkg'
+        New-Item -ItemType Directory -Path $src -Force | Out-Null
+        '<ImportExportXml><SolutionManifest><UniqueName>SpaarkeMaster</UniqueName><Version>1.2.0.0</Version><Managed>1</Managed></SolutionManifest></ImportExportXml>' |
+            Set-Content (Join-Path $src 'solution.xml')
+        $zip = Join-Path $TestDrive 'm.zip'
+        Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
+        $info = Get-PackedSolutionInfo -ZipPath $zip
+        $info.UniqueName | Should Be 'SpaarkeMaster'
+        $info.Version | Should Be '1.2.0.0'
+        $info.Managed | Should Be $true
+
+        $empty = Join-Path $TestDrive 'e'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        'x' | Set-Content (Join-Path $empty 'other.txt')
+        Compress-Archive -Path (Join-Path $empty '*') -DestinationPath (Join-Path $TestDrive 'e.zip') -Force
+        { Get-PackedSolutionInfo -ZipPath (Join-Path $TestDrive 'e.zip') } | Should Throw 'No solution.xml'
+    }
+}
+
 Describe 'Find-EnvironmentVariableValues (T218c value guard)' {
     It 'finds a values file in an unpacked folder and passes a clean one' {
         $dirty = Join-Path $TestDrive 'dirty/environmentvariabledefinitions/sprk_X'
