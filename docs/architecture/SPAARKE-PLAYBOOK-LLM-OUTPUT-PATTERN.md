@@ -75,6 +75,8 @@ The structured `## Input` section design (Layer 2) is the "external function" bo
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Executor-scoped roots are not rendered by Layer 1** (added 2026-10-08, ISS-018 #1452): a configJson string that uses the root `item` — bound only inside an executor's own per-item loop, e.g. `CreateNotification`'s `itemNotification` and `deduplication.key` — is left verbatim by `ApplyConfigJsonTemplates` (unless the render context itself binds `item`, as a fan-out overlay with that alias does), so the executor renders it once per item. Previously Layer 1 rendered those strings against a context with no `item`, producing blank titles and null dedup keys.
+
 **Key property**: the Action JPS body (`instruction.role/task/constraints/context`) stays pure instructions. Data lives in `## Input`. The LLM clearly sees the two as distinct.
 
 ---
@@ -85,7 +87,7 @@ The structured `## Input` section design (Layer 2) is the "external function" bo
 |---|---|---|
 | `PlaybookTemplateContextBuilder` (static) | [`src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs) | Layer 1 — single source of truth for "what context can templates see". Two overloads: `Build(PlaybookRunContext)` (orchestrator) + `Build(NodeExecutionContext)` (per-executor). Both delegate to private `BuildCore`. |
 | `PlaybookOrchestrationService.ApplyConfigJsonTemplates` | [`PlaybookOrchestrationService.cs:1921`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs#L1921) | Layer 1 caller — invokes the builder + `ITemplateEngine.Render` for every node before handing configJson to its executor. |
-| `ITemplateEngine` + `TemplateEngine` (Handlebars.NET) | [`TemplateEngine.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs) | Renders `{{X}}` / `{{X.Y.Z}}` against the merged context. Already DI-registered as Singleton ([`AnalysisServicesModule.cs:860`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs#L860)). Custom helpers: `default`, `safe`, `joinIds`. |
+| `ITemplateEngine` + `TemplateEngine` (Handlebars.NET) | [`TemplateEngine.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs) | Renders `{{X}}` / `{{X.Y.Z}}` against the merged context. Already DI-registered as Singleton ([`AnalysisServicesModule.cs:860`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs#L860)). Custom helpers: `default`, `safe`, `fetchInGuids` (FetchXML GUID lists — writes `<value>` children inside `<condition operator="in">…</condition>`), `joinIds` (comma list; **not** for FetchXML — Dataverse ignores the `value` attribute on list operators; corrected 2026-10-08, ISS-018 #1452). |
 | `LoadKnowledgeNodeExecutor.BuildTemplateContext` + `ReturnResponseNodeExecutor.BuildTemplateContext` | [`LoadKnowledgeNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs), [`ReturnResponseNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnResponseNodeExecutor.cs) | Per-executor resolvers — now thin delegations to `PlaybookTemplateContextBuilder.Build(NodeExecutionContext)`. Their own `_templateEngine.Render` calls become no-ops on already-resolved configJson. |
 | `PromptSchemaRenderer.Render` (`runtimeInput` parameter + "## Input" section) | [`PromptSchemaRenderer.cs:72`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs#L72) | Layer 2 — new `JsonElement? runtimeInput` parameter. When non-null, emits "## Input\n{indented json}" between Context and Document. |
 | `AiCompletionNodeExecutor.ExtractInputBindingAsJsonElement` | [`AiCompletionNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs) (private static) | Layer 2 wiring — parses `configJson.inputBinding` (already template-resolved by Layer 1) into a `JsonElement` clone. Defensive null/malformed handling. Passed to renderer as `runtimeInput`. |
@@ -243,4 +245,5 @@ Worked example: `DAILY-BRIEFING-NARRATE.GenerateTldr` node.
 
 | Date | Change | Trigger |
 |---|---|---|
+| 2026-10-08 | Corrected the helper list (`fetchInGuids` for FetchXML lists; `joinIds` not for FetchXML) and noted that Layer 1 leaves executor-scoped `item` templates for the executor. | ISS-018 (#1452) |
 | 2026-06-29 | Initial — Wave 11 task 111a per operator binding requirement ("we will need it for Insights Engine and many other areas"). Documents the Layer 1 + Layer 2 architecture shipped by T111. | R7 Wave 11 |

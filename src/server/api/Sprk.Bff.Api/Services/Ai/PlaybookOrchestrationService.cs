@@ -2441,6 +2441,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     return;
                 }
 
+                // ISS-018 (#1452, D-77): a template over an EXECUTOR-SCOPED root (`item`, bound by an executor's own
+                // per-item loop — CreateNotification's itemNotification / deduplication.key) cannot render here: the
+                // root is not in the Layer 1 context, so it rendered empty or null BEFORE the loop ran (blank titles,
+                // a null regardingId that defeats dedup). Leave such a string verbatim for the executor. When the root
+                // IS bound (a fan-out overlay whose alias is `item`), render normally.
+                if (ReferencesUnboundExecutorScope(raw, context))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
                 if (IsPureTemplate(raw))
                 {
                     // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
@@ -2519,6 +2530,53 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// expression: <c>"{{json &lt;inner&gt;}}"</c>. The json helper accepts any value
     /// (variable, helper-call, scalar) and produces JSON-encoded text.
     /// </remarks>
+    /// <summary>
+    /// Template roots that only an executor binds, inside its own per-item loop (ISS-018). Layer 1 leaves a string that
+    /// uses one of these verbatim unless the render context binds it.
+    /// </summary>
+    private static readonly string[] ExecutorScopedTemplateRoots = ["item"];
+
+    private static readonly IReadOnlyDictionary<string, System.Text.RegularExpressions.Regex> ExecutorScopedRootPatterns =
+        ExecutorScopedTemplateRoots.ToDictionary(
+            root => root,
+            root => new System.Text.RegularExpressions.Regex(
+                @"(?<![\w.'""@/])" + root + @"(?![\w'""])",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled));
+
+    private static readonly System.Text.RegularExpressions.Regex MustacheExpression = new(
+        @"\{\{(.*?)\}\}",
+        System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// True when a Handlebars expression in <paramref name="raw"/> uses an executor-scoped root (as a path root —
+    /// <c>{{item.x}}</c>, <c>{{lookup item 'm.x'}}</c>, <c>{{#if item.y}}</c> — not as text inside quotes or as a
+    /// later path segment like <c>{{q.item}}</c>) that <paramref name="context"/> does not bind.
+    /// </summary>
+    internal static bool ReferencesUnboundExecutorScope(string raw, IReadOnlyDictionary<string, object?> context)
+    {
+        foreach (var root in ExecutorScopedTemplateRoots)
+        {
+            if (context.ContainsKey(root))
+            {
+                continue;
+            }
+
+            var rootPattern = ExecutorScopedRootPatterns[root];
+            foreach (System.Text.RegularExpressions.Match expression in MustacheExpression.Matches(raw))
+            {
+                if (rootPattern.IsMatch(StripQuoted(expression.Groups[1].Value)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+
+        static string StripQuoted(string expression) =>
+            System.Text.RegularExpressions.Regex.Replace(expression, @"'[^']*'|""[^""]*""", "''");
+    }
+
     private static string AutoWrapWithJsonHelper(string pureTemplate)
     {
         var trimmed = pureTemplate.Trim();

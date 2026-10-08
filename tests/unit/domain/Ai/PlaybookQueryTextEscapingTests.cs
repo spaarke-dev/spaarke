@@ -80,7 +80,7 @@ public class PlaybookQueryTextEscapingTests
         const string config =
             "{\"fetchXml\":\"<fetch><entity name='sprk_event'><filter><condition attribute='modifiedon' operator='last-x-hours' " +
             "value='{{timeWindowHours}}'/><condition attribute='sprk_duedate' operator='lt' value='{{todayUtc}}'/>" +
-            "<condition attribute='sprk_regardingmatter' operator='in' value='{{joinIds myMatters.ids}}'/></filter></entity></fetch>\"}";
+            "<condition attribute='sprk_regardingmatter' operator='in'>{{fetchInGuids myMatters.ids}}</condition></filter></entity></fetch>\"}";
 
         var escaped = Render(config, context, ExecutorType.QueryDataverse);
         var unescaped = Render(config, context, executorType: null);

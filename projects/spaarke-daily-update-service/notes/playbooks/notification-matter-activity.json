@@ -42,6 +42,7 @@
     {
       "name": "Start",
       "nodeType": "Control",
+      "executorType": 33,
       "actionType": null,
       "canvasType": "start",
       "outputVariable": "start",
@@ -58,6 +59,7 @@
     {
       "name": "Lookup My Matters",
       "nodeType": "Workflow",
+      "executorType": 52,
       "actionType": 52,
       "canvasType": "lookupUserMembership",
       "outputVariable": "myMatters",
@@ -69,12 +71,13 @@
         "entityType": "sprk_matter",
         "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids)."
       }
     },
     {
       "name": "Query Matter Activity",
       "nodeType": "Workflow",
+      "executorType": 51,
       "actionType": 51,
       "canvasType": "queryDataverse",
       "outputVariable": "matterActivityQuery",
@@ -85,16 +88,17 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_event",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"sprk_regardingproject\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"modifiedon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"sprk_regardingproject\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"modifiedon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "Recent sprk_event activity on user's matters (all event types). Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: modifiedon desc."
+        "description": "sprk_event rows of any event type modified in the last 24 hours (timeWindowHours; the scheduler passes 24), where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the event's own owner is the user. The matter link is outer. Newest modifiedon first, at most 50."
       }
     },
     {
       "name": "Has Activity?",
       "nodeType": "Control",
+      "executorType": 30,
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasActivity",
@@ -115,6 +119,7 @@
     {
       "name": "Create Notification",
       "nodeType": "Workflow",
+      "executorType": 50,
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "matterActivityNotification",
@@ -145,7 +150,7 @@
           "sourceModifiedOn": "{{item.modifiedon}}",
           "sourceOwningUser": "{{item.ownerid}}",
           "viaMatterId": "{{item.sprk_regardingmatter}}",
-          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
           "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {

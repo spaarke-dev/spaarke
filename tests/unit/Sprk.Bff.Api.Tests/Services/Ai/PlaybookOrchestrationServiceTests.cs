@@ -222,7 +222,7 @@ public class PlaybookOrchestrationServiceTests
     public async Task ExecuteAsync_AQueryDataverseNodeAfterAStructuredNode_RendersItsIds_TheNotificationPlaybookShape()
     {
         // The live notification playbooks: a LookupUserMembership-style node outputs ids, and the Query Dataverse node
-        // joins them into FetchXML ({{joinIds myMatters.ids}}). The escaped context must keep that working.
+        // writes them into FetchXML as <value> children ({{fetchInGuids myMatters.ids}}, ISS-018). The escaped context must keep that working.
         var playbookId = Guid.NewGuid();
         var matterIds = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
         var source = new PlaybookNodeDto
@@ -235,7 +235,7 @@ public class PlaybookOrchestrationServiceTests
             Id = Guid.NewGuid(), Name = "Query Matter Activity", ActionId = Guid.Empty, OutputVariable = "activity", ExecutionOrder = 2,
             DependsOn = [source.Id], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.QueryDataverse,
             ConfigJson = "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch><entity name='sprk_event'><filter>" +
-                         "<condition attribute='sprk_regardingmatter' operator='in' value='{{joinIds myMatters.ids}}'/></filter></entity></fetch>\"}",
+                         "<condition attribute='sprk_regardingmatter' operator='in'>{{fetchInGuids myMatters.ids}}</condition></filter></entity></fetch>\"}",
         };
         _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([source, query]);
         var sourceExecutor = new Mock<INodeExecutor>();
@@ -256,7 +256,9 @@ public class PlaybookOrchestrationServiceTests
         }
 
         seen.Should().NotBeNull("the query node ran");
-        seen.Should().Contain(string.Join(",", matterIds));
+        var condition = System.Xml.Linq.XDocument.Parse(System.Text.Json.JsonDocument.Parse(seen!).RootElement.GetProperty("fetchXml").GetString()!)
+            .Descendants("condition").Single();
+        condition.Elements("value").Select(v => v.Value).Should().BeEquivalentTo(matterIds, "one <value> child per membership id");
     }
 
     [Fact]

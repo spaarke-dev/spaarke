@@ -193,7 +193,7 @@ public sealed class ConditionNodeExecutor : INodeExecutor
                 errors.Add($"{path}: unknown operator '{condition.Operator}'. Valid operators: {string.Join(", ", validOps)}, and, or, not");
             }
 
-            if (string.IsNullOrWhiteSpace(condition.Left))
+            if (IsMissingOperand(condition.Left))
             {
                 errors.Add($"{path}: 'left' operand is required for '{op}' operator");
             }
@@ -201,6 +201,19 @@ public sealed class ConditionNodeExecutor : INodeExecutor
 
         return errors;
     }
+
+    /// <summary>
+    /// True when a comparison's <c>left</c> operand is absent. A rendered number, boolean or string is present: the
+    /// orchestrator's Layer 1 renders <c>"left": "{{q.output.count}}"</c> to the JSON number <c>12</c> (ISS-018b).
+    /// </summary>
+    private static bool IsMissingOperand(object? operand) => operand switch
+    {
+        null => true,
+        string text => string.IsNullOrWhiteSpace(text),
+        JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => true,
+        JsonElement { ValueKind: JsonValueKind.String } element => string.IsNullOrWhiteSpace(element.GetString()),
+        _ => false,
+    };
 
     /// <inheritdoc />
     public Task<NodeOutput> ExecuteAsync(
@@ -348,6 +361,11 @@ public sealed class ConditionNodeExecutor : INodeExecutor
     {
         if (operand is null)
             return null;
+
+        // An object-typed operand deserializes as a JsonElement. A JSON string is still a string: render it if it is a
+        // template (before ISS-018b only a string-typed Left rendered; a template in Right came back verbatim).
+        if (operand is JsonElement { ValueKind: JsonValueKind.String } stringElement)
+            operand = stringElement.GetString();
 
         if (operand is string strOperand)
         {
@@ -569,10 +587,13 @@ internal sealed record ConditionExpression
     public string? Operator { get; init; }
 
     /// <summary>
-    /// Left operand (template expression like "{{node.output.value}}").
-    /// Required for comparison operators.
+    /// Left operand: a template expression like "{{node.output.value}}", or the value it already rendered to.
+    /// Required for comparison operators. Typed <c>object?</c> like <see cref="Right"/> (ISS-018b, #1452): the
+    /// orchestrator's Layer 1 renders a pure template to its JSON shape, so a count arrives as a JSON number and a
+    /// <c>string?</c> property failed deserialization for every notification playbook. <c>ResolveOperand</c> handles
+    /// strings, templates and <see cref="JsonElement"/> values alike.
     /// </summary>
-    public string? Left { get; init; }
+    public object? Left { get; init; }
 
     /// <summary>
     /// Right operand (literal value or template expression).
