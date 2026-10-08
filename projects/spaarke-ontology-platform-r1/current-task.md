@@ -18,9 +18,9 @@
 |---|---|---|---|
 | 098 | PR #1359 follow-ups: fold in 065 (D-27 `sprk_duedate`) + fix 9 non-working TZ-pin tests | PR #1359 (`C:\wt098`) | Focused independent review → ask owner to merge → mark 098 ✅ (065 already marked ✅ in index — it lands with #1359) → start **106** |
 | 039 | Secure-child Signals/Decision Records (uac-r2 conditions A/B on #1355) | Own PR to master (`C:\wts-039`, `feat/secure-child-signals-039`) + possibly writer change on this branch | Review → ask owner to merge → ✅ → start **037** |
-| Stream C | 036 + 026 DONE on `stream/c-036-026` @ `ea2239927` — review PASS-WITH-FINDINGS (no auth leak; merges clean); **round 2 running**: drop inquiry reply-within param (D-56), choice options, mutual excludes, describer fault → null, core set restricted to CoreRecordEntities, 403 for no-DV-user, small items | Branch `stream/c-036-026` (`C:\wts-c`) | Fix findings → merge into this branch (ledger file-count conflict with 046 expected; uac-r2 must review the ledger edits — note on #1355) → mark 036 + 026 ✅ in index (POMLs already completed) |
+| Stream C | **036 + 026 MERGED into this branch** (`f7a12a24a`, ArchTests 818/818, Signals 454/454) — stream idle; next free tasks per TASK-INDEX stream table | — | — |
 | Stream C2 | 047 response columns (D-58) → D-60 drop foreign tables from `OntologyPlatformSolution` → 046 WA create on `RecordCreationService` (D-59, uac-r2 review) | Branch `stream/c2-047-046` (`C:\wts-c2`) | Give the D-60 job a POML number (draft in notes) → merge → ✅ |
-| Stream D | 072 DONE on branch `stream/d-072` @ `ff001fb54` (agent could not run Step 9.5) — **independent review running** (`C:\wtr72`; incl. `sprk_enabled` filter gap) | Branch `stream/d-072` (`C:\wts-d`) | Fix review findings → merge into this branch → mark 072 ✅ (POML already completed; index pending) → start **073**, then **074** (measure via real ActionRunner path) |
+| Stream D | **072 MERGED** into this branch (ArchTests 818/818); **074 recall gate** (`C:\wts-d74`, `stream/d-074`) and **073 memo source** (`C:\wts-d73`, `stream/d-073`) running in parallel | Branches → merge back | 074 may escalate for a labelled set / >200 model calls |
 | Stream B | 057 → PR #1382 (review running); **056 running** (own PR, `C:\wts-b56`) | Own PRs to master | Review → ask owner to merge → ✅ |
 | Stream E | 060 → PR #1384 (review running); next **068** (D-63) after #1359 merges | Own PRs to master | Review → ask owner to merge → ✅ |
 
@@ -31,15 +31,17 @@
 | a810b83c36e7d8f39 | 039 secure-child Signals/DRs (own PR, uac-r2 review) | running |
 | a87c76386416d9b61 | Stream C2: 047 → D-60 solution cleanup → 046 | running |
 | af7588b2ed6612c5f | Stream B: 056 WizardShell on SprkModal (own PR) | running |
-| a7d2ba5e803c9cc47 | Reviewer: 072 (stream D branch) | running |
-| a3f2fdb8356621906 | Reviewer: stream C round 2 (036/026) | running |
-| aeaf761bb094a0bd4 | Reviewer: PR #1359 (098 + 065 + TZ tests) | running |
-| a6065b4aa9ef36798 | Reviewer: PRs #1382 (057) and #1384 (060) | running |
-| a67ad20f7bead7126 | 098 author (PR #1359) — resume for review fixes / rebase | idle |
-| a0c39a85690aeed2a | Stream C author (036/026) — resume for fixes | idle |
-| ab5429413019d8fb9 | Stream D author (072) — resume for fixes, then 073/074 | idle |
-| a18a719c189250af3 | Stream B author of 057 (PR #1382) — resume for fixes | idle |
-| a17154f00e69eeced | Stream E author of 060 (PR #1384) — resume for fixes; then 068 after #1359 merges | idle |
+| a7d2ba5e803c9cc47 | Reviewer: 072 (stream D branch) | done |
+| a3f2fdb8356621906 | Reviewer: stream C round 2 (036/026) | done |
+| aeaf761bb094a0bd4 | Reviewer: PR #1359 (098 + 065 + TZ tests) | done — PASS-WITH-FINDINGS |
+| a6065b4aa9ef36798 | Reviewer: PRs #1382 (057) and #1384 (060) | done — both PASS-WITH-FINDINGS |
+| a67ad20f7bead7126 | 098 author (PR #1359) — FINAL round (TZ env Windows teardown, Briefing overdue gap per D-43, small K items); then main session reads diff → ask owner to merge | running |
+| a0c39a85690aeed2a | Stream C author (036/026) — round 3 | running |
+| ab5429413019d8fb9 | Stream D author (072) — merged | idle |
+| a1bcb0bae3c363ca9 | Stream D: 074 recall exit gate | running |
+| af2686291a99e5351 | Stream D2: 073 memo as source #2 | running |
+| a18a719c189250af3 | Stream B author of 057 (PR #1382) — round 2 (Decision Record state resolver R-4, tones, NaN/unknown tier) | running |
+| a17154f00e69eeced | Stream E author of 060 (PR #1384) — round 2 (stale comments, High Priority IsOpenWork, test); conflicts with #1359 header comment; then 068 after #1359 merges | running |
 
 ### Critical path to 031
 

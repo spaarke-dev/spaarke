@@ -413,9 +413,11 @@ public sealed class ActionRunner : IActionRunner
     /// <remarks>
     /// This is the structured-output counterpart to the renderer's <c>— one of: …</c> prompt hint, which
     /// <see cref="PromptSchemaRenderer"/> only emits for <c>structuredOutput:false</c> JPS actions. A
-    /// TRIAGE-EMAIL-style Action declares <c>structuredOutput:true</c>, so its output fields never render into
-    /// the prompt and its <c>category</c> <c>$choices</c> could only bite via the SCHEMA — which the catalog
-    /// deliberately leaves a free string to keep the taxonomy admin-tunable (FR-16). Resolving the enum HERE,
+    /// TRIAGE-EMAIL-style Action declares <c>structuredOutput:true</c>, so the renderer does not list its output
+    /// fields in the prompt (it says only "Return valid JSON matching the provided schema"); the category names
+    /// reach the model through the SCHEMA enum, and a taxonomy with authored guidance additionally gets an
+    /// "Allowed values" section (task 072). The catalog deliberately leaves category a free string to keep the
+    /// taxonomy admin-tunable (FR-16). Resolving the enum HERE,
     /// from live Dataverse per run, keeps that FR-16 dynamism (an admin-added category appears on the next
     /// run) while making the constraint actually enforced. Best-effort (NFR-04): a malformed schema/JPS, a
     /// missing property, or any parse error returns <paramref name="outputSchemaJson"/> unchanged — the exact

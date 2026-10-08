@@ -37,6 +37,21 @@ public static class OntologyWriterEvents
     public static readonly EventId PolicyVersionInvalid = new(50301, nameof(PolicyVersionInvalid));
 
     /// <summary>
+    /// Logged at Warning, exactly once per refused decision plan, by <see cref="Actions.DecisionPlanService"/> (task 036):
+    /// a plan that does not resolve against the closed action catalog is refused for that plan, never skipped silently.
+    /// Structured properties: <c>policyVersionId</c> and <c>reason</c>
+    /// (<see cref="Telemetry.DecisionPlanRefusalReason"/>) ONLY.
+    /// </summary>
+    public static readonly EventId DecisionPlanRefused = new(50302, nameof(DecisionPlanRefused));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per rule description that could not be produced after the body validated, by
+    /// <see cref="RuleBodyDescriber"/> (task 026). Structured property: <c>reason</c>
+    /// (<see cref="Telemetry.RuleDescriptionRefusalReason"/>) ONLY; never the body, a name or the exception message.
+    /// </summary>
+    public static readonly EventId RuleDescriptionRefused = new(50303, nameof(RuleDescriptionRefused));
+
+    /// <summary>
     /// Logged at Warning, exactly once per skipped write, by <see cref="SignalWriter"/> when uac-r2's ownership
     /// resolver REFUSES an owner (task 039, D-33 — for example a root flagged Secure but not isolated): nothing is
     /// written and nothing is thrown, the task 146 shape for a background writer. Metered as
@@ -44,5 +59,5 @@ public static class OntologyWriterEvents
     /// <c>subjectEntity</c>, <c>subjectId</c>, <c>matterId</c>, <c>reason</c> and <c>refusalCode</c> (one of
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/>'s codes) — never fact values or the sentence.
     /// </summary>
-    public static readonly EventId WriteSkippedOwnerRefused = new(50302, nameof(WriteSkippedOwnerRefused));
+    public static readonly EventId WriteSkippedOwnerRefused = new(50304, nameof(WriteSkippedOwnerRefused));
 }
