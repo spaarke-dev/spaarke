@@ -273,3 +273,30 @@ listed as D-6/D-7 were pulled INTO scope rather than deferred.)*
 | **C-21** Pillar-9 `getAgentVisibleState` shim (ISS-005, #1112) | **DELETE.** The server re-derives the shape itself and trims it to identity fields; wiring the client copy live would feed browser-computed data into an LLM prompt. | Dead-code PR for `Spaarke.UI.Components`; trace `SerializedWidgetState.ts` / `WorkspaceTab.ts` consumers first. Closes #1112. |
 | **C-17** to-do due-date tier scheme | **3/7/10 days.** | This branch (Do lane). |
 | Cleanup placement rule | Fix everything, never defer to issues; items unrelated to ontology go to their own PRs grouped by area. | See `notes/cleanup-placement-plan.md`. |
+
+### ISS-007 — Triage category resolution ignores `statecode` and `sprk_enabled`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-07 |
+| **Source** | Independent review of task 072 (stream D) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1387 |
+
+**Description**
+
+`CommunicationEnrichmentService.ResolveTriageCategoryIdAsync` (email project) resolves the model's category name
+with an exact query and a normalized fallback over up to 200 rows; neither filters on `statecode` or
+`sprk_enabled`. A disabled or deactivated category the model still emits is saved on the communication, although the
+classifier is meant never to see it (spec `mvp-technical-spec.md:956`).
+
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs` (~634-675).
+
+**Suggested fix**: add both conditions to both queries, reusing `LookupChoicesResolver.AdditionalFilterFor("sprk_triagecategory")`; add a disabled-row test.
+
+**Estimated effort**: 1 hour
+**Blockers**: none; the file is owned by the email project
+**Related**: task 072, issue #1049
+
+---
