@@ -8,6 +8,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
@@ -255,16 +256,18 @@ public static class AnalysisEndpoints
         // Check if Analysis feature is enabled
         if (!options.Value.Enabled)
         {
-            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            await response.WriteAsJsonAsync(new { error = "Analysis feature is disabled" }, cancellationToken);
+            await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status503ServiceUnavailable, "Analysis feature is disabled")
+                .ExecuteAsync(context);
             return;
         }
 
         // Phase 1: Only single document supported
         if (request.DocumentIds.Length > 1 && !options.Value.MultiDocumentEnabled)
         {
-            response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "Multi-document analysis coming in Phase 2. Currently only single document is supported." }, cancellationToken);
+            await ProblemDetailsHelper.FromLegacyError(
+                    StatusCodes.Status400BadRequest,
+                    "Multi-document analysis coming in Phase 2. Currently only single document is supported.")
+                .ExecuteAsync(context);
             return;
         }
 
@@ -276,8 +279,8 @@ public static class AnalysisEndpoints
         // or the filter removed from the chain). One constant for both.
         if (!request.PlaybookId.HasValue)
         {
-            response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = PlaybookIdRequiredMessage }, cancellationToken);
+            await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, PlaybookIdRequiredMessage)
+                .ExecuteAsync(context);
             return;
         }
 
