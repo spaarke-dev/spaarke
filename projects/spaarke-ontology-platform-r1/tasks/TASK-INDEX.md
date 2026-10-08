@@ -254,7 +254,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 071 | [Disposition accrual](071-disposition-accrual.poml) | FULL | sonnet/high | 070 | **G** | Do-rule action rate reads `sprk_resolutiontype` |
 | ✅ [done] 072 | [Guidance injection](072-classifier-guidance-injection.poml) | FULL | sonnet/high | 004 | **G** | Prompt changes; the schema `enum` does NOT |
 | 🔲 [open] 073 | [`sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072, 037, 039, 031 | **G** | The consumer diff must be **empty** |
-| 🔲 [open] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
+| 🔲 [blocked] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
 
 ### Phase 8 — Remaining cleanup and repairs
 
