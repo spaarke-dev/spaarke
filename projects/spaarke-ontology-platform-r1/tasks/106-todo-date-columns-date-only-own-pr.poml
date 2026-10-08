@@ -4,7 +4,7 @@
     <title>sprk_todo date columns to Date Only, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable after 098 merges</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>One-way Dataverse schema change plus a data conversion, then BFF and client date handling.</rigor-reason>
     <model-tier>opus</model-tier>

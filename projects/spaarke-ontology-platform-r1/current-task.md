@@ -2,14 +2,14 @@
 
 > **Last Updated**: 2026-10-08, checkpoint 3 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
-> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-74). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-76). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Task** | No main-session task — orchestrating parallel streams (owner choice). Counts, critical path, stream table: top of `tasks/TASK-INDEX.md` (96 tasks). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 48/97 tasks done. ArchTests 818/818. Working tree clean. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 49/97 tasks done. ArchTests 818/818. Working tree clean. |
 | **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
@@ -33,9 +33,9 @@
 | What | Waiting for | Then |
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
-| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 → PR #1429** green (`65c83f68c`; 43 values converted, 5 hand-corrected; +376 B); ⚠️ dev quick-add / "Add to To Do" with a due date return HTTP 400 until #1429 deploys → independent review `af73df1eb324b2a9f` running → owner merge + dev deploy approval; 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
+| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 ✅ #1429 MERGED** 73d3b970e; dev deploy of master BFF + Console running (D-75, `a0f6ca4f806cc9dff`) |
 | **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
-| **#1413** (068) round 2 `e5f55a418` (D-73 order, D-72 note); review: F1 live node lacks the repo's myMatters condition (068 regression or pre-existing?), F2 card shows "Today" for no-due-date rows | author fixing (`a17154f00e69eeced`) | Re-check → owner merge → 068 ✅ |
+| **#1413** (068) `ded3cc069` green: D-73 order done live; F2 fixed (no-due-date rows dropped from the countdown); F1 was pre-existing drift → **D-76 restore matter scope** (author applying live) | `a17154f00e69eeced` | Re-check (`aee49df31b5a7dc81`) of round 2+3 → owner merge → 068 ✅ |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
 | **#1424** master compile fix **MERGED** 7c5f39d0d (owner pre-approval); #1418 closed | — | — |
@@ -45,8 +45,9 @@
 | ID | Role | State |
 |---|---|---|
 | a67ad20f7bead7126 | 098 author (#1359 merged) | idle |
-| a4aa08d7260331359 | 106 author — PR #1429 done | idle |
-| af73df1eb324b2a9f | Reviewer: PR #1429 (106) | running |
+| a4aa08d7260331359 | 106 author (#1429 merged) | idle |
+| af73df1eb324b2a9f | Reviewer: PR #1429 (106) — approved | idle |
+| a0f6ca4f806cc9dff | Dev deploy: master BFF + Console (D-75) | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 068 author — #1413 review fixes F1/F2 | running |
 | aa669e43432b512f5 | 060 author (done) | idle |
