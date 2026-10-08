@@ -526,6 +526,12 @@ public class DailyBriefingCollector : ICodedWorkflow
         {
             filters.Add("statecode eq 0");
         }
+        else if (spec.EntityType == EntityEvent)
+        {
+            // D-57: a flagged event is shown only while it is open work (EventStatusCode.IsOpenWork) — the same
+            // predicate as the task channels. Without it a flagged Completed/Closed/Cancelled task stayed in High Priority.
+            filters.Add(EventOpenWorkStatusFilter);
+        }
 
         var read = await ReadAsCallerAsync(
             systemUserId,

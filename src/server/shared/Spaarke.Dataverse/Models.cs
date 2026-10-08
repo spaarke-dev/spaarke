@@ -1079,7 +1079,7 @@ public static class EventStatusCode
     /// <summary>No Further Action — statecode 1 (Inactive). Used by the archive commands.</summary>
     public const int NoFurtherAction = 2;
 
-    /// <summary>Open — statecode 0 (Active). What the Daily Briefing reads as open work.</summary>
+    /// <summary>Open — statecode 0 (Active). One of the open-work statuses (<see cref="IsOpenWork"/>); the status a platform-created task carries.</summary>
     public const int Open = 659490001;
 
     /// <summary>Completed — statecode 0 (<b>Active</b>, not Inactive).</summary>
@@ -1149,7 +1149,8 @@ public static class EventStatusCode
     ///   filters already treat Draft as live work. Excluding it would make most user-created events un-completable.</item>
     ///   <item>Not open: Completed and Closed (Active, but finished), Cancelled, Transferred, No Further Action.</item>
     /// </list>
-    /// Used by the complete gate (EventEndpoints.CanCompleteEvent) and the To Do generation rules (<see cref="NotOpenWork"/>).
+    /// Used by the complete gate (EventEndpoints.CanCompleteEvent), the To Do generation rules (<see cref="NotOpenWork"/>)
+    /// and the Daily Briefing (Upcoming/Overdue task channels and High Priority events; D-57).
     /// </summary>
     public static bool IsOpenWork(int statusCode) =>
         statusCode is Draft or Open or OnHold or Reassigned;

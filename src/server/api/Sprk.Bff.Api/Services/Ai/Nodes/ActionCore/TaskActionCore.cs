@@ -66,10 +66,10 @@ internal sealed class TaskActionCore
     private static readonly Guid EventTypeTaskId = new("124f5fc9-98ff-f011-8406-7c1e525abd8b");
 
     /// <summary>
-    /// <c>sprk_event.statuscode</c> = Open. MUST match <c>DailyBriefingCollector</c>'s own
-    /// <c>EventStatusOpen</c>. The briefing's Upcoming/Overdue task channels filter on
-    /// <see cref="EventStatusCode.IsOpenWork"/> (Draft, Open, On Hold, Reassigned; D-57), of which Open is
-    /// the status a platform-created task should carry. Live option set: Draft(1) /
+    /// <c>sprk_event.statuscode</c> = Open, the status a platform-created task carries. The briefing
+    /// (Upcoming/Overdue channels and High Priority) selects events by
+    /// <see cref="EventStatusCode.IsOpenWork"/> (Draft, Open, On Hold, Reassigned; D-57), which includes Open,
+    /// so a task created with Open is always surfaced. Live option set: Draft(1) /
     /// Open(659490001) / Completed(659490002) / Cancelled(659490004).
     /// </summary>
     private const int EventStatusOpen = EventStatusCode.Open; // task 097 review F8: the one source of truth

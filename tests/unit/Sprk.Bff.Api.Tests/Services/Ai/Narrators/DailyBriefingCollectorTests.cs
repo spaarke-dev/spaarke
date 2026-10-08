@@ -72,6 +72,14 @@ public sealed class DailyBriefingCollectorTests
             list.Add((row, matchIds.Select(i => i.ToString("D")).ToArray()));
         }
 
+        /// <summary>Like Dataverse: when the query has <c>statuscode eq N</c> terms and the row has a statuscode, the row must match one.</summary>
+        private static bool MatchesStatusClause(Dictionary<string, JsonElement> row, string query)
+        {
+            var wanted = System.Text.RegularExpressions.Regex.Matches(query, @"statuscode eq (\d+)")
+                .Select(m => int.Parse(m.Groups[1].Value)).ToList();
+            return wanted.Count == 0 || !row.TryGetValue("statuscode", out var sc) || wanted.Contains(sc.GetInt32());
+        }
+
         public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
             string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
         {
@@ -84,7 +92,8 @@ public sealed class DailyBriefingCollectorTests
             var query = odataQuery ?? string.Empty;
             IReadOnlyList<Dictionary<string, JsonElement>> result = _rows.TryGetValue(entitySetName, out var list)
                 ? list.Where(r => r.Ids.Any(id => query.Contains(id, StringComparison.OrdinalIgnoreCase))
-                                  && !r.Ids.Any(id => DeniedToCaller.Contains(Guid.Parse(id))))
+                                  && !r.Ids.Any(id => DeniedToCaller.Contains(Guid.Parse(id)))
+                                  && MatchesStatusClause(r.Row, query))
                       .Select(r => r.Row)
                       .ToList()
                 : new List<Dictionary<string, JsonElement>>();
@@ -296,6 +305,8 @@ public sealed class DailyBriefingCollectorTests
                 matched.Contains(value).Should().Be(EventStatusCode.IsOpenWork(value),
                     $"status {label} must be {(EventStatusCode.IsOpenWork(value) ? "included in" : "excluded from")} the briefing's task channels");
             }
+            call.Query.Should().MatchRegex(@"\(statuscode eq \d+( or statuscode eq \d+)+\)",
+                "the status clauses must be OR-joined inside one group; ANDed or bare terms would match nothing");
             matched.Should().Contain(new[] { EventStatusCode.Draft, EventStatusCode.OnHold })
                 .And.NotContain(EventStatusCode.Completed);
         }
@@ -575,6 +586,29 @@ public sealed class DailyBriefingCollectorTests
         query.Calls.Should().OnlyContain(c => c.Caller == SystemUserId);
         query.Calls.Should().OnlyContain(c => notMine.All(n => !c.Query.Contains(n.ToString("D"))),
             "a flagged record outside the caller's people-targeted set is never even requested");
+    }
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_FlaggedEvent_ShownOnlyWhileOpenWork()
+    {
+        // D-57: one open-work predicate. A flagged Completed / Closed / Cancelled task must not stay in High Priority;
+        // a flagged Draft or On Hold one (open work) must appear. The old event spec had no status filter at all.
+        var draft = Guid.NewGuid(); var onHold = Guid.NewGuid();
+        var completed = Guid.NewGuid(); var closed = Guid.NewGuid(); var cancelled = Guid.NewGuid();
+        var query = new FakeCallerQuery();
+        void Add(Guid id, string name, int status) => query.Add("sprk_events",
+            FlaggedRow("sprk_eventid", "sprk_eventname", id, name, ("statuscode", status)), id);
+        Add(draft, "flagged draft", EventStatusCode.Draft);
+        Add(onHold, "flagged on hold", EventStatusCode.OnHold);
+        Add(completed, "flagged completed", EventStatusCode.Completed);
+        Add(closed, "flagged closed", EventStatusCode.Closed);
+        Add(cancelled, "flagged cancelled", EventStatusCode.Cancelled);
+        var sets = new Dictionary<string, Guid[]> { ["sprk_event"] = new[] { draft, onHold, completed, closed, cancelled } };
+
+        var result = await Sut(query, PeopleResolver(sets)).CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        result.Items.Where(i => i.EntityType == "sprk_event").Select(i => Guid.Parse(i.EntityId))
+            .Should().BeEquivalentTo(new[] { draft, onHold });
     }
 
     [Fact]
