@@ -57,3 +57,31 @@ Live verification: `POST /api/v1/child-records/sprk_todo` with a user token (az 
 Build notes: fresh worktree needed `npm install --legacy-peer-deps` in the three solutions plus `src/client/shared/Spaarke.UI.Components` (dompurify unresolved otherwise). SpaarkeAi `build:ribbon` step fails in a clean worktree (`@spaarke/sdap-client` unresolved); the HTML artifact is produced before that step and the ribbon is not part of the web-resource deploy.
 
 Still needs a human in the browser: SmartTodo quick-add with a due date; Daily Briefing "Add to To Do"; Console To Do widget add/complete; external app To Do create with a due date and Mark complete/incomplete (also needs the external SPA built/deployed if its client change is wanted: web-api-client.ts, SmartTodo.tsx); LegalWorkspace To Do date filters unverified until its solution is deployed.
+
+## 2026-10-08 - Task 121: which live surface serves LegalWorkspace code (read-only, spaarkedev1 only)
+
+No import, no web-resource write, no publish of any kind was run. Read-only repo and Web API GETs (az CLI token) only.
+
+### Import graph (repo)
+`src/solutions/SpaarkeAi/vite.config.ts` (lines 62-66, 149-157, 232-243) aliases/transpiles `../LegalWorkspace/src` and the `@spaarke/legal-workspace` barrel (`src/client/shared/Spaarke.LegalWorkspace/src`, re-exports `LegalWorkspaceApp`). `SpaarkeAi/src/components/workspace/WorkspacePane.tsx` and `main.tsx` import `LegalWorkspaceApp`; `LegalWorkspaceApp` -> QuickSummaryRow -> `quickSummaryConfig.ts` -> `services/queryHelpers.ts`; `ActivityFeed` -> `useActivityFeedFilters.ts`. All three 106 files are reachable from the Console bundle. `git diff 73d3b970e^1 73d3b970e -- src/solutions/LegalWorkspace`: quickSummaryConfig.ts and queryHelpers.ts changed runtime code (`formatDateOnly(new Date())` replaces `now.toISOString()` / UTC-midnight ISO); useActivityFeedFilters.ts changed COMMENTS ONLY (no runtime effect, nothing to verify live).
+
+### Live sprk_spaarkeai (webresourceid 5206a442-3451-f111-bec7-7ced8d1dc988, modifiedon 2026-10-08T17:19:09Z, 5,920,196 B decoded)
+Carries both runtime changes. Minified bundle contains `case ar.Overdue:return\`sprk_duedate lt ${sE(new Date)} and statuscode eq 1\`` and `...(statuscode eq 1 or statuscode eq 659490001) and sprk_duedate lt ${e}` with `e=sE(new Date)`; `sE` is `getFullYear()-pad(getMonth()+1)-pad(getDate())` (local calendar date). The old forms (`setUTCHours(0,0,0,0)` + `toISOString()` in the `sprk_duedate lt` filters) are absent. Deviation: step 1's clean-worktree vite build at 73d3b970e was not run; the live bundle's distinct template strings are the stronger evidence, and D-75 already byte-verified the deployed content against its dist. The escalation trigger (Console lacks the changes) did NOT fire.
+
+### Other surfaces
+| Item | Result |
+|---|---|
+| canvasapps `sprk_LegalOperationsWorkspace` (and any name/displayname containing "Legal") | **Does not exist** (47 canvas apps listed; none match) |
+| solution `SpaarkeLegalWorkspace` | Exists, unmanaged, v1.0.1, modifiedon 2026-02-18. Contains ONE component: customcontrol `sprk_Spaarke.LegalWorkspace` v1.0.1 (modifiedon 2026-02-18). Web resource `cc_Spaarke.LegalWorkspace/bundle.js` (2026-02-18) is its bundle |
+| webresource `sprk_corporateworkspace` (8b7e8863-020d-f111-8342-7ced8d1dc988) | Exists, modifiedon 2026-07-07T16:40:38Z, 3,759,131 B, **OLD code** (UTC-midnight `toISOString()` filter, no `formatDateOnly`). Member of 7 solutions. Retired 2026-05-26 (OC-R4-05); orphaned |
+| references to the above | Sitemaps of all 11 apps referenced by appmodulecomponents checked: none mention corporateworkspace or LegalOperations (Matter Management references sprk_spaarkeai, sprk_smarttodo, etc.). No systemform XML contains LegalWorkspace/corporateworkspace. No appmodulecomponent points at sprk_corporateworkspace or sprk_spaarkeai directly |
+| repo: PCF source `src/client/pcf/LegalWorkspace` | Removed from master (commit 5557abaa80); `scripts/Package-LegalWorkspace.ps1` and `Deploy-LegalWorkspaceCustomPage.ps1` cannot build or find a ZIP |
+
+### Conclusion
+No LegalWorkspace deploy is needed: the 106 date filters are already live inside the Console (D-75). Deploy-LegalWorkspaceCustomPage.ps1 targets a Custom Page that does not exist and a PCF whose source is gone. Recommendation: RETIRE it (guard copied from Deploy-CorporateWorkspace.ps1) and apply the same to Package-LegalWorkspace.ps1. PENDING OWNER DECISION. Live UI check (step 6) still needs a human; checklist below.
+
+### Step 6 checklist for a human (after 20:00 local, Console embedded workspace)
+1. Create To Dos `zz-121-today` (due today) and `zz-121-yesterday` (due yesterday), owned by you, open status.
+2. Quick Summary: overdue count includes zz-121-yesterday and NOT zz-121-today; Activity Feed Overdue filter agrees.
+3. Repeat in dark mode (badges/filters themed).
+4. Delete both rows; confirm `sprk_todos?$filter=startswith(sprk_name,'zz-121-')` returns 0.

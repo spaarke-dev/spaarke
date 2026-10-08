@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **107 tasks** across 14 phases (50 ✅ · 2 🔄 · 54 🔲 · 1 cancelled; updated 2026-10-08)
+> (spec §9) · **108 tasks** across 14 phases (50 ✅ · 2 🔄 · 55 🔲 · 1 cancelled; updated 2026-10-08)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -294,6 +294,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 127 | [ISS-014 #1412 SpaarkeAi ribbon build fails in a clean checkout (Deploy SpaarkeAi red on master), own PR](127-spaarkeai-ribbon-build-clean-checkout-own-pr.poml) | FULL | sonnet/**xhigh** | — | J | Once merged, master pushes auto-deploy the Console to dev again (owner told before merge) |
 | 🔲 [open] 128 | [Client test-harness repairs, own PR: #1416, #1417, #1388, #1392](128-client-test-harness-repairs-own-pr.poml) | FULL | sonnet/high | — | J | Test files/config only; rebase SemanticSearchControl after #1415 |
 | 🔲 [open] 129 | [D-63 completion: chart/view/grid definitions off `sprk_finalduedate` + deploy VisualHost 1.4.39 (068) without tenant-wide publish](129-visualhost-finalduedate-definitions-and-pcf-deploy.poml) | FULL | sonnet/high | 068 | — | Inventory read-only; **row edits and the import: owner approval required** |
+| 🔲 [open] 130 | [D-83: remove tenant-wide publish repo-wide (one scoped-publish procedure for scripts + skills)](130-scoped-publish-repo-wide.poml) | FULL | sonnet/high | — | J | Owner D-83. Skill text applied by the main session; live proof needs owner approval |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 

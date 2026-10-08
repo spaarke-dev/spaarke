@@ -110,6 +110,9 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
 | D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 | D-69 | WizardShell's skipped-step marker (dashed ring) is **opt-in** per wizard; existing wizards keep the tick for a skipped step; the 058 decision wizard opts in (from the #1386 review F1) | Binding (056, 058) |
+| D-82 | LegalWorkspace: its two deploy scripts are DELETED if nothing uses them (else retired); the orphaned `sprk_corporateworkspace` web resource is deleted from dev; task 106's LW changes are already live in the Console bundle (owner 2026-10-08) | Binding (121) |
+| D-83 | Tenant-wide publish is removed **repo-wide**: one shared scoped "import, then publish only the imported components" procedure for every script and the dataverse-deploy / pcf-deploy / ribbon-edit skills (owner 2026-10-08) | Binding (task 130) |
+| D-84 | Deploy the external SPA to dev (Static Web App) from master 885d0c5f9, shipping one day of merged master including uac-r2 and spaarkeai changes (owner 2026-10-08) | Binding (122) |
 | D-77 | **ISS-018 fix as recommended (option d), one PR in this project:** GUID-only list helper emitting `<value>` children (empty list selects nothing); shape check in executor + tests + deploy lint; Condition `Left` accepts numbers; no early render of `item.*`; rebuild Due Soon nodes; update all 7 repo playbooks + dev nodes (owner 2026-10-08) | Binding (task 120) |
 | D-78 | Scheduler: when every user's run of a playbook fails → log Error, mark Failed, alert, and DO NOT advance `sprk_lastrundate` (retry next tick) | Binding (task 120) |
 | D-79 | Restore matter-membership scope on all notification steps the repo designs that way (documents, emails, events, overdue tasks; extends D-76), roles confirmed with uac-r2 first | Binding (task 120) |
