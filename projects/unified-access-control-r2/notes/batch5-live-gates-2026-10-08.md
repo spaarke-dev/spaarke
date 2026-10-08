@@ -190,3 +190,51 @@ Tokens: `api://1e40baad…/.default` for the BFF, and the admin `az` token for D
 **Defects found:** none.
 
 **#1410 can be closed.** G1–G3 pass live on the merged build. The rule is pinned offline by `SecureParentReadVetoTests`, `SecureParentReadVetoInheritanceTests`, `NoAccessShareEnforcerTests` and `AssignedAccessParentWallTests`. What is left belongs to other issues: #1425 (contact plane) and #1426 (synchronizer, direct parents only).
+
+## Task 173: child records show their parent's Access Permission (PR #1458, merged `d7fdcafc3`), live gates 2026-10-08 22:57–23:12Z
+
+**Deployed by the coordinator, in order:**
+1. BFF (healthz 200).
+2. `Set-DocumentAccessPermissionSchema.ps1 -Verify`: PASS.
+3. Web resource `sprk_accesspermission_inherited`: created.
+4. `Set-InheritedAccessPermissionFormLock.ps1 -Apply` then `-Verify`: PASS on the To Do, Event, Message and Document main forms. Snapshot `…\scratchpad\snapshots\accesspermission-lock-snapshot-20261008185630.json`.
+
+The gates below were run by the task-173 agent through the Dataverse Web API and App Insights (`spe-insights-dev-67e2xz`), read-only except for the throwaway rows.
+
+**Reconcile runs** (`secure-child-reconciliation`, `[CHILD-ACCESS-PERMISSION] run=` traces, mode `write` throughout; failure null, failed 0, deferred 0, writeCapReached false in every run):
+
+| Run (UTC) | rowsChanged | examined | alreadyCorrect | changed | parentless | sweep |
+|---|---|---|---|---|---|---|
+| 22:57:22 | 0 | 1000 | 127 | **401** | 472 | 1000 rows, not complete |
+| 22:58:43 | 401 | 420 | 404 | **10** | 6 | 18 rows, **complete** |
+| 23:00:27 | 172 | 178 | 178 | 0 | 0 | — |
+| 23:02:07 | 6 | 5 | 0 | 4 | 1 | — (G-2a) |
+| 23:04:05 | 4 | 4 | 3 | 1 | 0 | — (G-2b) |
+| 23:06:06 | 2 | 4 | 0 | 4 | 0 | — (G-2c) |
+| 23:08:05 | 4 | 4 | 4 | 0 | 0 | — |
+| 23:10:05 | 0 | 0 | 0 | 0 | 0 | — |
+
+- The backfill converged in two runs: 411 rows set, under the 500 cap.
+- 0 undetermined.
+- 0 warning-level `CHILD-ACCESS-PERMISSION` traces.
+- Sample sets: To Do `dc011e7f…` and `cd7c55a3…` went Standard → Restricted from PAT-176903 (`232852f8…`); To Do `9fb4ece2…` went Standard → Limited from matter `2444af6d…`.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| **G-2a** — matter Standard → Restricted | **PASS** | Throwaway non-secure matter `a64a4306…` with To Do `99dac406…`, Event `a3dac406…`, Communication `db6a0a0b…` and Document `e06a0a0b…` filed under it. Matter PATCHed to Restricted at 23:00:39Z; all four read **Restricted** at 23:02:26Z, **107 s** later, in the 23:02 run. |
+| **G-2b** — hand edit reverted | **PASS** | To Do PATCHed to Standard through the Web API at 23:02:28Z; read **Restricted** again **102 s** later (23:04 run, changed 1). |
+| **G-2c** — matter back to Standard | **PASS** | Matter PATCHed to Standard at 23:04:11Z; all four read **Standard** after **134 s** (23:06 run, changed 4). |
+| **G-3** — parentless To Do keeps its own value | **PASS** | To Do `c4dac406…`, created with no parent and set to Limited at 23:00Z; still **Limited** at 23:11:28Z, after 5 runs. Never written. |
+| **UAT spot check** (the owner's case, through the API) | **PASS** | PAT-176903 (`232852f8…`) is Restricted and not secure. All 4 of its documents read Restricted. The To Do filed on its document `2bcfc5d2…` ("Word To Do Item" `4bebbbc9…`, created from the Word add-in) reads **Restricted**, as do all 4 To Dos carrying its matter stamp. A NEW add-in create was not made: that needs the add-in (G-1). |
+| **Cleanup** | done | All 6 throwaway rows deleted, each read back **404**: the 4 children, the G-3 To Do, then the matter. |
+
+**Defects found:** none in the product.
+- The first G-2 attempt sent no auth header and got a 401: in the agent's driver script, a function named `H` is shadowed by PowerShell's `h` alias (`Get-History`). It created nothing; it was fixed and re-run.
+
+**Owner gates still open:**
+- **G-1:** a NEW To Do created in the Word add-in on a document under PAT-176903 shows Restricted, locked, with "Access permission is inherited from …".
+- **G-4:** in the forms UI (To Do, Event, Message and Document main forms):
+  - the field is locked with the notification on a filed record and editable on an unfiled one;
+  - the TrackingFieldTrio pill change is put back while locked;
+  - no console errors;
+  - dark mode is readable.
