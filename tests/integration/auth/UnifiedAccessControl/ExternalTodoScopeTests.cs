@@ -1135,12 +1135,12 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         /// <summary>Task 152: the calling contact the endpoint handed the create (becomes Assigned To).</summary>
         public Guid? LastCreateCallerContactId { get; private set; }
 
-        public override Task<IReadOnlyList<ExternalTodoDto>> GetTodosAsync(
+        public override Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
         {
             ListCallCount++;
             LastListArgs = (rootKind, rootId);
-            return Task.FromResult<IReadOnlyList<ExternalTodoDto>>(Array.Empty<ExternalTodoDto>());
+            return Task.FromResult(new ExternalCollectionResponse<ExternalTodoDto>());
         }
 
         public override Task<ExternalTodoDto> CreateTodoAsync(

@@ -61,6 +61,7 @@ import {
 } from '@fluentui/react-icons';
 
 import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel } from '../types';
 import { SectionCard } from './SectionCard';
 
@@ -579,6 +580,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const [tasks, setTasks] = React.useState<ODataTodo[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState(false);
 
   // Status toggle state — tracks which to-do ID is currently being toggled
   const [togglingTaskId, setTogglingTaskId] = React.useState<string | null>(null);
@@ -598,16 +601,19 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const loadTasks = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    // Task 105: a flag from an earlier read must not sit beside this read's error.
+    setTruncated(false);
 
     try {
       // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records
       // regarding the given project (server-side resolver). No client-side
       // todoflag filter is needed — the new route returns only to-dos.
+      // The BFF returns every to-do up to its row cap and says `truncated` when it stops short (task 105).
       const todos = await getProjectTodos(projectId, {
         $orderby: 'createdon desc',
-        $top: 200,
       });
-      setTasks(todos);
+      setTasks(todos.items);
+      setTruncated(todos.truncated);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load tasks';
       setLoadError(message);
@@ -738,6 +744,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
               <MessageBarBody>{toggleError}</MessageBarBody>
             </MessageBar>
           )}
+          {!isLoading && <TruncatedListNotice truncated={truncated} shown={tasks.length} noun="tasks" />}
 
           {/* Loading state */}
           {isLoading && (
@@ -747,7 +754,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
 
           {/* Empty state */}
-          {!isLoading && !loadError && tasks.length === 0 && (
+          {/* Task 105: an incomplete empty list is not "no tasks" — the notice says it could not be read. */}
+          {!isLoading && !loadError && !truncated && tasks.length === 0 && (
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>

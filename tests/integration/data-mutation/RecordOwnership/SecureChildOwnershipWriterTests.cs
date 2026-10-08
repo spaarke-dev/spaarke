@@ -1003,10 +1003,9 @@ public class SecureChildOwnershipWriterTests
             Options.Create(new TodoGenerationOptions()));
 
         // The established harness for this background service (TodoGenerationServiceTests): its Dataverse client is
-        // resolved lazily in ExecuteAsync, so the test sets it directly and uses the internal seams for the rest.
-        typeof(TodoGenerationService)
-            .GetField("_dataverse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(service, dataverse.Object);
+        // resolved lazily in ExecuteAsync, so the test injects it through the internal seam (tests/CLAUDE.md B8 — no
+        // reflection into private fields). These tests create through CreateTodoAsync only, so the event source is inert.
+        service.SetDataverseForTest(dataverse.Object, Mock.Of<Spaarke.Dataverse.IEventDataverseService>());
         service.SetRegardingBuilderForTest(new TodoRegardingBuilder(
             communications.Object, CoreAncestorResolverFixtures.Inert(), NullLogger<TodoRegardingBuilder>.Instance));
         service.SetOwnershipResolverForTest(ownership);

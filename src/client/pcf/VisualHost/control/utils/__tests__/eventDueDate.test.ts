@@ -1,3 +1,4 @@
+/** @jest-environment ../../shared/Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * eventDueDate — DateOnly due dates under a negative-UTC-offset zone
  * (task 081 / H2) and the tier the card receives (task 081 / H1).
@@ -6,21 +7,12 @@
  * `new Date("YYYY-MM-DD")` (UTC midnight = 8pm the previous day in New York),
  * so a due date of TODAY read as 1 day overdue, and the "active date"
  * selection skipped a `sprk_duedate` of today in favour of `sprk_finalduedate`.
- * The zone is pinned BEFORE any Date-touching import so the test is hermetic.
+ * The file runs in America/New_York through the @jest-environment on line 1, so it is hermetic.
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { computeEventDueDays, mapEventToCardProps, selectActiveDueDate } from '../eventDueDate';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 
 /** 9:00pm local on 2026-10-05 — late in the day, where UTC-midnight parsing is off by one. */
 const NOW = new Date(2026, 9, 5, 21, 0, 0);
