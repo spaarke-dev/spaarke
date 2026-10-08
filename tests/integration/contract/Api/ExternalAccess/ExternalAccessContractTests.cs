@@ -449,6 +449,7 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     {
         "/api/v1/external/projects",
         $"/api/v1/external/projects/{ProjectA}/documents",
+        $"/api/v1/external/projects/{ProjectA}/todos",
         $"/api/v1/external/projects/{ProjectA}/events",
         $"/api/v1/external/projects/{ProjectA}/contacts",
         $"/api/v1/external/projects/{ProjectA}/organizations",
@@ -1473,6 +1474,14 @@ internal sealed class StubExternalDataService : ExternalDataService
     {
         _reads.Enqueue($"{nameof(GetDocumentsAsync)}:{projectId}");
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto> { Truncated = TruncatedRequested });
+    }
+
+    // Task 105: the to-do list seam, so the list-envelope contract covers the to-dos route too.
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalTodoDto>> GetTodosAsync(
+        TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetTodosAsync)}:{rootKind}:{rootId}");
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalTodoDto> { Truncated = TruncatedRequested });
     }
 
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>> GetEventsAsync(

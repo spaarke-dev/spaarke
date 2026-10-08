@@ -121,3 +121,26 @@ describe('each list view says when its list was cut short', () => {
     expect(screen.queryByTestId('truncated-list-notice')).toBeNull();
   });
 });
+
+describe('a truncated flag from an earlier read never sits beside a later read error', () => {
+  const reloadable: Array<[string, (projectId: string) => React.ReactElement, RegExp]> = [
+    ['to-dos', id => <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />, /network down/],
+    ['contacts', id => <ContactsOrganizations projectId={id} />, /Could not load contacts/],
+  ];
+
+  it.each(reloadable)(
+    '%s: a truncated read, then a failed read, shows the error and no notice',
+    async (_n, view, error) => {
+      answerEveryList(true);
+      const { rerender } = render(<FluentProvider theme={webLightTheme}>{view('p-first')}</FluentProvider>);
+      await waitFor(() => expect(screen.queryAllByTestId('truncated-list-notice').length).toBeGreaterThan(0));
+
+      bffApiCall.mockRejectedValue(new Error('network down'));
+      rerender(<FluentProvider theme={webLightTheme}>{view('p-second')}</FluentProvider>);
+
+      expect(await screen.findByText(error)).toBeTruthy();
+      // Contacts: the organisations read fails too; neither list may still claim the earlier truncation.
+      await waitFor(() => expect(screen.queryByTestId('truncated-list-notice')).toBeNull());
+    }
+  );
+});

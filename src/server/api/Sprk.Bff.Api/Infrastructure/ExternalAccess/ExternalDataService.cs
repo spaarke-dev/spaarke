@@ -1187,10 +1187,15 @@ public class ExternalDataService
     // ADR-024 Resolver-field application (Web API path)
     //
     // Mirrors Sprk.Bff.Api.Services.Workspace.TodoRegardingBuilder.ApplyResolverFieldsAsync
-    // but operates over the Dataverse Web API (no ServiceClient eager connect). When
-    // sprk_recordtype_ref cannot be resolved, the type field is left unset and a warning
-    // is logged — non-fatal, mirroring the SDK-path behaviour (correctness intact; only
-    // the cross-entity-view icon is lost).
+    // but operates over the Dataverse Web API (no ServiceClient eager connect). The type
+    // field (sprk_regardingrecordtype) has two different "no answer" cases (task 105):
+    //   - ABSENT: a complete read found no active sprk_recordtype_ref row for the entity.
+    //     The to-do is created without the type field and a warning is logged.
+    //   - UNREADABLE: the read failed. The create is refused with a 503 problem
+    //     (todo_record_type_unreadable) and nothing is written; the failure is not cached.
+    // The field is not cosmetic: SecureRootInheritance reads the polymorphic pair
+    // (sprk_regardingrecordid + sprk_regardingrecordtype, its PairTypeColumn) to find a
+    // record's root, so a to-do written without it loses that path.
     // ---------------------------------------------------------------------------
 
     /// <summary>
@@ -1220,8 +1225,8 @@ public class ExternalDataService
     /// Cached per service instance.
     /// </summary>
     /// <remarks>
-    /// <para><b>Absent and unreadable are different answers (task 105).</b> A COMPLETE read with no row means the type is
-    /// not configured: <c>null</c>, cached, and the create proceeds without the type bind (the caller logs it — the
+    /// <para><b>Absent and unreadable are different answers (task 105).</b> A COMPLETE read with no ACTIVE row means the
+    /// type is not configured: <c>null</c>, cached, and the create proceeds without the type bind (the caller logs it — the
     /// pre-existing, non-fatal design). A read that FAILED proves nothing, so it is never cached and never treated as
     /// absent: the create is refused with a 503 problem, because writing it would silently drop the fourth ADR-024
     /// resolver field. Before task 105 a failure (and any exception) was cached as "absent" for the instance's life.</para>
@@ -1244,7 +1249,9 @@ public class ExternalDataService
             // Task 105 (found in passing): the column is sprk_recordlogicalname. The former `sprk_recordentitylogicalname`
             // does not exist (live 2026-10-08: 400 0x80060888), so every external to-do create logged "not found" and
             // left sprk_RegardingRecordType unset — three of ADR-024's four resolver fields, not four.
-            var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}'");
+            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts, FieldMappingHandler.ts):
+            // a deactivated type row is not a type to bind.
+            var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}' and statecode eq 0");
             // Task 105: no $top=1 — GetCollectionAsync refuses $top (it suppresses @odata.nextLink). The filter names one
             // entity, so this is one row on one page; the first is taken, as before.
             var url = $"{GetApiUrl()}/sprk_recordtype_refs?$filter={filter}" +
@@ -1450,7 +1457,7 @@ public class ExternalDataService
         }
     }
 
-    /// <summary>One page of a collection read, or <c>null</c> when it failed (logged).</summary>
+    /// <summary>One page of a collection read, or <c>null</c> when it failed (logged). Cancellation by the caller is rethrown.</summary>
     private async Task<ODataResult<TRow>?> GetCollectionPageAsync<TRow>(string url, CancellationToken ct)
     {
         try
@@ -1472,6 +1479,12 @@ public class ExternalDataService
 
             return await response.Content.ReadFromJsonAsync<ODataResult<TRow>>(ct)
                 ?? throw new InvalidOperationException("Dataverse returned an empty collection body.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller went away. That is not a failed page and nothing is reported as truncated to anyone. Rethrown, so
+            // an aborted chunked read stops at once instead of logging an error for every remaining chunk.
+            throw;
         }
         catch (Exception ex)
         {

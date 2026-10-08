@@ -409,6 +409,8 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     const fetchContacts = async () => {
       setLoadingContacts(true);
       setContactsError(null);
+      // Task 105: a flag from an earlier read must not sit beside this read's error.
+      setContactsTruncated(false);
 
       try {
         const data = await getContacts(projectId);
@@ -447,6 +449,7 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     const fetchOrganizations = async () => {
       setLoadingOrganizations(true);
       setOrganizationsError(null);
+      setOrganizationsTruncated(false);
 
       try {
         const data = await getOrganizations(projectId);

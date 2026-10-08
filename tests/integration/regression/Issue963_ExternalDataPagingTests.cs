@@ -387,6 +387,51 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             .GetValue<string>().Should().Be($"/sprk_recordtype_refs({typeRef})", "the failure was not cached as 'absent'");
     }
 
+    /// <summary>
+    /// Only an ACTIVE record-type row is bound, like every sibling lookup of the table: a deactivated row for the same
+    /// entity, served first, is never chosen.
+    /// </summary>
+    [Fact]
+    public async Task AnExternalTodoCreate_BindsOnlyAnActiveRecordTypeRef()
+    {
+        var inactive = Guid.Parse("0dead000-0000-0000-0000-000000000105");
+        var active = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+        _dataverse.Add("sprk_recordtype_refs", new JsonObject
+        {
+            ["sprk_recordtype_refid"] = inactive.ToString(), ["sprk_recordlogicalname"] = "sprk_project", ["statecode"] = 1,
+        });
+        _dataverse.Add("sprk_recordtype_refs", new JsonObject
+        {
+            ["sprk_recordtype_refid"] = active.ToString(), ["sprk_recordlogicalname"] = "sprk_project", ["statecode"] = 0,
+        });
+
+        await _sut.CreateTodoAsync(
+            ExternalDataService.TodoRootKind.Project, Root,
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+
+        _dataverse.Posted("sprk_todos").Should().ContainSingle().Which["sprk_RegardingRecordType@odata.bind"]!
+            .GetValue<string>().Should().Be($"/sprk_recordtype_refs({active})");
+    }
+
+    /// <summary>
+    /// A caller that goes away is not a failed page: the read is cancelled at once, and no chunk or page is logged as a
+    /// truncation (an aborted 250-contact read used to log an error for every remaining chunk).
+    /// </summary>
+    [Fact]
+    public async Task ACancelledRead_IsCancelled_NotLoggedAsTruncated()
+    {
+        Seed("contacts", 250);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var read = () => _sut.GetContactsAsync(Root, cts.Token);
+
+        await read.Should().ThrowAsync<OperationCanceledException>();
+        _logger.Entries.Should().NotContain(e => e.Message.Contains("collection_truncated"));
+        _logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error);
+    }
+
     /// <summary>The control: a type that is genuinely not configured (a complete read, no row) still creates without the bind.</summary>
     [Fact]
     public async Task AnExternalTodoCreate_WhoseRecordTypeIsNotConfigured_IsStillCreated_WithoutTheBind()
@@ -498,7 +543,10 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
                 var clause = StringClause.Match(query.TryGetValue("$filter", out var f) ? f.ToString() : string.Empty);
                 if (!clause.Success || clause.Groups[1].Value != "sprk_recordlogicalname")
                     return Json(400, new JsonObject { ["error"] = new JsonObject { ["code"] = "0x80060888" } });
-                var match = Rows(set).Where(r => r["sprk_recordlogicalname"]!.GetValue<string>() == clause.Groups[2].Value);
+                var activeOnly = query.TryGetValue("$filter", out var tf) && tf.ToString().Contains("statecode eq 0");
+                var match = Rows(set).Where(r =>
+                    r["sprk_recordlogicalname"]!.GetValue<string>() == clause.Groups[2].Value
+                    && (!activeOnly || (r["statecode"]?.GetValue<int>() ?? 0) == 0));
                 return Json(200, new JsonObject { ["value"] = ToArray(match) });
             }
 

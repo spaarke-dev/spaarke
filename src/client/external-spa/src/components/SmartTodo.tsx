@@ -601,6 +601,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const loadTasks = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    // Task 105: a flag from an earlier read must not sit beside this read's error.
+    setTruncated(false);
 
     try {
       // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records

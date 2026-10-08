@@ -68,6 +68,7 @@ import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
 import type { ODataProject, ODataDocument, ODataEvent } from '../api/web-api-client';
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
+import { TruncatedListNotice } from '../components/TruncatedListNotice';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -476,16 +477,22 @@ const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }
 
 const RecentActivitySection: React.FC<{
   items: ActivityItem[];
+  /** Task 105: some project's event list was cut short or could not be read. */
+  truncated: boolean;
   isLoading: boolean;
   onItemClick: (projectId: string) => void;
-}> = ({ items, isLoading, onItemClick }) => {
+}> = ({ items, truncated, isLoading, onItemClick }) => {
   const styles = useStyles();
   return (
     <SectionCard title="Recent Activity">
+      {!isLoading && <TruncatedListNotice truncated={truncated} shown={items.length} noun="events" />}
       {isLoading ? (
         <SectionSpinner label="Loading activity..." />
       ) : items.length === 0 ? (
-        <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
+        // An incomplete empty list is not "no activity": the notice above says it could not be loaded.
+        truncated ? null : (
+          <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
+        )
       ) : (
         <div className={styles.itemList}>
           {items.map(item => (
@@ -518,14 +525,22 @@ const RecentActivitySection: React.FC<{
 // Upcoming Events & Tasks section
 // ---------------------------------------------------------------------------
 
-const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> = ({ items, isLoading }) => {
+const UpcomingSection: React.FC<{ items: UpcomingItem[]; truncated: boolean; isLoading: boolean }> = ({
+  items,
+  truncated,
+  isLoading,
+}) => {
   const styles = useStyles();
   return (
     <SectionCard title="Upcoming Events & Tasks">
+      {!isLoading && <TruncatedListNotice truncated={truncated} shown={items.length} noun="events" />}
       {isLoading ? (
         <SectionSpinner label="Loading upcoming items..." />
       ) : items.length === 0 ? (
-        <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
+        // Task 105: an incomplete empty list is not "nothing upcoming".
+        truncated ? null : (
+          <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
+        )
       ) : (
         <div className={styles.itemList}>
           {items.map(item => {
@@ -632,7 +647,12 @@ const MyDocumentsSection: React.FC<{
       {isLoading ? (
         <SectionSpinner label="Loading documents..." />
       ) : docs.length === 0 ? (
-        <EmptyState message="No documents found across your projects." icon={<FolderRegular />} />
+        // Task 105: an incomplete empty list is not "no documents" — say it could not be loaded.
+        truncated ? (
+          <TruncatedListNotice truncated shown={0} noun="documents" />
+        ) : (
+          <EmptyState message="No documents found across your projects." icon={<FolderRegular />} />
+        )
       ) : (
         <div>
           {docs.slice(0, 10).map(doc => (
@@ -687,6 +707,8 @@ export const OutsideCounselDashboard: React.FC = () => {
   const [projectEvents, setProjectEvents] = useState<TaggedEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [upcomingLoading, setUpcomingLoading] = useState(false);
+  // Task 105: some project's event list was cut short or could not be read — the activity and upcoming views say so.
+  const [eventsTruncated, setEventsTruncated] = useState(false);
   const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [allDocs, setAllDocs] = useState<TaggedDocument[]>([]);
@@ -741,6 +763,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     let cancelled = false;
     setActivityLoading(true);
     setUpcomingLoading(true);
+    setEventsTruncated(false);
 
     const fetchAll = async () => {
       try {
@@ -753,13 +776,21 @@ export const OutsideCounselDashboard: React.FC = () => {
               $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_regardingproject_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
-            }).then(evts => evts.items.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })))
+            }).then(evts => ({
+              truncated: evts.truncated,
+              items: evts.items.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })),
+            }))
           )
         );
         if (cancelled) return;
-        setProjectEvents(nested.flat());
+        setEventsTruncated(nested.some(n => n.truncated));
+        setProjectEvents(nested.flatMap(n => n.items));
       } catch {
-        setProjectEvents([]);
+        // A failed read is not "no events": shown as could-not-be-loaded, never as an empty list.
+        if (!cancelled) {
+          setProjectEvents([]);
+          setEventsTruncated(true);
+        }
       } finally {
         if (!cancelled) {
           setActivityLoading(false);
@@ -824,6 +855,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     }
     let cancelled = false;
     setDocsLoading(true);
+    setDocsTruncated(false);
 
     Promise.all(
       context.projects.map(p =>
@@ -852,7 +884,11 @@ export const OutsideCounselDashboard: React.FC = () => {
         }
       })
       .catch(() => {
-        if (!cancelled) setAllDocs([]);
+        if (!cancelled) {
+          // A failed read is not "no documents": shown as could-not-be-loaded, never as an empty list.
+          setAllDocs([]);
+          setDocsTruncated(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setDocsLoading(false);
@@ -907,8 +943,13 @@ export const OutsideCounselDashboard: React.FC = () => {
 
       {/* Row 1: Recent Activity + Upcoming (2-column) */}
       <div className={styles.twoColGrid}>
-        <RecentActivitySection items={recentActivity} isLoading={activityLoading} onItemClick={handleProjectClick} />
-        <UpcomingSection items={upcomingItems} isLoading={upcomingLoading} />
+        <RecentActivitySection
+          items={recentActivity}
+          truncated={eventsTruncated}
+          isLoading={activityLoading}
+          onItemClick={handleProjectClick}
+        />
+        <UpcomingSection items={upcomingItems} truncated={eventsTruncated} isLoading={upcomingLoading} />
       </div>
 
       {/* Row 2: My Projects */}
