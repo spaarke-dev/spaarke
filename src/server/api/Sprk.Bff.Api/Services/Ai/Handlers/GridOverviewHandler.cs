@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -97,6 +98,75 @@ public sealed class GridOverviewHandler : IToolHandler
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// The calling user's "today" in their own Dataverse time zone (spaarke-ontology-platform-r1 task 124, ISS-017 /
+    /// #1447, D-25). Everything is read AS THE CALLER over the handler's existing OBO client (WhoAmI, then
+    /// <c>usersettings.timezonecode</c> and <c>timezonedefinition.standardname</c>), so no app-only client is added.
+    /// Falls back to the UTC date from the injected clock, with one logged identifier-only reason, when the caller or
+    /// their zone cannot be read; the tool never fails because of it.
+    /// </summary>
+    private async Task<DateOnly> ResolveCallerTodayAsync(CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        string reason;
+        try
+        {
+            var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+            if (me.Failure is not null)
+            {
+                reason = "caller-unresolved";
+            }
+            else
+            {
+                var systemUserId = me.SystemUserId;
+                var day = await DataverseUserTimeZone.UserDayAsync(
+                    async c =>
+                    {
+                        var row = await FirstRowAsync(
+                            $"usersettingscollection?$select=timezonecode&$filter=systemuserid eq {systemUserId:D}", c).ConfigureAwait(false);
+                        return row is { } r && r.TryGetProperty("timezonecode", out var code) && code.ValueKind == JsonValueKind.Number
+                               && code.TryGetInt32(out var value)
+                            ? value
+                            : (int?)null;
+                    },
+                    async (code, c) =>
+                    {
+                        var row = await FirstRowAsync(
+                            $"timezonedefinitions?$select=standardname&$filter=timezonecode eq {code.ToString(CultureInfo.InvariantCulture)}", c)
+                            .ConfigureAwait(false);
+                        return row is { } r ? GetString(r, "standardname") : null;
+                    },
+                    now,
+                    ct).ConfigureAwait(false);
+
+                if (day.FallbackReason is null)
+                    return day.Today;
+                reason = day.FallbackReason;
+            }
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            reason = "lookup-failed";
+        }
+
+        _logger.LogWarning("GridOverviewHandler: the caller's time zone could not be read; today is the UTC date ({Reason}).", reason);
+        return DateOnly.FromDateTime(now.UtcDateTime);
+    }
+
+    /// <summary>The first row of an OBO collection read; null when none. A failed read throws so the time-zone helper reports <c>lookup-failed</c>.</summary>
+    private async Task<JsonElement?> FirstRowAsync(string path, CancellationToken ct)
+    {
+        var response = await _dataverse.GetAsync(path, ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+            throw new InvalidOperationException("The time-zone read failed.");
+        return response.Body is { } body
+               && body.TryGetProperty("value", out var value)
+               && value.ValueKind == JsonValueKind.Array
+               && value.GetArrayLength() > 0
+            ? value[0]
+            : null;
     }
 
     /// <inheritdoc />
@@ -211,7 +281,11 @@ public sealed class GridOverviewHandler : IToolHandler
             }
 
             // 2) Inject today SERVER-SIDE (never a client value). Deterministic via the injected clock.
-            var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
+            //    "today" is the CALLER's day (D-25): their Dataverse time zone, so an Eastern user at 20:30 local
+            //    does not get tomorrow. Resolved only when the query carries a today token.
+            var today = TodayTokenRegex.IsMatch(savedFetchXml)
+                ? await ResolveCallerTodayAsync(cancellationToken).ConfigureAwait(false)
+                : DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
             var todayIso = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var (datedFetchXml, todayInjected) = InjectToday(savedFetchXml, today);
 
