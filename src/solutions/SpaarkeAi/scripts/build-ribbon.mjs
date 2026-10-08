@@ -79,6 +79,14 @@ async function buildOne(sourceFile) {
     minify: false,
     logLevel: "info",
     legalComments: "none",
+    // Mirrors the vite/tsconfig/jest alias for @spaarke/ui-components (package source lives
+    // under src/, the file: dependency's package root has no utils/). Ribbon code must import
+    // dependency-free LEAF modules (e.g. @spaarke/ui-components/utils/guid), never the barrel:
+    // the barrel's closure imports react/@fluentui/* from the shared source tree, where no
+    // node_modules exists, and the ribbon is not allowed to bundle them (ISS-014 / #1412).
+    alias: {
+      "@spaarke/ui-components": resolve(solutionRoot, "../../client/shared/Spaarke.UI.Components/src"),
+    },
   });
 
   return { sourceName, outFile, globalName };
