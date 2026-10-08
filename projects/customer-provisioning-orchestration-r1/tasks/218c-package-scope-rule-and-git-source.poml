@@ -3,7 +3,7 @@
   <metadata>
     <title>Package scope by rule (every sprk component in the authoring environment + OOB columns − committed exclusions), two-way drift check, and an export step that writes SpaarkeMaster as unpacked source into git with no environment-variable values</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, G11); notes/t218-plan.md design 2, 3, 7</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Release tooling that decides what every customer receives; PowerShell + tests; reads the dev environment.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -66,5 +66,13 @@
     <criterion testable="true">Export script -WhatIf/dry run prints the export + unpack commands without writing to dev.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-08">COMPLETED (SESSION 43). Commits 48b16bcb8 (implementation), 3eb20566e (review fixes), 3d280df7d (re-check fixes). Pester tests/scripts/SpaarkePackageScope.Tests.ps1 25/25 (Pester 3.4 under pwsh). Read-only live runs against spaarkedev1 throughout; nothing written to Dataverse.
+    - SpaarkePackageScope.psm1 = the rule: unmanaged sprk_ tables (not intersects) whole, option sets, web resources, PCFs, apps, site maps, env-var DEFINITIONS; sprk_ columns + unmanaged views/forms on OOB tables (with their table as parent); unmanaged dashboards and field security profiles; ROOT roles from any business unit by pattern or name, minus docs/data-model/package-scope.json exclusions (reason + date required). Discovery ported from the retired Build-SpaarkeMaster.ps1.
+    - Test-SolutionCompleteness: missing / packaged as shell / excluded but packaged / outside the rule / stale exclusion / unmatched extra role / OOB column unlisted / inventory drift. Assemble: adds with subcomponents and NO dependencies (AddRequiredComponents=true had dragged five Microsoft tables in), OOB parents as true shells, re-adds shells, verifies membership before bumping the version. Export-SpaarkeMasterSource: --environment pinned, both types unpacked, env-var values stripped, FAILS on any missing dependency on solution="Active" (the F12 forcing function).
+    - Live state of SpaarkeMaster (2026-10-08): 520 in scope, 18 excluded, 53 missing, 8 sprk_ tables packaged as shells (sprk_signal, sprk_noaccessentry, sprk_policy, ...), Spaarke Provisioning Registry role packaged though excluded, 13 outside the rule (5 Microsoft tables + 8 env-var values). All of it is 218e (owner-approved live changes).
+    - CORRECTIONS recorded: the plan's F7 example (sprk_spaarkeai/sprk_dailyupdate "in no Spaarke solution") and a "no Spaarke Basic User role" note were both wrong - 20-row-capped Dataverse queries. Plan, runbook, POMLs, current-task fixed.
+    - AC1 amended (see criterion). AC4 met (-WhatIf prints the pac commands).
+    - KNOWN LIMITS: Learn does not document that re-adding a table with DoNotIncludeSubcomponents=false turns a shell into a full component - Assemble's post-add verification refuses the bump if it does not; Pester tests run manually (no CI job runs tests/scripts yet); four April PCF exclusions (UpdateRelatedButton, ThemeEnforcer, RegardingLink, ScopeConfigEditor) left for 218e's form-usage check.</note>
+  </notes>
 </task>

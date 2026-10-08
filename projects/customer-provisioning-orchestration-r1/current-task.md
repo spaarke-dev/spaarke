@@ -2,25 +2,23 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-07 SESSION 43 (task-execute checkpoint) — T218 split into 218a–e + T257; 218a ✅ (ADR-027 amended); 218b ✅ (H6 = one SpaarkeMaster, managed by default); next 218c.
+> **Last Updated**: 2026-10-08 SESSION 43 (task-execute checkpoint) — 218a ✅ ADR-027 amended; 218b ✅ H6 = one SpaarkeMaster, managed by default; 218c ✅ package scope rule + drift + export (read-only runs); next 218e needs the owner's OK for live dev changes.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T218** — the complete Dataverse package. Plan `notes/t218-plan.md`; POMLs `tasks/218a…218e`, `257`. 218a ✅ `8b878d655`; 218b ✅ `3f41aab33` + review `4f6c579ed` + re-check `d3aa70726`. |
-| **Step** | Next: **218c** (scope by rule + exclusions file + two-way drift + `Export-SpaarkeMasterSource.ps1` + env-value guard). Reading dev is allowed; Assemble without -WhatIf (writes SpaarkeMaster in dev) needs owner OK. |
-| **Status** | in-progress (218c not started). |
-| **Next Action** | `task-execute` 218c. Then 218e (content gaps + first source export — live dev changes, ask), then 218d (CI pack + publish — first publish needs OK). T240b still blocked on the add-in apps being single-tenant. |
+| **Task** | **T218** — the complete Dataverse package. Plan `notes/t218-plan.md`; POMLs `tasks/218a…218e`, `257`. 218a ✅ `8b878d655`; 218b ✅ `3f41aab33`/`4f6c579ed`/`d3aa70726`; 218c ✅ `48b16bcb8`/`3eb20566e`/`3d280df7d`. |
+| **Step** | Next: **218e** — content gaps + first source export. Every step writes to spaarkedev1's SpaarkeMaster → **owner OK first** (owner item 9). |
+| **Status** | waiting on the owner's OK for 218e's live dev changes. |
+| **Next Action** | On the owner's OK: `task-execute` 218e — (1) `Test-SolutionCompleteness.ps1 -FailOnDrift:$false -SkipInventory` (read-only) → classify the 53 missing (ship / exclude with reason; the 4 April PCFs by form usage); (2) remove from SpaarkeMaster what is OUTSIDE THE RULE (5 Microsoft tables, 8 env-var values) + the Provisioning Registry role; (3) `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, then without (adds + re-adds the 8 shells, bumps the version); (4) `Export-SpaarkeMasterSource.ps1` (pac auth with access to spaarkedev1) → commit src/dataverse/solutions/SpaarkeMaster; then 218d (CI pack + publish). Without the OK: continue with T235. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean (after this checkpoint). **9+ behind master** (2026-10-08): merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests` (CLAUDE.md §6). PR #1365 open. |
 | **Order** | 218c → 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240c (owner OK for the service) → T240d → T257 → T186. T240b when word-add-in-r1 answers. |
 
-### T218 facts that matter for 218c–e (details in the plan)
-- The first rule run (218c, read-only) found **44 in-scope components missing from SpaarkeMaster** (11 PCFs incl. RecordHeader, AI Setup app + site map, `sprk_assignedaccess`, access scripts, Console User + Ontology roles, 17 OOB columns) and the Provisioning Registry role packaged though excluded. (Correction: the earlier claim that `sprk_spaarkeai`/`sprk_dailyupdate` are in no Spaarke solution was wrong — a 20-row-capped query; both are in SpaarkeMaster.)
-- Roles (corrected after the 218c review): "Spaarke Basic User" — H11's default guest role — EXISTS (root unit "Spaarke", already in SpaarkeMaster); my earlier "no Basic User" note came from a 20-row-capped query. "Secure Record Owner" is a root role authored in the child unit "Secure Record" — the rule now takes root roles from any unit.
-- Dev holds SpaarkeMaster 1.0.0.0 **unmanaged** (modified 2026-08-23), SpaarkeCore 1.1.0.0, SpaarkeSecurityRoles 1.0.0.1. The 2026-08-21 export packaged dev env-var VALUES (must not ship).
-- The store `sprkcpartifactsdev/provisioning-artifacts` holds a hand-made `SpaarkeMaster.zip` + old-format manifest → a real run now fails at H6 with missing-solution-zips (no SpaarkeMaster entry) until 218d publishes.
-- H6 manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
+### T218 facts for 218e/218d (details in 218c's POML notes)
+- Live SpaarkeMaster in dev (2026-10-08, read-only): 520 in scope, 18 excluded, **53 missing**, **8 sprk_ tables packaged as shells** (incl. sprk_signal, sprk_noaccessentry, sprk_policy), Provisioning Registry role packaged though excluded, **13 outside the rule** (5 Microsoft tables dragged in by the 2026-08-23 rebuild, 8 env-var values).
+- Roles: "Spaarke Basic User" (H11 default) EXISTS and is in SpaarkeMaster; "Secure Record Owner" is a root role in the child unit "Secure Record". (Two earlier wrong notes came from 20-row-capped MCP queries — pass `top` or use the scripts.)
+- The store `sprkcpartifactsdev/provisioning-artifacts` holds the hand-made old-format manifest → a real run fails at H6 (missing-solution-zips) until 218d publishes. Manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
 
 ### T240b (blocked)
 Deploying the add-in package in another organization fails at consent (`AADSTS700016`): the add-in apps are single-tenant — dev `c1258e2d…` AND production `1958aec2…` (word-add-in-r1 created it 2026-10-07, master `cbee69b68`). Customer BFFs now pre-authorize `1958aec2` (Worker Bicep, `4d41cb026`). Message `notes/coordination/2026-10-08-to-word-add-in-r1-4.md` (+ addendum for the production app).
@@ -40,7 +38,7 @@ Deploying the add-in package in another organization fails at consent (`AADSTS70
 6. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
 7. Board Status "Active" vs Status Reason "On hold" on Issue #438.
 8. **ISS-005 / #1401 (escalation from 218b)**: `Deploy-Release.ps1` (deploy-new-release skill, Spaarke's own envs) and the legacy `Provision-Customer.ps1` still call `Deploy-DataverseSolutions.ps1`, whose list names 6 nonexistent solutions. Recommendation: package type per Spaarke environment in `config/environments.json`, then retire the PS list in favour of the CI-published SpaarkeMaster zips.
-9. **218c/218e live steps** (ask when reached): Assemble into SpaarkeMaster in dev, version bump, export; **218d** first CI publish to `sprkcpartifactsdev`.
+9. **218e live steps (ASK NOW)**: changes to SpaarkeMaster in spaarkedev1 — add the missing components, remove the 5 Microsoft tables + 8 env-var values + Provisioning Registry role, re-add the 8 shell tables, bump the version, export to git. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
 10. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
 
 ## Cross-project deliveries (track until delivered)
