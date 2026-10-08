@@ -91,7 +91,10 @@ describe('external to-dos: the due date is the calendar day (New York, 21:00)', 
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
     await waitFor(() =>
-      expect(bffApiCall).toHaveBeenCalledWith(`/api/v1/external/projects/${PROJECT}/todos`, expect.objectContaining({ method: 'POST' }))
+      expect(bffApiCall).toHaveBeenCalledWith(
+        `/api/v1/external/projects/${PROJECT}/todos`,
+        expect.objectContaining({ method: 'POST' })
+      )
     );
     const post = bffApiCall.mock.calls.find(([, init]) => init?.method === 'POST')!;
     expect(JSON.parse(post[1].body).sprk_duedate).toBe('2026-10-07');

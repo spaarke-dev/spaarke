@@ -68,7 +68,9 @@ describe('To Do due dates are calendar dates (task 106, America/New_York 21:00)'
 
   describe('LegalWorkspace feed "Overdue" event filter (same defect class on sprk_event, found by the 106 review)', () => {
     it('is overdue only before the LOCAL today, never a UTC-midnight timestamp', () => {
-      expect(buildEventCategoryFilter(EventFilterCategory.Overdue)).toBe('sprk_duedate lt 2026-10-05 and statuscode eq 1');
+      expect(buildEventCategoryFilter(EventFilterCategory.Overdue)).toBe(
+        'sprk_duedate lt 2026-10-05 and statuscode eq 1'
+      );
     });
   });
 });
