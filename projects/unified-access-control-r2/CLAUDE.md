@@ -190,6 +190,8 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 
 ## 6. Gotchas — do not re-learn
 
+**Shared machine (2026-10-08):** many sessions and agents run tests on this machine at once. NEVER kill processes machine-wide (`taskkill /F /IM testhost.exe`, `dotnet build-server shutdown`, killing `dotnet`/`node` by name): it interrupts other sessions' runs. Kill only a PID you started, or wait for the lock to clear. A Dataverse form `GET` returns the PUBLISHED XML: publish before reading back a form write (task 153's script, PR #1473).
+
 **Dataverse Web API:**
 - A lookup is `_x_value` in `$filter` AND `$select` (G-13); a test double matching on query text copies the code's mistake.
 - `RetrievePrincipalAccess` is refused on organization-owned tables (0x80040800); ask the table privilege.
