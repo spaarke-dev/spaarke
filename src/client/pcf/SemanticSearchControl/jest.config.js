@@ -31,6 +31,10 @@ module.exports = {
     transform: {
         "^.+\\.tsx?$": ["ts-jest", {
             tsconfig: "tsconfig.json",
+            // `generated/ManifestTypes` (imported type-only as `IInputs`) is pcf-scripts build
+            // output and is gitignored, so a fresh checkout has none. TS2307 for it must not make
+            // the suites unloadable; every other diagnostic still fails the run (#1392).
+            diagnostics: { ignoreCodes: [2307] },
         }],
     },
     moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],

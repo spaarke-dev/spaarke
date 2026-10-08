@@ -18,6 +18,9 @@
  */
 import * as React from 'react';
 import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
+// #1416: the REAL cleanGuid (ADR-044: strip braces, trim, lowercase) — dependency-free deep import,
+// same pattern as realGetXrm. Never re-implement it here: an identity stub hides brace/case bugs.
+import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/utils/guid';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MicrosoftToDoIcon: React.FC<any> = props => (
@@ -163,7 +166,7 @@ export class EntityCreationService {
     return {};
   }
 }
-export const cleanGuid: (id: string) => string = id => id;
+export const cleanGuid = realCleanGuid;
 
 // `email.registration.ts` (another LegalWorkspace section, task 092,
 // 2026-10-04) imports these 6. `resolveCurrentUserEmail` typed to return
