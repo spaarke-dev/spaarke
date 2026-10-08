@@ -400,7 +400,39 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
         }
 
+        // Task 064: the handler may need the caller's FULL rights on this record (the per-record No Access read shows the
+        // entries only to a caller who also holds Write). Published here so it reuses this probe's answer instead of
+        // asking Dataverse a second time; keyed by the record, so it can only ever answer for the record just checked.
+        httpContext.Items[AuthorizedRightsItemKey] = new AuthorizedRouteRecord(entitySetName, recordId, rights);
+
         return await next(context);
+    }
+
+    /// <summary>The <see cref="HttpContext.Items"/> key of the rights the fixed-entity-set decision just allowed (task 064).</summary>
+    internal static readonly object AuthorizedRightsItemKey = new();
+
+    /// <summary>The record the fixed-entity-set decision allowed, and the caller's rights on it as the probe answered.</summary>
+    internal sealed record AuthorizedRouteRecord(string EntitySet, Guid RecordId, AccessRights Rights);
+
+    /// <summary>
+    /// The caller's rights on (<paramref name="entitySetName"/>, <paramref name="recordId"/>) as this request's
+    /// fixed-entity-set decision read them (task 064), or <c>false</c> when no such decision ran for that record — the
+    /// caller then treats the rights as unknown (none), never as granted.
+    /// </summary>
+    internal static bool TryGetAuthorizedRights(
+        HttpContext httpContext, string entitySetName, Guid recordId, out AccessRights rights)
+    {
+        if (httpContext.Items.TryGetValue(AuthorizedRightsItemKey, out var value)
+            && value is AuthorizedRouteRecord allowed
+            && string.Equals(allowed.EntitySet, entitySetName, StringComparison.Ordinal)
+            && allowed.RecordId == recordId)
+        {
+            rights = allowed.Rights;
+            return true;
+        }
+
+        rights = AccessRights.None;
+        return false;
     }
 
     /// <summary>The declared-target decision (see the extension's remarks for the denial shape).</summary>

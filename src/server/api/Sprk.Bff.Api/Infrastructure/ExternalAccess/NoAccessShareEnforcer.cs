@@ -92,6 +92,23 @@ public sealed record NoAccessEnforcementReport(
             0, 0, false);
 }
 
+/// <summary>One active entry covering a record, and the record it covers it through: the record itself, or a secure
+/// record it is filed under (task 064).</summary>
+public sealed record NoAccessCoveringEntry(Guid EntryId, string CoveredRecordType, Guid CoveredRecordId);
+
+/// <summary>
+/// The active No Access entries covering one record (<see cref="NoAccessShareEnforcer.ReadCoverageAsync"/>, task 064).
+/// <see cref="Truncated"/>: more entries cover it than one read returns. Not <see cref="IsReadable"/>: the entries are
+/// UNKNOWN (never "none") and <see cref="Fault"/> says why.
+/// </summary>
+public sealed record NoAccessCoverage(IReadOnlyList<NoAccessCoveringEntry> Entries, bool Truncated, string? Fault)
+{
+    /// <summary>The entries could be read; when false, <see cref="Entries"/> is empty and means nothing.</summary>
+    public bool IsReadable => Fault is null;
+
+    internal static NoAccessCoverage Unreadable(string fault) => new(Array.Empty<NoAccessCoveringEntry>(), false, fault);
+}
+
 /// <summary>
 /// Removes the direct POA shares an active No Access entry walls off, on secure records (task 143 · owner Q4).
 /// </summary>
@@ -212,6 +229,30 @@ public sealed class NoAccessShareEnforcer
         _logger = logger;
     }
 
+    /// <summary>
+    /// The ONE well-formedness rule for an entry (schema Business Rule 1, plus task 154's canonical record id), shared by
+    /// the enforcer and the per-record read (task 064): exactly one subject, and EITHER an object organization alone OR an
+    /// object record type with a record id in the form the read-time veto matches
+    /// (<see cref="NoAccessListReader.TryParseObjectRecordId"/>). A row that fails it walls nothing, so neither the
+    /// enforcer nor the read counts it as a restriction.
+    /// </summary>
+    /// <param name="row">The entry's subject and object columns.</param>
+    /// <param name="subjectKind">The one subject's kind, when well-formed.</param>
+    /// <param name="isOrgObject">True when the object is an organization (an ethical wall); false for a record.</param>
+    internal static bool TryClassify(NoAccessEntryRow row, out NoAccessSubjectKinds subjectKind, out bool isOrgObject)
+    {
+        subjectKind = NoAccessListReader.SubjectKindOf(row) ?? NoAccessSubjectKinds.None;
+        isOrgObject = row._sprk_objectorganization_value.HasValue
+                      && !row._sprk_objectrecordtype_value.HasValue && string.IsNullOrEmpty(row.sprk_objectrecordid);
+        // Task 154: the record id must be in the form the read-time veto matches. A braced or otherwise non-canonical id is
+        // malformed here too. Before, it was enforced (shares removed) while the veto never matched it, so the entry looked
+        // enforced and walled nothing on Teams/SPA.
+        var isRecordObject = !row._sprk_objectorganization_value.HasValue
+                             && row._sprk_objectrecordtype_value.HasValue
+                             && NoAccessListReader.TryParseObjectRecordId(row.sprk_objectrecordid, out _);
+        return subjectKind != NoAccessSubjectKinds.None && (isOrgObject || isRecordObject);
+    }
+
     /// <summary>Enforces one entry now.</summary>
     /// <param name="entryId">The <c>sprk_noaccessentry</c> id. Everything else is read from the entry.</param>
     /// <param name="cacheTenants">The tenant namespaces a walled user's root-set cache is cleared under (the caller's
@@ -246,29 +287,21 @@ public sealed class NoAccessShareEnforcer
         }
 
         var row = entry.Row;
-        var subjectKind = NoAccessListReader.SubjectKindOf(row);
-        var isOrgObject = row._sprk_objectorganization_value.HasValue
-                          && !row._sprk_objectrecordtype_value.HasValue && string.IsNullOrEmpty(row.sprk_objectrecordid);
-        // Task 154: the record id must be in the form the read-time veto matches (NoAccessListReader.TryParseObjectRecordId).
-        // A braced or otherwise non-canonical id is malformed here too. Before, it was enforced (shares removed) while the
-        // veto never matched it, so the entry looked enforced and walled nothing on Teams/SPA.
-        var isRecordObject = !row._sprk_objectorganization_value.HasValue
-                             && row._sprk_objectrecordtype_value.HasValue
-                             && NoAccessListReader.TryParseObjectRecordId(row.sprk_objectrecordid, out _);
-        if (subjectKind is null || (!isOrgObject && !isRecordObject))
+        if (!TryClassify(row, out var subjectKind, out var isOrgObject))
         {
             _logger.LogWarning(
                 "[NO-ACCESS-ENFORCE] Entry {EntryId} is malformed (subject kind {SubjectKind}, org object {OrgObject}, " +
-                "record object {RecordObject}); it walls nothing and nothing was enforced.",
-                entryId, subjectKind, isOrgObject, isRecordObject);
+                "record type {HasType}, record id '{RecordId}'); it walls nothing and nothing was enforced.",
+                entryId, NoAccessListReader.SubjectKindOf(row), row._sprk_objectorganization_value.HasValue,
+                row._sprk_objectrecordtype_value.HasValue, row.sprk_objectrecordid);
             return NoAccessEnforcementReport.Terminal(entryId, NoAccessEnforcementOutcome.Malformed);
         }
 
-        var run = new Run(entryId, subjectKind.Value);
+        var run = new Run(entryId, subjectKind);
 
         // ── Covered secure records, covered users ─────────────────────────────
         var records = await CoveredRecordsAsync(row, isOrgObject, run, ct).ConfigureAwait(false);
-        var users = await CoveredUsersAsync(row, subjectKind.Value, run, ct).ConfigureAwait(false);
+        var users = await CoveredUsersAsync(row, subjectKind, run, ct).ConfigureAwait(false);
         run.CoveredRecords = records.Count;
         run.CoveredUsers = users.Count;
 
@@ -326,34 +359,19 @@ public sealed class NoAccessShareEnforcer
     {
         try
         {
-            var (entryIds, truncated) = await EntriesCoveringAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
-
-            // Never throws a read fault: an unreadable record, filing or parent comes back Unverifiable.
-            // Round 61 item 1: every secure ANCESTOR's entries (a work assignment under a project under the matter).
-            var parents = await SecureRootInheritance
-                .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct,
-                    maxDepth: SecureRootInheritance.MaxFilingDepth)
-                .ConfigureAwait(false);
-            if (!parents.IsKnown)
+            var coverage = await ReadCoverageAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
+            if (!coverage.IsReadable)
             {
-                throw new InvalidOperationException($"What the record is filed under could not be read: {parents.Unverifiable}.");
-            }
-
-            var covering = entryIds.ToList();
-            foreach (var parent in parents.SecureParents)
-            {
-                var (parentEntryIds, parentTruncated) = await EntriesCoveringAsync(parent.Table, parent.Id, ct).ConfigureAwait(false);
-                covering.AddRange(parentEntryIds);
-                truncated |= parentTruncated;
+                return new[] { CoveringEntriesUnreadable(entityLogicalName, recordId) };
             }
 
             var reports = new List<NoAccessEnforcementReport>();
-            foreach (var entryId in covering.Distinct())
+            foreach (var entryId in coverage.Entries.Select(e => e.EntryId).Distinct())
             {
                 reports.Add(await EnforceEntryAsync(entryId, cacheTenants, ct).ConfigureAwait(false));
             }
 
-            if (truncated)
+            if (coverage.Truncated)
             {
                 reports.Add(NoAccessEnforcementReport.Terminal(Guid.Empty, NoAccessEnforcementOutcome.Failed,
                     new NoAccessEnforcementFailure(entityLogicalName, recordId, null, "covering-entries-truncated",
@@ -364,14 +382,71 @@ public sealed class NoAccessShareEnforcer
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            _logger.LogError(ex, "[NO-ACCESS-ENFORCE] The entries covering {Type} {RecordId} could not be enforced.",
+                entityLogicalName, recordId);
+            return new[] { CoveringEntriesUnreadable(entityLogicalName, recordId) };
+        }
+    }
+
+    private static NoAccessEnforcementReport CoveringEntriesUnreadable(string entityLogicalName, Guid recordId)
+        => NoAccessEnforcementReport.Terminal(Guid.Empty, NoAccessEnforcementOutcome.Failed,
+            new NoAccessEnforcementFailure(entityLogicalName, recordId, null, "covering-entries-unreadable",
+                "The No Access entries that cover this record could not be read, so nothing was enforced. Try again."));
+
+    /// <summary>
+    /// The ONE answer to "which ACTIVE No Access entries cover this record" (task 064, owner round 59 item 3: lifted out of
+    /// <see cref="EnforceForRecordAsync"/> so the enforcer and the per-record read share it). Every entry whose object is the
+    /// record or an organization it references (ANY org-typed lookup, B-10), and the same for every secure record it is filed
+    /// under, up the chain (round 61 item 1, through the ONE parent walk
+    /// <see cref="SecureRootInheritance.ReadSecureParentsAsync"/>). Each entry carries the record it covers through.
+    /// </summary>
+    /// <remarks>
+    /// Never throws a read fault: an unreadable referenced-organization set, filing or entry query comes back
+    /// <see cref="NoAccessCoverage.IsReadable"/> = false with the reason, never "no entries" (NFR-01). The record's own
+    /// entries come first, so an entry reached both directly and through a parent is reported on its direct path. The
+    /// query asks for ACTIVE entries; whether each is well-formed (<see cref="TryClassify"/>) is the caller's to judge.
+    /// </remarks>
+    /// <param name="entityLogicalName">The record's table: <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c>.</param>
+    /// <param name="recordId">The record.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<NoAccessCoverage> ReadCoverageAsync(string entityLogicalName, Guid recordId, CancellationToken ct)
+    {
+        try
+        {
+            var covering = new List<NoAccessCoveringEntry>();
+            var (entryIds, truncated) = await EntriesCoveringAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
+            covering.AddRange(entryIds.Select(id => new NoAccessCoveringEntry(id, entityLogicalName, recordId)));
+
+            // Never throws a read fault: an unreadable record, filing or parent comes back Unverifiable.
+            // Round 61 item 1: every secure ANCESTOR's entries (a work assignment under a project under the matter).
+            var parents = await SecureRootInheritance
+                .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct,
+                    maxDepth: SecureRootInheritance.MaxFilingDepth)
+                .ConfigureAwait(false);
+            if (!parents.IsKnown)
+            {
+                _logger.LogError(
+                    "[NO-ACCESS-ENFORCE] What {Type} {RecordId} is filed under could not be read ({Reason}); the entries " +
+                    "covering it are unknown.", entityLogicalName, recordId, parents.Unverifiable);
+                return NoAccessCoverage.Unreadable($"What the record is filed under could not be read: {parents.Unverifiable}.");
+            }
+
+            foreach (var parent in parents.SecureParents)
+            {
+                var (parentEntryIds, parentTruncated) = await EntriesCoveringAsync(parent.Table, parent.Id, ct).ConfigureAwait(false);
+                covering.AddRange(parentEntryIds
+                    .Where(id => covering.All(c => c.EntryId != id))
+                    .Select(id => new NoAccessCoveringEntry(id, parent.Table, parent.Id)));
+                truncated |= parentTruncated;
+            }
+
+            return new NoAccessCoverage(covering, truncated, null);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
             _logger.LogError(ex, "[NO-ACCESS-ENFORCE] The entries covering {Type} {RecordId} could not be read.",
                 entityLogicalName, recordId);
-            return new[]
-            {
-                NoAccessEnforcementReport.Terminal(Guid.Empty, NoAccessEnforcementOutcome.Failed,
-                    new NoAccessEnforcementFailure(entityLogicalName, recordId, null, "covering-entries-unreadable",
-                        "The No Access entries that cover this record could not be read, so nothing was enforced. Try again.")),
-            };
+            return NoAccessCoverage.Unreadable("The No Access entries that cover this record could not be read.");
         }
     }
 
