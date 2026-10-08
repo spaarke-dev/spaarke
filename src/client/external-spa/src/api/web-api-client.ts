@@ -138,7 +138,7 @@ export interface ODataTodo {
   sprk_name: string;
   /** Rich notes / description (memo up to 100000 chars) */
   sprk_notes?: string | null;
-  /** ISO date string — due date */
+  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only, task 106) — parse with parseDueDate, never new Date(). */
   sprk_duedate?: string | null;
   /** Priority score 0-100 */
   sprk_priorityscore?: number | null;
@@ -621,7 +621,7 @@ export interface CreateTodoPayload {
   sprk_name: string;
   /** Rich notes / description */
   sprk_notes?: string | null;
-  /** ISO date string for the due date */
+  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only refuses a timestamp — task 106). */
   sprk_duedate?: string | null;
   /** Priority score 0-100 */
   sprk_priorityscore?: number;
@@ -645,7 +645,7 @@ export interface UpdateTodoPayload {
   sprk_name?: string | null;
   /** Rich notes / description */
   sprk_notes?: string | null;
-  /** ISO date string for the due date */
+  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only refuses a timestamp — task 106). */
   sprk_duedate?: string | null;
   /** Priority score 0-100 */
   sprk_priorityscore?: number;

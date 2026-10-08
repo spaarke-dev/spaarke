@@ -131,7 +131,7 @@ export const MOCK_TODOS: Record<string, ODataTodo[]> = {
       sprk_todoid: 'todo-001',
       sprk_name: 'Review SPA redline from counterparty',
       sprk_notes: 'Mark up changes against base draft and circulate to deal team.',
-      sprk_duedate: '2026-03-28T00:00:00Z',
+      sprk_duedate: '2026-03-28',
       sprk_priorityscore: 75,
       sprk_effortscore: 40,
       sprk_todocolumn: 100000000, // Today
@@ -148,7 +148,7 @@ export const MOCK_TODOS: Record<string, ODataTodo[]> = {
       sprk_todoid: 'todo-002',
       sprk_name: 'Provide tax structuring comments',
       sprk_notes: null,
-      sprk_duedate: '2026-04-02T00:00:00Z',
+      sprk_duedate: '2026-04-02',
       sprk_priorityscore: 50,
       sprk_effortscore: 25,
       sprk_todocolumn: 100000001, // Tomorrow

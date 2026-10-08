@@ -373,3 +373,11 @@ outlook/commands/__tests__/commands.emailContent.test.ts
 shared/adapters/__tests__/OutlookAdapter.attachmentKinds.test.ts
 shared/taskpane/components/__tests__/AttachmentSelector.saveLimit.test.tsx
 shared/taskpane/utils/__tests__/copyText.test.ts
+# UAT round 12 (2026-10-08): 117 Copy Link = Spaarke record link; 119 Find open affordance; 120 Outlook email identity
+# (already-saved box) + opening records on Office on the web.
+shared/taskpane/components/__tests__/SaveFlow.copyRecordLink.test.tsx
+shared/taskpane/components/__tests__/FindResultsList.openAffordance.test.tsx
+shared/taskpane/__tests__/App.emailIdentity.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.emailAlreadySaved.test.tsx
+shared/taskpane/services/__tests__/documentIdentityService.emailIdentity.test.ts
+shared/taskpane/services/__tests__/openRecordLauncher.webOpen.test.ts

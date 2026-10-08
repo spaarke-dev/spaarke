@@ -962,8 +962,11 @@ public class ExternalDataService
             body["sprk_name"] = request.SprkName;
         if (!string.IsNullOrEmpty(request.SprkNotes))
             body["sprk_notes"] = request.SprkNotes;
+        // Task 106: sprk_todo.sprk_duedate is a Date Only column — the Web API accepts only "yyyy-MM-dd" and answers 400
+        // for a timestamp. Earlier SPA builds sent toISOString() of the picked day's NOON UTC; its leading ten characters
+        // are that day. The endpoint refuses anything DataverseDateOnly cannot read before this point.
         if (request.SprkDuedate is not null)
-            body["sprk_duedate"] = request.SprkDuedate;
+            body["sprk_duedate"] = DataverseDateOnly.Format(DataverseDateOnly.Parse(request.SprkDuedate));
         if (request.SprkPriorityscore.HasValue)
             body["sprk_priorityscore"] = request.SprkPriorityscore.Value;
         if (request.SprkEffortscore.HasValue)
@@ -1062,6 +1065,47 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// The PATCH body of <see cref="UpdateTodoAsync"/>: only the fields the request carries. Hoisted out of the async
+    /// method by task 106 so the body is testable without a transport (the create side's
+    /// <see cref="BuildTodoCreatePayload"/> pattern).
+    /// </summary>
+    internal static Dictionary<string, object?> BuildTodoUpdatePayload(UpdateExternalTodoRequest request)
+    {
+        var body = new Dictionary<string, object?>();
+        if (request.SprkName is not null) body["sprk_name"] = request.SprkName;
+        if (request.SprkNotes is not null) body["sprk_notes"] = request.SprkNotes;
+        // Task 106: a calendar date, "yyyy-MM-dd" — Dataverse refuses a timestamp for the Date Only column (see
+        // BuildTodoCreatePayload); the route refuses what DataverseDateOnly cannot read before this point.
+        if (request.SprkDuedate is not null) body["sprk_duedate"] = DataverseDateOnly.Format(DataverseDateOnly.Parse(request.SprkDuedate));
+        if (request.SprkPriorityscore.HasValue) body["sprk_priorityscore"] = request.SprkPriorityscore.Value;
+        if (request.SprkEffortscore.HasValue) body["sprk_effortscore"] = request.SprkEffortscore.Value;
+        if (request.SprkTodocolumn.HasValue) body["sprk_todocolumn"] = request.SprkTodocolumn.Value;
+        if (request.SprkTodopinned.HasValue) body["sprk_todopinned"] = request.SprkTodopinned.Value;
+        if (request.Statuscode is { } status)
+        {
+            // Task 106 (found by the live complete leg): Dataverse refuses a status reason outside the row's current
+            // state ("2 is not a valid status code for state code sprk_TodoState.Active", HTTP 400) — it does NOT move
+            // the state for us — so the state the status reason belongs to is written with it. The route refuses any
+            // other status reason before this point.
+            body["statuscode"] = status;
+            if (TodoStateCodeFor(status) is { } state)
+                body["statecode"] = state;
+        }
+        return body;
+    }
+
+    /// <summary>
+    /// The <c>statecode</c> a <c>sprk_todo</c> status reason belongs to (live option set, task 097): Open and In Progress
+    /// are Active (0); Completed and Dismissed are Inactive (1). Null for any other value — not a to-do status reason.
+    /// </summary>
+    internal static int? TodoStateCodeFor(int statuscode) => statuscode switch
+    {
+        Services.Workspace.TodoGenerationService.StatusCodeOpen or Services.Workspace.TodoGenerationService.StatusCodeInProgress => 0,
+        Services.Workspace.TodoGenerationService.StatusCodeCompleted or Services.Workspace.TodoGenerationService.StatusCodeDismissed => 1,
+        _ => null,
+    };
+
+    /// <summary>
     /// Updates an existing <c>sprk_todo</c> record (PATCH semantics — only provided fields are changed).
     /// </summary>
     /// <remarks>
@@ -1076,15 +1120,7 @@ public class ExternalDataService
     {
         var token = await GetAppOnlyTokenAsync(ct);
 
-        var body = new Dictionary<string, object?>();
-        if (request.SprkName is not null) body["sprk_name"] = request.SprkName;
-        if (request.SprkNotes is not null) body["sprk_notes"] = request.SprkNotes;
-        if (request.SprkDuedate is not null) body["sprk_duedate"] = request.SprkDuedate;
-        if (request.SprkPriorityscore.HasValue) body["sprk_priorityscore"] = request.SprkPriorityscore.Value;
-        if (request.SprkEffortscore.HasValue) body["sprk_effortscore"] = request.SprkEffortscore.Value;
-        if (request.SprkTodocolumn.HasValue) body["sprk_todocolumn"] = request.SprkTodocolumn.Value;
-        if (request.SprkTodopinned.HasValue) body["sprk_todopinned"] = request.SprkTodopinned.Value;
-        if (request.Statuscode.HasValue) body["statuscode"] = request.Statuscode.Value;
+        var body = BuildTodoUpdatePayload(request);
 
         if (body.Count == 0)
         {
