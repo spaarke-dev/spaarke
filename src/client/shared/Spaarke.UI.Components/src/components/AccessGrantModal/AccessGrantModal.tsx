@@ -7,7 +7,7 @@
  * not a browse-in-context collection). Per `docs/standards/MODAL-DESIGN-SYSTEM.md`
  * it is built directly on the **`SprkModal` base shell** (NOT one of the six
  * presets): none of `ConfirmModal`/`ChoiceModal`/`FormModal`/`PreviewModal`/
- * `BrowseModal`/`WizardModal` fit — this modal has THREE independent sections
+ * `BrowseModal`/`WizardShell` fit — this modal has THREE independent sections
  * (candidate-approve list, named-contact picker, existing-grants+revoke list)
  * each with its OWN per-row action, not a single primary Save/Submit — so a thin
  * `SprkModal` config (size `lg`, `dismiss="explicit"`, a single footer "Close")
