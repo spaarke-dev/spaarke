@@ -15,6 +15,13 @@ export interface SprkModalNav {
   total: number;
   /** Navigate to the previous/next record. */
   onNavigate: (dir: 'prev' | 'next') => void;
+  /**
+   * Optional guard run BEFORE `onNavigate`. Return (or resolve to) `false` to block the move — the seam
+   * for a discard check ("Discard what you haven't recorded?") or a cross-frame dirty-check. A guard that
+   * throws or rejects blocks the move (fail closed). Without a guard, `onNavigate` runs synchronously.
+   * Lifted from `BrowseModal` into the shell so every `nav` consumer (`BrowseModal`, `WizardShell`) gets it.
+   */
+  onBeforeNavigate?: (dir: 'prev' | 'next') => boolean | Promise<boolean>;
 }
 
 /**
@@ -70,6 +77,14 @@ export interface SprkModalProps {
   yieldToSidePane?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
+  /**
+   * @deprecated Transitional — do not use in new code. Carries `WizardShell`'s deprecated
+   * `maxWidth` / `height` string overrides (v1.1.63) through its re-base onto this shell
+   * (ontology task 056) so existing wizards keep their footprint. `width` replaces the named size's
+   * width (still clamped by its 96vw outer `maxWidth`); `height` sets both `height` and `minHeight`.
+   * Ignored while maximized. Removed when task 111 maps those consumers to named sizes.
+   */
+  legacySize?: { width?: string; height?: string };
   /** Whether the maximize/restore control is shown (default true). */
   maximizable?: boolean;
   /** Optional browse navigation ("N of M") in the header-left. */

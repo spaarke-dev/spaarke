@@ -1,65 +1,46 @@
 /**
  * WizardShell.tsx
  *
- * Generic, domain-free wizard dialog shell.
+ * Generic, domain-free wizard engine — and the wizard preset of the canonical modal shell
+ * (ADR-050 as amended 2026-10-07, D-26).
  *
- * Layout:
- *   +------------------------------------------------------+
- *   | Title bar (ellipsized)        [Maximize/Restore] [X]  |
- *   +------------------------------------------------------+
- *   | Sidebar ~200px  |  Content area (flex: 1)             |
- *   | WizardStepper   |    - Error bar (if finishError)     |
- *   |                 |    - Success screen (if finished)    |
- *   |                 |    - Step content (renderContent)    |
- *   +------------------------------------------------------+
- *   | [Cancel]   [spinner] [custom] [Skip] [Back]  [Next]   |
- *   +------------------------------------------------------+
+ * Two render modes, one engine:
+ *
+ *   Modal (default, `embedded={false}`) — renders INSIDE `SprkModal`, which owns the
+ *   envelope, header (‹ N of M › nav · title · maximize · ×), body and footer slots:
+ *     SprkModal size={size ?? 'wizard'} dismiss={dismiss ?? 'explicit'} uiScale nav
+ *       footerStart = Cancel + footerLeftExtra       footer = [spinner] [step actions] Skip · Back · Next/Finish
+ *       body        = WizardStepper sidebar | statusBar + error bar + step content / success screen
+ *
+ *   Embedded (`embedded`) — no envelope; fills its host (workspace tab, full page, or a Code Page
+ *   under `navigateTo` platform chrome with `hideTitle`). Its markup is UNCHANGED by the re-base
+ *   (locked by the characterization snapshot, ontology task 056).
  *
  * The shell handles:
- *   - Navigation state via useReducer (wizardShellReducer)
+ *   - Navigation state via useReducer (wizardShellReducer), incl. 'skipped' steps
  *   - Dynamic step insertion/removal via imperative handle
- *   - Finish flow with async onFinish, error display, and success screen
- *   - Layout, styles, and footer button logic
+ *   - Finish flow with async onFinish, error display, success screen, optional stay-open
+ *   - Footer button logic, with an optional footer override
  *
  * Domain-specific content is injected via IWizardStepConfig.renderContent
  * callbacks. The shell has ZERO domain imports.
  *
  * Constraints:
- *   - Fluent v9 only: Dialog, Text, Button, Spinner, MessageBar — ZERO hardcoded colors
- *   - makeStyles with semantic tokens
+ *   - Fluent v9 only, semantic tokens only — ZERO hardcoded colors (ADR-021)
+ *   - React 16/17-safe (PCF consumers) — no React 18-only APIs
  *   - No domain-specific imports
  *
- * P6 light-first re-base (spaarke-modal-system, task 080, FR-17 — owner
- * decision §11-G): the header/footer/size TOKENS are aligned to the
- * canonical `SprkModal` standard (see `SprkModal/presets/WizardModal.tsx`,
- * the reference chrome) — ellipsized title + `ModalWindowControls` +
- * `strokeWidthThin`/`colorNeutralStroke2` borders; footer `Cancel` always
- * left, `Skip · Back · Next` right; DEFAULT size swapped from the ad-hoc
- * `95vw`/`70vh` literals to the named `wizard` size (`SIZE_SPEC.wizard` =
- * 62vw × min(74vh, 760px)). The Dialog envelope, `embedded` mode, the
- * 200px `WizardStepper` sidebar, and the `maxWidth`/`height` prop OVERRIDE
- * mechanism (v1.1.63) are UNCHANGED — this is a chrome/token alignment
- * pass only, not a full internal re-base onto `SprkModal` itself.
+ * History: task 080 (spaarke-modal-system) aligned the header/footer TOKENS to SprkModal; ontology
+ * task 056 replaced the shell's own Fluent `Dialog` with SprkModal itself (P2) — intended UAT changes:
+ * Escape / backdrop no longer close a wizard (dismiss 'explicit'), the old `resize: both` surface is
+ * gone, and the header title is SprkModal's `aria-labelledby` span.
  */
 
 import * as React from 'react';
-import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogContent as _DialogContent,
-  DialogActions as _DialogActions,
-  Button,
-  MessageBar,
-  MessageBarBody,
-  Text,
-  Spinner,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Text, Spinner, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 
 import { ModalWindowControls } from '../ModalWindowControls';
+import { SprkModal } from '../SprkModal/SprkModal';
 import { WizardStepper } from './WizardStepper';
 import { WizardSuccessScreen } from './WizardSuccessScreen';
 import { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
@@ -68,67 +49,17 @@ import type {
   IWizardShellHandle,
   IWizardStepConfig,
   IWizardSuccessConfig,
+  IWizardFooterContext,
 } from './wizardShellTypes';
-import { getSurfaceStyle } from '../SprkModal/sizes';
-
-// ---------------------------------------------------------------------------
-// Default size — the named `wizard` scale (spec FR-17 / design §6.4 / task 080)
-// ---------------------------------------------------------------------------
-// Replaces the pre-v1.1.64 ad-hoc `'95vw'`/`'70vh'` literal defaults. Sourced
-// from `getSurfaceStyle('wizard')` so the numbers can never drift from the
-// canonical size scale (`SIZE_SPEC.wizard` = 62vw × min(74vh, 760px)) — the
-// same sourcing discipline task 061 used for `FindSimilarDialog`'s `xl`
-// override. NOTE: `getSurfaceStyle`'s `.width` field is the value that plays
-// WizardShell's `maxWidth` role here (the actual target size WizardShell
-// clamps the DialogSurface to via its existing inline-style sizing-clamp
-// bypass, v1.1.63) — NOT `.maxWidth` (SprkModal's own 96vw OUTER safety
-// clamp around an explicit narrower `width`, which doesn't apply to
-// WizardShell's single-value clamp architecture). WizardShell does not
-// accept a `uiScale` prop (light-first scope); `uiScale` is fixed at the
-// `getSurfaceStyle` default (1) here.
-const WIZARD_DEFAULT_SIZE = getSurfaceStyle('wizard');
-const WIZARD_DEFAULT_MAX_WIDTH = String(WIZARD_DEFAULT_SIZE.width);
-const WIZARD_DEFAULT_HEIGHT = String(WIZARD_DEFAULT_SIZE.height);
 
 // ---------------------------------------------------------------------------
 // Styles (generic shell layout only)
 // ---------------------------------------------------------------------------
+// The embedded-mode slots (embeddedRoot, titleBar, titleText, mainArea, contentArea, footer*,
+// progressRow) are unchanged by the SprkModal re-base: their generated class names are part of the
+// locked embedded markup. Modal-only additions get their own slots.
 
 const useStyles = makeStyles({
-  // Override DialogSurface — landscape orientation, resizable.
-  // v1.1.63: `width` kept here as the default (1100px) for back-compat;
-  // `maxWidth` and the body `height`/`min-height` are now driven by the
-  // consumer-provided `maxWidth`/`height` props via inline style on
-  // DialogSurface (same width-clamp-bypass pattern as SendEmailDialog
-  // since v1.1.56) so the makeStyles cascade can't override them.
-  surface: {
-    width: '100%',
-    // maxWidth + maxHeight intentionally OMITTED here — see the inline
-    // `style={{ maxWidth, height, minHeight: height }}` on DialogSurface
-    // below; that pattern is the only reliable way to bypass Fluent v9's
-    // DialogSurface inner-content sizing under tall content.
-    padding: '0px',
-    resize: 'both',
-    overflow: 'auto',
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
-    // v1.1.63 — the surface must be a flex column so DialogBody can
-    // flex-grow to fill the surface height. Fluent DialogSurface is
-    // already display:flex by default; we just ensure direction.
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  // DialogBody: remove default padding so we control layout entirely.
-  // v1.1.63 — body fills the surface (flex:1) rather than hard-coding
-  // a 70vh height; the consumer-controlled height on DialogSurface now
-  // drives the overall vertical footprint.
-  body: {
-    padding: '0px',
-    display: 'flex',
-    flexDirection: 'column',
-    flex: 1,
-    minHeight: 0,
-    overflow: 'hidden',
-  },
   // Embedded mode: fills the host container (e.g., Dataverse dialog iframe)
   embeddedRoot: {
     display: 'flex',
@@ -138,11 +69,7 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // Custom title bar (replaces DialogTitle default rendering) — re-based
-  // (task 080) onto the `SprkModal` standard header tokens: uniform
-  // `spacingHorizontalL` inline padding, `spacingVerticalS` block padding,
-  // and the token border shorthand (was `borderBottomWidth: '1px'` —
-  // ADR-021 violation removed).
+  // Custom title bar (embedded mode only — in modal mode SprkModal owns the header).
   titleBar: {
     display: 'flex',
     alignItems: 'center',
@@ -153,10 +80,7 @@ const useStyles = makeStyles({
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     flexShrink: 0,
   },
-  // Ellipsized title (task 080) — matches `SprkModal`'s title token set
-  // exactly (`fontSizeBase400`/`lineHeightBase400`/`fontWeightSemibold`)
-  // rather than the Fluent `Text` `size`/`weight` props, so the two shells
-  // read as one system.
+  // Ellipsized title — matches SprkModal's title token set exactly.
   titleText: {
     flex: '1 1 auto',
     minWidth: 0,
@@ -174,6 +98,11 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     overflow: 'hidden',
   },
+  // Modal mode: SprkModal's body is a block scroll container, so the sidebar + content row must fill
+  // its height explicitly (the content area scrolls; the stepper stays put).
+  mainAreaFill: {
+    height: '100%',
+  },
   // Content area (right of sidebar)
   contentArea: {
     flex: '1 1 auto',
@@ -186,13 +115,7 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
   },
-  // Footer / dialog actions — re-based (task 080) onto the `SprkModal`
-  // standard footer tokens (was `borderTopWidth: '1px'` — ADR-021 violation
-  // removed). `justify-content` now lives on the `footerBetween`/`footerEnd`
-  // modifiers below (matches `SprkModal`'s own footer/footerBetween/
-  // footerEnd/footerSlot split) so the same base class serves both the
-  // normal (Cancel left / actions right) and success (actions right only)
-  // footer layouts.
+  // Footer (embedded mode — in modal mode SprkModal renders the footer from the same slot content).
   footer: {
     display: 'flex',
     alignItems: 'center',
@@ -229,39 +152,25 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     steps: stepConfigs,
     onClose,
     onFinish,
-    finishingLabel = 'Processing\u2026',
+    finishingLabel = 'Processing…',
     finishLabel = 'Finish',
     footerLeftExtra,
-    // task 080 (spec FR-17) \u2014 sizing overrides; default to the named
-    // `wizard` size (`SIZE_SPEC.wizard` = 62vw \u00d7 min(74vh, 760px)) instead
-    // of the pre-v1.1.64 ad-hoc `95vw`/`70vh` literals (v1.1.63). Consumers
-    // that pass an explicit `maxWidth`/`height` (e.g. FindSimilarDialog's
-    // `xl` override, DocumentEmailWizard's forwarded prop) are UNCHANGED \u2014
-    // only the fallback default moves.
-    maxWidth = WIZARD_DEFAULT_MAX_WIDTH,
-    height = WIZARD_DEFAULT_HEIGHT,
+    // Deprecated raw-string sizing (v1.1.63). Honoured in modal mode through SprkModal's
+    // transitional `legacySize`; task 111 maps the remaining callers to named sizes.
+    maxWidth,
+    height,
     initialStepId,
+    // ontology task 056 — additive props (modal-only where noted in wizardShellTypes)
+    size = 'wizard',
+    dismiss = 'explicit',
+    uiScale,
+    nav,
+    statusBar,
+    footer: footerOverride,
+    stayOpenOnFinish = false,
   } = props;
 
   const styles = useStyles();
-
-  // ── Maximize/restore (task 030, FR-12) ─────────────────────────────────
-  // Local to this shell; always starts restored on (re)open (matches the
-  // established EmailComposer wrapper pattern). Reuses the EXISTING
-  // consumer-driven sizing mechanism (inline style bypass of the makeStyles
-  // cascade, v1.1.63) rather than introducing a parallel one: when maximized,
-  // the effective maxWidth/height swap to a full-viewport target; restored,
-  // they fall back to the consumer's `maxWidth`/`height` props unchanged.
-  // Only offered in standard (non-embedded) mode — an `embedded` mount has no
-  // independent viewport to expand into (it already fills its host
-  // container), so the toggle is omitted there and only the close (×)
-  // affordance renders, preserving the pre-existing embedded-mode behavior.
-  const [isMaximized, setIsMaximized] = React.useState(false);
-  React.useEffect(() => {
-    if (!open) setIsMaximized(false);
-  }, [open]);
-  const effectiveMaxWidth = isMaximized ? '100vw' : maxWidth;
-  const effectiveHeight = isMaximized ? '100vh' : height;
 
   // ── Navigation state via reducer ───────────────────────────────────────
   // R2 UAT §3.1 (2026-07-03): pass `initialStepId` through the lazy-init
@@ -331,8 +240,8 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     prevOpenRef.current = open;
 
     if (open && !wasOpen) {
-      // Reset reducer to initial state from current step configs
-      dispatch({ type: 'GO_TO_STEP', stepIndex: 0 });
+      // Reset to the first step; a fresh session has nothing skipped yet.
+      dispatch({ type: 'GO_TO_STEP', stepIndex: 0, clearSkipped: true });
 
       // Clear finishing state
       setSuccessConfig(null);
@@ -387,7 +296,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       const result = await onFinish();
       if (result) {
         setSuccessConfig(result);
-      } else {
+      } else if (!stayOpenOnFinish) {
         onClose();
       }
     } catch (err: unknown) {
@@ -396,7 +305,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     } finally {
       setIsFinishing(false);
     }
-  }, [onFinish, onClose]);
+  }, [onFinish, onClose, stayOpenOnFinish]);
 
   // ── Primary button click ──────────────────────────────────────────────
   const handlePrimaryButtonClick = React.useCallback(() => {
@@ -412,9 +321,9 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     dispatch({ type: 'PREV_STEP' });
   }, []);
 
-  // ── Skip button click (advances without canAdvance check) ────────────
+  // ── Skip button click (advances without canAdvance check; marks the step 'skipped') ──
   const handleSkip = React.useCallback(() => {
-    dispatch({ type: 'NEXT_STEP' });
+    dispatch({ type: 'SKIP_STEP' });
   }, []);
 
   // ── Build the imperative handle for renderContent ─────────────────────
@@ -450,143 +359,151 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     [shellState, forceRender]
   );
 
-  // ── Shared inner content (used by both dialog and embedded modes) ─────
+  // ── Body: sidebar + content area (shared by both modes) ───────────────
+  const renderMainArea = (className: string) => (
+    <div className={className}>
+      <WizardStepper steps={shellState.steps} />
 
-  const innerContent = (
-    <>
-      {/* Custom title bar with close button (hidden when host provides its own chrome) */}
-      {!hideTitle && (
-        <div className={styles.titleBar}>
-          {/* Ellipsized title (task 080) — `title` attr shows the full text
-              on hover, matching `SprkModal`'s header exactly. */}
-          <Text as="h1" title={title} className={styles.titleText}>
-            {title}
-          </Text>
-          {/* Standardized window-controls cluster (task 030, FR-12; formalized
-              onto the SprkModal standard header at task 080) — replaces the
-              former ad hoc Close-only button. Maximize is omitted in embedded mode
-              (see the state comment above); close is wired to the same unchanged
-              onClose handler. */}
-          <ModalWindowControls
-            isMaximized={isMaximized}
-            onToggleMaximize={embedded ? undefined : () => setIsMaximized(m => !m)}
-            onClose={onClose}
-          />
-        </div>
-      )}
+      <div className={styles.contentArea}>
+        {/* Status bar slot (task 056) — above everything else in the content area */}
+        {statusBar}
 
-      {/* Sidebar + content area */}
-      <div className={styles.mainArea}>
-        <WizardStepper steps={shellState.steps} />
+        {/* Finish error bar */}
+        {finishError && (
+          <MessageBar intent="error" role="alert">
+            <MessageBarBody>{finishError}</MessageBarBody>
+          </MessageBar>
+        )}
 
-        <div className={styles.contentArea}>
-          {/* Finish error bar */}
-          {finishError && (
-            <MessageBar intent="error" role="alert">
-              <MessageBarBody>{finishError}</MessageBarBody>
-            </MessageBar>
-          )}
-
-          {/* Success screen replaces step content */}
-          {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
-        </div>
+        {/* Success screen replaces step content */}
+        {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
       </div>
+    </div>
+  );
 
-      {/* Footer — success screen shows actions in footer; normal steps show
-          navigation. Re-based (task 080) onto the SprkModal standard footer
-          tokens: `footerBetween` (Cancel left / actions right) for the normal
-          case, `footerEnd` (actions right only) for the success screen — the
-          same split SprkModal itself uses. */}
-      {successConfig ? (
-        <div className={mergeClasses(styles.footer, styles.footerEnd)}>
-          <div className={styles.footerSlot}>{successConfig.actions}</div>
-        </div>
-      ) : (
-        <div className={mergeClasses(styles.footer, styles.footerBetween)}>
-          <div className={styles.footerSlot}>
-            <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
-              Cancel
-            </Button>
-            {footerLeftExtra}
-          </div>
-
-          <div className={styles.footerSlot}>
-            {/* In-progress spinner */}
-            {isFinishing && (
-              <div className={styles.progressRow}>
-                <Spinner size="tiny" />
-                <Text size={200}>{finishingLabel}</Text>
-              </div>
-            )}
-
-            {/* Per-step custom footer actions */}
-            {currentConfig?.footerActions}
-
-            {/* Skip button — shown on skippable steps (optional follow-on
-                steps). Ordered BEFORE Back (Skip · Back · Next) and styled
-                `transparent`, matching the canonical `WizardModal` preset
-                footer exactly (task 080 / design §6.4). */}
-            {isSkippable && !isLastStep && !isFinishing && (
-              <Button appearance="transparent" onClick={handleSkip}>
-                Skip
-              </Button>
-            )}
-
-            {/* Back button — hidden on step 0, disabled when finishing */}
-            {!isFirstStep && (
-              <Button appearance="secondary" onClick={handleBack} disabled={isFinishing}>
-                Back
-              </Button>
-            )}
-
-            {/* Next / Finish */}
-            <Button appearance="primary" onClick={handlePrimaryButtonClick} disabled={!canAdvance || isFinishing}>
-              {primaryButtonLabel}
-            </Button>
-          </div>
-        </div>
-      )}
+  // ── Footer slot content (shared by both modes) ────────────────────────
+  // Standard footer: Cancel (+ footerLeftExtra) LEFT; [spinner] [step actions] Skip · Back · Next RIGHT.
+  const standardFooterStart = (
+    <>
+      <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
+        Cancel
+      </Button>
+      {footerLeftExtra}
     </>
   );
 
+  const standardFooterEnd = (
+    <>
+      {/* In-progress spinner */}
+      {isFinishing && (
+        <div className={styles.progressRow}>
+          <Spinner size="tiny" />
+          <Text size={200}>{finishingLabel}</Text>
+        </div>
+      )}
+
+      {/* Per-step custom footer actions */}
+      {currentConfig?.footerActions}
+
+      {/* Skip button — shown on skippable steps (optional follow-on
+          steps). Ordered BEFORE Back (Skip · Back · Next), `transparent`. */}
+      {isSkippable && !isLastStep && !isFinishing && (
+        <Button appearance="transparent" onClick={handleSkip}>
+          Skip
+        </Button>
+      )}
+
+      {/* Back button — hidden on step 0, disabled when finishing */}
+      {!isFirstStep && (
+        <Button appearance="secondary" onClick={handleBack} disabled={isFinishing}>
+          Back
+        </Button>
+      )}
+
+      {/* Next / Finish */}
+      <Button appearance="primary" onClick={handlePrimaryButtonClick} disabled={!canAdvance || isFinishing}>
+        {primaryButtonLabel}
+      </Button>
+    </>
+  );
+
+  // Footer override (task 056): a supplied slot replaces that side; an omitted slot keeps the standard.
+  // Not applied on the success screen, whose footer is the success config's own actions.
+  let footerStart: React.ReactNode = standardFooterStart;
+  let footerEnd: React.ReactNode = standardFooterEnd;
+  if (footerOverride && !successConfig) {
+    const context: IWizardFooterContext = {
+      currentStepId: currentStepDef?.id,
+      isFirstStep,
+      isLastStep,
+      isFinishing,
+      canAdvance,
+      goBack: () => dispatch({ type: 'PREV_STEP' }),
+      goNext: () => dispatch({ type: 'NEXT_STEP' }),
+      close: onClose,
+    };
+    const slots = footerOverride(context);
+    if (slots) {
+      if (slots.start !== undefined) footerStart = slots.start;
+      if (slots.end !== undefined) footerEnd = slots.end;
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
 
-  // Embedded mode: render directly without Dialog/DialogSurface wrapper.
-  // Used when the wizard is already inside a Dataverse dialog iframe.
+  // Embedded mode: no envelope. Used for workspace tabs, full pages, and Code Pages hosted under
+  // platform chrome (with hideTitle). Markup unchanged by the SprkModal re-base.
   if (embedded) {
     if (!open) return null;
     return (
       <div className={styles.embeddedRoot} aria-label={ariaLabel ?? title}>
-        {innerContent}
+        {/* Custom title bar with close button (hidden when host provides its own chrome) */}
+        {!hideTitle && (
+          <div className={styles.titleBar}>
+            <Text as="h1" title={title} className={styles.titleText}>
+              {title}
+            </Text>
+            {/* Close only — an embedded mount has no independent viewport to maximize into. */}
+            <ModalWindowControls isMaximized={false} onToggleMaximize={undefined} onClose={onClose} />
+          </div>
+        )}
+
+        {renderMainArea(styles.mainArea)}
+
+        {/* Footer — success screen shows its actions right-aligned; steps show the standard split. */}
+        {successConfig ? (
+          <div className={mergeClasses(styles.footer, styles.footerEnd)}>
+            <div className={styles.footerSlot}>{successConfig.actions}</div>
+          </div>
+        ) : (
+          <div className={mergeClasses(styles.footer, styles.footerBetween)}>
+            <div className={styles.footerSlot}>{footerStart}</div>
+            <div className={styles.footerSlot}>{footerEnd}</div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // Standard mode: render inside Fluent Dialog overlay.
-  //
-  // v1.1.63 — DialogSurface receives an inline `style={{ maxWidth, height,
-  // minHeight: height }}` so the surface honors the consumer's sizing
-  // overrides. Inline style is the only reliable bypass for Fluent v9's
-  // makeStyles + DialogSurface inner-content sizing (verified across
-  // SendEmailDialog v1.1.56+ where the same pattern fixed the same
-  // width-clamp issue). When the consumer omits the props, the defaults
-  // are now the named `wizard` size (62vw × min(74vh, 760px), task 080 /
-  // spec FR-17) — previously the ad-hoc 95vw/70vh literals.
+  // Modal mode: the wizard preset of SprkModal (ADR-050 as amended 2026-10-07). SprkModal owns the
+  // envelope, the header (nav · title · maximize · ×), dismiss, size + uiScale, and the footer layout.
+  const legacySize = maxWidth || height ? { width: maxWidth, height } : undefined;
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      onOpenChange={(_e, data) => {
-        if (!data.open) onClose();
-      }}
+      onClose={onClose}
+      title={title}
+      size={size}
+      dismiss={dismiss}
+      uiScale={uiScale}
+      legacySize={legacySize}
+      nav={nav}
+      padded={false}
+      footerStart={successConfig ? undefined : footerStart}
+      footer={successConfig ? successConfig.actions : footerEnd}
     >
-      <DialogSurface
-        className={styles.surface}
-        style={{ maxWidth: effectiveMaxWidth, height: effectiveHeight, minHeight: effectiveHeight }}
-        aria-label={ariaLabel ?? title}
-      >
-        <DialogBody className={styles.body}>{innerContent}</DialogBody>
-      </DialogSurface>
-    </Dialog>
+      {renderMainArea(mergeClasses(styles.mainArea, styles.mainAreaFill))}
+    </SprkModal>
   );
 });
 
