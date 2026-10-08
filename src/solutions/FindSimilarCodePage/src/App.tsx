@@ -25,6 +25,7 @@ import {
   SearchRegular,
 } from "@fluentui/react-icons";
 import { OOB_MODAL_SIZES, cleanGuid, getXrm } from "@spaarke/ui-components";
+import { SprkModal } from "@spaarke/ui-components/components/SprkModal";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -44,6 +45,17 @@ export interface IFindSimilarAppProps {
     readonly sessionId?: string;
     readonly fileIds: ReadonlyArray<string>;
     readonly fileNames?: ReadonlyArray<string>;
+  };
+  /**
+   * Task 113 (ontology-platform-r1 D-26). Present = IN-APP: the form renders inside `SprkModal`
+   * (named size, explicit dismiss, shell-owned header and Cancel-left / action-right footer) and
+   * closes ONLY through this callback. Absent = the code-page layout under the Dataverse
+   * `navigateTo` dialog's chrome, whose Cancel clicks the platform close button.
+   */
+  inApp?: {
+    readonly onClose: () => void;
+    /** App-shell `--sprk-ui-scale`. */
+    readonly uiScale?: number;
   };
 }
 
@@ -412,6 +424,8 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
   // ---------------------------------------------------------------------------
 
   const handleCancel = React.useCallback(() => {
+    // Code-page path ONLY. In-app, the modal's own Cancel / × call `inApp.onClose` and this
+    // parent-document close-button hack never runs (it would click the Console's own dialog).
     try {
       // Find dialog close button in parent DOM (proven pattern from wizards)
       const parentDoc =
@@ -435,13 +449,8 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
   // Render
   // ---------------------------------------------------------------------------
 
-  return (
-    <div className={styles.root}>
-      <Text className={styles.title}>Find Similar Documents</Text>
-      <Text className={styles.subtitle}>
-        Select a document or upload a file to find similar content.
-      </Text>
-
+  const formBody = (
+    <>
       {/* Path A: Document Lookup */}
       <div className={styles.section}>
         <Text weight="semibold">Select a document:</Text>
@@ -555,20 +564,58 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
           {error}
         </Text>
       )}
+    </>
+  );
+
+  const findSimilarButton = (
+    <Button
+      appearance="primary"
+      onClick={handleFindSimilar}
+      disabled={!canSubmit}
+      icon={isProcessing ? <Spinner size="tiny" /> : <SearchRegular />}
+    >
+      {isProcessing ? "Processing..." : "Find Similar"}
+    </Button>
+  );
+
+  // In-app (task 113): SprkModal owns the title, the close ×, dismiss and the footer layout.
+  if (props.inApp) {
+    return (
+      <SprkModal
+        open
+        onClose={props.inApp.onClose}
+        title="Find Similar Documents"
+        size="sm"
+        dismiss="explicit"
+        uiScale={props.inApp.uiScale}
+        footerStart={
+          <Button appearance="secondary" onClick={props.inApp.onClose} disabled={isProcessing}>
+            Cancel
+          </Button>
+        }
+        footer={findSimilarButton}
+      >
+        <Text className={styles.subtitle}>Select a document or upload a file to find similar content.</Text>
+        {formBody}
+      </SprkModal>
+    );
+  }
+
+  return (
+    <div className={styles.root}>
+      <Text className={styles.title}>Find Similar Documents</Text>
+      <Text className={styles.subtitle}>
+        Select a document or upload a file to find similar content.
+      </Text>
+
+      {formBody}
 
       {/* Footer */}
       <div className={styles.footer}>
         <Button appearance="secondary" onClick={handleCancel} disabled={isProcessing}>
           Cancel
         </Button>
-        <Button
-          appearance="primary"
-          onClick={handleFindSimilar}
-          disabled={!canSubmit}
-          icon={isProcessing ? <Spinner size="tiny" /> : <SearchRegular />}
-        >
-          {isProcessing ? "Processing..." : "Find Similar"}
-        </Button>
+        {findSimilarButton}
       </div>
     </div>
   );

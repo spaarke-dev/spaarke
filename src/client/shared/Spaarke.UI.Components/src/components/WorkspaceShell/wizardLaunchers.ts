@@ -3,7 +3,8 @@
  *
  * Shared Xrm.Navigation.navigateTo launchers for the seven Get Started wizards
  * used by both LegalWorkspace and SpaarkeAi. Since task 112 (ontology-platform-r1,
- * D-26) the five Create wizards open IN-APP instead when an `InAppWizardHost` is
+ * D-26; task 113 added four more) the Create/Summarize/Upload/Find Similar/Workspace-layout
+ * wizards open IN-APP instead when an `InAppWizardHost` supports them and is
  * mounted — see "In-app routing seam" below. Hoisted in Round 4 Fix 2 (task 085)
  * to STOP the parallel-implementation bug — previously SpaarkeAi had its own
  * `launchCodePagePopup` helper (Round 3 task 068) and `launchAssignWorkWizard`
@@ -89,23 +90,34 @@ export function resolveXrmNavigation(): any | null {
 // open IN-APP, in SprkModal, instead of in a `navigateTo(webresource)` dialog
 // whose white title bar is platform chrome that cannot be themed. With no host
 // mounted, every launcher below keeps calling `navigateTo` exactly as before.
+// Task 113 adds Summarize Files, Upload Documents, Find Similar and the Workspace
+// layout wizard to the same seam.
 // The ribbon scripts (`sprk_wizard_commands.js`) do not use this module and stay
 // on `navigateTo` (launch rule (b)); the code pages stay deployable for them.
 // ---------------------------------------------------------------------------
 
-/** The web resources whose launches route to a mounted in-app host (task 112 scope). */
+/** The web resources whose launches route to a mounted in-app host (task 112 + 113 scope). */
 const IN_APP_WIZARD_NAMES = [
+  // Task 112: the five Create wizards (all live in this library).
   'sprk_creatematterwizard',
   'sprk_createprojectwizard',
   'sprk_createeventwizard',
   'sprk_createtodowizard',
   'sprk_createworkassignmentwizard',
+  // Task 113: Summarize Files lives in this library too ...
+  'sprk_summarizefileswizard',
+  // ... but these three are code-page solutions (`DocumentUploadWizard`, `FindSimilarCodePage`,
+  // `WorkspaceLayoutWizard`) a shared library cannot import, so the mounting app supplies their
+  // renderers to `InAppWizardHost` (`renderers` prop) and the host declares which names it can open.
+  'sprk_documentuploadwizard',
+  'sprk_findsimilar',
+  'sprk_workspacelayoutwizard',
 ] as const;
 
 /** A wizard web resource the in-app host can mount. */
 export type InAppWizardName = (typeof IN_APP_WIZARD_NAMES)[number];
 
-/** `true` when `name` is one of the wizards the in-app host mounts. */
+/** `true` when `name` is one of the wizards that open in-app while a host that supports it is mounted. */
 export function isInAppWizardName(name: string): name is InAppWizardName {
   return (IN_APP_WIZARD_NAMES as readonly string[]).includes(name);
 }
@@ -120,22 +132,51 @@ export interface InAppWizardRequest {
 /** Opens a wizard in-app; the promise resolves when it closes (the `navigateTo` promise equivalent). */
 export type InAppWizardOpener = (request: InAppWizardRequest) => Promise<void>;
 
+/** What a host with nothing but its built-in wizards can open (the task 112 five + Summarize Files). */
+export const DEFAULT_IN_APP_WIZARD_NAMES: readonly InAppWizardName[] = [
+  'sprk_creatematterwizard',
+  'sprk_createprojectwizard',
+  'sprk_createeventwizard',
+  'sprk_createtodowizard',
+  'sprk_createworkassignmentwizard',
+  'sprk_summarizefileswizard',
+];
+
 let inAppWizardOpener: InAppWizardOpener | null = null;
+let inAppSupportedNames: ReadonlySet<string> = new Set();
 
 /**
- * Register the mounted in-app host. Called by `InAppWizardHost` on mount; the
- * returned function unregisters it (only if it is still the registered one).
+ * Register the mounted in-app host and the wizards it can open. Called by `InAppWizardHost` on
+ * mount; the returned function unregisters it (only if it is still the registered one). A launch of
+ * any name the host did not declare keeps using `navigateTo`, so a host that was not given a
+ * renderer for a code-page wizard never swallows that launch.
  */
-export function registerInAppWizardHost(opener: InAppWizardOpener): () => void {
+export function registerInAppWizardHost(
+  opener: InAppWizardOpener,
+  supportedNames: readonly InAppWizardName[] = DEFAULT_IN_APP_WIZARD_NAMES
+): () => void {
   inAppWizardOpener = opener;
+  inAppSupportedNames = new Set(supportedNames);
   return () => {
-    if (inAppWizardOpener === opener) inAppWizardOpener = null;
+    if (inAppWizardOpener === opener) {
+      inAppWizardOpener = null;
+      inAppSupportedNames = new Set();
+    }
   };
 }
 
-/** Open in-app when a host is mounted and the wizard is in scope; `null` → use `navigateTo`. */
+/**
+ * `true` when a mounted host would open `name` in-app right now. For callers that must keep their
+ * own `navigateTo` shape (a bespoke size or option) byte-identical when no host is mounted.
+ */
+export function canOpenInApp(name: string): boolean {
+  return inAppWizardOpener !== null && isInAppWizardName(name) && inAppSupportedNames.has(name);
+}
+
+/** Open in-app when a host is mounted and supports the wizard; `null` → use `navigateTo`. */
 function tryOpenInApp(webresourceName: string, data: string): Promise<void> | null {
   if (inAppWizardOpener === null || !isInAppWizardName(webresourceName)) return null;
+  if (!inAppSupportedNames.has(webresourceName)) return null;
   return inAppWizardOpener({ webresourceName, data });
 }
 
@@ -199,7 +240,7 @@ interface NavigateToParams {
 }
 
 function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): void {
-  // Task 112: a mounted in-app host opens the five Create wizards itself.
+  // Tasks 112/113: a mounted in-app host opens the wizards it supports itself.
   if (tryOpenInApp(webresourceName, data) !== null) return;
   const nav = resolveXrmNavigation();
   if (nav === null) {
@@ -399,7 +440,7 @@ export interface NavigateToOutcome {
  * bffBaseUrl (the payload rides sessionStorage, not the URL — design §2).
  */
 export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams): Promise<NavigateToOutcome> {
-  // Task 112: a mounted in-app host opens the five Create wizards itself; the
+  // Tasks 112/113: a mounted in-app host opens the wizards it supports itself; the
   // promise resolves when the wizard closes, exactly like the `navigateTo` one.
   const inApp = tryOpenInApp(params.webresourceName, params.data);
   if (inApp !== null) {
