@@ -12,7 +12,7 @@
 | File | Role |
 |---|---|
 | `access-group.template.xml` | The ONE authored definition: a FlyoutAnchor "Access" (Sequence 905) on `Mscrm.Form.{{entity}}.MainTab.Actions.Controls._children`, holding "Update Access" (10), "Make Secure" (20, task 150, release-gated) and "Remove Secure" (30, task 150). Never hand-edit a per-entity copy. |
-| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. `-SecureTransitionDeployed` keeps Make Secure; without it the generator removes it. |
+| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. `-SecureTransitionDeployed` keeps Make Secure; without it the generator removes it. `-ShareCommandXml` (task 114) copies the platform's form Share command, read live by `Set-AccessRibbon.ps1`, with the ShareAllowed rule appended. |
 | `Set-AccessRibbon.ps1` | Task 150: the three forms in one step — dry run (default; 142's checked-in exports, no Dataverse call), `-Apply` (live: records the live command lists, exports the dedicated ribbon solution, checks in the work-assignment export, merges, packs, imports, publishes, then verifies) and `-Verify` (read-only `RetrieveEntityRibbon`: the before-list is intact, the Access commands call `access_ribbon.js`, Make Secure present exactly when `-SecureTransitionDeployed`). |
 
 ### Make Secure is release-gated (task 150 acceptance (b); owner R3b / F7)
@@ -62,6 +62,50 @@ reason gets the generic warning and is logged — never silent, round 33 item 5;
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in
 `Spaarke.AssignedAccess` (`sprk_/scripts/assignedaccess_postsave.js`, `src/solutions/webresources/sprk_assignedaccess_postsave.js`).
+
+### The platform's Share command is hidden on Restricted records (task 114, owner round 67 amendment 4(a))
+
+A Restricted record (`sprk_accesspermission` = Restricted) is for internal use only, so the platform's own form **Share**
+command is hidden on it and sharing goes through Manage Access "+ User", which refuses a user flagged
+`sprk_isexternal = true` there. The rule is `sprk.Access.{{entity}}.ShareAllowed.EnableRule` in the template, calling
+`Spaarke.Access.Ribbon.isShareAllowed` (`access_ribbon.js` 1.6.0): the form's `sprk_accesspermission` when the form
+carries it (`assignedaccess_postsave.js` 1.1.0 refreshes the command bar when it changes), else one saved-value read;
+a read that fails hides Share.
+
+The command it is appended to is the PLATFORM's, never authored here: `Set-AccessRibbon.ps1 -Apply` reads the live
+effective ribbon, takes the `Command` of each form Share button and its CommandDefinition, and
+`Merge-AccessRibbon.ps1 -ShareCommandXml` copies each definition into the RibbonDiff with the rule appended — every
+platform enable and display rule is kept, a re-run replaces the copy (idempotent), and `-Verify` checks every live
+Share command carries the rule. The dry run without `-EnvironmentUrl` uses `fixtures/share-command.dry-run-sample.xml`,
+a stand-in that only exercises the transformation (never imported); **with `-EnvironmentUrl` it reads the live Share
+commands read-only, exactly as `-Apply` does** — run it that way before `-Apply`.
+
+Where the platform's Share actually is (read from spaarkedev1's live effective ribbons, 2026-10-07; there is **no**
+`Mscrm.Form.<entity>.Share` or `Mscrm.HomepageGrid.<entity>.Share` button — the first version assumed those ids and
+`-Verify`/`-Apply` failed on all three entities):
+
+| Surface | Button | Command | Notes |
+|---|---|---|---|
+| Form (UCI command bar) | `Mscrm.Form.<entity>.Permissions.Sharing` | `Mscrm.SharePrimaryRecordRefresh` | display rule `Mscrm.HideInLegacyRibbon` — the Unified Interface Share; required |
+| Form (legacy flyout) | `Mscrm.Form.<entity>.Permissions.SharingNonRefresh` | `Mscrm.SharePrimaryRecord` | inside the `Permissions` flyout, which is `Mscrm.HideOnModern`; ruled when present |
+| Home grid | `Mscrm.HomepageGrid.<entity>.Sharing` | `Mscrm.ShareSelectedRecord` | required |
+| Subgrid | `Mscrm.SubGrid.<entity>.Sharing` | `Mscrm.ShareSelectedRecord` | when present |
+
+Not ruled: `Permissions.Grant*` (column-security "secured fields" sharing, not record access) and `Chart.Share`.
+`Mscrm.SharePrimaryRecordRefresh` also carries the platform's `Mscrm.CollabNotEnabled` rule
+(`XrmCore.Commands.Share.showLegacyShareAndEmailALink`): where the platform's collaboration Share is switched on, the
+platform disables this button itself, and that experience is not a ribbon command RibbonDiff can rule — the
+server-side `RestrictedExternalShareRemover` is the backstop either way.
+
+The GRID and SUBGRID Share (on selected rows) get the same treatment (task 114 follow-up): `Set-AccessRibbon.ps1 -Apply`
+reads the live ribbon (location `All`), takes the `Command` of `Mscrm.HomepageGrid.<entity>.Sharing` (required) and
+`Mscrm.SubGrid.<entity>.Sharing` (when present), and `Merge-AccessRibbon.ps1 -GridShareCommandXml` appends
+`sprk.Access.{{entity}}.ShareAllowedSelection.EnableRule` → `isShareAllowedForSelection(SelectedControlSelectedItemIds,
+SelectedEntityTypeName)`, which hides Share when ANY selected row is Restricted (one batched read; a row that does not come
+back, or a failed read, hides it). A command the form and grid buttons share is refused (one copy cannot carry both rules).
+`-Verify` checks every grid Share button present. Dry run: `fixtures/grid-share-command.dry-run-sample.xml`. The server
+still removes such a share on a Restricted record (the record's save, the 5-minute job: `RestrictedExternalShareRemover`),
+and Manage Access labels it "External user — no access" until then.
 
 ## Why a FlyoutAnchor (realisation choice)
 
@@ -157,7 +201,11 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
    (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:
    the AFTER list is the BEFORE list plus `sprk.Access.*`), packs, imports with publish, and runs `-Verify` against
-   `before.json`. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition, the
+   `before.json`. **The effective ribbon lags the publish**: on spaarkedev1 (2026-10-07) the verify run right after
+   "Published All Customizations" reported partial, per-entity FAILs and a read-only `-Verify` 75 s later passed on all
+   three, so `-Apply` retries its verify with a bounded backoff (15/30/45/60/30 s, about 3 minutes) and reports
+   `VERIFY FAILED` only when the last attempt still fails. The standalone read-only `-Verify` does not retry — straight
+   after an import, give it a few minutes. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition, the
    wired file relocation AND its `SecureChildReconciliationJob` backstop with writes on.
    Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only

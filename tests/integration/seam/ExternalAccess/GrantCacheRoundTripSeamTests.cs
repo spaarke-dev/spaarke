@@ -546,6 +546,7 @@ public sealed class GrantCacheRoundTripSeamTests
             Composer = new AccessibleRecordSetService(
                 membership.Object, Participations, standing.Object, denyList.Object,
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
                 NullLogger<AccessibleRecordSetService>.Instance);
         }
 

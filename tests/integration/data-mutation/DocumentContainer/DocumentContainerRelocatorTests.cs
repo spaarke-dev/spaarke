@@ -263,7 +263,29 @@ public class DocumentContainerRelocatorTests
         public DocumentContainerRelocator NewRelocator(
             Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null)
             => new(Resolver, World.EntityService!, Spe.Object, Indexing, locks ?? Locks, access ?? Access,
-                NullLogger<DocumentContainerRelocator>.Instance, time);
+                NullLogger<DocumentContainerRelocator>.Instance, time, Attribution);
+
+        /// <summary>Who an app-only upload was made for (task 171 attach fix) — real, over an in-memory cache.</summary>
+        public FaultableAttribution Attribution { get; } = new();
+
+        /// <summary><see cref="UploadAttribution"/> whose READ can be made to fault (a Redis outage).</summary>
+        internal sealed class FaultableAttribution : UploadAttribution
+        {
+            public FaultableAttribution()
+                : base(new Sprk.Bff.Api.Infrastructure.Cache.TenantCache(
+                    new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+                    NullLogger<Sprk.Bff.Api.Infrastructure.Cache.TenantCache>.Instance))
+            {
+            }
+
+            public bool ReadFaults { get; set; }
+
+            public override Task<MatchOutcome> MatchAsync(
+                string tenantId, Guid caller, string drive, string item, CancellationToken ct = default)
+                => ReadFaults
+                    ? Task.FromException<MatchOutcome>(new TimeoutException("Redis unavailable"))
+                    : base.MatchAsync(tenantId, caller, drive, item, ct);
+        }
 
         /// <summary>Runs inside every CURRENT-content download, before its bytes are returned (a pause, a lock theft).</summary>
         public Func<string, string, Task>? BeforeDownload { get; set; }
@@ -486,6 +508,139 @@ public class DocumentContainerRelocatorTests
         stamp.Fields["sprk_hasfile"].Should().Be(true, "'has a file' and 'points at a file' are written together");
         stamp.Fields["sprk_filepath"].Should().Be("https://contoso/brief.docx", "the web URL is read from Graph, not taken from the client");
         stamp.Fields.Should().NotContainKey(Ledger, "a first attach owes nothing");
+    }
+
+    // ── Task 171 attach fix: an APP-ONLY upload is attached only for the person the BFF uploaded it for ──────────────
+
+    private const string Tenant = "17150000-0000-4000-8000-0000000000a1";
+    private static readonly string OtherUser = Guid.Parse("17150000-0000-4000-8000-0000000000b2").ToString("D");
+
+    private static SpeItemCreator BffUpload(string name = "brief.docx")
+        => new(name, null, TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D"), 10, null, "https://contoso/brief.docx");
+
+    private static Task<PointerAttachResult> Attach(Rig rig, string caller = "", string? tenant = Tenant, string? drive = null)
+        => rig.Relocator.AttachFileAsync(DocumentId, caller.Length == 0 ? Creator : caller, drive ?? CustomerA1Container, Item,
+            callerTenantId: tenant);
+
+    private static World AttachWorld(Rig? _ = null)
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc();
+        world.Items[(CustomerA1Container, Item)] = BffUpload();
+        return world;
+    }
+
+    [Fact(DisplayName = "Attach fix: a BFF-uploaded item whose ITEM binding names the caller is attached, and the binding is consumed")]
+    public async Task Attach_ABffUploadedItem_WithTheCallersBinding_IsAttached_AndTheBindingConsumed()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, Creator, CustomerA1Container, Item);
+
+        var result = await Attach(rig);
+
+        result.Outcome.Should().Be(PointerAttachOutcome.Attached, result.Detail);
+        world.Updates.Should().ContainSingle().Which.Fields["sprk_graphitemid"].Should().Be(Item);
+        (await rig.Attribution.MatchAsync(Tenant, Guid.Parse(Creator), CustomerA1Container, Item))
+            .Should().Be(UploadAttribution.MatchOutcome.None, "a binding is consumed once its attach succeeded");
+    }
+
+    [Fact(DisplayName = "Attach fix: a BFF-uploaded item bound to ANOTHER user is refused — a Write holder never attaches someone else's file")]
+    public async Task Attach_ABffUploadedItem_BoundToAnotherUser_IsRefused()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, OtherUser, CustomerA1Container, Item);
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Attach fix: a BFF-uploaded item with NO binding is refused — 'any item the BFF uploaded' would admit everyone's")]
+    public async Task Attach_ABffUploadedItem_WithNoBinding_IsRefused()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Attach fix (K3): a binding recorded for the item in ANOTHER drive does not admit it")]
+    public async Task Attach_ABindingForAnotherDrive_IsRefused()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, Creator, CustomerBContainer, Item);
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader,
+            "an item id is only meaningful in its drive — a binding for the same id elsewhere says nothing about this file");
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Attach fix (K1): a binding is scoped to the caller's TENANT — the same caller in another tenant is refused, and no tenant refuses")]
+    public async Task Attach_TheBindingIsTenantScoped()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, Creator, CustomerA1Container, Item);
+
+        (await Attach(rig, tenant: "another-tenant")).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        (await Attach(rig, tenant: null)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Attach fix: a binding read that FAULTS refuses with a retryable outcome — never allows")]
+    public async Task Attach_ABffUploadedItem_WhenTheBindingReadFaults_IsRefusedRetryably()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, Creator, CustomerA1Container, Item);
+        rig.Attribution.ReadFaults = true;
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.UploaderUnverifiable);
+        world.Updates.Should().BeEmpty();
+    }
+
+    // Verifier F1 (2026-10-07) — the attack WAS: a binding recorded for a session's PATH before any item existed, matched
+    // later by whatever item stood at that path. The upload-session route records nothing now (pinned at the ROUTE by
+    // RecordKeyedUploadRouteChildRecordTests.UploadSession_RecordsNothing); what the attach must guarantee is that the
+    // ONLY thing that admits a BFF-uploaded item is an item binding naming the caller. These two pin that, for the two
+    // states the old attack exploited.
+
+    [Fact(DisplayName = "Verifier F1: after ANOTHER user's item binding was consumed by their attach, the caller cannot attach that item — nothing else admits it")]
+    public async Task ABffItem_WhoseOnlyBindingWasAnotherUsersAndIsConsumed_IsRefused()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+        await rig.Attribution.RecordItemAsync(Tenant, OtherUser, CustomerA1Container, Item);
+        await rig.Attribution.ConsumeAsync(Tenant, Item); // B's successful attach
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Verifier F1: an app-only item that NO upload bound to anyone (another BFF writer's, or one a session created) cannot be attached")]
+    public async Task ABffItem_WithNoBindingAtAll_IsRefused()
+    {
+        var world = AttachWorld();
+        var rig = new Rig(world);
+
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader,
+            "the document's own creator, holding Write, still cannot attach an app-only file nobody's upload bound to them");
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Attach fix: a file uploaded by ANOTHER PERSON is still refused (the user-uploaded branch is unchanged)")]
+    public async Task Attach_AnotherPersonsUpload_IsStillRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc();
+        world.Items[(CustomerA1Container, Item)] = new SpeItemCreator("brief.docx", OtherPersonObjectId.ToString("D"), null, 10);
+        var rig = new Rig(world);
+
+        (await rig.Relocator.AttachFileAsync(DocumentId, Creator, CustomerA1Container, Item)).Outcome
+            .Should().Be(PointerAttachOutcome.NotTheUploader);
     }
 
     [Fact]

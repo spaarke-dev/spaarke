@@ -33,18 +33,26 @@ import type { BadgeProps } from '@fluentui/react-components';
 // ---------------------------------------------------------------------------
 
 /**
- * Generic visual tone for a status/severity badge. Deliberately NOT a
+ * Generic visual tone for a status/severity badge (`success` added by
+ * spaarke-ontology-platform-r1 task 057, D-24). Deliberately NOT a
  * domain vocabulary (no `Signal`, `Policy`, `Disposition`, ...). Callers map
- * their own status or severity values onto one of these four tones.
+ * their own status or severity values onto one of these five tones.
  */
-export type StatusBadgeTone = 'neutral' | 'info' | 'warning' | 'critical';
+export type StatusBadgeTone = 'neutral' | 'info' | 'success' | 'warning' | 'critical';
 
-const KNOWN_TONES: ReadonlySet<string> = new Set<StatusBadgeTone>(['neutral', 'info', 'warning', 'critical']);
+const KNOWN_TONES: ReadonlySet<string> = new Set<StatusBadgeTone>([
+  'neutral',
+  'info',
+  'success',
+  'warning',
+  'critical',
+]);
 
 /** Fluent v9 `Badge` semantic color per tone. Semantic names, not literals. */
 const TONE_TO_COLOR: Record<StatusBadgeTone, BadgeProps['color']> = {
   neutral: 'subtle',
   info: 'informative',
+  success: 'success',
   warning: 'warning',
   critical: 'danger',
 };

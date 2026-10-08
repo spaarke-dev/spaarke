@@ -1613,6 +1613,21 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     public const string AccessCheckDeniedErrorCode = "0x80040220";
 
     /// <summary>
+    /// Dataverse's error code for "the principal does not have ReadAccess right(s)" on the target record — what an
+    /// impersonated <c>RetrievePrincipalAccess</c> answers for a user who has LOST all access to the record (seen live
+    /// 2026-10-07, sync run d03f01eb: a user fully unshared from a secure project). No Read means no Write: an answer about
+    /// the principal's access, not a fault of the request.
+    /// </summary>
+    public const string NoReadAccessErrorCode = "0x80048306";
+
+    /// <summary>
+    /// The 403 error codes that ARE answers about the principal's access ("no rights") — everything else (an impersonation
+    /// fault 0x8004A110, an unrecognised code, an unreadable body) is UNKNOWN to a revoking caller.
+    /// </summary>
+    public static readonly IReadOnlySet<string> AccessDeniedErrorCodes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { AccessCheckDeniedErrorCode, NoReadAccessErrorCode };
+
+    /// <summary>
     /// <see cref="RetrievePrincipalRightsAsync"/> for a caller that ACTS DESTRUCTIVELY on "no rights" (removing an
     /// access grant) — unified-access-control-r2 task 171, adversarial finding 3. Returns <see langword="null"/>
     /// (UNKNOWN) for every answer that is not about the principal's access.
@@ -1625,8 +1640,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// that would revoke every grant on every pass.</para>
     /// <para><b>The mapping.</b> 2xx → the rights Dataverse answered (an empty string is an authoritative "none").
     /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
-    /// <see cref="AccessRights.None"/> ONLY when the error code is <see cref="AccessCheckDeniedErrorCode"/>; any other
-    /// 403 code, or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure throws, as in
+    /// <see cref="AccessRights.None"/> ONLY when the error code is one of <see cref="AccessDeniedErrorCodes"/>
+    /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>); any other 403 code, or a 403 whose
+    /// body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
     /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
     /// </remarks>
     public async Task<AccessRights?> RetrievePrincipalRightsOrUnknownAsync(
@@ -1643,7 +1659,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
             var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
-            if (string.Equals(code, AccessCheckDeniedErrorCode, StringComparison.OrdinalIgnoreCase))
+            if (code is not null && AccessDeniedErrorCodes.Contains(code.Trim()))
                 return AccessRights.None;
 
             _logger.LogWarning(

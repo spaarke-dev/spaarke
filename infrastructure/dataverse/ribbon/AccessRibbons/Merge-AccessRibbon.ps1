@@ -30,6 +30,22 @@
 .PARAMETER Out
     Where to write the merged RibbonDiff.xml (normally back over the unpacked export before packing).
 
+.PARAMETER ShareCommandXml
+    Task 114 (owner round 67 amendment 4(a)): a file holding the PLATFORM's form Share CommandDefinition(s) for -Entity,
+    exactly as the live effective ribbon has them (Set-AccessRibbon.ps1 reads them with RetrieveEntityRibbon: the
+    commands of Mscrm.Form.<entity>.Permissions.Sharing - the Unified Interface Share - and, when present,
+    Mscrm.Form.<entity>.Permissions.SharingNonRefresh in the legacy Permissions flyout). The merge copies each into the
+    RibbonDiff (replacing an earlier copy), strips any sprk.Access.* rule reference from it, and appends
+    sprk.Access.<entity>.ShareAllowed.EnableRule - so Share keeps every platform rule and is also hidden on a Restricted
+    record. Without it the Share rule is NOT applied (a warning says so); never hand-author the platform command.
+
+.PARAMETER GridShareCommandXml
+    Task 114 follow-up: a file holding the PLATFORM's GRID and SUBGRID Share CommandDefinition(s) for -Entity, as the live
+    effective ribbon has them (the commands of Mscrm.HomepageGrid.<entity>.Sharing and Mscrm.SubGrid.<entity>.Sharing - one
+    definition when both buttons use the same command). Each is copied with sprk.Access.<entity>.ShareAllowedSelection
+    .EnableRule appended: Share is hidden when ANY selected row is Restricted. A command shared with the FORM button is
+    refused (one copy cannot carry both rules). Without it the grid Share rule is NOT applied (a warning says so).
+
 .PARAMETER SecureTransitionDeployed
     Task 150 (UX amendment acceptance (b); owner R3b / F7): include "Make Secure". Pass it ONLY when the target
     environment's BFF carries task 148's provisioning transition (existing children follow the record), round 26 item
@@ -47,6 +63,8 @@ param(
     [Parameter(Mandatory)] [string] $ExportedRibbonDiff,
     [Parameter(Mandatory)] [ValidateSet('sprk_project', 'sprk_matter', 'sprk_workassignment')] [string] $Entity,
     [Parameter(Mandatory)] [string] $Out,
+    [string] $ShareCommandXml,
+    [string] $GridShareCommandXml,
     [switch] $SecureTransitionDeployed
 )
 
@@ -125,6 +143,71 @@ foreach ($sectionName in $map.Keys) {
     }
 }
 
+# Task 114 (owner round 67 amendment 4(a) + follow-up): the PLATFORM's Share commands, copied from the live ribbon, each
+# with a sprk.Access rule appended - the FORM command (ShareAllowed: this record is Restricted) and the GRID / SUBGRID
+# command(s) (ShareAllowedSelection: any selected row is Restricted). Never hand-authored: the copy keeps the platform's
+# rules. A re-run replaces each copy (idempotent).
+function Add-PlatformCommandRule([string] $path, [string] $ruleId, [string] $what) {
+    [xml] $doc = Get-Content -Raw -LiteralPath $path
+    $commands = @($doc.SelectNodes('//*[local-name()="CommandDefinition"]'))
+    if ($commands.Count -eq 0) { throw "No CommandDefinition in $path." }
+    $ids = @()
+    foreach ($command in $commands) {
+        $id = $command.GetAttribute('Id')
+        if (-not $id -or $id.StartsWith('sprk.')) { throw "'$id' is not a platform command ($what)." }
+        if ($ids -contains $id) { continue }
+        $ids += $id
+
+        foreach ($node in @($commandDefinitions.ChildNodes)) {
+            if ($node -is [System.Xml.XmlElement] -and $node.GetAttribute('Id') -eq $id) {
+                [void] $commandDefinitions.RemoveChild($node)
+            }
+        }
+
+        $copy = $ribbon.ImportNode($command, $true)
+        $rules = $copy.SelectSingleNode("*[local-name()='EnableRules']")
+        if (-not $rules) {
+            $rules = $ribbon.CreateElement('EnableRules', $copy.NamespaceURI)
+            [void] $copy.PrependChild($rules)
+        }
+        foreach ($rule in @($rules.ChildNodes)) {
+            if ($rule -is [System.Xml.XmlElement] -and $rule.GetAttribute('Id').StartsWith('sprk.Access.')) {
+                [void] $rules.RemoveChild($rule) # the live copy of a previous run's override
+            }
+        }
+        $newRule = $ribbon.CreateElement('EnableRule', $copy.NamespaceURI)
+        $newRule.SetAttribute('Id', $ruleId)
+        [void] $rules.AppendChild($newRule)
+        [void] $commandDefinitions.AppendChild($copy)
+    }
+    return $ids
+}
+
+$shareRuleId = "sprk.Access.$Entity.ShareAllowed.EnableRule"
+$gridShareRuleId = "sprk.Access.$Entity.ShareAllowedSelection.EnableRule"
+$shareCommandIds = @()
+$gridShareCommandIds = @()
+if ($ShareCommandXml) {
+    $shareCommandIds = @(Add-PlatformCommandRule $ShareCommandXml $shareRuleId "the form Share command")
+}
+else {
+    Write-Warning ("No -ShareCommandXml: the platform's FORM Share command is NOT hidden on Restricted $Entity records. " +
+        "Set-AccessRibbon.ps1 -Apply reads it from the live ribbon; never hand-author it.")
+}
+if ($GridShareCommandXml) {
+    [xml] $gridDoc = Get-Content -Raw -LiteralPath $GridShareCommandXml
+    $overlap = @($gridDoc.SelectNodes('//*[local-name()="CommandDefinition"]') |
+        ForEach-Object { $_.GetAttribute('Id') } | Where-Object { $shareCommandIds -contains $_ })
+    if ($overlap.Count -gt 0) {
+        throw "The form and grid Share buttons share command '$($overlap -join ', ')': one copy cannot carry both rules. Nothing was merged."
+    }
+    $gridShareCommandIds = @(Add-PlatformCommandRule $GridShareCommandXml $gridShareRuleId "the grid / subgrid Share command")
+}
+else {
+    Write-Warning ("No -GridShareCommandXml: the platform's GRID / SUBGRID Share command is NOT hidden for Restricted $Entity rows. " +
+        "Set-AccessRibbon.ps1 -Apply reads it from the live ribbon; never hand-author it.")
+}
+
 $settings = New-Object System.Xml.XmlWriterSettings
 $settings.Indent = $true
 $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
@@ -145,3 +228,5 @@ Write-Host "Merged the Access group into $Entity -> $Out"
 Write-Host "Commands before: $($before -join ', ')"
 Write-Host "Commands after : $($after -join ', ')"
 Write-Host "Access menu    : $($menuItems -join ', ')$(if (-not $SecureTransitionDeployed) { '   (Make Secure withheld: -SecureTransitionDeployed not given)' })"
+Write-Host "Share command  : $(if ($shareCommandIds.Count) { "$($shareCommandIds -join ', ') + $shareRuleId (hidden on Restricted records)" } else { 'NOT changed (no -ShareCommandXml)' })"
+Write-Host "Grid Share     : $(if ($gridShareCommandIds.Count) { "$($gridShareCommandIds -join ', ') + $gridShareRuleId (hidden when any selected row is Restricted)" } else { 'NOT changed (no -GridShareCommandXml)' })"

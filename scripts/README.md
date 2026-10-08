@@ -1259,6 +1259,20 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../p
 .\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = no NULL, default No
 ```
 
+### `Set-ExternalFlagForB2BGuests.ps1`
+**Purpose:** One-off data step: every B2B guest system user (`#EXT#` in its user name, `systemuser.domainname`) gets `sprk_isexternal = Yes`; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so guests must be marked explicitly. JSON report of every user listed.
+**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
+**Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003)
+**Dependencies:** Azure CLI (`az login`, Write on systemuser), PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** never run (written, not executed — task 114).
+
+```powershell
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"            # dry run (list)
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply     # PATCH If-Match:*, report
+.\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = every guest is Yes
+```
+
 ### `Set-SecureFlagFieldSecurity.ps1`
 **Purpose:** Locks `sprk_issecure` on the three secure roots (and `sprk_invoice`, owner round 10 item 11) with field-level security — only the BFF application user(s) can write it, every business unit's default team reads it — REUSING task 133's `Spaarke BFF-Managed Field Readers/Writers` profiles (it never creates them or edits their membership). Lists every System Administrator holder (owner decision F4).
 **Usage:** 🔴 One-time per environment (task 150 step 6), AFTER the BFF and the client that stops writing the flag are deployed; `-Apply` refuses unless the profiles, every default team, the writer membership and the NULL cleanup are in place and `-ClientNoLongerWritesFlag` is passed. `-Verify` any time.

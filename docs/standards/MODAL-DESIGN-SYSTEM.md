@@ -125,9 +125,14 @@ import {
   FormModal,          // sm|md, explicit dismiss, Cancel + Save
   PreviewModal,       // lg landscape, light dismiss, stage+meta grid, single Close
   BrowseModal,        // PreviewModal + the shell's `nav` prop (browse "N of M")
-  WizardModal,        // wizard size, explicit dismiss, stepper sidebar + Cancel/Skip/Back/Next
+  WizardShell,        // the wizard preset + engine: renders inside SprkModal (wizard size, explicit dismiss, uiScale);
+                      // `embedded` (+ `hideTitle` under platform chrome) for tabs, full pages and ribbon-hosted pages
 } from '@spaarke/ui-components';
 ```
+
+> **Amended 2026-10-07 (ADR-050, D-26)**: `WizardShell` replaces `WizardModal` as the wizard preset — it is the only wizard
+> engine (`WizardModal` had zero consumers and is retired). Launch modals and wizards **in-app** from Spaarke React surfaces;
+> `navigateTo` is for hostless ribbon scripts only, and its title bar is white platform chrome that cannot be themed.
 
 Each preset is a **thin config** of `SprkModal` — it owns no `Dialog`/header/footer of its own; it only supplies the size, dismiss mode, and footer slot contents that make sense for its intent. `ChoiceModal` is the one preset **not** ported from the prototype — it was built fresh in this project to re-base `ChoiceDialog`'s existing selection model (the choice-dialog-pattern, ADR-023) onto the canonical shell without forking it.
 

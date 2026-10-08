@@ -7,6 +7,25 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-07 — ADR-050 amended: `WizardShell` is the wizard preset, `WizardModal` retired, in-app launch rule (spaarke-ontology-platform-r1 task 110, D-26)
+
+`.claude/adr/ADR-050-canonical-modal-shell.md` (concise; **no full ADR-050 exists under `docs/adr/`**, checked
+2026-10-07): the preset list is now `ConfirmModal`, `ChoiceModal`, `FormModal`, `PreviewModal`, `BrowseModal`,
+**`WizardShell`** — the engine-bearing wizard preset that renders inside `SprkModal`, with an `embedded` mode for tabs,
+full pages and pages under platform chrome. **`WizardModal` is retired** (zero consumers). New MUSTs: every multi-step
+flow uses `WizardShell` (no second wizard engine); **launch in-app** from Spaarke React surfaces and keep
+`navigateTo(target 2)` for hostless ribbon scripts, because its title bar is light-only platform chrome that cannot be
+themed; `WizardShell` embedded `hideTitle` under platform chrome; wizards default to `dismiss="explicit"` + `uiScale`.
+New MUST NOT: inject CSS or DOM into platform dialog chrome. Unchanged: Layout 1 (85% × 85%), the `fullCover`
+escalation, the per-entity-size MUST NOT. `RecordNavigationModalShell` is recorded as the dirty-check protocol behind
+`BrowseModal.onBeforeNavigate` (zero envelope consumers). Companion fixes: `.claude/patterns/ui/record-modal-selection.md`
+and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationModalShell`"),
+`.claude/adr/ADR-026-full-page-custom-page-standard.md` (Wizard/dialog row cross-reference), plus
+`docs/standards/MODAL-DECISION-CRITERIA.md`, `docs/standards/MODAL-DESIGN-SYSTEM.md` §7 and
+`docs/architecture/ui-dialog-shell-architecture.md`. Path **B** per root `CLAUDE.md` §6.5 (owner decision **D-26**,
+2026-10-07); alternatives A (project exception) and C (build on `WizardModal`, a second engine) rejected. Record:
+`projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
+
 ###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 18,569 bytes (−48,088), 499 → 215 lines; 16.6 KB / 187 lines as injected (claude-md-cleanup-r1)
 
 The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows alone were 30 KB; incident write-ups sat inside rules; nothing limited growth. It now holds only binding every-turn rules, safety guards and one-line triggers, per Anthropic's guidance (< 200 lines per CLAUDE.md). Section numbers are unchanged. The previous file is archived verbatim at `.claude/archive/2026-10-07/CLAUDE.md`.
@@ -1573,7 +1592,7 @@ Trigger: `spaarkeai-compose-r3` project-pipeline run hit a stale POML template. 
 - **Deferred (separate evaluation, NOT implemented)**: settings-level Stop/PreToolUse hooks, `/loop`, `/batch`, scheduling, plan-mode mandates, and the proposal's calibration-pass (1.10). Per user direction 2026-07-08.
 
 ### Fixed (2026-07-08 — permission prompts)
-- Added `"PowerShell(*)"` to user-level [`~/.claude/settings.json`](file) allow list (alongside the existing `"Bash(*)"`) to stop recurring PowerShell approval prompts across all worktrees. (User-scoped file; not in-repo.)
+- Added `"PowerShell(*)"` to user-level `~/.claude/settings.json` allow list (alongside the existing `"Bash(*)"`) to stop recurring PowerShell approval prompts across all worktrees. (User-scoped file; not in-repo.)
 
 ### Added (2026-07-08 visual-host-create-button-r1 — Sonnet-5 execution model tiering)
 - **Model-tier strategy across the task pipeline.** Planning phases (design-to-spec, project-pipeline Steps 0–3) run on Opus 4.8 / Fable 5; task **execution defaults to Sonnet 5 @ effort `xhigh`**, with per-task escalation to Opus/Fable for the minority of high-power tasks. Mechanism is additive (absent tier ⇒ current behavior):

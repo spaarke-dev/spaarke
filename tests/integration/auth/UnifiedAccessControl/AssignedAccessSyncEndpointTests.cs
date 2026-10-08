@@ -184,6 +184,50 @@ public class AssignedAccessSyncEndpointTests : IClassFixture<AssignedAccessSyncT
         body.GetProperty("detail").GetString().Should().Contain(user.ToString());
     }
 
+    /// <summary>
+    /// Task 114 (owner round 67 amendment 3): the save that makes a record Restricted removes the shares of users flagged
+    /// external, in the same call, and the answer names them (<c>restrictedExternal.removed</c>). An internal share stays.
+    /// </summary>
+    [Fact]
+    public async Task Sync_OfARestrictedRecord_RemovesTheSharesOfUsersFlaggedExternal_AndSaysSo()
+    {
+        H.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = H.SystemUser(isExternal: true);
+        var internalUser = H.SystemUser(isExternal: false);
+        H.Shares.Seed("sprk_matter", _matter, Spaarke.Dataverse.DataversePrincipalRef.User(external), 1);
+        H.Shares.Seed("sprk_matter", _matter, Spaarke.Dataverse.DataversePrincipalRef.User(internalUser), 1);
+        _fixture.WritableRecords[_matter] = true;
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(SyncRoute, new { recordType = "matter", recordId = _matter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var restricted = (await BodyOf(response)).GetProperty("restrictedExternal");
+        restricted.GetProperty("outcome").GetString().Should().Be(RestrictedExternalShareOutcome.Evaluated);
+        restricted.GetProperty("removed").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(external);
+        H.Shares.MaskOf("sprk_matter", _matter, Spaarke.Dataverse.DataversePrincipalRef.User(external)).Should().BeNull();
+        H.Shares.MaskOf("sprk_matter", _matter, Spaarke.Dataverse.DataversePrincipalRef.User(internalUser)).Should().Be(1);
+    }
+
+    /// <summary>Task 114: a removal that cannot be confirmed is a 500 with its own reason code — never a silent 200.</summary>
+    [Fact]
+    public async Task Sync_WhenAnExternalUsersShareOnARestrictedRecordCannotBeRemoved_Is500RestrictedExternalIncomplete()
+    {
+        H.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = H.SystemUser(isExternal: true);
+        H.Shares.Seed("sprk_matter", _matter, Spaarke.Dataverse.DataversePrincipalRef.User(external), 1);
+        H.Shares.IgnoreWrites = true;
+        _fixture.WritableRecords[_matter] = true;
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(SyncRoute, new { recordType = "matter", recordId = _matter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var body = await BodyOf(response);
+        body.GetProperty("reasonCode").GetString().Should().Be(AssignedAccessSyncEndpoint.RestrictedExternalIncompleteReasonCode);
+        body.GetProperty("detail").GetString().Should().Contain(external.ToString());
+    }
+
     [Fact]
     public async Task Sync_OfALinkedUser_ClearsTheirRootSetUnderTheCallersTenant()
     {
