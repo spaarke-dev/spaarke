@@ -33,9 +33,9 @@
 | af7588b2ed6612c5f | Stream B: 056 WizardShell on SprkModal (own PR) | running |
 | a7d2ba5e803c9cc47 | Reviewer: 072 (stream D branch) | done |
 | a3f2fdb8356621906 | Reviewer: stream C round 2 (036/026) | done |
-| aeaf761bb094a0bd4 | Reviewer: PR #1359 (098 + 065 + TZ tests) | running |
+| aeaf761bb094a0bd4 | Reviewer: PR #1359 (098 + 065 + TZ tests) | done — PASS-WITH-FINDINGS |
 | a6065b4aa9ef36798 | Reviewer: PRs #1382 (057) and #1384 (060) | running |
-| a67ad20f7bead7126 | 098 author (PR #1359) — resume for review fixes / rebase | idle |
+| a67ad20f7bead7126 | 098 author (PR #1359) — FINAL round (TZ env Windows teardown, Briefing overdue gap per D-43, small K items); then main session reads diff → ask owner to merge | running |
 | a0c39a85690aeed2a | Stream C author (036/026) — round 3 | running |
 | ab5429413019d8fb9 | Stream D author (072) — round 2 running; then 073/074 | running |
 | a18a719c189250af3 | Stream B author of 057 (PR #1382) — resume for fixes | idle |
