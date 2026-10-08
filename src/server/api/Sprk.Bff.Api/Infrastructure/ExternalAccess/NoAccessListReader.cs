@@ -627,10 +627,12 @@ public class NoAccessListReader : INoAccessListReader
     /// (shares removed) yet never vetoed a read, and no reader reported it: a wall that walled nothing.</para>
     /// <para><b>The rule accepts what the filters match, as measured.</b> Dataverse's <c>eq</c> on a text column uses a
     /// case-, accent- and width-insensitive collation and pads with spaces. Probed live on spaarkedev1 (2026-10-07, task
-    /// 154 verifier pass 1): it MATCHES a different case, an accented or combining-marked letter, full-width forms,
-    /// U+FEFF anywhere, and trailing U+0020 / U+3000; it does NOT match a leading space (U+0020 or U+3000), a U+3000
-    /// inside the value, or a trailing tab, LF, NBSP (U+00A0), em space (U+2003), zero-width space (U+200B) or soft
-    /// hyphen (U+00AD). <see cref="FoldLikeDataverse"/> applies exactly the matched foldings before parsing. Accepting
+    /// 154 verifier passes 1 and 2): it MATCHES a different case, a precomposed accented Latin letter, a combining mark
+    /// in U+0300-U+036F (all 112 probed), full-width forms, U+FEFF anywhere, and trailing U+0020 / U+3000; it does NOT
+    /// match any OTHER combining mark (e.g. Arabic U+064B, U+0651, Thai U+0E31, U+0E34), a leading space (U+0020 or
+    /// U+3000), a U+3000 inside the value, or a trailing tab, LF, NBSP (U+00A0), em space (U+2003), zero-width space
+    /// (U+200B) or soft hyphen (U+00AD). <see cref="FoldLikeDataverse"/> applies exactly the matched foldings before
+    /// parsing. Accepting
     /// less would turn a wall that works today into one that denies nothing; accepting more (e.g. trimming every Unicode
     /// space) would let the enforcer remove shares for a row the read-time veto never matches.</para>
     /// </remarks>
@@ -653,17 +655,27 @@ public class NoAccessListReader : INoAccessListReader
 
     /// <summary>
     /// The value as Dataverse's text comparison sees it (measured; see <see cref="TryParseObjectRecordId"/>): U+FEFF
-    /// removed, combining marks removed (accent-insensitive), full-width forms mapped to ASCII and U+3000 to a space
-    /// (width-insensitive), then trailing spaces removed (padding). Nothing else is trimmed or mapped.
+    /// removed, combining diacritical marks U+0300-U+036F removed (accent-insensitive; every OTHER combining mark is
+    /// significant to Dataverse and stays, so the value fails to parse), full-width forms mapped to ASCII and U+3000 to a
+    /// space (width-insensitive), then trailing spaces removed (padding). Nothing else is trimmed or mapped.
     /// </summary>
     internal static string FoldLikeDataverse(string raw)
     {
-        var decomposed = raw.Normalize(System.Text.NormalizationForm.FormD);
+        string decomposed;
+        try
+        {
+            decomposed = raw.Normalize(System.Text.NormalizationForm.FormD);
+        }
+        catch (ArgumentException)
+        {
+            // A lone surrogate cannot be normalized. Such a value is never a record id: fold nothing and let it fail.
+            return raw;
+        }
+
         var builder = new System.Text.StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {
-            if (c == '\uFEFF'
-                || System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)
+            if (c == '\uFEFF' || (c >= '\u0300' && c <= '\u036F'))
             {
                 continue;
             }

@@ -598,6 +598,12 @@ public class NoAccessListReaderTests
     [InlineData("abcdef01-2345-6789-abcd-ef0123456789\n", false)]        // trailing LF: significant
     [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u200B", false)]    // trailing zero-width space: significant
     [InlineData("abcdef01-2345-6789\u3000abcd-ef0123456789", false)]     // a U+3000 inside the value
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u064b", false)]    // Arabic fathatan: a mark Dataverse does NOT ignore
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u0651", false)]    // Arabic shadda: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u0e31", false)]    // Thai mai han-akat: significant
+    [InlineData("a\u0e34bcdef01-2345-6789-abcd-ef0123456789", false)]    // Thai sara i inside the value: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u036f", true)]     // the last mark of U+0300-U+036F: ignored
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\uD800", false)]    // a lone surrogate: never a record id
     [InlineData("00000000-0000-0000-0000-000000000000", false)]          // the empty id names no record
     [InlineData("not a record id", false)]
     [InlineData("", false)]
@@ -790,7 +796,7 @@ public class NoAccessListReaderTests
         /// </summary>
         private static bool MatchesLikeDataverse(string? stored, Guid id)
             => stored is not null
-               && string.Equals(stored.TrimEnd(' ', '　'), id.ToString(), StringComparison.OrdinalIgnoreCase);
+               && string.Equals(stored.TrimEnd(' ', '\u3000'), id.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static NoAccessEntryRow OrganizationObjectRow(

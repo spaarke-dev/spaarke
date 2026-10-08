@@ -129,6 +129,14 @@ their app-only deny reads are unaffected; the role script re-checks this every r
 | F4 role -Verify wording | Extras are listed (reported, not failed); wording now "holds every privilege of its set". |
 | F4 OnPostSave | Enforces only when `getIsSaveSuccess()`; a missing `Spaarke.BffAuth` shows a form notice. |
 
+## Verifier pass 2 (2026-10-07) - fixes
+
+| Finding | Fix |
+|---|---|
+| F3-a all Unicode Mn marks stripped (fail-open: e.g. Arabic U+064B accepted by the rule, not matched by Dataverse) | C# `FoldLikeDataverse` and JS `_foldLikeDataverse` strip only U+0300-U+036F (all 112 probed as ignored); every other mark stays and the value fails to parse. Lone surrogate guarded before `Normalize`. Tests: U+064B, U+0651, U+0E31, U+0E34 refused; U+036F accepted; lone surrogate refused. |
+| F3-b load-time writes + autosave change the N5 author | No write on load for an existing entry (`_isCreateForm`): a non-canonical id is flagged (warning says saving makes the user the author); an id the readers match is left as stored; the name suggestion runs only on create or after a user change. |
+| F4 ribbon foreign-customization check | `Deploy-NoAccessEntryRibbon.ps1` reads `ribboncustomizations` and `ribbondiffs` for the table and refuses when any diff row is not one of the two checked-in HideCustomActions. |
+
 The picker is isolated in `Spaarke.NoAccessEntry.Picker` (one `register` call in `onLoad`), ready for the pending owner
 decision on a RegardingResolver "link only" mode.
 
@@ -163,7 +171,8 @@ form, site map, app component); quick create already off; role plan as in the ta
 | l | Dark mode | Form notifications and native controls adapt (no custom UI in this task) |
 | m | The three NO ACCESS subgrids (Organization x2, Contact) | **No "Add Existing"** command; "+ New" present |
 | n | Create an entry, save it, then change its Record Type | The lookup dialog opens ONCE; the enforce call runs ONCE per save (one notice, one request in the network log) |
-| o | Open an entry whose stored id has braces (seed one through the Web API as an administrator) | The id is corrected on the form (dirty) with a warning "walls nothing until it is saved"; after Save the warning is gone and the veto matches |
+| o | Open an entry whose stored id has braces (seed one through the Web API as an administrator) | A warning "walls nothing as it is" that says saving makes you the author; the form is NOT dirty, and with autosave on nothing is saved by opening it (Modified By unchanged after 60 s). Re-pick the record and save: the warning is gone and the veto matches |
+| p | Open an existing, well-formed entry and wait 60 s (autosave is on in dev) | Modified By and Modified On unchanged; no enforce request in the network log |
 
 **No false empty (h).** If the platform renders an EMPTY list for a user without Read (rather than hiding the subgrid or
 showing a permission message), the follow-up is the small `sprk_noaccess_sections.js` OnLoad probe from the POML

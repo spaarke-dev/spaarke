@@ -43,7 +43,10 @@ post-save enforcement.
 (source `src/solutions/webresources/sprk_noaccessentry_postsave.js`, version 1.1.0 or later). ONE form event:
 OnLoad `Spaarke.NoAccessEntry.onLoad` (pass execution context), which registers everything else, each handler exactly
 once (Unified Interface fires OnLoad again after a save). On load, a stored record id the access checks do not match
-(braces, a leading space, blank) is corrected on the form and flagged "walls nothing until it is saved". The record
+(braces, a leading space, blank) is flagged "walls nothing". An EXISTING entry is never written on load, and the
+name suggestion runs only on a new entry or after a user change: with the org's autosave on, a load-time write would
+save the entry as the viewer, and the enforcer treats the last modifier as the author whose Write decides enforcement
+(owner N5). The warning says so; the user re-picks the record and saves deliberately. The record
 picker is self-contained (`Spaarke.NoAccessEntry.Picker`, one `register` call), so it can be replaced by a control.
 
 | Handler | What it does |

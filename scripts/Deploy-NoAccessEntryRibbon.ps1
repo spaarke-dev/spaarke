@@ -20,9 +20,11 @@
 
     MODES
       (default)  Dry run. Reads the live EFFECTIVE ribbon (RetrieveEntityRibbon, read-only), reports whether the two
-                 buttons are present, refuses when the table carries any OTHER Spaarke ribbon customization (the import
-                 replaces the table's RibbonDiffXml, so it would be lost; merge it into the checked-in RibbonDiff.xml
-                 first), and packs the solution into a temp file to prove it packs. Zero writes to Dataverse.
+                 buttons are present, and refuses when the table already carries any ribbon customization that is not
+                 exactly the checked-in diff (read from the stored ribboncustomizations / ribbondiffs rows, which also
+                 show hide-only diffs and other prefixes; the import replaces the table's RibbonDiffXml, so it would be
+                 lost - merge it into the checked-in RibbonDiff.xml first). Then packs the solution into a temp file to
+                 prove it packs. Zero writes to Dataverse.
       -Apply     The same checks, then pac solution pack + pac solution import --environment <url> --publish-changes,
                  then the -Verify check with a bounded retry (the effective ribbon lags the publish; Set-AccessRibbon.ps1
                  measured up to about 75 s on spaarkedev1).
@@ -83,17 +85,44 @@ if ($Verify) {
 if ($present.Count -eq 0) { Write-Host 'Add Existing is already hidden; nothing to import.' -ForegroundColor Green; exit 0 }
 Write-Host "Present now: $($present -join ', ')" -ForegroundColor Yellow
 
-# The import REPLACES the table's RibbonDiffXml. Any other Spaarke customization on this table would be lost.
-$foreign = @($ribbon.SelectNodes("//*[starts-with(@Id,'sprk') or starts-with(@Id,'Spaarke')]") | ForEach-Object { $_.GetAttribute('Id') } | Sort-Object -Unique)
-if ($foreign.Count -gt 0) {
-    Write-Host "REFUSED: $Table already carries Spaarke ribbon customizations that this import would replace: $($foreign -join ', '). Export them into $SolutionFolder/Entities/$Table/RibbonDiff.xml first. Nothing was changed." -ForegroundColor Red
-    exit 2
-}
-
 $diff = Join-Path $SolutionFolder "Entities/$Table/RibbonDiff.xml"
 [xml]$diffXml = Get-Content -LiteralPath $diff -Raw
 foreach ($b in $HiddenButtons) {
     if (-not $diffXml.SelectSingleNode("//HideCustomAction[@Location='$b']")) { throw "$diff does not hide $b." }
+}
+# The checked-in diff, as (HideActionId -> Location). It holds nothing but these HideCustomActions.
+$expected = @{}
+foreach ($h in $diffXml.SelectNodes('//HideCustomAction')) { $expected[$h.GetAttribute('HideActionId')] = $h.GetAttribute('Location') }
+
+# The import REPLACES the table's RibbonDiffXml, so any customization already on the table would be lost. Read what is
+# there from the stored customization rows (ribboncustomizations + ribbondiffs), not the effective ribbon: a hide-only
+# diff, or one under another prefix, leaves no trace in the effective ribbon (task 154 verifier pass 2, F4).
+$api = "$BaseUrl/api/data/v9.2"
+$customizations = @((Invoke-RestMethod -Headers $headers -Uri "$api/ribboncustomizations?`$filter=entity eq '$Table'&`$select=ribboncustomizationid").value)
+$rows = @()
+$next = "$api/ribbondiffs?`$filter=entity eq '$Table'&`$select=diffid,difftype,rdx"
+while ($next) {
+    $page = Invoke-RestMethod -Headers $headers -Uri $next
+    $rows += $page.value
+    $next = $page.'@odata.nextLink'
+}
+$unexpected = @(foreach ($row in $rows) {
+        $ok = $false
+        if ($expected.ContainsKey("$($row.diffid)") -and $row.rdx) {
+            try {
+                [xml]$rdx = "<r>$($row.rdx)</r>"
+                $node = $rdx.r.FirstChild
+                $ok = $rdx.r.ChildNodes.Count -eq 1 -and $node.LocalName -eq 'HideCustomAction' -and
+                $node.GetAttribute('HideActionId') -eq "$($row.diffid)" -and $node.GetAttribute('Location') -eq $expected["$($row.diffid)"]
+            }
+            catch { $ok = $false }
+        }
+        if (-not $ok) { "$($row.diffid) [$($row.difftype)]" }
+    })
+Write-Host "Stored ribbon customization rows for ${Table}: $($customizations.Count); diff rows: $($rows.Count)"
+if ($unexpected.Count -gt 0) {
+    Write-Host "REFUSED: $Table already carries ribbon customizations that are not the checked-in diff, and this import would replace them: $($unexpected -join ', '). Merge them into $diff first. Nothing was changed." -ForegroundColor Red
+    exit 2
 }
 
 $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("NoAccessEntryRibbons-{0}.zip" -f (Get-Date -Format 'yyyyMMddHHmmss'))

@@ -45,9 +45,10 @@ interface FakeAttr {
   removeOnChange: (fn: (ctx: unknown) => void) => void;
   setSubmitMode: jest.Mock;
   handlers: Array<(ctx: unknown) => void>;
+  writes: number;
 }
 
-function makeForm(initial: Record<string, unknown>, saveMode = 1, saveSuccess = true) {
+function makeForm(initial: Record<string, unknown>, saveMode = 1, saveSuccess = true, formType = 1) {
   const names = [
     'sprk_subjectcontact',
     'sprk_subjectorganization',
@@ -63,9 +64,11 @@ function makeForm(initial: Record<string, unknown>, saveMode = 1, saveSuccess = 
     const attr: FakeAttr = {
       value: initial[name] ?? null,
       handlers: [],
+      writes: 0,
       getValue: () => attr.value,
       setValue: (v: unknown) => {
         attr.value = v;
+        attr.writes++;
       },
       addOnChange: fn => attr.handlers.push(fn),
       removeOnChange: fn => {
@@ -87,7 +90,7 @@ function makeForm(initial: Record<string, unknown>, saveMode = 1, saveSuccess = 
   const formContext = {
     getAttribute: (n: string) => attrs[n] ?? null,
     getControl: (n: string) => controls[n] ?? null,
-    ui: { setFormNotification: jest.fn(), clearFormNotification: jest.fn() },
+    ui: { setFormNotification: jest.fn(), clearFormNotification: jest.fn(), getFormType: () => formType },
     data: {
       entity: {
         onSave: [] as unknown[],
@@ -515,7 +518,37 @@ describe('registration and the post-save notice', () => {
 });
 
 describe('task 154 verifier pass 1', () => {
-  it('on load, corrects a braced stored id (dirty) and warns that the entry walls nothing until saved', async () => {
+  const EXISTING = 2;
+  const storedIdWarning = (f: ReturnType<typeof makeForm>) =>
+    f.formContext.ui.setFormNotification.mock.calls.find((c: unknown[]) => c[2] === 'sprk_noaccess_storedid');
+  const totalWrites = (f: ReturnType<typeof makeForm>) => Object.values(f.attrs).reduce((n, a) => n + a.writes, 0);
+
+  it('on load of an EXISTING entry, a braced stored id is NOT rewritten; the warning says it walls nothing and who becomes the author', async () => {
+    const { api } = load();
+    const braced = `{${MATTER_ID.toUpperCase()}}`;
+    const f = makeForm(
+      {
+        sprk_subjectcontact: lookup(CONTACT),
+        sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
+        sprk_objectrecordid: braced,
+      },
+      1,
+      true,
+      EXISTING
+    );
+
+    api.onLoad(f.ctx);
+    await flush();
+
+    expect(f.attrs.sprk_objectrecordid.value).toBe(braced);
+    expect(f.attrs.sprk_objectrecordid.writes).toBe(0);
+    const warning = storedIdWarning(f);
+    expect(warning?.[1]).toBe('WARNING');
+    expect(warning?.[0]).toContain('walls nothing as it is');
+    expect(warning?.[0]).toContain("Saving makes you this entry's author");
+  });
+
+  it('on load of a NEW entry, a braced id is corrected in place (nothing is saved yet)', async () => {
     const { api } = load();
     const f = makeForm({
       sprk_subjectcontact: lookup(CONTACT),
@@ -527,42 +560,71 @@ describe('task 154 verifier pass 1', () => {
     await flush();
 
     expect(f.attrs.sprk_objectrecordid.value).toBe(MATTER_ID);
-    const warning = f.formContext.ui.setFormNotification.mock.calls.find(
-      (c: unknown[]) => c[2] === 'sprk_noaccess_storedid'
-    );
-    expect(warning?.[1]).toBe('WARNING');
-    expect(warning?.[0]).toContain('walls nothing until it is saved');
   });
 
-  it('on load, tidies an upper-case stored id without a warning (the access checks match it already)', async () => {
+  it('on load of an EXISTING entry, an upper-case id the access checks match is left as stored, with no warning', async () => {
     const { api } = load();
-    const f = makeForm({
-      sprk_subjectcontact: lookup(CONTACT),
-      sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
-      sprk_objectrecordid: MATTER_ID.toUpperCase(),
-    });
+    const f = makeForm(
+      {
+        sprk_subjectcontact: lookup(CONTACT),
+        sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
+        sprk_objectrecordid: MATTER_ID.toUpperCase(),
+      },
+      1,
+      true,
+      EXISTING
+    );
 
     api.onLoad(f.ctx);
     await flush();
 
-    expect(f.attrs.sprk_objectrecordid.value).toBe(MATTER_ID);
-    expect(
-      f.formContext.ui.setFormNotification.mock.calls.some((c: unknown[]) => c[2] === 'sprk_noaccess_storedid')
-    ).toBe(false);
+    expect(f.attrs.sprk_objectrecordid.value).toBe(MATTER_ID.toUpperCase());
+    expect(f.attrs.sprk_objectrecordid.writes).toBe(0);
+    expect(storedIdWarning(f)).toBeUndefined();
   });
 
-  it('on load, clears a blank stored id and warns', async () => {
+  it('on load of an EXISTING entry, a blank stored id is left alone and flagged', async () => {
     const { api } = load();
-    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT), sprk_objectrecordid: '   ' });
+    const f = makeForm({ sprk_subjectcontact: lookup(CONTACT), sprk_objectrecordid: '   ' }, 1, true, EXISTING);
 
     api.onLoad(f.ctx);
     await flush();
 
-    expect(f.attrs.sprk_objectrecordid.value).toBeNull();
-    const warning = f.formContext.ui.setFormNotification.mock.calls.find(
-      (c: unknown[]) => c[2] === 'sprk_noaccess_storedid'
+    expect(f.attrs.sprk_objectrecordid.writes).toBe(0);
+    expect(storedIdWarning(f)?.[0]).toContain('blank');
+  });
+
+  it('opening an EXISTING entry writes nothing at all (the form stays not dirty, so autosave cannot change the author)', async () => {
+    const { api } = load();
+    const f = makeForm(
+      {
+        sprk_subjectcontact: lookup(CONTACT),
+        sprk_objectrecordtype: typeLookup(MATTER_TYPE_REF),
+        sprk_objectrecordid: MATTER_ID.toUpperCase(),
+        sprk_name: null,
+      },
+      1,
+      true,
+      EXISTING
     );
-    expect(warning?.[0]).toContain('blank');
+
+    api.onLoad(f.ctx);
+    await flush();
+
+    expect(totalWrites(f)).toBe(0);
+    expect(f.attrs.sprk_name.value).toBeNull();
+  });
+
+  it('on an EXISTING entry, the name suggestion runs only after the user changes a subject or object', async () => {
+    const { api } = load();
+    const f = makeForm({ sprk_objectorganization: lookup(ORG), sprk_name: null }, 1, true, EXISTING);
+    api.onLoad(f.ctx);
+    await flush();
+    expect(f.attrs.sprk_name.writes).toBe(0);
+
+    f.change('sprk_subjectcontact', lookup(CONTACT));
+
+    expect(f.attrs.sprk_name.value).toBe('Pat Doe – Acme LLP');
   });
 
   it('readerMatches mirrors the server rule (measured Dataverse equality)', () => {
@@ -573,6 +635,9 @@ describe('task 154 verifier pass 1', () => {
     expect(api.readerMatches(`{${MATTER_ID}}`)).toBe(false);
     expect(api.readerMatches(' ' + MATTER_ID)).toBe(false);
     expect(api.readerMatches(MATTER_ID + '\t')).toBe(false);
+    expect(api.readerMatches(MATTER_ID + String.fromCharCode(0x0301))).toBe(true); // U+0300-U+036F: ignored by Dataverse
+    expect(api.readerMatches(MATTER_ID + String.fromCharCode(0x064b))).toBe(false); // Arabic fathatan: significant
+    expect(api.readerMatches(MATTER_ID + String.fromCharCode(0x0e31))).toBe(false); // Thai mai han-akat: significant
     expect(api.readerMatches(MATTER_ID + '\u00A0')).toBe(false);
   });
 

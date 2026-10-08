@@ -27,7 +27,8 @@
  * Form Events (registered by task 154's scripts/Deploy-NoAccessEntryForms.ps1):
  * - OnLoad: Spaarke.NoAccessEntry.onLoad (pass execution context). It registers OnSave, OnPostSave and every OnChange,
  *   each exactly once (Unified Interface fires OnLoad again after a save).
- * - A stored record id the access checks do not match (braces, a leading space, blank) is corrected on load and flagged.
+ * - A stored record id the access checks do not match (braces, a leading space, blank) is flagged on load. An EXISTING
+ *   entry is never written on load (autosave would make the viewer its author for enforcement, owner N5).
  * - Library order: sprk_/scripts/bff_auth.js FIRST, then this library.
  *
  * What the user sees after a save (text-only form notifications - owner O1 final):
@@ -84,7 +85,9 @@ Spaarke.NoAccessEntry._state = {
     /** @type {string|null} Display name of the object record, when known. */
     recordName: null,
     /** @type {string|null} The last name this script suggested (overwritten only while unchanged). */
-    lastSuggestedName: null
+    lastSuggestedName: null,
+    /** @type {boolean} Whether the user changed a subject or object field on this form (name suggestion gate). */
+    userChanged: false
 };
 
 Spaarke.NoAccessEntry._cachedApiBaseUrl = null;
@@ -95,11 +98,10 @@ Spaarke.NoAccessEntry._cachedApiBaseUrl = null;
 
 var CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var EMPTY_ID = "00000000-0000-0000-0000-000000000000";
-var NON_SPACING_MARK = /\p{Mn}/u;
-
 /**
  * The value as Dataverse's text comparison sees it, the mirror of NoAccessListReader.FoldLikeDataverse (measured live,
- * task 154): U+FEFF and combining marks removed, full-width forms mapped to ASCII, U+3000 mapped to a space.
+ * task 154): U+FEFF and the combining diacritical marks U+0300-U+036F removed (every OTHER combining mark, e.g. Arabic
+ * or Thai, is significant to Dataverse and stays), full-width forms mapped to ASCII, U+3000 mapped to a space.
  */
 Spaarke.NoAccessEntry._foldLikeDataverse = function (value) {
     var decomposed = typeof value.normalize === "function" ? value.normalize("NFD") : value;
@@ -107,7 +109,7 @@ Spaarke.NoAccessEntry._foldLikeDataverse = function (value) {
     for (var i = 0; i < decomposed.length; i++) {
         var ch = decomposed.charAt(i);
         var code = decomposed.charCodeAt(i);
-        if (code === 0xFEFF || NON_SPACING_MARK.test(ch)) {
+        if (code === 0xFEFF || (code >= 0x0300 && code <= 0x036F)) {
             continue;
         }
 
@@ -334,7 +336,7 @@ Spaarke.NoAccessEntry.onLoad = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
         var F = Spaarke.NoAccessEntry.Fields;
-        Spaarke.NoAccessEntry._state = { recordType: null, recordName: null, lastSuggestedName: null };
+        Spaarke.NoAccessEntry._state = { recordType: null, recordName: null, lastSuggestedName: null, userChanged: false };
 
         var entity = formContext.data.entity;
         Spaarke.NoAccessEntry._registerOnce(entity, "addOnSave", "removeOnSave", Spaarke.NoAccessEntry.onSave);
@@ -492,9 +494,14 @@ Spaarke.NoAccessEntry._verifyRecord = function (formContext, type, id, blocking)
 };
 
 /**
- * A stored id the readers do not match (braces, a leading space, a blank value) walls nothing: correct it on the form
- * (dirty, saved with the next save) and say so. An id the readers match but that is not canonical (e.g. upper case) is
- * corrected without a warning.
+ * A stored id the readers do not match (braces, a leading space, a blank value) walls nothing: say so.
+ *
+ * NEVER writes on an EXISTING entry (task 154 verifier pass 2): a load-time write dirties the form, the org's autosave
+ * then saves it, the viewer becomes the entry's last modifier, and the enforcer uses the last modifier as the author
+ * whose Write decides enforcement (owner N5). So merely opening the form would change who the author is. On an
+ * existing entry the warning asks the user to correct it and says that saving makes them the author; an id the readers
+ * already match (e.g. upper case) is left as stored and normalised by the next real save (onSave). On a NEW entry
+ * nothing is saved yet, so the value is corrected in place.
  */
 Spaarke.NoAccessEntry._checkStoredRecordId = function (formContext) {
     var C = Spaarke.NoAccessEntry.Config;
@@ -505,27 +512,46 @@ Spaarke.NoAccessEntry._checkStoredRecordId = function (formContext) {
         return;
     }
 
+    var create = Spaarke.NoAccessEntry._isCreateForm(formContext);
+    var authorNote = " Saving makes you this entry's author: whether it is then enforced on each record depends on " +
+        "your Write on that record.";
     var normalized = Spaarke.NoAccessEntry.normalizeRecordId(raw);
     if (normalized === null) {
         var blank = String(raw).trim() === "";
-        if (blank) {
+        if (blank && create) {
             Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, null);
         }
 
         Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId, (blank
             ? "The stored record id is blank, so this entry walls nothing."
             : "The stored record id is not a record id, so this entry walls nothing.") +
-            " Choose the record type to pick the record, then save.", "WARNING");
+            " To fix it, choose the record type again and pick the record, then save." + (create ? "" : authorNote),
+            "WARNING");
         return;
     }
 
-    if (normalized !== raw) {
+    if (normalized === raw) {
+        return;
+    }
+
+    if (create) {
         Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, normalized);
-        if (!Spaarke.NoAccessEntry.readerMatches(raw)) {
-            Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId,
-                "The stored record id was not in the form the access checks match, so this entry walls nothing until " +
-                "it is saved. It has been corrected here: save the entry.", "WARNING");
-        }
+        return;
+    }
+
+    if (!Spaarke.NoAccessEntry.readerMatches(raw)) {
+        Spaarke.NoAccessEntry._formNotify(formContext, C.storedIdNotificationId,
+            "The stored record id is not in the form the access checks match, so this entry walls nothing as it is. " +
+            "To fix it, choose the record type again and pick the record, then save." + authorNote, "WARNING");
+    }
+};
+
+/** Whether the form is creating a new entry (form type 1). Unknown is treated as an existing entry: no writes. */
+Spaarke.NoAccessEntry._isCreateForm = function (formContext) {
+    try {
+        return typeof formContext.ui.getFormType === "function" && formContext.ui.getFormType() === 1;
+    } catch (error) {
+        return false;
     }
 };
 
@@ -556,6 +582,7 @@ Spaarke.NoAccessEntry._clearRecordObject = function (formContext) {
 Spaarke.NoAccessEntry.onObjectOrganizationChange = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
+        Spaarke.NoAccessEntry._state.userChanged = true;
         if (Spaarke.NoAccessEntry._lookup(formContext, Spaarke.NoAccessEntry.Fields.objectOrganization)) {
             Spaarke.NoAccessEntry._clearRecordObject(formContext);
         }
@@ -574,6 +601,7 @@ Spaarke.NoAccessEntry.onObjectOrganizationChange = function (executionContext) {
 Spaarke.NoAccessEntry.Picker.onRecordTypeChange = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
+        Spaarke.NoAccessEntry._state.userChanged = true;
         var F = Spaarke.NoAccessEntry.Fields;
         Spaarke.NoAccessEntry._controlNotify(formContext, F.objectRecordType, null);
         Spaarke.NoAccessEntry._setValue(formContext, F.objectRecordId, null);
@@ -643,6 +671,7 @@ Spaarke.NoAccessEntry.Picker.pickRecord = function (formContext, type) {
 Spaarke.NoAccessEntry.onObjectRecordIdChange = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
+        Spaarke.NoAccessEntry._state.userChanged = true;
         var F = Spaarke.NoAccessEntry.Fields;
         var raw = Spaarke.NoAccessEntry._value(formContext, F.objectRecordId);
         Spaarke.NoAccessEntry._state.recordName = null;
@@ -683,18 +712,27 @@ Spaarke.NoAccessEntry.onObjectRecordIdChange = function (executionContext) {
 
 Spaarke.NoAccessEntry.onSubjectChange = function (executionContext) {
     try {
+        Spaarke.NoAccessEntry._state.userChanged = true;
         Spaarke.NoAccessEntry._applySuggestedName(executionContext.getFormContext());
     } catch (error) {
         console.error("[No Access] Error in onSubjectChange:", error);
     }
 };
 
-/** Fills sprk_name while it is empty or still holds the last suggestion; a name the user typed is never replaced. */
+/**
+ * Fills sprk_name while it is empty or still holds the last suggestion; a name the user typed is never replaced. Only
+ * on a NEW entry or after the user changed a subject or object field: on an existing entry a load-time write would
+ * dirty the form and autosave would make the viewer the entry's author (see _checkStoredRecordId).
+ */
 Spaarke.NoAccessEntry._applySuggestedName = function (formContext) {
     try {
         var F = Spaarke.NoAccessEntry.Fields;
-        var current = Spaarke.NoAccessEntry._value(formContext, F.name);
         var state = Spaarke.NoAccessEntry._state;
+        if (!state.userChanged && !Spaarke.NoAccessEntry._isCreateForm(formContext)) {
+            return;
+        }
+
+        var current = Spaarke.NoAccessEntry._value(formContext, F.name);
         if (current && current !== state.lastSuggestedName) {
             return;
         }
