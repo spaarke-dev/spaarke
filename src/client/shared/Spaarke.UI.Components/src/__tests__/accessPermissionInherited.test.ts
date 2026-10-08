@@ -255,6 +255,20 @@ describe('sprk_accesspermission_inherited.js — lock while the record has a par
     expect(f.notifications[NOTIFICATION_ID].text).toBe('Access permission is inherited from INV-0042.');
   });
 
+  it('onLoad_RegisteredTwiceOnTheSameForm_WiresOnce', async () => {
+    const retrieveRecord = jest.fn().mockResolvedValue({});
+    const ns = load(retrieveRecord);
+    const f = form({ permission: RESTRICTED, lookups: { sprk_regardingmatter: { id: '{M1}', name: 'M' } } });
+
+    ns.onLoad(f.executionContext);
+    ns.onLoad(f.executionContext);
+    await flush();
+    f.pick('sprk_regardingmatter', null);
+
+    expect(retrieveRecord).toHaveBeenCalledTimes(1);
+    expect(f.controls[0].disabled).toBe(false); // one wiring: the unlock re-enables what the one lock disabled
+  });
+
   it('onLoad_TheSavedParentsCannotBeRead_TheLookupsOnTheFormDecide', async () => {
     const ns = load(jest.fn().mockRejectedValue(new Error('offline')));
     const f = form({ permission: LIMITED, lookups: { sprk_regardingmatter: null } });

@@ -28,6 +28,15 @@
  * TrackingFieldTrio pill on the To Do and Event main forms) is put back to the value the field had when it was locked.
  * Unlocking re-enables only the controls this script disabled, so a read-only form stays read-only.
  *
+ * ADR-006 amendment 2.1 (owner round 86, path B, #1462) — a thin form-event script, within its limits: platform form APIs
+ * only (formContext, Xrm.WebApi); no UI of its own (the platform's form notification and control state); no access
+ * decision (the server decides and writes the value; this only locks and labels); fails safe (a failed read leaves the
+ * lookups on the form deciding, and the server's reconcile reverts any edit that slips through); namespaced
+ * (Spaarke.AccessPermissionInherited) and idempotent (one wiring per form load); jest-tested
+ * (Spaarke.UI.Components/src/__tests__/accessPermissionInherited.test.ts); registered by a checked-in operator script
+ * (scripts/Set-InheritedAccessPermissionFormLock.ps1). The one value it relies on, PARENT_LOOKUPS, is pinned to the
+ * server's rule by ParentLineageTests.FormLibraryParentLookups_MatchTheServerMap.
+ *
  * ES5, no build step, never throws into the form.
  */
 // A property of window, not a top-level var: the form resolves "Spaarke.AccessPermissionInherited.onLoad" from window,
@@ -45,6 +54,9 @@ window.Spaarke.AccessPermissionInherited = (function () {
     var NOTIFICATION_ID = "sprk_accesspermission_inherited";
     var FORM_TYPE_CREATE = 1;
     var FORMATTED = "@OData.Community.Display.V1.FormattedValue";
+
+    /** The access permission attributes already wired on this page (one entry per form load). */
+    var wired = [];
 
     /* PARENT_LOOKUPS:BEGIN - the server's ParentLineage.ChildFiling for the four tables (column -> parent table). JSON. */
     ns.PARENT_LOOKUPS = {
@@ -155,6 +167,15 @@ window.Spaarke.AccessPermissionInherited = (function () {
             if (!lookups || !attribute) {
                 return; // not one of the four tables, or the column is not on this form: nothing to lock
             }
+            // Idempotent: a second registration on the same form load (a maker adding the handler twice) wires nothing
+            // again. Keyed on the attribute AND the record, so a form the platform reuses for another record still wires.
+            var recordKey = formContext.data.entity.getId() || "";
+            for (var w = 0; w < wired.length; w++) {
+                if (wired[w].attribute === attribute && wired[w].record === recordKey) {
+                    return;
+                }
+            }
+            wired.push({ attribute: attribute, record: recordKey });
 
             var state = { locked: false, lockedValue: null, disabledByUs: [], saved: {} };
 

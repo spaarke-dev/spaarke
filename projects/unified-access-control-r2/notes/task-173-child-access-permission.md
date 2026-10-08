@@ -65,7 +65,16 @@ Escalation trigger 3 does not fire: no path writes these tables without the reco
     - The Office To Do with a record AND a carrier is recomputed after the carrier is set (`CoreAncestorResolver.ApplyInheritedAccessPermissionAsync`); this was the K2 in §8.
     - The remaining "retired" comments in Communication.Components and TrackingFieldTrio are corrected.
     - The restamper doc comment is moved.
-    - HELD: ADR-006 ("MUST NOT create legacy JavaScript web resources") vs `sprk_accesspermission_inherited.js`. The coordinator raises it with the owner as a §6.5 ADR conflict; the library stays thin (platform form APIs only, lineage map pinned by the parity test, no access decision).
+    - **ADR-006 — resolved by amendment 2.1 (owner round 86, CLAUDE.md §6.5 path B, PR #1462, merges before #1458).** Thin form-event scripts are allowed within its limits. `sprk_accesspermission_inherited.js` was checked against each:
+      - platform form APIs only (formContext, `Xrm.WebApi.retrieveRecord`; no BFF call);
+      - no UI of its own (the platform's form notification and control state);
+      - no access decision (the server writes the value; the script only locks and labels);
+      - fails safe (a failed read leaves the lookups on the form deciding; the reconcile reverts any edit that slips through);
+      - namespaced (`Spaarke.AccessPermissionInherited`) and idempotent — made so in this pass: one wiring per form load and record, jest-tested;
+      - jest-tested (9 tests, the real script in jsdom);
+      - registered by a checked-in operator script (`Set-InheritedAccessPermissionFormLock.ps1`);
+      - "a value the script relies on must come from, or be pinned by a test to, the server's rule": `PARENT_LOOKUPS` is pinned by `ParentLineageTests.FormLibraryParentLookups_MatchTheServerMap`.
+    - **Goal (5) deviation, recorded:** the lock uses the server lineage map (`ParentLineage.ChildFiling`), not `config/regarding-filing-columns.json` — see item 2 for why.
 10. **Locked = disabled + not submitted + a bound PCF's change put back.** A form script cannot disable one parameter of the TrackingFieldTrio pill; the library reverts a change the pill makes while the record has a parent.
 
 ## 5. No access decision reads a child's value (AC 7, escalation trigger 2)
@@ -112,7 +121,7 @@ Scope (AC 10): the rule (ranking, null, unknown value), the walk (top of a deep 
 
 **Suite results (branch merged with master `6cd5d9a47`, 2026-10-08):** `Sprk.Bff.Api.Tests` 18,760 passed / 4 failed / 54 skipped in a 33-minute run — the 4 (`DocumentEmailIdentityContractTests`, `DocumentProfileContractTests`, `ChatAgentRouteProofTests`, the upload-session binding verifier test) each ran ~3 minutes (host start-up timeouts under load) and all pass on re-run in isolation (22/22); none touches this task's code. `Spaarke.ArchTests` 811/811. `Sprk.Bff.Api.IntegrationTests` 87 passed / 4 skipped. `Spe.Integration.Tests` 350 passed / 25 skipped. Task 173's own: 30 .NET (data-mutation + unit) + 3 contract additions, 8 jest, script `-SelfTest` 33 + 9.
 
-**Pass-1 fixes:** focused suites 341/341 (task tests, every job harness, Office and Event contracts, child-record routes). The record+carrier Office test goes red when the recompute is removed.
+**Pass-1 fixes (commit c469c4054):** full `Sprk.Bff.Api.Tests` 18,766 passed / 0 failed / 54 skipped; ArchTests 811/811; focused suites 341/341 (task tests, every job harness, Office and Event contracts, child-record routes). The record+carrier Office test goes red when the recompute is removed.
 
 **Seeding proof (the one the AC asks for)**, run 2026-10-08: in `ChildAccessPermissionReconciler.RunAsync`, replacing the `parents.Count == 0` branch with "a parentless row inherits Standard" turned `Run_AParentlessChildsOwnValue_AndAnUnfiledChildsLastValue_AreNeverOverwritten` red on its write assertion; dropping the branch alone turned it red on `parentless`. Restored; green.
 
