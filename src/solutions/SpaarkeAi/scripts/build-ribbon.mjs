@@ -61,13 +61,38 @@ function discoverRibbonSources() {
   return readdirSync(ribbonSourceDir).filter(isRibbonSource);
 }
 
+/**
+ * Ribbon bundles are invocation-only (ADR-006) and must stay React/Fluent-free. Without this
+ * guard a barrel import only fails in a clean checkout; with the shared library's
+ * node_modules installed it would resolve and silently bundle React and Fluent (ISS-014).
+ */
+const FORBIDDEN_INPUT = [
+  /(^|\/)node_modules\/react\//,
+  /(^|\/)node_modules\/react-dom\//,
+  /(^|\/)node_modules\/@fluentui\//,
+  /Spaarke\.UI\.Components\/src\/index\.(ts|tsx)$/,
+];
+
+function assertNoForbiddenInputs(sourceName, metafile) {
+  const offenders = Object.keys(metafile.inputs)
+    .map((i) => i.split("\\").join("/"))
+    .filter((i) => FORBIDDEN_INPUT.some((re) => re.test(i)));
+  if (offenders.length > 0) {
+    throw new Error(
+      `Ribbon bundle ${sourceName} pulls in forbidden inputs (React/Fluent/ui-components barrel). ` +
+        `Import dependency-free leaf modules instead, e.g. @spaarke/ui-components/utils/guid. ` +
+        `First offenders: ${offenders.slice(0, 5).join(", ")}`,
+    );
+  }
+}
+
 async function buildOne(sourceFile) {
   const sourceName = basename(sourceFile, ".ts");
   const entryPath = join(ribbonSourceDir, sourceFile);
   const outFile = join(ribbonOutputDir, `${sourceName}.js`);
   const globalName = `${GLOBAL_NAMESPACE}.${sourceName}`;
 
-  await build({
+  const result = await build({
     entryPoints: [entryPath],
     outfile: outFile,
     bundle: true,
@@ -79,6 +104,7 @@ async function buildOne(sourceFile) {
     minify: false,
     logLevel: "info",
     legalComments: "none",
+    metafile: true,
     // Mirrors the vite/tsconfig/jest alias for @spaarke/ui-components (package source lives
     // under src/, the file: dependency's package root has no utils/). Ribbon code must import
     // dependency-free LEAF modules (e.g. @spaarke/ui-components/utils/guid), never the barrel:
@@ -88,6 +114,8 @@ async function buildOne(sourceFile) {
       "@spaarke/ui-components": resolve(solutionRoot, "../../client/shared/Spaarke.UI.Components/src"),
     },
   });
+
+  assertNoForbiddenInputs(sourceName, result.metafile);
 
   return { sourceName, outFile, globalName };
 }
