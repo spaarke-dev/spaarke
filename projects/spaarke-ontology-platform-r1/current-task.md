@@ -13,17 +13,17 @@
 | **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
-### Queued actions (not yet started — do these first after compaction)
+### Queued actions (all three launched 2026-10-07 after compaction)
 
-1. **074 labelling for the owner (D-64)**: the 92-email set is drafted on `stream/d-074` (`notes/074-labelling-set.json`,
+1. **074 labelling for the owner (D-64)** — LIVE: owner labels at https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU (db: `labels/<Lnnn>` {label}, `status/final` {complete}; only the owner can write). Read back with ArtifactData `list labels` once `status/final.complete` = true. The 92-email set is drafted on `stream/d-074` (`notes/074-labelling-set.json`,
    no labels; `notes/074-category-definitions.md` = the 10 live categories + guidance; `074-drafting-intent.json` is SEALED
    — never show the owner). Build the owner a labelling page (Artifact; load `artifact-capabilities` + `artifact-design`
    skills; per-item category pick incl. `AMBIGUOUS`; results stored so the main session can read them back), or a file
    if the owner prefers. When labels return → resume agent `a1bcb0bae3c363ca9` to build the harness and run once (~184 calls).
-2. **#1391 small follow-ups (D-68)**: resume `a87c76386416d9b61` (author) to fix the stale `OwnedChildWrite` class doc
+2. **#1391 small follow-ups (D-68)** — SENT to the author; awaiting its report. Was: resume `a87c76386416d9b61` (author) to fix the stale `OwnedChildWrite` class doc
    (review F2) and file the follow-up issue for business-owned lookups (systemuser/team) via `/project-defer-issue-tracking`.
    Optional F3: cache `OwnershipType`. Do not merge — waits for uac-r2 + green.
-3. **039 independent review**: review PR #1390 (lineage + role config) and branch `stream/039-signal-writer`
+3. **039 independent review** — RUNNING (reviewer `ab5b1f4de577106f2`). Was: review PR #1390 (lineage + role config) and branch `stream/039-signal-writer`
    (`C:\wts-039w`; writer → uac-r2 ownership resolver, EventId 50304, `owner_refused`, `secure_owner_mismatch`) before
    merging the writer branch into this branch. #1390 merges only after uac-r2 approves (D-67), then deploy master to dev
    (owner-approved by D-67) and finish the live gate (zz-039 Secure matter + its SPE container to delete afterwards).
@@ -47,8 +47,9 @@
 | af7588b2ed6612c5f | 056 author, PR #1386 — resume for review fixes | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) | running |
 | a810b83c36e7d8f39 | 039 author (PR #1390 + `stream/039-signal-writer`) | idle |
-| a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 | idle |
+| a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 — doing F2 + defer issue | running |
 | a1bcb0bae3c363ca9 | 074 author — waits for owner labels | idle |
+| ab5b1f4de577106f2 | Reviewer: PR #1390 + `stream/039-signal-writer` | running |
 | af2686291a99e5351 | 073 — blocked until 037 + 039 + 031 | idle |
 | a0c39a85690aeed2a | Stream C author (036/026, merged) | idle |
 | ab5429413019d8fb9 | Stream D author (072, merged) | idle |
