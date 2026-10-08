@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="126" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Model 1: a guest from the stamp's customer counts as internal staff (external flag, WorkforceIdentity member test, contact binding)</title>
+    <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Access-control rules (security), UAC-r2's code, BFF.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security rule change across UAC-r2 components.</model-tier-reason>
+    <effort>xhigh</effort>
+    <deps>UAC-r2 answers to notes/coordination/2026-10-08-to-uac-r2-model1-guests.md</deps>
+    <tags>bff-api, auth, security, access-control, unit-test</tags>
+  </metadata>
+  <prompt>BLOCKED until UAC-r2 answers Q1-Q4 in `notes/coordination/2026-10-08-to-uac-r2-model1-guests.md` (owner 2026-10-08: this project makes the change, after UAC-r2's input, to keep their rules). Under provisioning D2, Model 1 customer users are B2B guests in Spaarke's tenant (`tid` = Spaarke, `acct = 1`, `idp` = home tenant). G1: `scripts/Set-ExternalFlagForB2BGuests.ps1` (required by the deployment guide) flags every `#EXT#` systemuser `sprk_isexternal = true`. G2: `WorkforceIdentityOptions.cs:6-9` / D-13 assume Model 1 staff sign in with the customer's `tid`, so `WorkforceMembershipTest.Evaluate` denies them. G3: guest contact binding never binds by email.</prompt>
+  <goal>On a Model 1 stamp, guests whose home tenant is the customer's are treated as internal staff by the external flag, the workforce member test and contact binding; every other guest stays external/denied; the D-13 comment and the deployment guide match D2. Exact rules per UAC-r2's answers.</goal>
+  <constraints>
+    <constraint>Do not start until the owner relays UAC-r2's answers; implement exactly the agreed rule; spec/ADR conflicts → escalate (CLAUDE.md 6.5).</constraint>
+    <constraint>Do not edit UAC-r2's `tests/integration/auth/UnifiedAccessControl/*` or `SecureBuRoleDepthAssertion*`; add new tests elsewhere unless UAC-r2 agrees.</constraint>
+    <constraint>BFF §10 obligations (placement, publish size, CVE, tests); dev BFF deploy and any `-Apply` of the script only with the owner's go.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Unit tests: a customer-home-tenant guest is internal / a member / binds by email; a guest from any other tenant is external / denied / strict; Model 2 behaviour unchanged.</criterion>
+    <criterion testable="true">The script's dry run lists only non-customer guests on a Model 1 stamp; the guide and the D-13 comment describe D2.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>sprk_isexternal eligibility (UAC-r2 task 114), WorkforceIdentity (task 141), ContactIdentityBinder.</existing>
+    <extension>Yes — extend each rule with the customer-home-tenant case; settings per stamp from provisioning.</extension>
+    <cost-of-doing-nothing>Every Model 1 customer employee is treated as an outsider: Restricted records refused, Office edit denied, first sign-in denied.</cost-of-doing-nothing>
+  </justification>
+</task>
