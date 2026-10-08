@@ -2,16 +2,16 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅, T235 ✅, 218d ✅ (CI pack + publish workflow, dry runs green; first real publish waits for the master merge + owner OK). Next 218f.
+> **Last Updated**: 2026-10-08 SESSION 44 — master merged into the branch (`c7e3d719b`, 0 behind); PR #1365 CI running → merge when ALL checks green (owner OK 'yes merge'); 218f code complete (`8350f27bc`, `4a0b711b6`).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **218f** — Spaarke's own environments take the canonical SpaarkeMaster (POML `tasks/218f-spaarke-environments-take-canonical-package.poml`). T218: a/b/c/d/e ✅. |
-| **Step** | 218f not started. Its `-WhatIf` acceptance check reads the published manifest, which exists only after the first CI publish (needs the master merge). |
-| **Status** | not-started. |
-| **Next Action** | Owner decisions first (owner items 1–2): merge the branch to master (PR #1365) so the first publish can run; delete the unused `pull_request` OIDC credential (#1446). Meanwhile `task-execute` 218f (code + Pester; the live `-WhatIf` waits for the publish). |
+| **Task** | **Merge PR #1365** (owner OK 2026-10-08) then **218f** live check. T218: a/b/c/d/e ✅; 218f code complete — open only for its AC2 (live -WhatIf vs demo after the first publish). |
+| **Step** | Waiting for every PR #1365 check to be terminal + green (not just Router) → `gh pr merge 1365 --merge` → verify on master (ForApp grep, guard tests) → main repo sync. |
+| **Status** | in-progress (merge). |
+| **Next Action** | `gh pr checks 1365` until 0 pending; any fail → diagnose (do not merge). Then merge, then ask the owner for the first real publish (`publish-dataverse-solutions-manifest.yml`, publish=true, on master) and the #1446 OIDC credential removal; after the publish run 218f's `-WhatIf` vs demo and close 218f. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
 | **Order** | 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner's live re-test with add-in package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
@@ -28,9 +28,9 @@ Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-
 
 ## Owner items
 
-1. **Merge this branch to master (PR #1365)** — recommended now: the first SpaarkeMaster publish runs from master only, 218f's live check and T186 need the published package, and the branch is ~40 commits behind. The merge brings master's push-triggered workflows (e.g. ARM-artifact publish) into play — ask before merging. After the merge: grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`.
-2. **First real SpaarkeMaster publish** (after the merge): run `publish-dataverse-solutions-manifest.yml` on master with `publish: true` — uploads 1.2.0.0 to `sprkcpartifactsdev`, keeps the hand-made manifest as `latest.previous`, moves `latest`. Needs OK.
-3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — any same-repo PR can sign in to Azure as the CI app. Entra write, needs OK.
+1. **PR #1365 merge — APPROVED 2026-10-08** ("yes merge"; branch updated from master first, done). Merging deploys the Console to DEV (deploy-spaarke-ai push trigger: T254's SprkChat change) and publishes ARM artifacts to `sprkcpartifactsdev`; production deploys only by manual dispatch.
+2. **First real SpaarkeMaster publish** (after the merge): `publish-dataverse-solutions-manifest.yml` on master with `publish: true`. Needed by the first end-to-end run (owner 2026-10-08: the first run builds a NEW environment to execute/test/confirm the E2E process — T186) and by 218f's live check. Needs OK.
+3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — verified 2026-10-08 that no workflow needs it. Entra write, needs OK.
 4. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
 5. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
 6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
