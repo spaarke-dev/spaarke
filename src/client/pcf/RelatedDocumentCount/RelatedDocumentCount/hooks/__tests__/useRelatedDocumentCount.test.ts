@@ -9,6 +9,11 @@
 import { renderHook, act } from '@testing-library/react-hooks';
 import { useRelatedDocumentCount } from '../useRelatedDocumentCount';
 
+// The hook calls `@spaarke/auth`'s authenticatedFetch, which THROWS for a non-OK response. This double
+// wraps the stubbed `global.fetch` with exactly that behaviour, so the 401/403/404/500 cases below
+// describe what production delivers (they were written when the hook used a raw fetch).
+jest.mock('@spaarke/auth', () => jest.requireActual('./spaarkeAuthDouble'));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const API_BASE = 'https://spe-api-dev.azurewebsites.net';
