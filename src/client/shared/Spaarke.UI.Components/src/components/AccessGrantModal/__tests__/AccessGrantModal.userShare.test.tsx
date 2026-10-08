@@ -916,7 +916,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
 
       const dialog = screen.getByRole('dialog');
       expect(dialog.style.visibility).not.toBe('hidden');
-      expect(dialog.style.filter).toBe('opacity(0.6)');
+      expect(dialog.style.filter).toBe('brightness(0.75)');
       expect(dialog).toHaveAttribute('inert');
 
       resolvePick(null);

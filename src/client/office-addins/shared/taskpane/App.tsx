@@ -45,6 +45,23 @@ import { describeFetchFailure } from './utils/errorMessages';
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
 // rich-text editor, which Outlook (no Email tab) and Word with the tab held off would otherwise download and parse
 // for nothing.
+// Task 113: the dev-only sign-in Diagnostics view, loaded only when opened (and compiled in only when the build
+// flag is on — the `DIAGNOSTICS_ENABLED` check below is a build-time constant).
+const DiagnosticsView = lazy(() =>
+  import('./components/views/DiagnosticsView').then(module => ({ default: module.DiagnosticsView }))
+);
+const DIAGNOSTICS_ENABLED = process.env.ADDIN_DIAGNOSTICS_ENABLED === 'true';
+
+/** The Office host/platform/version for the Diagnostics view, or "unknown" outside Office. Never throws. */
+function describeOfficeHostSafe(): string {
+  try {
+    const d = Office.context.diagnostics;
+    return [d.host, d.platform, d.version].filter(Boolean).join(' · ') || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 const EmailView = lazy(() => import('./components/views/EmailView').then(module => ({ default: module.EmailView })));
 
 /**
@@ -580,6 +597,11 @@ export const App: React.FC<AppProps> = ({
   // Task 096: stable token getter / cache-clear for the Email tab's injected fetch (the shared compose engine
   // receives a fetch function, never a token — ADR-028).
   const getPaneAccessToken = useCallback(() => authService.getAccessToken(), []);
+
+  // Task 113 (provisioning's guest sign-in test): "⋮ → Diagnostics" opens a panel above the tab content; the tabs
+  // stay mounted underneath, so closing it loses nothing.
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const openDiagnostics = useCallback(() => setShowDiagnostics(true), []);
   const clearPaneTokenCache = useCallback(() => authService.clearCache(), []);
 
   // Settings handler (placeholder)
@@ -728,7 +750,19 @@ export const App: React.FC<AppProps> = ({
         {...(canSendEmail
           ? { onSendEmail: () => void handleSendEmail(), isSendingEmail: sendEmailStatus === 'sending' }
           : {})}
+        {...(DIAGNOSTICS_ENABLED ? { onShowDiagnostics: openDiagnostics } : {})}
       >
+        {DIAGNOSTICS_ENABLED && showDiagnostics && (
+          <Suspense fallback={<Spinner size="small" label="Loading diagnostics…" />}>
+            <DiagnosticsView
+              getAccessToken={getPaneAccessToken}
+              {...(authService.getSignInDiagnostics ? { signIn: authService.getSignInDiagnostics() } : {})}
+              hostDescription={describeOfficeHostSafe()}
+              onClose={() => setShowDiagnostics(false)}
+            />
+          </Suspense>
+        )}
+
         {/* Send Email's live region and error stay in the body; the button itself is in the toolbar (task 106). */}
         {canSendEmail && sendEmailLiveRegion}
         {canSendEmail && sendEmailError && (
