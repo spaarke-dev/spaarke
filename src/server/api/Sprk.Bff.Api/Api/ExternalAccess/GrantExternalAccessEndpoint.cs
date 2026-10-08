@@ -139,9 +139,11 @@ public static class GrantExternalAccessEndpoint
         GrantUpsertOutcome outcome;
         try
         {
+            // Owner round 80: the Manage Access modal's re-adds ("+ Contact", "+ Organization", a suggestion's "Grant")
+            // call this route with no date, so a re-add over a lapsed grant is a SET — restored at the picked level.
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct, reAddRestoresLapsed: true);
         }
         catch (Exception ex)
         {
@@ -165,6 +167,9 @@ public static class GrantExternalAccessEndpoint
         // resolve. The row exists, so this is not a server fault — but reporting a bare 200 would tell
         // the operator access was restored when the grantee still has none. 409 says "your request was
         // understood and did not take effect", and carries the row id so the caller can retry against it.
+        // Since owner round 80 this route RESTORES a lapsed grant (a dateless request gets today + 90) and a
+        // past date is a 400 above, so this is a fail-closed backstop no request is known to reach; if one
+        // does, nothing was written (task 113).
         if (outcome.Warning is { } warning)
         {
             return Results.Problem(
@@ -291,6 +296,12 @@ public static class GrantExternalAccessEndpoint
     /// contact issued, the row's issuer becomes the systemuser making the change (the contact stamp is cleared), so the
     /// contact can no longer revoke a decision an internal user made. A no-op re-grant changes nothing, so it leaves the
     /// issuer as it was.</para>
+    /// <para><b>A re-add over a lapsed grant is a SET (owner round 80).</b> With <paramref name="reAddRestoresLapsed"/>
+    /// — passed by <c>/grant</c> and <c>/invite-and-grant</c>, the routes the Manage Access modal's "+ Contact",
+    /// "+ Organization" and suggestion "Grant" re-adds call, none of which sends a date — a request with no expiry over a
+    /// key on which nothing confers RESTORES the grant: written at the granted (picked, ceiling-capped) level with
+    /// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. Without it (the Assigned-To rule), such a request is
+    /// refused and writes nothing (task 113). A still-live key keeps its date either way (task 097).</para>
     /// </remarks>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
@@ -304,7 +315,8 @@ public static class GrantExternalAccessEndpoint
         IAccessibleRecordSetService accessibleRecords,
         ILogger logger,
         CancellationToken ct,
-        ContactGrantIssuer? contactIssuer = null)
+        ContactGrantIssuer? contactIssuer = null,
+        bool reAddRestoresLapsed = false)
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
@@ -384,8 +396,17 @@ public static class GrantExternalAccessEndpoint
             //
             // Task 140 — a CONTACT issuer never SHORTENS its own row: the (already capped) date is written only when it
             // is later than the row's current one. The never-lower rule for the level ran in CheckGrantAsync.
+            //
+            // Owner round 80 — a RE-ADD over a lapsed key is a SET: with `reAddRestoresLapsed` and no date in the request,
+            // a survivor that confers nothing (and so, being the elected survivor, no row on the key does) is restored at
+            // today + DefaultExpiryDays. The contact-issuer mode needs no such branch: it always sends a date (the
+            // requested one or today + 90, capped at the grantor's own).
+            var survivorConfers = ExternalParticipationService.ConfersAccessOn(survivor.ExpiresDate, today);
             DateOnly? expiryToWrite = contactIssuer is null
-                ? request.ExpiryDate ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null)
+                ? request.ExpiryDate
+                  ?? (survivor.ExpiresDate is null || (reAddRestoresLapsed && !survivorConfers)
+                      ? ExternalGrantLifecycle.DefaultExpiry(today)
+                      : null)
                 : survivor.ExpiresDate is { } current && current >= request.ExpiryDate!.Value ? null : request.ExpiryDate;
             var expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
@@ -417,9 +438,11 @@ public static class GrantExternalAccessEndpoint
             //
             // Every input (the request's expiry, the survivor's, today, and for a contact issuer the
             // already-resolved `expiryToWrite`) exists before the update below, and none of it is produced
-            // by that update, so the answer is computed here. When the request supplied NO expiry, the
-            // update could not change it (the survivor's date is kept), so the row would still confer
-            // nothing whatever else it wrote: the request is refused here and writes NOTHING. Before task
+            // by that update, so the answer is computed here. When the request supplied NO expiry and the
+            // route did not opt into the round-80 restore (the Assigned-To rule), the update could not change
+            // the date (the survivor's is kept), so the row would still confer nothing whatever else it wrote:
+            // the request is refused here and writes NOTHING. (With the restore — /grant, /invite-and-grant —
+            // the row carries today + 90, confers, and this does not fire.) Before task
             // 113 the check ran after the update, so a re-grant at a different level over an expired key
             // wrote the new level (and, over a contact-issued row, took it over) and THEN answered 409
             // "Grant did not take effect" — a false statement about a row it had just changed.
@@ -436,23 +459,39 @@ public static class GrantExternalAccessEndpoint
             // the read filter's own predicate.
             // Task 140: a contact issuer's request may carry a date the row does NOT take (never shortened), so what the row
             // carries is the written date, else its own.
-            var effectiveExpiry = contactIssuer is null
-                ? ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today)
-                : expiryToWrite ?? survivor.ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(today);
+            // What the row will carry: the date being written, else its own (else the default). Round 80: fed the WRITTEN date
+            // rather than the request's — identical in every case but the round-80 restore, where the row carries the
+            // restored date, not its lapsed one. The contact-issuer mode always computed it this way.
+            var effectiveExpiry = ExternalGrantLifecycle.EffectiveExpiry(expiryToWrite, survivor.ExpiresDate, today);
             var confersAccess = ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today);
 
             GrantUpsertOutcome ConfersNoAccess()
             {
-                logger.LogWarning(
-                    "[EXT-GRANT] Grant {Key} elected record {AccessRecordId} whose expiry {Expiry} has " +
-                    "PASSED — no active row on the key confers access — and the request supplied no new " +
-                    "expiry. Refusing to report success over a grant that confers no access.",
-                    key, survivor.Id, effectiveExpiry);
+                // Two shapes, worded for what happened: no date in the request (refused, nothing written — the text the
+                // routes' 409 has always carried), or a SUPPLIED date that has passed (written as asked; only the
+                // in-process Assigned-To restore sends one, and it logs this text, never a client).
+                string warning;
+                if (request.ExpiryDate is null)
+                {
+                    logger.LogWarning(
+                        "[EXT-GRANT] Grant {Key} elected record {AccessRecordId} whose expiry {Expiry} has " +
+                        "PASSED — no active row on the key confers access — and the request supplied no new " +
+                        "expiry. Refusing to report success over a grant that confers no access; nothing was written.",
+                        key, survivor.Id, effectiveExpiry);
+                    warning = $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
+                        + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.";
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "[EXT-GRANT] Grant {Key} on record {AccessRecordId} was written with the requested expiry {Expiry}, " +
+                        "which has PASSED — the grant confers no access.",
+                        key, survivor.Id, effectiveExpiry);
+                    warning = $"The requested expiry date {effectiveExpiry:yyyy-MM-dd} has passed, so the grant, written as "
+                        + "requested, confers no access.";
+                }
 
-                return new GrantUpsertOutcome(
-                    survivor.Id,
-                    $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
-                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.")
+                return new GrantUpsertOutcome(survivor.Id, warning)
                 {
                     GrantedLevel = check.GrantedLevel,
                     Narrowed = check.Narrowed,

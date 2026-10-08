@@ -249,6 +249,17 @@ public class GrantLifecycleCharacterizationTests
             NullLogger.Instance, CancellationToken.None);
 
     /// <summary>
+    /// Owner round 80: the core as <c>/grant</c> and <c>/invite-and-grant</c> call it — a dateless re-add over a lapsed
+    /// grant is a SET. <see cref="Grant"/> is the core's default mode (the Assigned-To rule's), which refuses it instead.
+    /// </summary>
+    private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> ReAdd(
+        Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
+        GrantExternalAccessEndpoint.CreateGrantAsync(
+            request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
+            callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear,
+            NullLogger.Instance, CancellationToken.None, reAddRestoresLapsed: true);
+
+    /// <summary>
     /// Task 139: the grant core takes the grantor's ceiling as a REQUIRED input. The upsert behaviour this class pins
     /// predates the ceiling, so its grantor holds Read + Write + Delete — a Full Access ceiling, which never narrows.
     /// The ceiling itself is pinned in the "Task 139" section below.
@@ -876,6 +887,7 @@ public class GrantLifecycleCharacterizationTests
 
     /// <summary>
     /// Task 113 (ISS-028 / #1008): a request the ADR-003 check REFUSES writes nothing — in particular not the level.
+    /// The core's DEFAULT mode (the Assigned-To rule's); the routes restore instead (owner round 80, below).
     /// </summary>
     /// <remarks>
     /// <para>The refusal fires on an expired key when the request carries no new expiry. Before task 113 the core wrote the
@@ -918,6 +930,55 @@ public class GrantLifecycleCharacterizationTests
             "a request that is refused issues no update at all");
         table.CreateCount.Should().Be(0);
         table.ActiveRows.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Owner round 80 (task 113): a RE-ADD over a lapsed grant is an explicit SET — restored at the PICKED level, in either
+    /// direction, with today + the default days, and reported as written. The level the row held is not kept (a later
+    /// renewal must never revive a level nobody picked).
+    /// </summary>
+    [Theory]
+    [InlineData(ExternalAccessLevel.FullAccess, ExternalAccessLevel.ViewOnly)]
+    [InlineData(ExternalAccessLevel.ViewOnly, ExternalAccessLevel.FullAccess)]
+    [InlineData(ExternalAccessLevel.Collaborate, ExternalAccessLevel.Collaborate)]
+    public async Task ReAdd_OverALapsedGrantWithNoExpiry_RestoresItAtThePickedLevel_ForTheDefaultDays(
+        ExternalAccessLevel stored, ExternalAccessLevel picked)
+    {
+        var table = new FakeGrantTable();
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)stored, expiresDate: Today.AddDays(-3));
+        var client = table.BuildMock();
+
+        var outcome = await ReAdd(client, Request(picked, expiryDate: null));
+
+        outcome.Warning.Should().BeNull("the re-add restored the grant, so it confers access");
+        outcome.Refusal.Should().BeNull();
+        outcome.AccessRecordId.Should().Be(seeded.Id, "restored in place, not a second row");
+        outcome.GrantedLevel.Should().Be(picked, "the outcome reports the level written");
+        outcome.GrantedExpiry.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+        seeded.AccessLevel.Should().Be((int)picked);
+        seeded.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+        ExternalParticipationService.ConfersAccessOn(seeded.ExpiresDate, Today).Should().BeTrue();
+        table.ExpiryUpdateCount.Should().Be(1);
+        table.CreateCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Round 80's NEGATIVE twin: a re-add over a still-LIVE grant keeps its date (task 097 — a dateless surface never moves
+    /// a date someone set). Without this, a restore that reset every date to today + 90 would also pass the above.
+    /// </summary>
+    [Fact]
+    public async Task ReAdd_OverALiveGrantWithNoExpiry_KeepsItsDate()
+    {
+        var table = new FakeGrantTable();
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: Today.AddDays(12));
+        var client = table.BuildMock();
+
+        var outcome = await ReAdd(client, Request(ExternalAccessLevel.Collaborate, expiryDate: null));
+
+        outcome.Warning.Should().BeNull();
+        seeded.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        seeded.ExpiresDate.Should().Be(Today.AddDays(12));
+        table.ExpiryUpdateCount.Should().Be(0);
     }
 
     /// <summary>
