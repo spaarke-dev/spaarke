@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-33 — "External shares by expiration" Dataverse views (estate-wide)</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Dataverse view definitions; no .cs/.ts. Applying them is an operator step.</rigor-reason>
     <model-tier>sonnet</model-tier>

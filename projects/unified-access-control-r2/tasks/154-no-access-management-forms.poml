@@ -4,7 +4,7 @@
     <title>No Access management on the Organization and Contact forms, plus a usable No Access entry: NO ACCESS subgrids beside SYSTEM ACCESS/MEMBERS, a main form with a record PICKER (not a typed GUID), real views, a site map entry in the right app, and authoring rights per O2 with enforcement per record per N5</title>
     <phase>Register-driven (authored 2026-10-01, session 27; owner round 3b UX requirements; disposition row 5 of notes/session27-ux-research-ethical-wall-secure.md)</phase>
     <gate>blocked — requires 143's SERVER and SCHEMA work landed (its steps 2-7: the `sprk_subjectsystemuser` column, the three-subject malformed-row rule, the enforce endpoint and the enforcer), NOT 143's form steps or live gate: 143 depends on THIS task's form for those (143 amendment n="UX", "PARTIAL dependency"), so waiting for all of 143 would deadlock. Also requires 064 (the BFF deny-list endpoints and their entry validation) merged. O2 was ACCEPTED as recommended on 2026-10-01 (research note :74); step 0 confirms the recorded answer before step 6 (security roles). Runs BEFORE 153, whose Organization/Contact banner points at the sections built here, and before 143's form steps and live gate.</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-role change on an ethical-wall table (O2, accepted), a new PCF control, a new Dataverse column, form/view/site-map customization of three tables; tags pcf, frontend, security, auth.</rigor-reason>
     <model-tier>opus</model-tier>
