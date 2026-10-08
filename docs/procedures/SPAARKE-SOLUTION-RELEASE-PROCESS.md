@@ -25,11 +25,13 @@ needs; one solution keeps every dependency inside one import, one version and on
   option sets, relationships, forms, views, web resources (**including every code page**), PCF controls, security roles,
   model-driven apps and site maps, environment-variable **definitions**;
 - plus the `sprk_` columns on OOB tables listed in [`docs/data-model/oob-customizations.yaml`](../data-model/oob-customizations.yaml);
-- **minus** the entries in `docs/data-model/package-exclusions.yaml`, each with a reason and a date *(218c)*.
+- **minus** the entries in [`docs/data-model/package-scope.json`](../data-model/package-scope.json), each with a reason and a date.
+  The rule lives in `scripts/solution-authoring/SpaarkePackageScope.psm1` (tests: `tests/scripts/SpaarkePackageScope.Tests.ps1`).
 
-Why a rule: the old scope collected only components already inside a Spaarke solution, but most code-page deploy
-scripts create their web resource in the Default solution. On 2026-10-07 the Console (`sprk_spaarkeai`) and
-`sprk_dailyupdate` were in no Spaarke solution, so the package would have shipped without them.
+Why a rule: the old scope collected only components already inside a Spaarke solution, but most deploy scripts
+create components in the Default solution. The first rule run against spaarkedev1 (2026-10-07) found **44 in-scope
+components missing from SpaarkeMaster** — 11 PCF controls (incl. RecordHeader), the AI Setup app and site map,
+`sprk_assignedaccess`, the access scripts, the Console User and Ontology roles, 17 OOB-table columns.
 
 **Never in the package**
 
@@ -66,14 +68,17 @@ Manifest schema read by H6:
 
 1. **Dev is release-ready**: the content is finished and tested in `spaarkedev1`.
 2. **Drift report** (read-only): `./scripts/solution-authoring/Test-SolutionCompleteness.ps1`. It fails when a component
-   matches the rule but is not in SpaarkeMaster, or a SpaarkeMaster component is gone from dev *(218c: two-way, by rule)*.
-3. **Classify each finding**: add to the package, or add to `package-exclusions.yaml` with a reason. A new `sprk_` column on
+   matches the rule but is not in SpaarkeMaster, an excluded component is packaged, an exclusion is stale, an OOB
+   column is unlisted, or the committed inventory drifted.
+3. **Classify each finding**: add to the package, or add to `package-scope.json` with a reason and date. A new `sprk_` column on
    an OOB table also goes into `oob-customizations.yaml`.
 4. **Assemble** (writes to dev — the release owner runs it): `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, review, then
-   without `-WhatIf`. Bump the version (semver: Major = breaking schema change; Minor = new table/feature; Build =
+   without `-WhatIf`. It adds what the rule finds missing with `AddRequiredComponents = true` (F12 — a managed export
+   built without it does not install in a fresh environment); OOB tables go in metadata-only. Bump the version (semver: Major = breaking schema change; Minor = new table/feature; Build =
    additive content; Revision = a fix for one customer stamp).
 5. **Export to source**: `./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1` exports managed + unmanaged,
-   unpacks into `src/dataverse/solutions/SpaarkeMaster/` and strips environment-variable values *(218c)*.
+   unpacks into `src/dataverse/solutions/SpaarkeMaster/` and strips environment-variable values (`-WhatIf` prints the
+   commands; `pac auth` must already point at spaarkedev1).
 6. **PR**: the diff of the unpacked source is the release review. The release note lists **removed components**
    (they are deleted from managed customer environments on upgrade — §5).
 7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml`. CI packs both zips from git, fails if a zip

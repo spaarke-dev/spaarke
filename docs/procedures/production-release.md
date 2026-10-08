@@ -214,16 +214,12 @@ pac solution list  # Should show SpaarkeMaster v1.0.0.0
 pac org publish
 ```
 
-### Build-SpaarkeMaster.ps1
+### Composing SpaarkeMaster (retired: `Build-SpaarkeMaster.ps1`)
 
-The `Build-SpaarkeMaster.ps1` script automates solution composition using independent discovery:
-- Creates/recreates the SpaarkeMaster solution in dev
-- Adds all components programmatically using the identification logic above
-- Verifies component count matches expected (386)
-
-Run this when: new entities/PCFs/web resources are added, or to rebuild the solution from scratch.
-
-See `scripts/Build-SpaarkeMaster.ps1` for implementation.
+`Build-SpaarkeMaster.ps1` was retired on 2026-10-07 (T218c). Its prefix discovery now lives in
+`scripts/solution-authoring/SpaarkePackageScope.psm1` with committed exclusions in `docs/data-model/package-scope.json`;
+`Test-SolutionCompleteness.ps1` reports what is missing and `Assemble-SpaarkeMasterSolution.ps1` adds it. Steps:
+[`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md) §3.
 
 ---
 
@@ -343,7 +339,7 @@ Test-Path ./deploy/SpaarkeMaster.zip
 (Get-Item ./deploy/SpaarkeMaster.zip).Length / 1MB
 ```
 
-**GATE**: Export must succeed and produce a valid ZIP. If SpaarkeMaster solution doesn't exist in dev, run `Build-SpaarkeMaster.ps1` first.
+**GATE**: Export must succeed and produce a valid ZIP. If SpaarkeMaster is incomplete, run `Test-SolutionCompleteness.ps1` and `Assemble-SpaarkeMasterSolution.ps1` first (runbook §3).
 
 ---
 

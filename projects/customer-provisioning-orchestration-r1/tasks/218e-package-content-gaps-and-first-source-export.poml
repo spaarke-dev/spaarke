@@ -31,7 +31,7 @@
       sprk_communicationconversationpage (comment-only reference) look unused; EventDetailSidePane IS used (EventsPage
       eventConfig.ts:282); CalendarSidePane must keep working (root CLAUDE.md §17).</background>
     <relevant-files>
-      <file>docs/data-model/package-exclusions.yaml (218c); src/dataverse/solutions/SpaarkeMaster/ (218c output)</file>
+      <file>docs/data-model/package-scope.json (218c); src/dataverse/solutions/SpaarkeMaster/ (218c output)</file>
       <file>Core/Handlers/UserProvisioning/H11UserProvisioningOptions.cs:51 (GuestSecurityRoleNames default)</file>
       <file>docs/guides/office-addins-admin-guide.md:560-583; scripts/Set-SecureRecordOwnerRolePrivileges.ps1; src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
     </relevant-files>
@@ -52,7 +52,7 @@
 
   <steps mode="directional">
     <step order="1">Run 218c's drift report; classify each missing item ship / exclude (reason); owner OK for the list.</step>
-    <step order="2">Roles: confirm names in dev; add the hand-made roles to SpaarkeMaster; align H11's default (code + tests + guide).</step>
+    <step order="2">Roles: confirm names in dev; add the hand-made roles to SpaarkeMaster; align H11's default (code + tests + guide). FACT 2026-10-07: dev has NO "Spaarke Basic User" — H11's default — so H11 fails userprov-security-role-not-found today; root roles are listed in current-task.md.</step>
     <step order="3">sprk_noaccessentry with UAC-r2 (#1364): schema settled → in SpaarkeMaster.</step>
     <step order="4">Unused folders → coordination message; exclusions meanwhile.</step>
     <step order="5">Owner OK → Assemble (adds), version bump, Export-SpaarkeMasterSource → commit the source; drift check green; close.</step>

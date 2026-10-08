@@ -22,7 +22,7 @@
     `Get-SpaarkeComponents.ps1` enumerates every unmanaged `sprk`-prefixed component in the authoring environment
     (tables, columns, option sets, relationships, forms, views, web resources, PCF controls, roles, app modules, site maps,
     environment-variable definitions) plus the OOB columns in oob-customizations.yaml, minus
-    `docs/data-model/package-exclusions.yaml` (each entry has a reason). `Test-SolutionCompleteness.ps1` fails when a
+    `docs/data-model/package-scope.json` (each entry has a reason and a date). `Test-SolutionCompleteness.ps1` fails when a
     component matches the rule but is not in SpaarkeMaster, and when a SpaarkeMaster component is gone from dev.
     `Export-SpaarkeMasterSource.ps1` exports SpaarkeMaster managed + unmanaged from dev, unpacks both into
     `src/dataverse/solutions/SpaarkeMaster/`, and removes environment-variable values; a test fails if values appear.
@@ -60,7 +60,7 @@
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">Against dev (read-only), the drift report lists sprk_spaarkeai and sprk_dailyupdate as missing from SpaarkeMaster (proves F7 is caught).</criterion>
+    <criterion testable="true">Against dev (read-only), the drift report lists the in-scope components SpaarkeMaster lacks (proves the rule catches what membership missed). [Amended 2026-10-07: the original wording named sprk_spaarkeai/sprk_dailyupdate on a wrong premise — both are in SpaarkeMaster.]</criterion>
     <criterion testable="true">An excluded component never appears as drift; a component excluded without a reason fails validation.</criterion>
     <criterion testable="true">The value guard fails on a fixture containing environmentvariablevalues.json and passes on the stripped tree.</criterion>
     <criterion testable="true">Export script -WhatIf/dry run prints the export + unpack commands without writing to dev.</criterion>

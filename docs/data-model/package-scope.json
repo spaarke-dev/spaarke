@@ -1,0 +1,80 @@
+{
+  "$comment": "The Spaarke package scope (T218c; ADR-027 §3 amended 2026-10-07). Rule: every unmanaged sprk_ component of the scoped types in spaarkedev1 (incl. every code page) + sprk_ columns on OOB tables + root-BU roles matching roleNamePattern or listed in roleNamesAlsoIncluded, MINUS the exclusions below. Every exclusion needs type, name (exact), reason and date. Read by scripts/solution-authoring/SpaarkePackageScope.psm1. Runbook: docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md.",
+  "prefix": "sprk_",
+  "roleNamePattern": "(?i)^spaarke ",
+  "roleNamesAlsoIncluded": ["Secure Record Owner"],
+  "exclusions": [
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.Controls.AnalysisWorkspace",
+      "reason": "Not on any shipped form; kept out by the owner after the 6-layer live-dependency audit (SpaarkeMaster v1.1.0.0, commit 88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.Controls.DueDatesWidget",
+      "reason": "Not on any shipped form; owner-directed exclusion (88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.Controls.EventCalendarFilter",
+      "reason": "Not on any shipped form; owner-directed exclusion (88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.Controls.FieldMappingAdmin",
+      "reason": "Admin tool shipped separately (FieldMappingAdminSolution); owner-directed exclusion (88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.LegalWorkspace",
+      "reason": "Retired workspace PCF (the workspace is a code page); owner-directed exclusion (88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "CustomControl",
+      "name": "sprk_Spaarke.Controls.PlaybookBuilderHost",
+      "reason": "Not on any shipped form; owner-directed exclusion (88c330dc7).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "AppModule",
+      "name": "sprk_SpaarkePlatform",
+      "reason": "Spaarke's internal platform app, not a customer app (Assemble-SpaarkeMasterSolution default exclusion).",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "SiteMap",
+      "name": "sprk_SpaarkePlatform",
+      "reason": "Site map of the excluded sprk_SpaarkePlatform app.",
+      "date": "2026-08-21"
+    },
+    {
+      "type": "SiteMap",
+      "name": "sprk_LawFirmCaseManagement",
+      "reason": "Legacy site map with no app (tech debt; excluded by Build-SpaarkeMaster since 2026-04-06).",
+      "date": "2026-04-06"
+    },
+    {
+      "type": "SiteMap",
+      "name": "sprk_CorporateMatterManagement",
+      "reason": "Legacy site map with no app (tech debt; excluded by Build-SpaarkeMaster since 2026-04-06).",
+      "date": "2026-04-06"
+    },
+    {
+      "type": "SiteMap",
+      "name": "sprk_DocumentManagement",
+      "reason": "Legacy site map with no app (tech debt; excluded by Build-SpaarkeMaster since 2026-04-06).",
+      "date": "2026-04-06"
+    },
+    {
+      "type": "Role",
+      "name": "Spaarke Provisioning Registry",
+      "reason": "Control-plane role for the admin/registry environment only; no customer environment uses it.",
+      "date": "2026-10-07"
+    }
+  ]
+}

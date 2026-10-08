@@ -16,7 +16,8 @@
 | **Order** | 218c → 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240c (owner OK for the service) → T240d → T257 → T186. T240b when word-add-in-r1 answers. |
 
 ### T218 facts that matter for 218c–e (details in the plan)
-- The SpaarkeMaster scripts collect by solution membership; code-page deploy scripts create web resources in the Default solution only, so **`sprk_spaarkeai` (the Console) and `sprk_dailyupdate` are in no Spaarke solution in dev** — the rule must be prefix-based.
+- The first rule run (218c, read-only) found **44 in-scope components missing from SpaarkeMaster** (11 PCFs incl. RecordHeader, AI Setup app + site map, `sprk_assignedaccess`, access scripts, Console User + Ontology roles, 17 OOB columns) and the Provisioning Registry role packaged though excluded. (Correction: the earlier claim that `sprk_spaarkeai`/`sprk_dailyupdate` are in no Spaarke solution was wrong — a 20-row-capped query; both are in SpaarkeMaster.)
+- **Dev has no role "Spaarke Basic User"**, which is H11's default guest role (`H11UserProvisioningOptions.cs:51`) → H11 would fail `userprov-security-role-not-found`. Root roles: Spaarke Core User, Console User, AI Analysis User/Admin, Office Add In User, Reporting Access Viewer/Author/Admin, Ontology Administrator/Service, Provisioning Registry, Secure Record Owner. Fix in 218e.
 - Dev holds SpaarkeMaster 1.0.0.0 **unmanaged** (modified 2026-08-23), SpaarkeCore 1.1.0.0, SpaarkeSecurityRoles 1.0.0.1. The 2026-08-21 export packaged dev env-var VALUES (must not ship).
 - The store `sprkcpartifactsdev/provisioning-artifacts` holds a hand-made `SpaarkeMaster.zip` + old-format manifest → a real run now fails at H6 with missing-solution-zips (no SpaarkeMaster entry) until 218d publishes.
 - H6 manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
