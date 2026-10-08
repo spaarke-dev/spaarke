@@ -82,6 +82,15 @@ Escalation trigger 3 does not fire: no path writes these tables without the reco
 - `Set-InheritedAccessPermissionFormLock.ps1` — Existing: `Add-RegardingFilingPickerToForms.ps1` / `Lock-CoreAncestorStampColumnsOnForms.ps1` (their transforms are specific to the regarding columns). Its transform helpers are copied from them (the established per-script shape). Cost of nothing: the forms are hand-edited with no snapshot, restore or verify.
 - `Set-DocumentAccessPermissionSchema.ps1` — Existing: none for this column. Cost of nothing: no other environment gets `sprk_document.sprk_accesspermission`.
 
+## 6a. Publish size, CVEs (CLAUDE.md §10, NFR-06)
+
+| | master `6cd5d9a47` (`C:\wt173m`) | branch `1b61a194b` (`C:\wt173b`, master merged) |
+|---|---|---|
+| Files | 192 | 192 |
+| Zip | 38,011,535 B (36.25 MB) | 38,042,928 B (36.28 MB) |
+
+Delta **+31,393 B (+0.03 MB)**. Convention: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included (4). Both from fresh short-path worktrees. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages (no package added).
+
 ## 7. Tests
 
 Scope (AC 10): the rule (ranking, null, unknown value), the walk (top of a deep filing, two roots, parentless top, contact not a parent, unreadable parent, too deep, loop, a document's own version), the stamp path (`StampAsync`, `DeriveForHostAsync`, the association update, the refresh), the owner's UAT through `POST /api/office/todo`, the event create body, the reconcile (parent change at depth, hand edit, correct rows not written, parentless and un-filed rows never written, unreadable parent left and carried, sweep backfill page by page), the form-lock script (`-SelfTest`, 33 checks), the form/server map parity.
@@ -92,6 +101,7 @@ Scope (AC 10): the rule (ranking, null, unknown value), the walk (top of a deep 
 - `tests/integration/contract/Api/Office/OfficeTodoRegardingContractTests.cs` (+2: the UAT; an unreadable matter never fails the create)
 - `tests/integration/contract/Api/Events/EventEndpointsAuthorizationContractTests.cs` (+1: the create body)
 - `tests/integration/data-mutation/ExternalAccess/SecureChildShareWorld.cs` (the in-memory Dataverse models the one-column write, `GreaterThan` on an id, and an id-list read fault)
+- `src/client/shared/Spaarke.UI.Components/src/__tests__/accessPermissionInherited.test.ts` (the REAL form library in jsdom: lock / unlock / revert / saved parents / read failure; 8 tests)
 
 **Seeding proof (the one the AC asks for)**, run 2026-10-08: in `ChildAccessPermissionReconciler.RunAsync`, replacing the `parents.Count == 0` branch with "a parentless row inherits Standard" turned `Run_AParentlessChildsOwnValue_AndAnUnfiledChildsLastValue_AreNeverOverwritten` red on its write assertion; dropping the branch alone turned it red on `parentless`. Restored; green.
 
@@ -103,6 +113,7 @@ Beyond the AC's list, one line each: the event-create and email-draft payload ca
 - **K2** — a filing that cannot be decided (unreadable, missing, a loop, deeper than 6) keeps its stored value and is logged / carried; display only.
 - **K2** — after a restart the new instance's window starts 60 minutes back; older drift is reached by the sweep window, ceil(rows / 1000) runs.
 - **K4** — the `/api/v1/child-records` route's inline refresh is covered by the helper's own tests and backstopped by the reconcile, not by a route-level test (the route harness creates rows in a different in-memory world than its restamper reads).
+- **K2** — in an environment that lacks one of the 13 tables the pass lists (or a lineage lookup column), the listing fails every run and reports it (the run is unsuccessful; nothing is written wrongly). Same root cause and fix candidates as the secure pass's #1378; the pass has its own watermark, so it never stalls the secure pass.
 - **K2** — an `Office` To Do with a record regarding AND a carrier takes the record's value inline; when the carrier's filing is more restrictive, the reconcile raises it within a cycle (the carrier is set after the record's `StampAsync`).
 
 ## 9. Supersession (for `notes/decisions.md` "Superseded and withdrawn rules", on the work branch)

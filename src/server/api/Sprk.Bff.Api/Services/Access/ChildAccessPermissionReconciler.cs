@@ -228,7 +228,7 @@ internal sealed class ChildAccessPermissionReconciler
                 continue;
             }
 
-            var answer = await InheritedAccessPermission.ResolveAsync(_walk, parents, ct).ConfigureAwait(false);
+            var answer = await InheritedAccessPermission.ResolveAsync(_walk, parents, ct, (table, id)).ConfigureAwait(false);
             if (answer.Status != ParentTopsStatus.Found || answer.Value is not { } inherited)
             {
                 undetermined++;

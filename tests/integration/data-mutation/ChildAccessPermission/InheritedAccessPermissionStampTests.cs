@@ -172,6 +172,28 @@ public class InheritedAccessPermissionStampTests
     }
 
     [Fact]
+    public async Task StampAsync_OnARefile_AFilingThatLeadsBackToTheRowItself_NeverBringsBackTheParentItIsLeaving()
+    {
+        // The to-do is stored under a Restricted matter and is being re-filed to a Standard project and a document whose
+        // only link is back to the to-do. Reading the to-do's STORED row through the document would re-add the matter.
+        var oldMatter = Root("sprk_matter", Restricted);
+        var newProject = Root("sprk_project", Standard);
+        var todo = Row("sprk_todo", Restricted, ("sprk_regardingmatter", "sprk_matter", oldMatter));
+        var document = Row("sprk_document", ("sprk_relatedtodo", "sprk_todo", todo));
+        var update = new Entity("sprk_todo", todo)
+        {
+            ["sprk_regardingmatter"] = null,
+            ["sprk_regardingproject"] = new EntityReference("sprk_project", newProject),
+            ["sprk_regardingdocument"] = new EntityReference("sprk_document", document),
+        };
+
+        await Resolver().StampAsync(update, "sprk_project", newProject);
+
+        update.GetAttributeValue<OptionSetValue>(Column)!.Value.Should().Be(Standard,
+            "the document is filed under the to-do itself, so it adds nothing; the old matter is not a parent any more");
+    }
+
+    [Fact]
     public async Task RefreshInheritedAccessPermissionAsync_AParentedRowShowingAStaleValue_IsSetToItsParentsValue()
     {
         // The client's generic create / re-file (/api/v1/child-records) does not stamp through StampAsync: it calls this

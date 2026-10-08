@@ -746,7 +746,7 @@ public sealed class CoreAncestorResolver
         var inherited = await InheritedAccessPermissionAsync(
             child.LogicalName,
             ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
-            targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+            targetEntityLogicalName, targetRecordId, ct, self: child.Id).ConfigureAwait(false);
         if (inherited is { } level)
         {
             child[InheritedAccessPermission.Column] = new OptionSetValue(level);
@@ -903,7 +903,8 @@ public sealed class CoreAncestorResolver
 
         var parents = ParentLineage.ParentsIn(hostEntityLogicalName, column =>
             fields.TryGetValue(column, out var value) ? value as EntityReference : stored?.GetAttributeValue<EntityReference>(column));
-        return await InheritedAccessPermissionAsync(hostEntityLogicalName, parents, null, Guid.Empty, ct).ConfigureAwait(false);
+        return await InheritedAccessPermissionAsync(hostEntityLogicalName, parents, null, Guid.Empty, ct, self: existingRowId)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -935,7 +936,7 @@ public sealed class CoreAncestorResolver
             if (parents.Count == 0)
                 return null;
 
-            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct).ConfigureAwait(false);
+            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table!, recordId)).ConfigureAwait(false);
             if (answer.Status != ParentTopsStatus.Found || answer.Value is not { } level)
             {
                 _logger.LogWarning(
@@ -967,7 +968,8 @@ public sealed class CoreAncestorResolver
         IReadOnlyList<(string Table, Guid Id)> payloadParents,
         string? targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid self = default)
     {
         if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
             return null;
@@ -997,7 +999,8 @@ public sealed class CoreAncestorResolver
             }
 
             var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
-            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct).ConfigureAwait(false);
+            var answer = await InheritedAccessPermission.ResolveAsync(
+                walk, parents, ct, self == Guid.Empty ? null : (hostEntityLogicalName, self)).ConfigureAwait(false);
             if (answer.Status == ParentTopsStatus.Found)
                 return answer.Value;
 

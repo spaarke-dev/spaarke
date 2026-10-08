@@ -198,9 +198,11 @@ internal sealed class ParentLineageWalk
 
     /// <summary>
     /// The records at the top of a filing that starts at <paramref name="parents"/> (a row's own non-null filing parents).
-    /// No parents → <see cref="ParentTopsStatus.NoParent"/>.
+    /// No parents → <see cref="ParentTopsStatus.NoParent"/>. <paramref name="self"/> is the row being decided, when it
+    /// exists: a filing that leads back to it adds nothing (its STORED lookups may be the ones a write is replacing).
     /// </summary>
-    internal async Task<ParentTops> TopsAsync(IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct)
+    internal async Task<ParentTops> TopsAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct, (string Table, Guid Id)? self = null)
     {
         ArgumentNullException.ThrowIfNull(parents);
         var start = parents
@@ -214,6 +216,15 @@ internal sealed class ParentLineageWalk
         try
         {
             var visited = new HashSet<(string, Guid)>(start);
+            if (self is { } me && me.Id != Guid.Empty && !string.IsNullOrWhiteSpace(me.Table))
+            {
+                var key = (me.Table.ToLowerInvariant(), me.Id);
+                visited.Add(key);
+                start.Remove(key);
+                if (start.Count == 0)
+                    return ParentTops.Undetermined("it is filed only under itself");
+            }
+
             var frontier = start;
             var tops = new List<ParentTop>();
             for (var depth = 1; frontier.Count > 0; depth++)
@@ -368,10 +379,11 @@ internal static class InheritedAccessPermission
     /// (which must read <see cref="Column"/>). <see cref="ParentTopsStatus.Found"/> carries the value.
     /// </summary>
     internal static async Task<Answer> ResolveAsync(
-        ParentLineageWalk walk, IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct)
+        ParentLineageWalk walk, IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct,
+        (string Table, Guid Id)? self = null)
     {
         ArgumentNullException.ThrowIfNull(walk);
-        var tops = await walk.TopsAsync(parents, ct).ConfigureAwait(false);
+        var tops = await walk.TopsAsync(parents, ct, self).ConfigureAwait(false);
         if (tops.Status != ParentTopsStatus.Found)
             return new Answer(tops.Status, null, tops.Tops, tops.Reason);
 

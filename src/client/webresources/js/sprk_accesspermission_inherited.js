@@ -30,10 +30,11 @@
  *
  * ES5, no build step, never throws into the form.
  */
-var Spaarke = window.Spaarke || {};
-window.Spaarke = Spaarke;
+// A property of window, not a top-level var: the form resolves "Spaarke.AccessPermissionInherited.onLoad" from window,
+// and a global var binding could not be replaced by a later load of the library on the same page.
+window.Spaarke = window.Spaarke || {};
 
-Spaarke.AccessPermissionInherited = (function () {
+window.Spaarke.AccessPermissionInherited = (function () {
     "use strict";
 
     var ns = {};
