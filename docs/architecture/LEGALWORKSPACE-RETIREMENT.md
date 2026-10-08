@@ -116,7 +116,7 @@ Two LegalWorkspace-adjacent Dataverse assets existed (historical); both are now 
 
 | Asset | What it is | Status |
 |---|---|---|
-| **`sprk_corporateworkspace`** (web resource) | HTML build of `src/solutions/LegalWorkspace/dist/corporateworkspace.html`. Vite + React 19 + Fluent v9. Deployed by `Deploy-CorporateWorkspace.ps1`. | **Retired** by this doc + R4 task 041 |
+| **`sprk_corporateworkspace`** (web resource) | HTML build of `src/solutions/LegalWorkspace/dist/corporateworkspace.html`. Vite + React 19 + Fluent v9. Was deployed by `Deploy-CorporateWorkspace.ps1` (deleted). | **Retired** by this doc + R4 task 041 |
 | **`sprk_LegalOperationsWorkspace`** (Custom Page) | Former Power Apps Custom Page hosting the PCF control `sprk_Spaarke.Controls.LegalWorkspace`. | **Gone.** PCF source removed from the repo (5557abaa80); the Custom Page does not exist in spaarkedev1 (verified 2026-10-08); `Deploy-LegalWorkspaceCustomPage.ps1` and `Package-LegalWorkspace.ps1` were deleted (task 121, D-82). The unused `SpaarkeLegalWorkspace` solution (stale PCF) remains in dev. |
 
 There is no longer a LegalWorkspace Custom Page deploy path; LegalWorkspace code is deployed only as part of the Console (`sprk_spaarkeai`) bundle, via `scripts/Deploy-SpaarkeAi.ps1`.
@@ -127,9 +127,9 @@ The following deploy scripts were updated to skip the LW web-resource deploy:
 
 | Script | Change |
 |---|---|
-| `scripts/Deploy-CorporateWorkspace.ps1` | Added early-exit guard at the top of the script. The guard logs the retirement notice and exits 0 (success — i.e., orchestrator does not treat the skip as a failure). The deploy body is left in place after the guard (preserves history). |
+| `scripts/Deploy-CorporateWorkspace.ps1` | Added an early-exit guard (R4 task 041). **Deleted 2026-10-08 (task 121, D-82)**: nothing used it, and its `-ForceRetiredDeploy` path would have recreated the deleted web resource. |
 | `scripts/Deploy-WizardCodePages.ps1` | The `sprk_corporateworkspace` entry in the deploy-loop array was commented out with a retirement notice referencing this doc. |
-| `scripts/Deploy-AllWebResources.ps1` | The `CorporateWorkspace` entry in the `$components` array was commented out with a retirement notice. (The standalone `Deploy-CorporateWorkspace.ps1` early-exit guard is the belt-and-braces backup if the comment is accidentally reverted.) |
+| `scripts/Deploy-AllWebResources.ps1` | The `CorporateWorkspace` entry in the `$components` array was commented out with a retirement notice. (The standalone script has since been deleted.) |
 | `scripts/README.md` | The deploy-sequence table was annotated to mark CorporateWorkspace as retired with a link to this doc. |
 
 The scripts were NOT deleted. The guard approach was preferred over rename-to-deprecated so that:
