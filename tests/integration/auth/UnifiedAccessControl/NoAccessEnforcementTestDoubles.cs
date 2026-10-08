@@ -54,10 +54,12 @@ internal static class NoAccessEnforcementTestDoubles
         public ConcurrentBag<(Guid Principal, Guid RecordId)> RightsReads { get; } = new();
 
         /// <summary>Adds an active (or inactive) entry from its parts and returns its id.</summary>
+        /// <remarks><paramref name="objectRecordIdText"/> (task 154) stores the record id exactly as given (e.g. with
+        /// braces), as a Web API writer or an import could; otherwise the canonical form is stored.</remarks>
         public Guid AddEntry(
             Guid? subjectUser = null, Guid? subjectContact = null, Guid? subjectOrganization = null,
             Guid? objectOrganization = null, (string LogicalName, Guid Id)? objectRecord = null,
-            Guid? modifiedBy = null, int stateCode = 0)
+            Guid? modifiedBy = null, int stateCode = 0, string? objectRecordIdText = null)
         {
             var id = Guid.NewGuid();
             Guid? typeRef = null;
@@ -76,7 +78,7 @@ internal static class NoAccessEnforcementTestDoubles
                     _sprk_subjectorganization_value = subjectOrganization,
                     _sprk_objectorganization_value = objectOrganization,
                     _sprk_objectrecordtype_value = typeRef,
-                    sprk_objectrecordid = objectRecord?.Id.ToString(),
+                    sprk_objectrecordid = objectRecordIdText ?? objectRecord?.Id.ToString(),
                 },
                 stateCode,
                 modifiedBy);

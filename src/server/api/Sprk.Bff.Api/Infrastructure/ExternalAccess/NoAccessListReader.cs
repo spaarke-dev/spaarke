@@ -593,7 +593,7 @@ public class NoAccessListReader : INoAccessListReader
                     }
                 }
             }
-            else if (Guid.TryParse(row.sprk_objectrecordid, out var deniedRecordId))
+            else if (TryParseObjectRecordId(row.sprk_objectrecordid, out var deniedRecordId))
             {
                 foreach (var candidate in candidates)
                 {
@@ -607,11 +607,44 @@ public class NoAccessListReader : INoAccessListReader
             {
                 _logger.LogWarning(
                     "[NO-ACCESS] Entry {EntryId} has sprk_objectrecordtype populated but " +
-                    "sprk_objectrecordid ('{RawValue}') is not a parseable GUID. Excluding this " +
-                    "entry from matching.",
+                    "sprk_objectrecordid ('{RawValue}') is not a record id in the canonical form " +
+                    "(xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, no braces). Excluding this entry from matching " +
+                    "(denies nothing).",
                     entryId, row.sprk_objectrecordid);
             }
         }
+    }
+
+    /// <summary>
+    /// The ONE rule for a well-formed <c>sprk_objectrecordid</c> (task 154), shared with the enforcer: the value is a
+    /// record id in the hyphenated 36-character form, in either case, with no braces and no leading whitespace.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why not <see cref="Guid.TryParse(string?, out Guid)"/>.</b> Every reader of the column matches it by
+    /// STRING equality against the lowercase hyphenated id (<see cref="BuildRecordObjectFilter"/>,
+    /// <c>NoAccessEnforcementStore.CoveringObjectFilters</c>). <c>Guid.TryParse</c> also accepts braces, parentheses and
+    /// the 32-digit form, none of which that equality ever matches. Before task 154, such an entry was enforced on save
+    /// (shares removed) yet never vetoed a read, and no reader reported it: a wall that walled nothing.</para>
+    /// <para><b>What the rule accepts is exactly what the filters match.</b> Dataverse compares strings
+    /// case-insensitively and ignores TRAILING spaces (verified live on spaarkedev1, 2026-10-07), so an upper-case id or
+    /// one with trailing spaces is matched and is accepted here. Rejecting either would turn a working wall into one that
+    /// denies nothing. A leading space, braces, or any other form is never matched, so it is malformed.</para>
+    /// </remarks>
+    /// <param name="raw">The stored <c>sprk_objectrecordid</c> text.</param>
+    /// <param name="recordId">The parsed id when the value is well-formed; otherwise <see cref="Guid.Empty"/>.</param>
+    /// <returns><c>true</c> when the value is a non-empty record id in the canonical form.</returns>
+    internal static bool TryParseObjectRecordId(string? raw, out Guid recordId)
+    {
+        recordId = Guid.Empty;
+        if (raw is null)
+        {
+            return false;
+        }
+
+        var value = raw.TrimEnd(' ');
+        return value.Length == 36
+               && Guid.TryParseExact(value, "D", out recordId)
+               && recordId != Guid.Empty;
     }
 
     /// <summary>

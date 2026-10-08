@@ -319,6 +319,39 @@ public class NoAccessShareEnforcerTests
         _h.Shares.Writes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("{14314314-3143-1431-4314-314314314301}")] // braces: the record filter never matches it
+    [InlineData("14314314314314314314314314314301")]       // 32 digits, no hyphens
+    public async Task Enforce_ARecordIdNotInTheCanonicalForm_IsMalformed_AndRemovesNothing(string storedId)
+    {
+        // Task 154: before, Guid.TryParse accepted these, so the share was removed while the read-time veto (string
+        // equality on the canonical id) never matched the entry: a wall that looked enforced and walled nothing.
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(
+            subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author, objectRecordIdText: storedId);
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Malformed);
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task Enforce_AnUpperCaseRecordId_IsEnforced_BecauseTheVetoMatchesItToo()
+    {
+        // Dataverse string equality ignores case, so the read-time veto matches an upper-case id; the enforcer agrees.
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(
+            subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author,
+            objectRecordIdText: SecureProject.ToString().ToUpperInvariant());
+
+        var report = await Enforce(entry);
+
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Evaluated);
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled && r.RecordId == SecureProject);
+    }
+
     [Fact]
     public async Task Enforce_WhenTheSharesCannotBeRead_IsAFailure_AndNothingIsReportedClean()
     {
