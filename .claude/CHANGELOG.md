@@ -19,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **`.claude/skills/provision-environment/SKILL.md`**: the tenant-id line no longer calls Spaarke's tenant "shared".
 - **`.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`**: Decision 3 (shared-BFF Dataverse routing) marked
   superseded by D-12.
+- **`.claude/constraints/provisioning.md`** (T218e, earlier the same day — recorded here): the package rule takes
+  roles from the ROOT business unit only; "Secure Record Owner" stays contained in the Secure Record unit and is
+  created per environment by H7b (T256), not packaged.
 - Root `CLAUDE.md` unchanged (its provisioning and auth pointer rows were already correct).
 
 ---

@@ -314,10 +314,12 @@ az rest --method PUT \
 
 ## Deployment Model Configuration
 
-### Shared Model (Default)
+### Shared Model (Default — every stamp)
 
 No additional configuration required. The system automatically uses:
-- Index: `spaarke-knowledge-index-v2` (from `Analysis:SharedIndexName`, default in `AnalysisOptions`)
+- Index: `AiSearch:KnowledgeIndexName` (default `spaarke-files-index`, the stamp's own index created by H2b).
+  `Analysis:SharedIndexName` (`spaarke-knowledge-index-v2`) is deprecated (FR-26) and read only when
+  `AiSearchOptions` is not registered (corrected 2026-10-08, T235)
 - Isolation: `customerId` filter (from `Analysis:TenantFilterField`)
 
 ### Dedicated Model

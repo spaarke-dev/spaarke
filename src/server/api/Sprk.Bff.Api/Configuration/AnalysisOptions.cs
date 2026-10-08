@@ -57,8 +57,8 @@ public class AnalysisOptions
     // === RAG Configuration ===
 
     /// <summary>
-    /// Default RAG deployment model for new customers.
-    /// Options: "Shared" (multi-tenant), "Dedicated" (customer index)
+    /// Default RAG deployment model. "Shared" (the default, used by every stamp): the configured
+    /// AiSearch:KnowledgeIndexName. "Dedicated": "{tenantId}-knowledge", which nothing creates (#1432).
     /// Maps to configuration for sprk_knowledgedeployment entity.
     /// </summary>
     public RagDeploymentModel DefaultRagModel { get; set; } = RagDeploymentModel.Shared;
@@ -200,8 +200,8 @@ public enum RagDeploymentModel
     Shared,
 
     /// <summary>
-    /// Dedicated index per customer (its own index name in the stamp's AI Search).
-    /// Better isolation and performance.
+    /// An index named "{tenantId}-knowledge" in the stamp's AI Search. No provisioning step creates it — do not
+    /// configure this value (#1432). Isolation comes from the stamp's own AI Search service, not the index name.
     /// </summary>
     Dedicated,
 

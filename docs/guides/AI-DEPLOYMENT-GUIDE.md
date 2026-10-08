@@ -79,7 +79,7 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 
 **R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
 - RAG knowledge index (`spaarke-knowledge-index-v2`) with hybrid search (3072-dim vectors)
-- Per-customer RAG deployment: `Dedicated` (the default — a dedicated AI Search service per customer, in Model 1 and Model 2 alike). The former `CustomerOwned` value was removed (task 230b) and the former `Shared` value is **retired — never provision it**; see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
+- Per-customer RAG: a dedicated AI Search service per customer (each stamp's own), in Model 1 and Model 2 alike; the setting `Analysis:DefaultRagModel` stays at its code default `Shared`, which reads the stamp's own `AiSearch:KnowledgeIndexName` (`spaarke-files-index`, created by H2b); `Dedicated` reads `{tenantId}-knowledge`, which nothing creates — never set it (corrected 2026-10-08, T235; #1432). The former `CustomerOwned` value was removed (task 230b); see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
 - `IKnowledgeDeploymentService` for SearchClient routing
 - `IRagService` for hybrid search with semantic ranking
 - Redis caching for embeddings

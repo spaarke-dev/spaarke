@@ -375,9 +375,11 @@ boundary cannot be forgotten.
 **Still in force as belt-and-braces**: every document carries `tenantId` and every query filters on it.
 That control is retained, just no longer credited with separating customers.
 
-**Service**: `IKnowledgeDeploymentService` still routes requests to the configured placement. ⚠️ Its
-`Shared` value is a **retired option** for customer-serving deployments; any index naming scheme must key on
-the **customer**, not on `tenantId`, which is identical across Model 1 customers.
+**Service**: `IKnowledgeDeploymentService` routes requests to the configured index. Its default `Shared`
+value reads `AiSearch:KnowledgeIndexName` — on a stamp, the stamp's own index in its own AI Search service — and
+is the value every stamp uses; `Dedicated` reads `{tenantId}-knowledge`, which nothing creates (#1432; corrected
+2026-10-08, T235). Customer isolation comes from the per-customer service, never from `tenantId`, which is
+identical across Model 1 customers.
 
 ---
 

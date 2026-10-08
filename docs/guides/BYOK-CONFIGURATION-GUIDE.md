@@ -238,7 +238,7 @@ These settings apply in all deployment models and are required for BFF startup.
 | Config Key | Env Var (App Service) | Required | Purpose |
 |------------|-----------------------|----------|---------|
 | `AiSearch:Endpoint` | `AiSearch__Endpoint` | Yes | Azure AI Search endpoint URL. |
-| `AiSearch:KnowledgeIndexName` | `AiSearch__KnowledgeIndexName` | No | Knowledge index name (default: `spaarke-knowledge-index-v2`). |
+| `AiSearch:KnowledgeIndexName` | `AiSearch__KnowledgeIndexName` | No | Knowledge index name (default: `spaarke-files-index`, created by H2b on every stamp). |
 | `AiSearch:DiscoveryIndexName` | `AiSearch__DiscoveryIndexName` | No | Document discovery index name. |
 | `AiSearch:SemanticConfigName` | `AiSearch__SemanticConfigName` | No | Semantic search configuration name. |
 

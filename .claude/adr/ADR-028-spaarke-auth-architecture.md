@@ -399,7 +399,11 @@ dedicated deployment per customer (D-12), so it can start without keys instead o
 - **MUST** disable key / local authentication on every data-plane resource where Azure allows it: AI Search,
   Azure OpenAI (`kind: OpenAI`, custom subdomain), Document Intelligence, Content Safety, Cosmos DB, Service Bus,
   SignalR (`disableLocalAuth: true`), Storage (`allowSharedKeyAccess: false`) and Azure Managed Redis
-  (`accessKeysAuthentication: 'Disabled'`, Microsoft Entra only — D12).
+  (`accessKeysAuthentication: 'Disabled'`, Microsoft Entra only — D12). **Documented exclusions** (reasons in
+  `CustomerStampKeylessTemplateTests`): Application Insights ingestion (the connection string's instrumentation key
+  is telemetry ingestion, not data access; Entra-only ingestion needs agent configuration — outside D13) and Azure
+  Communication Services (`disableLocalAuth` unverified on the module's pinned API version; the BFF already uses
+  its credential).
 - **MUST** reach each of them as the stamp's user-assigned managed identity. Provisioning writes endpoints and
   identities, never a key (the H4b settings catalog and the canonical secret catalog, T226/T225b).
 - **MUST** prove it on the first run of every stamp: H13 calls the stamp BFF's keyless proof
@@ -411,7 +415,8 @@ dedicated deployment per customer (D-12), so it can start without keys instead o
 
 - **MUST NOT** put a credential in a stamp's Key Vault when a managed-identity path exists. What a stamp vault holds:
   the inbound-webhook client states and signing keys Spaarke generates (Spaarke is the issuer; there is no managed
-  identity alternative) and non-secret endpoints / ids kept for reference parity. No `BFF-API-ClientSecret` and no
+  identity alternative), `AppInsights-ConnectionString` (the excluded ingestion key above) and non-secret endpoints /
+  ids kept for reference parity. No `BFF-API-ClientSecret` and no
   `Dataverse-ClientSecret` (A4, secret-free stamps — `provisioning.md` "KV credential lifecycle"). The Bing and
   LlamaParse vendor keys are not provisioned (D18).
 - **MUST NOT** fix a stamp failure by re-enabling local auth or adding a key setting. A managed-identity failure on

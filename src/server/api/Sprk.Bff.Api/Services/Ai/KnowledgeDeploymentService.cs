@@ -17,9 +17,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// - The key-only "CustomerOwned" model (API key from Key Vault) was removed by customer-provisioning-orchestration-r1 task 230b: unreachable, and a
 ///   stamp holds no key (owner D13).
 ///
-/// Index naming (configurable via AnalysisOptions):
-/// - Shared: Uses AnalysisOptions.SharedIndexName (single multi-tenant index)
-/// - Dedicated: "{tenantId}-knowledge" (per-customer index)
+/// Index naming (AnalysisOptions.DefaultRagModel):
+/// - Shared (default, every stamp): AiSearchOptions.KnowledgeIndexName — the stamp's own index, created by H2b
+///   (AnalysisOptions.SharedIndexName only when AiSearchOptions is not registered)
+/// - Dedicated: "{tenantId}-knowledge" — nothing creates it; do not configure (#1432)
 /// </remarks>
 public class KnowledgeDeploymentService : IKnowledgeDeploymentService
 {
