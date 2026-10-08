@@ -3,7 +3,8 @@
  *
  * One Spaarke dialog follows a Quick Save from its first moment to its last: it opens at the START in a progress
  * state ("Saving to Spaarke…"), then shows the result — success (with an "Open in Spaarke" link to the document
- * record) or the error — in the same window. The page is `word/commands/notify.html`.
+ * record) or the error — in the same window. The page is `shared/commands/notify.html`, served per host (`word/commands-notify.html`, `outlook/commands-notify.html`).
+ * Shared by the Word and Outlook ribbon Quick Save commands (task 118 moved it here from `word/commands/`).
  *
  * Host support (decided by capability, never host type — NFR-10):
  * - **Update in place** with `dialog.messageChild` when `DialogApi 1.2` is supported AND the page has told us it is
@@ -59,6 +60,8 @@ export interface QuickSaveDialog {
 export interface QuickSaveDialogDeps {
   /** Called exactly once — the command's `event.completed()`. */
   onComplete: () => void;
+  /** Where this host serves the notify page, e.g. `/word/commands-notify.html` (resolved against the page origin). */
+  pagePath: string;
   /** The configured Spaarke organisation URL (`ORG_URL`); links are only opened on this origin. */
   orgUrl: string | undefined;
 }
@@ -201,7 +204,7 @@ export async function openQuickSaveDialog(deps: QuickSaveDialogDeps): Promise<Qu
     if (linkUrl) {
       params.set('linkUrl', linkUrl);
     }
-    const url = `${window.location.origin}/word/commands-notify.html?${params.toString()}`;
+    const url = `${window.location.origin}${deps.pagePath}?${params.toString()}`;
 
     return new Promise(resolve => {
       try {

@@ -13,17 +13,21 @@ export class DataverseAPI {
     this.client = axios.create({
       baseURL: baseUrl,
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'OData-MaxVersion': '4.0',
         'OData-Version': '4.0',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
     });
   }
 
   /**
-   * Create Azure AD access token for service principal
+   * Create Azure AD access token for service principal.
+   *
+   * @param resource - The Dataverse org URL. A Web API URL (`https://org.api.crm.dynamics.com/api/data/v9.2`) is
+   *   accepted too: the token is always requested for the ORIGIN (`https://org.api.crm.dynamics.com/.default`), because
+   *   the Web API path is not part of the resource and a scope that carries it does not name the Dataverse resource.
    */
   static async authenticate(
     tenantId: string,
@@ -32,8 +36,18 @@ export class DataverseAPI {
     resource: string
   ): Promise<string> {
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-    const token = await credential.getToken(`${resource}/.default`);
+    const token = await credential.getToken(`${DataverseAPI.resourceOrigin(resource)}/.default`);
     return token.token;
+  }
+
+  /** The origin of a Dataverse org or Web API URL, which is what a token is requested for. */
+  static resourceOrigin(resource: string): string {
+    try {
+      return new URL(resource).origin;
+    } catch {
+      // Not an absolute URL (for example an unset env var): pass it through so the token request fails visibly.
+      return resource.replace(/\/+$/, '');
+    }
   }
 
   /**
@@ -70,7 +84,7 @@ export class DataverseAPI {
    */
   async fetchRecords(entityName: string, fetchXml: string): Promise<any[]> {
     const response = await this.client.get(`/${entityName}`, {
-      params: { fetchXml }
+      params: { fetchXml },
     });
     return response.data.value;
   }
@@ -98,10 +112,7 @@ export class DataverseAPI {
    * @param entityName - Dataverse entity set name (e.g. 'sprk_projects', 'businessunits')
    * @param params - OData query parameters as string key-value pairs
    */
-  async queryRecords<T = Record<string, unknown>>(
-    entityName: string,
-    params: Record<string, string>
-  ): Promise<T[]> {
+  async queryRecords<T = Record<string, unknown>>(entityName: string, params: Record<string, string>): Promise<T[]> {
     const response = await this.client.get(`/${entityName}`, { params });
     return (response.data?.value ?? []) as T[];
   }

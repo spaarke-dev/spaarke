@@ -231,6 +231,14 @@ export interface LookupOptions {
    * When omitted the entity's default lookup view is used.
    */
   defaultViewId?: string;
+
+  /**
+   * Extra row filters applied to the lookup's results, one per entity —
+   * passed straight through as `Xrm.Utility.lookupObjects`'s `filters`
+   * (`filterXml` is a FetchXML `<filter>` element). When omitted the lookup
+   * shows every row the user can read.
+   */
+  filters?: Array<{ entityLogicalName: string; filterXml: string }>;
 }
 
 /**

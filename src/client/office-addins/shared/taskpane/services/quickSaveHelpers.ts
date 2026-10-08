@@ -4,6 +4,7 @@ import { mapProblemDetailsToMessage, type ProblemDetails } from '../utils/errorM
 import type { DocumentIdentityOutcome } from './documentIdentityService';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { buildOpenRecordUrl } from './openRecordLauncher';
+import type { CapturedAttachment, EmailContentCapture } from './emailContentCapture';
 
 /**
  * quickSaveHelpers.ts
@@ -43,19 +44,24 @@ export interface OfficeSaveRequestBody {
   triggerAiProcessing: boolean;
   aiOptions: { profileSummary: boolean; ragIndex: boolean; deepAnalysis: boolean };
   documentMetadata: { name: string; description?: string };
-  targetEntity: { entityType: string; entityId: string; displayName: string };
+  /** Absent for an UNFILED save (task 118): association is optional on the server. */
+  targetEntity?: { entityType: string; entityId: string; displayName: string };
   email: {
     subject: string;
     senderEmail: string;
     senderName?: string;
     recipients: Array<{ type: 'To' | 'Cc' | 'Bcc'; email: string; name?: string }>;
     sentDate?: string;
-    body: undefined;
+    /** Task 116a: read in the add-in. Undefined only when the host cannot read it — the server then uses Graph. */
+    body: string | undefined;
     isBodyHtml: true;
+    /** Task 116a: the attachments read in the add-in (absent when nothing was read). */
+    attachments?: CapturedAttachment[];
     /** Task 046 (b): always true here; the ribbon files under the email's own subject and never takes a typed name. */
     isNameSystemDerived: true;
     internetMessageId: string;
-    selectedAttachmentFileNames: undefined;
+    /** Undefined = "all" (server rule); with a capture, the names of the attachments actually sent. */
+    selectedAttachmentFileNames: string[] | undefined;
   };
   idempotencyKey: string;
 }
@@ -68,14 +74,26 @@ function mapRecipientType(type: 'to' | 'cc' | 'bcc'): 'To' | 'Cc' | 'Bcc' {
 }
 
 /**
- * Build the `POST /api/office/save` body that files an email to the engine-predicted
- * record. The email body + attachment content are fetched server-side via Graph (OBO),
- * so the client sends only the internetMessageId + metadata — identical to useSaveFlow.
+ * The save's `targetEntity` for a filing target. The FRIENDLY type name ("Matter"), never the logical name
+ * ("sprk_matter"): the save accepts only friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002
+ * otherwise), and the finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
+ */
+function buildTargetEntity(target: EntitySearchResult): NonNullable<OfficeSaveRequestBody['targetEntity']> {
+  return { entityType: target.entityType, entityId: target.id, displayName: target.name };
+}
+
+/**
+ * Build the `POST /api/office/save` body that files an email to the engine-predicted record.
+ *
+ * Task 116a: `content` is the body + attachments read in the add-in (`captureEmailContent`), sent the same way the
+ * pane sends them. Without it the request carries only the internetMessageId + metadata and the server fetches the
+ * email through Graph — which cannot reach a B2B guest's home-tenant mailbox, so a guest needs `content`.
  */
 export function buildEmailSaveRequest(
   context: QuickSaveEmailContext,
-  target: EntitySearchResult,
-  idempotencyKey: string
+  target: EntitySearchResult | null,
+  idempotencyKey: string,
+  content?: EmailContentCapture
 ): OfficeSaveRequestBody {
   return {
     contentType: 'Email',
@@ -83,14 +101,8 @@ export function buildEmailSaveRequest(
       DEFAULT_AI_OPTIONS.profileSummary || DEFAULT_AI_OPTIONS.ragIndex || DEFAULT_AI_OPTIONS.deepAnalysis,
     aiOptions: { ...DEFAULT_AI_OPTIONS },
     documentMetadata: { name: context.subject || 'Untitled Email' },
-    targetEntity: {
-      // The FRIENDLY type name ("Matter"), never the logical name ("sprk_matter"): the save accepts only
-      // friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002 otherwise), and the
-      // finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
-      entityType: target.entityType,
-      entityId: target.id,
-      displayName: target.name,
-    },
+    // Task 118: `null` = an unfiled save (the supported "no related record" case) — no targetEntity at all.
+    ...(target ? { targetEntity: buildTargetEntity(target) } : {}),
     email: {
       subject: context.subject || 'Untitled Email',
       senderEmail: context.senderEmail || 'unknown@placeholder.com',
@@ -103,10 +115,11 @@ export function buildEmailSaveRequest(
       ...(context.sentDate ? { sentDate: context.sentDate.toISOString() } : {}),
       // Task 046 (b): the subject is the email's own, so the server stores it with a short unique suffix.
       isNameSystemDerived: true,
-      body: undefined,
+      body: content?.body,
       isBodyHtml: true,
+      ...(content ? { attachments: content.attachments } : {}),
       internetMessageId: context.internetMessageId,
-      selectedAttachmentFileNames: undefined,
+      selectedAttachmentFileNames: content?.selectedAttachmentFileNames,
     },
     idempotencyKey,
   };
@@ -123,7 +136,7 @@ export function buildEmailSaveRequest(
  * forever. `kind` is a real discriminant (not a label) so each source's canonical shape stays honest.
  */
 export type QuickSaveIdempotencySource =
-  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult }
+  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult | null }
   | {
       readonly kind: 'document';
       readonly title: string;
@@ -138,7 +151,9 @@ export type QuickSaveIdempotencySource =
 
 function canonicalQuickSaveKey(source: QuickSaveIdempotencySource): string {
   if (source.kind === 'email') {
-    return `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`;
+    return source.target
+      ? `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`
+      : `email:${source.internetMessageId}|unfiled`;
   }
   return source.existingDocumentId
     ? `document-version:${source.existingDocumentId}|${source.title}|${source.contentBase64}`

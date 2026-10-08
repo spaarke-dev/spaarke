@@ -1,3 +1,4 @@
+/** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * Cross-surface due-date tier parity (spaarke-ontology-platform-r1 task 081 / H1).
  *
@@ -16,9 +17,8 @@
  * parse or an elapsed-hours day count is off by one.
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 jest.mock('@spaarke/ui-components', () => ({
   ...jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal'),
 }));
@@ -38,14 +38,6 @@ import {
   EVENT_DUE_BADGE_COLOR,
   EVENT_DUE_DATE_COLUMN_BACKGROUND,
 } from '../../Spaarke.Visuals/src/components/EventDueDateCard';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 
 const NOW = new Date(2026, 9, 5, 21, 0, 0);
 

@@ -34,7 +34,7 @@ Full-page surfaces and standalone dialogs need React 19 because:
 | Form field/subgrid/tab | PCF control | 16 (platform) | `src/client/pcf/` |
 | Full navigation page | Standalone HTML | 19 (bundled) | `src/solutions/{PageName}/` |
 | Side pane | Standalone HTML | 19 (bundled) | `src/solutions/{PaneName}/` |
-| Wizard / dialog (standalone) | Standalone HTML | 19 (bundled) | `src/solutions/{WizardName}/` |
+| Wizard / dialog (standalone) | Standalone HTML | 19 (bundled) | `src/solutions/{WizardName}/` — the deployment wrapper for **hostless (ribbon)** entry points; when a Spaarke React host exists, open the wizard **in-app** instead ([ADR-050](ADR-050-canonical-modal-shell.md) launch rule, amended 2026-10-07) |
 | Ribbon/command script | Minimal JS | N/A | `src/dataverse/webresources/` |
 
 ---

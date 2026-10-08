@@ -1,64 +1,56 @@
 /**
  * E2E Tests: Secure Project Creation Flow
  *
- * ⚠️ PARTIALLY OBSOLETE AS OF 2026-08-25 — READ BEFORE RUNNING.
+ * This spec drives the SUPPORTED secure-create path, the one the Create Project wizard uses
+ * (`CreateProjectWizard.tsx`: `projectService.createProject`, then `provisioningService.provisionSecureProject`):
  *
- * `unified-access-control-r2` task 021 re-scoped `/provision-project`. The mechanism most of this
- * spec was written against no longer exists:
+ *   1. The creating USER creates an ORDINARY `sprk_project`, WITHOUT `sprk_issecure`. Since
+ *      unified-access-control-r2 task 150 the column is field-secured: only the BFF application user may create or
+ *      update it (`scripts/Set-SecureFlagFieldSecurity.ps1`), so a create payload that names it, even as `false`, is
+ *      refused for every other identity. This spec used to post `sprk_issecure: true` directly; that is now refused.
+ *   2. The SAME user calls POST /api/v1/external-access/provision-project with their own delegated token. The route is
+ *      gated by `DelegationRuleFilter` (Write on the record, evaluated as the caller through OBO), and an unflagged
+ *      record is secured only for the person who created it (`createdby`, else the BFF-stamped
+ *      `sprk_createdbyperson`). So the create and the call must be made by the same person. A client-credentials token
+ *      can do neither: OBO has no user to exchange, and an app-only create makes the application user `createdby`.
+ *   3. Provisioning (`ProvisionProjectEndpoint.cs`) then:
+ *        - resolves the ONE canonical `Secure Record` business unit by name, and its NAMED, non-default owner team
+ *          (`Secure Record Owners`, task 144), refusing unless the team has no members and the BU holds no users
+ *        - sets `sprk_issecure = true` as its FIRST write, and reads it back (task 150)
+ *        - shares the record to its creator, then assigns it to that team (verified by read-back)
+ *        - creates the record's own SPE container and records it on `sprk_containerid`, failing loudly if that write
+ *          does not land
  *
- *   REMOVED  child Business Unit per project (named SP-{ProjectRef})
- *   REMOVED  External Access Account per project
- *   REMOVED  umbrella-BU reuse (there is now ONE canonical `Secure Record` BU, resolved by name
- *            from server configuration, so there is nothing for a caller to select)
- *   REMOVED  the BU-rollback path (nothing destructive is created any more)
- *   REMOVED  the stamps `sprk_securitybuid` / `sprk_specontainerid` / `sprk_externalaccountid` —
- *            none of those columns ever existed on sprk_project, which is why the write silently
- *            failed for five months. `sprk_externalaccount` (the real column) is the project's
- *            CLIENT lookup and must NEVER be written by provisioning.
- *
- *   NOW      1. Resolve the canonical `Secure Record` BU by name
- *            2. Resolve that BU's NAMED, non-default owner team (`Secure Record Owners`, task 144 — never the
- *               BU's default team), and refuse unless it has no members and the BU holds no users
- *            3. Assign the record to that team (verified by read-back) — a project, matter or work
- *               assignment (`recordType` + `recordId`, or the legacy `projectId`)
- *            4. Create the record's own SPE container
- *            5. Record it on `sprk_containerid` — and FAIL LOUDLY if that write does not land
- *
- * Cases that exercised a deleted mechanism are `test.skip`ped below with a per-case reason rather
- * than rewritten. They need re-authoring against a live environment, which is the only place this
- * spec can be validated; rewriting them blind would produce assertions that look verified and are
- * not. This file is not run by CI (no workflow references tests/e2e).
- *
- * NOTE, independent of task 021: the payload builders below use `sprk_projectref` and
- * `sprk_description`, neither of which exists on live `sprk_project` (the description column is
- * `sprk_projectdescription`). This spec therefore could not have passed as written, whatever the
- * endpoint did. Fix that as part of the re-authoring.
- *
- * Still valid as written: the 401 case, the not-a-secure-project case, the non-existent-project
- * case, and per-project container isolation.
- *
- * Tests validate the end-to-end secure project creation pipeline:
- *   1. Create project record with sprk_issecure = true (via Dataverse API)
- *   2. Call POST /api/v1/external-access/provision-project
- *   3. Verify the project is owned by the Secure Record BU's NAMED owner team — not its default team
- *   4. Verify SPE container provisioned and ID returned
- *   5. Verify the project record's sprk_containerid points at it
- *   6. Clean up all test data after verification
+ * History: task 021 (2026-08-25) removed the child business unit per project (`SP-{ProjectRef}`), the External Access
+ * account per project, umbrella-BU reuse, and the `sprk_securitybuid` / `sprk_specontainerid` /
+ * `sprk_externalaccountid` stamps (none of those columns ever existed on sprk_project; `sprk_externalaccount` is the
+ * project's CLIENT lookup and provisioning must never write it). The cases that tested those mechanisms
+ * (TC-070-02 umbrella reuse, TC-070-11 ProjectRef required, TC-070-21 SP-{ProjectRef} naming, TC-070-22 account owned
+ * by the child BU) were removed, because the scenarios no longer exist. Their offline replacements live in the BFF unit
+ * tests (for example `ProvisionProject_OnTheHappyPath_NeverWritesTheClientLookup`).
  *
  * Also covers:
- *   - Validation error paths (missing ProjectId, not-secure project, non-existent project)
+ *   - The route's gate: no token → 401; an unresolvable or unreachable target → 403 from the delegation filter, never a
+ *     400 or 404 (an unauthorized caller must not be able to enumerate records)
+ *   - The creator rule: an ordinary project the caller did not create is refused, and nothing changes
+ *   - Fail-closed on a missing Secure Record BU (operator-armed, see TC-070-14)
+ *
+ * This file is not run by CI (no workflow references tests/e2e). It needs a deployed environment.
  *
  * Prerequisites:
- *   - BFF API deployed to dev with /api/v1/external-access/* endpoints enabled
- *   - Dataverse dev environment configured (spaarkedev1.crm.dynamics.com)
- *   - Entra External ID provider configured (task 020 complete)
- *   - Azure AD app with Dataverse + Graph API permissions
- *   - SharePointEmbedded:ContainerTypeId configured on BFF API
- *   - Authentication credentials in .env
+ *   - BFF API deployed to dev with the /api/v1/external-access/* endpoints
+ *   - The canonical `Secure Record` BU and its `Secure Record Owners` team set up (docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md)
+ *   - `sprk_issecure` field security applied (scripts/Set-SecureFlagFieldSecurity.ps1)
+ *   - SharePointEmbedded:ContainerTypeId configured on the BFF API
+ *   - tests/e2e/config/.env, see "Manual Execution Notes" at the bottom
  *
- * @see tasks/070-e2e-test-secure-project-creation.poml
- * @see tasks/011-grant-access-endpoint.poml
+ * Cleanup: test projects are deleted with the app identity (the creator's share does not include Delete). SPE
+ * containers are NOT deleted. Each container id is logged so an orphan can be reconciled.
+ *
  * @see src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs
+ * @see src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs
+ * @see src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts
+ * @see projects/unified-access-control-r2/tasks/047-validate-secure-project-provisioning-live.poml
  */
 
 import { test, expect } from '@playwright/test';
@@ -68,14 +60,16 @@ import { DataverseAPI } from '../../utils/dataverse-api';
 // Constants
 // ============================================================================
 
-const BFF_API_BASE = process.env.BFF_API_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+const BFF_API_BASE = process.env.BFF_API_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 const DATAVERSE_API_URL = process.env.DATAVERSE_API_URL || 'https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2';
+
+/** The Dataverse resource (origin) that tokens are requested for. The Web API path is not part of the resource. */
+const DATAVERSE_RESOURCE = DataverseAPI.resourceOrigin(DATAVERSE_API_URL);
 
 /** Dataverse entity set names */
 const ENTITY_SETS = {
   project: 'sprk_projects',
   businessUnit: 'businessunits',
-  account: 'accounts',
 } as const;
 
 /** BFF external access endpoint base path */
@@ -84,10 +78,9 @@ const EXTERNAL_ACCESS_BASE = `${BFF_API_BASE}/api/v1/external-access`;
 /**
  * The canonical Secure Record business unit's name.
  *
- * SINGULAR — verified against live Dataverse metadata 2026-08-25. Must match whatever the BFF's
+ * SINGULAR, verified against live Dataverse metadata 2026-08-25. It must match whatever the BFF's
  * `SecureRecord:BusinessUnitName` is set to in the target environment (default `Secure Record`).
- * This business unit is shared by every secure project and is created during environment setup;
- * tests must never delete it.
+ * Every secure project shares this business unit, and environment setup creates it. Tests must never delete it.
  */
 const SECURE_BU_NAME = process.env.SECURE_RECORD_BU_NAME || 'Secure Record';
 
@@ -97,6 +90,38 @@ const SECURE_BU_NAME = process.env.SECURE_RECORD_BU_NAME || 'Secure Record';
  * default team, which carries the BU's own name and whose membership follows every user placed in the BU.
  */
 const SECURE_OWNER_TEAM_NAME = process.env.SECURE_RECORD_OWNER_TEAM_NAME || 'Secure Record Owners';
+
+/**
+ * Optional: the BFF's `SharePointEmbedded:DefaultContainerId` (the SHARED container). When set, the provisioned
+ * container must differ from it as well as from every business unit's container.
+ */
+const SHARED_DEFAULT_CONTAINER_ID = process.env.SPE_DEFAULT_CONTAINER_ID || '';
+
+/**
+ * The CREATOR: one internal Dataverse user, the person who creates the project and secures it, exactly as in the
+ * wizard. Both tokens are delegated tokens for that SAME user:
+ *   - SECURE_CREATOR_BFF_TOKEN: audience the BFF app registration (the token the wizard's MSAL-backed fetch sends).
+ *     The BFF exchanges it through OBO to find the caller, so a client-credentials token does not work here.
+ *   - SECURE_CREATOR_DATAVERSE_TOKEN: audience Dataverse. Used to create the project, so `createdby` is the caller,
+ *     and to read it back afterwards (after provisioning, the creator's share is the only way in for a human).
+ * Supplied pre-acquired, like the portal tokens in specs/secure-project/access-level-enforcement.spec.ts.
+ */
+const CREATOR_BFF_TOKEN = process.env.SECURE_CREATOR_BFF_TOKEN || '';
+const CREATOR_DATAVERSE_TOKEN = process.env.SECURE_CREATOR_DATAVERSE_TOKEN || '';
+const CREATOR_TOKENS_MISSING = !CREATOR_BFF_TOKEN || !CREATOR_DATAVERSE_TOKEN;
+const CREATOR_TOKENS_REASON =
+  'SECURE_CREATOR_BFF_TOKEN and SECURE_CREATOR_DATAVERSE_TOKEN (delegated tokens for ONE internal user) ' +
+  'not configured — skipping live test';
+
+/** Reason codes asserted below (ProvisionProjectEndpoint.cs / DelegationRuleFilter.cs). */
+const REASON = {
+  alreadyProvisioned: 'sdap.provision.already_provisioned',
+  secureBuNotFound: 'sdap.provision.secure_bu_not_found',
+  notRecordCreator: 'sdap.provision.not_record_creator',
+  delegationTargetUnresolved: 'sdap.access.deny.delegation_target_unresolved',
+  delegationWriteRequired: 'sdap.access.deny.delegation_write_required',
+  delegationCheckFailed: 'sdap.access.deny.delegation_check_failed',
+} as const;
 
 // ============================================================================
 // Test data helpers
@@ -111,27 +136,16 @@ function generateProjectRef(): string {
 }
 
 /**
- * Minimal Dataverse project record payload with sprk_issecure = true.
- * Only includes required fields for a test project.
+ * The create payload the Create Project wizard sends (projectService.createProject), without its optional lookups.
+ *
+ * `sprk_issecure` is deliberately ABSENT: it is field-secured (task 150) and only provisioning sets it. The column
+ * names are the live ones: `sprk_projectname` and `sprk_projectdescription`. `sprk_projectref` and `sprk_description`,
+ * which this builder used to send, do not exist on sprk_project.
  */
-function buildSecureProjectPayload(projectRef: string): Record<string, unknown> {
+function buildProjectPayload(projectRef: string, label = 'Secure Project'): Record<string, unknown> {
   return {
-    sprk_projectname: `E2E Test Secure Project — ${projectRef}`,
-    sprk_projectref: projectRef,
-    sprk_issecure: true,
-    sprk_description: 'Created by E2E test — safe to delete',
-  };
-}
-
-/**
- * Minimal project payload with sprk_issecure = false (for negative testing).
- */
-function buildNonSecureProjectPayload(projectRef: string): Record<string, unknown> {
-  return {
-    sprk_projectname: `E2E Test Non-Secure Project — ${projectRef}`,
-    sprk_projectref: projectRef,
-    sprk_issecure: false,
-    sprk_description: 'Created by E2E test — safe to delete',
+    sprk_projectname: `E2E Test ${label} — ${projectRef}`,
+    sprk_projectdescription: 'Created by E2E test — safe to delete',
   };
 }
 
@@ -139,77 +153,130 @@ function buildNonSecureProjectPayload(projectRef: string): Record<string, unknow
 // Types
 // ============================================================================
 
-/** Mirrors the task-021 response shape. */
+/** Mirrors ProvisionProjectResponse.cs (the fields this spec asserts). */
 interface ProvisionProjectResponse {
-  /** The canonical Secure Record BU — resolved by name, not created. */
+  /** The canonical Secure Record BU, resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
-  /** That BU's NAMED owner team (task 144 — never its default team), which now owns the record. */
+  /** That BU's NAMED owner team (task 144, never its default team), which now owns the record. */
   ownerTeamId: string;
   ownerTeamName: string;
   speContainerId: string;
+  /** The systemuser the record was shared to: the creator, identified from the caller's own token. */
+  sharedToCreatorSystemUserId: string;
   /** Task 144: `project` | `matter` | `workassignment`, and the record's id. */
   recordType: string;
   recordId: string;
+  resumed?: boolean;
+}
+
+/** A problem-details body with the BFF's `reasonCode` extension. */
+interface ProblemBody {
+  title?: string;
+  detail?: string;
+  reasonCode?: string;
 }
 
 /**
  * Columns that actually exist on live `sprk_project` (verified 2026-08-25).
  *
- * `_sprk_securitybuid_value`, `sprk_specontainerid` and `_sprk_externalaccountid_value` — which this
- * spec previously declared — do not exist on the table at all. `sprk_specontainerid` belongs to
+ * `_sprk_securitybuid_value`, `sprk_specontainerid` and `_sprk_externalaccountid_value`, which this
+ * spec previously declared, do not exist on the table at all. `sprk_specontainerid` belongs to
  * `sprk_container`, which is where the name was borrowed from.
  */
 interface ProjectRecord {
   sprk_projectid: string;
   sprk_projectname: string;
-  sprk_issecure: boolean;
+  sprk_issecure: boolean | null;
   /** The project's own SPE container, written by provisioning. */
-  sprk_containerid?: string;
-  /** The owning team — the observable proof that provisioning secured the record. */
-  _owningteam_value?: string;
+  sprk_containerid?: string | null;
+  /** The owning team, which shows that provisioning secured the record. */
+  _owningteam_value?: string | null;
+  /** The owning user, set on an ordinary (user-owned) record. */
+  _owninguser_value?: string | null;
+  /** The systemuser who created the record. The creator rule compares it with the caller. */
+  _createdby_value?: string | null;
   /** Retired per-project security BU. Present only on legacy rows; never written now. */
-  _sprk_securitybu_value?: string;
-}
-
-/**
- * The RETIRED response and record shapes, kept so the `test.skip`ped legacy cases below still
- * type-check (TypeScript checks skipped bodies even though Playwright does not run them).
- *
- * This is a record of what the contract used to be, not something to build on. Every member here
- * either no longer exists on the response or names a column that never existed on `sprk_project`.
- * Delete this block when those cases are re-authored against a live environment.
- */
-interface LegacyProvisionProjectResponse {
-  businessUnitId: string;
-  businessUnitName: string;
-  speContainerId: string;
-  accountId: string;
-  accountName: string;
-  wasUmbrellaBu: boolean;
-}
-
-interface LegacyProjectRecord {
-  sprk_projectid: string;
-  sprk_issecure: boolean;
-  /** Never existed on sprk_project. */
-  _sprk_securitybuid_value?: string;
-  /** Belongs to sprk_container, not sprk_project. */
-  sprk_specontainerid?: string;
-  /** Never existed; the real column, sprk_externalaccount, is the CLIENT. */
-  _sprk_externalaccountid_value?: string;
+  _sprk_securitybu_value?: string | null;
 }
 
 interface BusinessUnitRecord {
   businessunitid: string;
   name: string;
   _parentbusinessunitid_value?: string;
+  sprk_containerid?: string | null;
 }
 
-interface AccountRecord {
-  accountid: string;
-  name: string;
-  _owningbusinessunit_value?: string;
+// ============================================================================
+// Shared helpers
+// ============================================================================
+
+/** The app identity, used ONLY for read-only lookups and for cleanup, never to create or secure a project. */
+async function connectAppDataverse(): Promise<DataverseAPI> {
+  const appToken = await DataverseAPI.authenticate(
+    process.env.TENANT_ID || '',
+    process.env.CLIENT_ID || '',
+    process.env.CLIENT_SECRET || '',
+    DATAVERSE_RESOURCE
+  );
+  return new DataverseAPI(DATAVERSE_API_URL, appToken);
+}
+
+/** The creator's own Dataverse session, which is how the wizard creates a project. */
+function connectCreatorDataverse(): DataverseAPI {
+  return new DataverseAPI(DATAVERSE_API_URL, CREATOR_DATAVERSE_TOKEN);
+}
+
+/** Calls provision-project as the creator, which is what the wizard does right after the create. */
+async function callProvisionProject(
+  body: Record<string, unknown>,
+  token: string = CREATOR_BFF_TOKEN
+): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const responseBody = await response.json().catch(() => ({}));
+  return { status: response.status, body: responseBody };
+}
+
+/** Reads the project's security-relevant columns. Every column named here exists on live sprk_project. */
+async function queryProject(api: DataverseAPI, projectId: string): Promise<ProjectRecord | null> {
+  // No catch: a failed read must fail the test, not turn into a null that a later assertion explains away.
+  const results = await api.queryRecords<ProjectRecord>(ENTITY_SETS.project, {
+    $filter: `sprk_projectid eq ${projectId}`,
+    $select: [
+      'sprk_projectid',
+      'sprk_projectname',
+      'sprk_issecure',
+      'sprk_containerid',
+      '_owningteam_value',
+      '_owninguser_value',
+      '_createdby_value',
+      '_sprk_securitybu_value',
+    ].join(','),
+    $top: '1',
+  });
+  return results[0] ?? null;
+}
+
+/**
+ * The container ids that provisioning must NOT record: every business unit's container, plus the configured shared
+ * default when supplied. A populated `sprk_containerid` proves nothing, because before task 076 the wizard's BU cascade
+ * filled it with shared storage. The provisioned id must be DIFFERENT from all of these.
+ */
+async function sharedContainerIds(appApi: DataverseAPI): Promise<string[]> {
+  const units = await appApi.queryRecords<BusinessUnitRecord>(ENTITY_SETS.businessUnit, {
+    $select: 'businessunitid,name,sprk_containerid',
+  });
+  const ids = units.map(u => u.sprk_containerid).filter((id): id is string => !!id);
+  if (SHARED_DEFAULT_CONTAINER_ID) ids.push(SHARED_DEFAULT_CONTAINER_ID);
+  return ids;
 }
 
 // ============================================================================
@@ -217,8 +284,8 @@ interface AccountRecord {
 // ============================================================================
 
 test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
-  let dataverseApi: DataverseAPI;
-  let bffToken: string;
+  let appApi: DataverseAPI;
+  let creatorApi: DataverseAPI;
 
   /**
    * Track all resources created during tests for cleanup.
@@ -231,46 +298,22 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
   // --------------------------------------------------------------------------
 
   test.beforeAll(async () => {
-    // Authenticate with Dataverse for record verification and cleanup
-    const dvToken = await DataverseAPI.authenticate(
-      process.env.TENANT_ID || '',
-      process.env.CLIENT_ID || '',
-      process.env.CLIENT_SECRET || '',
-      DATAVERSE_API_URL
-    );
-    dataverseApi = new DataverseAPI(DATAVERSE_API_URL, dvToken);
+    appApi = await connectAppDataverse();
+    creatorApi = connectCreatorDataverse();
 
-    // Obtain BFF API token (client credentials against the BFF app registration)
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: process.env.CLIENT_ID || '',
-        client_secret: process.env.CLIENT_SECRET || '',
-        scope: `api://${process.env.BFF_CLIENT_ID || process.env.CLIENT_ID}/.default`,
-      }),
-    });
-
-    const tokenJson = (await tokenResponse.json()) as { access_token?: string };
-    bffToken = tokenJson.access_token || '';
-
-    if (!bffToken) {
-      console.warn(
-        '[E2E] BFF API token not obtained. Tests that call the BFF API will fail. ' +
-          'Ensure BFF_CLIENT_ID and credentials are set in .env.'
-      );
+    if (CREATOR_TOKENS_MISSING) {
+      console.warn(`[E2E] ${CREATOR_TOKENS_REASON}. Set them in tests/e2e/config/.env.`);
     }
   });
 
   test.afterAll(async () => {
-    // Clean up all test records in reverse creation order (most specific first)
-    // Order: Account → Business Unit → SPE Container (via BFF if needed) → Project
+    // Only projects are tracked. The canonical Secure Record BU and its owner team are shared infrastructure and
+    // are never deleted. SPE containers are not deleted here: their ids are logged for reconciliation.
     console.log(`[E2E] Cleaning up ${resourcesToCleanup.length} test resources...`);
 
     for (const resource of [...resourcesToCleanup].reverse()) {
       try {
-        await dataverseApi.deleteRecord(resource.entitySet, resource.id);
+        await appApi.deleteRecord(resource.entitySet, resource.id);
         console.log(`[E2E] Cleaned up: ${resource.label} (${resource.id})`);
       } catch (error) {
         console.warn(`[E2E] Cleanup failed for ${resource.label} (${resource.id}):`, error);
@@ -287,124 +330,60 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
   }
 
   // --------------------------------------------------------------------------
-  // Helper: call provision-project endpoint
-  // --------------------------------------------------------------------------
-
-  async function callProvisionProject(body: {
-    projectId: string;
-    projectRef?: string;
-    /**
-     * REMOVED from the real request contract by task 021 — retained on this helper ONLY so the
-     * skipped legacy cases below still type-check (TypeScript compiles skipped tests). The server
-     * ignores unknown JSON properties. Delete this when those cases are re-authored.
-     */
-    umbrellaBuId?: string;
-  }): Promise<{ status: number; body: unknown }> {
-    const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bffToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const responseBody = await response.json().catch(() => ({}));
-    return { status: response.status, body: responseBody };
-  }
-
-  // --------------------------------------------------------------------------
-  // Helper: query Dataverse project record with infrastructure fields
-  // --------------------------------------------------------------------------
-
-  async function queryProject(projectId: string): Promise<ProjectRecord | null> {
-    try {
-      const results = await dataverseApi.queryRecords<ProjectRecord>(ENTITY_SETS.project, {
-        $filter: `sprk_projectid eq ${projectId}`,
-        // Live columns only (verified 2026-08-25). The three names this helper previously
-        // projected — _sprk_securitybuid_value, sprk_specontainerid,
-        // _sprk_externalaccountid_value — do not exist on sprk_project, so this query was a 400
-        // and the catch below turned it into a silent null. Every assertion built on it was
-        // therefore vacuous.
-        $select: [
-          'sprk_projectid',
-          'sprk_projectname',
-          'sprk_issecure',
-          'sprk_containerid',
-          '_owningteam_value',
-          '_sprk_securitybu_value',
-        ].join(','),
-        $top: '1',
-      });
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  // --------------------------------------------------------------------------
   // Helper: query a Business Unit by ID
   // --------------------------------------------------------------------------
 
   async function queryBusinessUnit(buId: string): Promise<BusinessUnitRecord | null> {
-    try {
-      const results = await dataverseApi.queryRecords<BusinessUnitRecord>(ENTITY_SETS.businessUnit, {
-        $filter: `businessunitid eq ${buId}`,
-        $select: 'businessunitid,name,_parentbusinessunitid_value',
-        $top: '1',
-      });
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Helper: query Account owned by a specific Business Unit
-  // --------------------------------------------------------------------------
-
-  async function queryAccountForBu(buId: string): Promise<AccountRecord | null> {
-    try {
-      const results = await dataverseApi.queryRecords<AccountRecord>(ENTITY_SETS.account, {
-        $filter: `_owningbusinessunit_value eq ${buId}`,
-        $select: 'accountid,name,_owningbusinessunit_value',
-        $top: '1',
-      });
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
+    const results = await appApi.queryRecords<BusinessUnitRecord>(ENTITY_SETS.businessUnit, {
+      $filter: `businessunitid eq ${buId}`,
+      $select: 'businessunitid,name,_parentbusinessunitid_value',
+      $top: '1',
+    });
+    return results[0] ?? null;
   }
 
   // ==========================================================================
-  // TC-070-01: Standard Secure Project Creation (new BU path)
+  // TC-070-01: Standard Secure Project Creation (the wizard's path)
   // ==========================================================================
 
   test('TC-070-01: should provision full infrastructure for a new secure project', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
     const projectRef = generateProjectRef();
+    const forbiddenContainers = await sharedContainerIds(appApi);
 
-    // ── Arrange: Create a project record in Dataverse with sprk_issecure = true ──
-    const projectPayload = buildSecureProjectPayload(projectRef);
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, projectPayload);
+    // ── Arrange: the creator creates an ORDINARY project, as the wizard does (no sprk_issecure) ──
+    const projectId = await creatorApi.createRecord(ENTITY_SETS.project, buildProjectPayload(projectRef));
     trackForCleanup(ENTITY_SETS.project, projectId, `secure project ${projectRef}`);
 
-    // ── Act: Call provision-project endpoint ─────────────────────────────────
+    const beforeProvisioning = await queryProject(creatorApi, projectId);
+    expect(beforeProvisioning).not.toBeNull();
+    // Provisioning, not the create, makes the project secure.
+    expect(beforeProvisioning!.sprk_issecure).toBe(false);
+    expect(beforeProvisioning!.sprk_containerid).toBeFalsy();
+    const creatorSystemUserId = beforeProvisioning!._createdby_value;
+    expect(creatorSystemUserId).toBeTruthy();
+
+    // ── Act: the same creator calls provision-project ─────────────────────────
     const { status, body } = await callProvisionProject({ projectId, projectRef });
     const response = body as ProvisionProjectResponse;
+    console.log(`[E2E] TC-070-01 provisioned ${projectId}: container ${response.speContainerId ?? '(none)'}`);
 
     // ── Assert: HTTP 200 with correct shape ───────────────────────────────────
-    expect(status).toBe(200);
+    expect(status, JSON.stringify(body)).toBe(200);
     expect(response.businessUnitId).toBeTruthy();
     expect(response.businessUnitName).toBe(SECURE_BU_NAME);
     expect(response.ownerTeamId).toBeTruthy();
     expect(response.speContainerId).toBeTruthy();
+    expect(response.resumed ?? false).toBe(false);
 
-    // Track ONLY the SPE container-bearing project for cleanup.
-    //
-    // Deliberately NOT tracking the business unit: it is the CANONICAL `Secure Record` BU, shared
-    // by every secure project and created during environment setup. The retired version of this test
-    // tracked it for deletion because provisioning created it per project — running that against the
-    // new endpoint would delete shared infrastructure. Nor is there an account to clean up.
+    // Assert INEQUALITY, not presence. A container that is a business unit's container or the shared default is
+    // shared storage, which is the disclosure this whole mechanism exists to prevent.
+    expect(forbiddenContainers).not.toContain(response.speContainerId);
+
+    // Only the project is tracked for cleanup. The business unit is NOT tracked: it is the CANONICAL
+    // `Secure Record` BU, shared by every secure project and created during environment setup. The retired version
+    // of this test tracked it for deletion because provisioning used to create one per project. Running that against
+    // the current endpoint would delete shared infrastructure. Provisioning creates no account either.
 
     // ── Assert: the resolved BU is the canonical one, not a per-project child ──
     const buRecord = await queryBusinessUnit(response.businessUnitId);
@@ -413,14 +392,20 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
     expect(buRecord!.name).not.toContain('SP-'); // no per-project BU was created
 
     // ── Assert: the project is OWNED by that BU's NAMED owner team ─────────────
-    // This is the security-relevant outcome. Ownership is what puts the record in the Secure Record
-    // business unit, and per design.md §5.1a no human holds access through it. Task 144: the owner is
-    // the NAMED team, never the BU's default team (whose membership is every user placed in the BU).
+    // This is the security-relevant outcome. Ownership puts the record in the Secure Record business unit, and per
+    // design.md §5.1a no human holds access through it. Task 144: the owner is the NAMED team, never the BU's default
+    // team (whose membership is every user placed in the BU).
     expect(response.ownerTeamName).toBe(SECURE_OWNER_TEAM_NAME);
     expect(response.ownerTeamName).not.toBe(SECURE_BU_NAME);
     expect(response.recordType).toBe('project');
     expect(response.recordId).toBe(projectId);
-    const projectRecord = await queryProject(projectId);
+
+    // ── Assert: the creator, and only the creator, was shared to ──────────────
+    expect(response.sharedToCreatorSystemUserId).toBe(creatorSystemUserId);
+
+    // Read back AS THE CREATOR. A memberless team owns the record now, so this read succeeds only through the
+    // creator's share.
+    const projectRecord = await queryProject(creatorApi, projectId);
     expect(projectRecord).not.toBeNull();
     expect(projectRecord!.sprk_issecure).toBe(true);
     expect(projectRecord!._owningteam_value).toBe(response.ownerTeamId);
@@ -428,71 +413,16 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
     // ── Assert: the container is recorded on the project ─────────────────────
     expect(projectRecord!.sprk_containerid).toBe(response.speContainerId);
 
-    // ── Assert: the CLIENT lookup was not touched ────────────────────────────
-    // sprk_externalaccount is the project's client. Provisioning must never write it — had the
-    // retired stamp's column name been repaired instead of removed, it would have overwritten the
-    // client with a synthetic "External Access — {project}" account.
+    // ── Assert: no per-project security BU was stamped ───────────────────────
     expect(projectRecord!._sprk_securitybu_value).toBeFalsy();
-  });
 
-  // ==========================================================================
-  // TC-070-02: Umbrella BU Reuse — Multi-Project Organisation
-  // ==========================================================================
-
-  // OBSOLETE (task 021, 2026-08-25): umbrella-BU reuse was one branch of "create a BU per project
-  // or reuse this one". Neither branch survives — there is ONE canonical `Secure Record` BU,
-  // resolved by name from server configuration, so a caller has no BU to select and `umbrellaBuId`
-  // no longer exists on the request. Nothing to re-author: the scenario itself is gone.
-  test.skip('TC-070-02: should reuse an existing umbrella BU and Account for a multi-project org', async () => {
-    const orgName = `E2E Org ${Date.now()}`;
-
-    // ── Arrange: Create a root-level Account to act as the "umbrella" org ─────
-    // First, we need a BU to own the Account (simulate an existing umbrella BU).
-    // We create a BU and Account pair as if they were set up by a previous project.
-    const umbrellaBuPayload = {
-      name: `E2E-Umbrella-BU-${Date.now()}`,
-      description: 'E2E test umbrella BU — safe to delete',
-    };
-    const umbrellaBuId = await dataverseApi.createRecord(ENTITY_SETS.businessUnit, umbrellaBuPayload);
-    trackForCleanup(ENTITY_SETS.businessUnit, umbrellaBuId, `umbrella BU for ${orgName}`);
-
-    const umbrellaAccountPayload = {
-      name: `External Access — ${orgName}`,
-      description: 'E2E test umbrella account — safe to delete',
-      'owningbusinessunit@odata.bind': `/businessunits(${umbrellaBuId})`,
-    };
-    const umbrellaAccountId = await dataverseApi.createRecord(ENTITY_SETS.account, umbrellaAccountPayload);
-    trackForCleanup(ENTITY_SETS.account, umbrellaAccountId, `umbrella account for ${orgName}`);
-
-    // Create a new project that will reuse the umbrella BU
-    const projectRef = generateProjectRef();
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, buildSecureProjectPayload(projectRef));
-    trackForCleanup(ENTITY_SETS.project, projectId, `secure project ${projectRef} (umbrella)`);
-
-    // ── Act: Provision with UmbrellaBuId — should skip BU and Account creation ─
-    const { status, body } = await callProvisionProject({
-      projectId,
-      projectRef,
-      umbrellaBuId,
-    });
-    const response = body as LegacyProvisionProjectResponse;
-
-    // ── Assert: Returns 200 with umbrella BU references ───────────────────────
-    expect(status).toBe(200);
-    expect(response.businessUnitId).toBe(umbrellaBuId);
-    expect(response.accountId).toBe(umbrellaAccountId);
-    expect(response.wasUmbrellaBu).toBe(true);
-    expect(response.speContainerId).toBeTruthy(); // SPE container still provisioned per project
-
-    // ── Assert: No new BU was created (only the umbrella BU exists for this org) ─
-    // (Verified by wasUmbrellaBu=true and businessUnitId matching the input umbrellaBuId)
-
-    // ── Assert: Project record references the umbrella infrastructure ──────────
-    const projectRecord = (await queryProject(projectId)) as LegacyProjectRecord | null;
-    expect(projectRecord).not.toBeNull();
-    expect(projectRecord!._sprk_securitybuid_value).toBe(umbrellaBuId);
-    expect(projectRecord!._sprk_externalaccountid_value).toBe(umbrellaAccountId);
-    expect(projectRecord!.sprk_specontainerid).toBe(response.speContainerId);
+    // ── Assert: a second call changes nothing (409 already_provisioned, no second container) ──
+    const again = await callProvisionProject({ projectId, projectRef });
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expect((again.body as ProblemBody).reasonCode).toBe(REASON.alreadyProvisioned);
+    const afterRepost = await queryProject(creatorApi, projectId);
+    expect(afterRepost!.sprk_containerid).toBe(response.speContainerId);
+    expect(afterRepost!._owningteam_value).toBe(response.ownerTeamId);
   });
 
   // ==========================================================================
@@ -500,17 +430,19 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
   // ==========================================================================
 
   test('TC-070-03: each project gets its own isolated SPE container', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
     const projectRef1 = generateProjectRef();
     const projectRef2 = generateProjectRef();
+    const forbiddenContainers = await sharedContainerIds(appApi);
 
-    // Create two separate secure projects
-    const projectId1 = await dataverseApi.createRecord(ENTITY_SETS.project, buildSecureProjectPayload(projectRef1));
+    // The creator creates two ordinary projects
+    const projectId1 = await creatorApi.createRecord(ENTITY_SETS.project, buildProjectPayload(projectRef1));
     trackForCleanup(ENTITY_SETS.project, projectId1, `secure project 1 — ${projectRef1}`);
 
-    const projectId2 = await dataverseApi.createRecord(ENTITY_SETS.project, buildSecureProjectPayload(projectRef2));
+    const projectId2 = await creatorApi.createRecord(ENTITY_SETS.project, buildProjectPayload(projectRef2));
     trackForCleanup(ENTITY_SETS.project, projectId2, `secure project 2 — ${projectRef2}`);
 
-    // Provision both
+    // ...and secures both
     const [result1, result2] = await Promise.all([
       callProvisionProject({ projectId: projectId1, projectRef: projectRef1 }),
       callProvisionProject({ projectId: projectId2, projectRef: projectRef2 }),
@@ -518,22 +450,28 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
 
     const response1 = result1.body as ProvisionProjectResponse;
     const response2 = result2.body as ProvisionProjectResponse;
+    console.log(
+      `[E2E] TC-070-03 containers: ${projectId1} → ${response1.speContainerId ?? '(none)'}, ` +
+        `${projectId2} → ${response2.speContainerId ?? '(none)'}`
+    );
 
-    expect(result1.status).toBe(200);
-    expect(result2.status).toBe(200);
+    expect(result1.status, JSON.stringify(result1.body)).toBe(200);
+    expect(result2.status, JSON.stringify(result2.body)).toBe(200);
 
-    // Nothing extra to track: no accounts and no per-project business units are created. The
-    // canonical Secure Record BU is shared infrastructure and must NEVER be tracked for deletion —
-    // the retired version of this test queued it twice.
+    // Nothing extra to track: provisioning creates no accounts and no per-project business units. The canonical
+    // Secure Record BU is shared infrastructure and must NEVER be tracked for deletion. The retired version of this
+    // test queued it twice.
 
-    // The assertion this test exists for, and it survives the re-scope unchanged: each secure
-    // project MUST get its OWN SPE container. A shared container is the disclosure.
+    // The assertion this test exists for, unchanged by the re-scope: each secure project MUST get its OWN SPE
+    // container. A shared container is the disclosure.
     expect(response1.speContainerId).toBeTruthy();
     expect(response2.speContainerId).toBeTruthy();
     expect(response1.speContainerId).not.toBe(response2.speContainerId);
+    expect(forbiddenContainers).not.toContain(response1.speContainerId);
+    expect(forbiddenContainers).not.toContain(response2.speContainerId);
 
-    // Both projects now resolve to the SAME business unit — the inverse of the old expectation, and
-    // the point of design.md §5.1's "no BU-per-project proliferation".
+    // Both projects now resolve to the SAME business unit. That is the inverse of the old expectation, and the point
+    // of design.md §5.1's "no BU-per-project proliferation".
     expect(response1.businessUnitId).toBe(response2.businessUnitId);
     expect(response1.businessUnitName).toBe(SECURE_BU_NAME);
     expect(response2.businessUnitName).toBe(SECURE_BU_NAME);
@@ -548,39 +486,20 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
 // ============================================================================
 
 test.describe('Secure Project Creation — Validation & Error Paths @e2e @secure-project', () => {
-  let dataverseApi: DataverseAPI;
-  let bffToken: string;
+  let appApi: DataverseAPI;
+  let creatorApi: DataverseAPI;
 
   const resourcesToCleanup: { entitySet: string; id: string; label: string }[] = [];
 
   test.beforeAll(async () => {
-    const dvToken = await DataverseAPI.authenticate(
-      process.env.TENANT_ID || '',
-      process.env.CLIENT_ID || '',
-      process.env.CLIENT_SECRET || '',
-      DATAVERSE_API_URL
-    );
-    dataverseApi = new DataverseAPI(DATAVERSE_API_URL, dvToken);
-
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: process.env.CLIENT_ID || '',
-        client_secret: process.env.CLIENT_SECRET || '',
-        scope: `api://${process.env.BFF_CLIENT_ID || process.env.CLIENT_ID}/.default`,
-      }),
-    });
-
-    const tokenJson = (await tokenResponse.json()) as { access_token?: string };
-    bffToken = tokenJson.access_token || '';
+    appApi = await connectAppDataverse();
+    creatorApi = connectCreatorDataverse();
   });
 
   test.afterAll(async () => {
     for (const resource of [...resourcesToCleanup].reverse()) {
       try {
-        await dataverseApi.deleteRecord(resource.entitySet, resource.id);
+        await appApi.deleteRecord(resource.entitySet, resource.id);
       } catch {
         console.warn(`[E2E] Cleanup failed for ${resource.label} (${resource.id})`);
       }
@@ -591,59 +510,32 @@ test.describe('Secure Project Creation — Validation & Error Paths @e2e @secure
     resourcesToCleanup.push({ entitySet, id, label });
   }
 
-  async function callProvisionProject(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
-    const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bffToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const responseBody = await response.json().catch(() => ({}));
-    return { status: response.status, body: responseBody };
-  }
-
   // ==========================================================================
-  // TC-070-10: Validation — Empty ProjectId
+  // TC-070-10: Gate — Empty ProjectId
   // ==========================================================================
 
-  test('TC-070-10: should return 400 when ProjectId is empty GUID', async () => {
+  // DelegationRuleFilter runs before the handler and answers 403 on EVERY exit path, including the ones that could
+  // arguably be 400 or 404. That way an unauthorized caller cannot enumerate records. The handler's own 400 is not
+  // reachable for a request that names no record.
+  test('TC-070-10: should return 403 (never 400) when ProjectId is the empty GUID', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
     const { status, body } = await callProvisionProject({
       projectId: '00000000-0000-0000-0000-000000000000',
       projectRef: 'E2E-VALIDATION',
     });
 
-    expect(status).toBe(400);
-    const problem = body as { title?: string; detail?: string };
-    expect(problem.title).toMatch(/validation|bad request/i);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect((body as ProblemBody).reasonCode).toBe(REASON.delegationTargetUnresolved);
   });
 
   // ==========================================================================
-  // TC-070-11: Validation — Missing ProjectRef (when UmbrellaBuId not provided)
+  // TC-070-12: Gate — Project Does Not Exist
   // ==========================================================================
 
-  // OBSOLETE (task 021): the rule under test was "ProjectRef is required unless UmbrellaBuId is
-  // provided", and it existed only because ProjectRef named the per-project BU (SP-{ProjectRef}).
-  // With no BU to name, ProjectRef is a display-name fallback and is genuinely optional, so this
-  // request is now VALID rather than a 400.
-  test.skip('TC-070-11: should return 400 when ProjectRef is missing and no UmbrellaBuId', async () => {
-    const { status, body } = await callProvisionProject({
-      projectId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      // No projectRef, no umbrellaBuId
-    });
-
-    expect(status).toBe(400);
-    const problem = body as { detail?: string };
-    expect(problem.detail).toMatch(/projectRef|required/i);
-  });
-
-  // ==========================================================================
-  // TC-070-12: Not Found — Project Does Not Exist
-  // ==========================================================================
-
-  test('TC-070-12: should return 404 when project does not exist in Dataverse', async () => {
+  // A caller cannot hold Write on a record that does not exist, so the delegation filter refuses with 403. A 404 here
+  // would tell an unauthorized caller which ids exist.
+  test('TC-070-12: should return 403 (never 404) when the project does not exist in Dataverse', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
     const nonExistentId = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
     const { status, body } = await callProvisionProject({
@@ -651,64 +543,78 @@ test.describe('Secure Project Creation — Validation & Error Paths @e2e @secure
       projectRef: 'E2E-NOT-FOUND',
     });
 
-    expect(status).toBe(404);
-    const problem = body as { title?: string; detail?: string };
-    expect(problem.title).toMatch(/not found/i);
-    expect(problem.detail).toContain(nonExistentId);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect([REASON.delegationWriteRequired, REASON.delegationCheckFailed]).toContain((body as ProblemBody).reasonCode);
   });
 
   // ==========================================================================
-  // TC-070-13: Validation — Project Exists But sprk_issecure = false
+  // TC-070-13: Creator rule — an ordinary project the caller did NOT create
   // ==========================================================================
 
-  test('TC-070-13: should return 400 when project exists but is not a Secure Project', async () => {
-    const projectRef = `E2E-NS-${Date.now()}`;
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
-      sprk_projectname: `E2E Non-Secure Project ${projectRef}`,
-      sprk_projectref: projectRef,
-      sprk_issecure: false,
-      sprk_description: 'E2E test non-secure project — safe to delete',
-    });
-    trackForCleanup(ENTITY_SETS.project, projectId, `non-secure project ${projectRef}`);
+  // Was "400 when the project is not a Secure Project". Since task 150 an unflagged project is the NORMAL input, and
+  // provisioning is what flags it. It is secured that way only for the person who created it (owner round 10 item 10).
+  // Here the APP identity creates the project, so `createdby` is an application user and no `sprk_createdbyperson` is
+  // stamped (only the BFF stamps it). The creator is then refused: by the delegation filter when they cannot write
+  // the record, otherwise by the creator rule. Either way the refusal comes before any write.
+  test('TC-070-13: should refuse to secure an ordinary project the caller did not create, changing nothing', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
+    const projectRef = `E2E-NC-${Date.now()}`;
+    const projectId = await appApi.createRecord(
+      ENTITY_SETS.project,
+      buildProjectPayload(projectRef, 'Not-Mine Project')
+    );
+    trackForCleanup(ENTITY_SETS.project, projectId, `app-created project ${projectRef}`);
+
+    const before = await queryProject(appApi, projectId);
+    expect(before).not.toBeNull();
 
     const { status, body } = await callProvisionProject({ projectId, projectRef });
 
-    expect(status).toBe(400);
-    const problem = body as { detail?: string };
-    expect(problem.detail).toMatch(/not a secure project|sprk_issecure/i);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect([REASON.notRecordCreator, REASON.delegationWriteRequired]).toContain((body as ProblemBody).reasonCode);
+
+    // Nothing changed: not flagged, not moved, no container.
+    const after = await queryProject(appApi, projectId);
+    expect(after).not.toBeNull();
+    expect(after!.sprk_issecure).not.toBe(true);
+    expect(after!._owningteam_value ?? null).toBe(before!._owningteam_value ?? null);
+    expect(after!._owninguser_value ?? null).toBe(before!._owninguser_value ?? null);
+    expect(after!.sprk_containerid).toBeFalsy();
   });
 
   // ==========================================================================
-  // TC-070-14: Not Found — Umbrella BU Does Not Exist
+  // TC-070-14: Fail closed — the configured Secure Record BU does not exist
   // ==========================================================================
 
-  // OBSOLETE (task 021): there is no caller-supplied BU to be absent. The equivalent case now is
-  // "the CONFIGURED Secure Record BU does not exist", which must fail closed with reasonCode
-  // `sdap.provision.secure_bu_not_found` and never fall back to the root or caller BU. Covered
-  // offline by ProvisionProject_WhenTheSecureBusinessUnitIsAbsent_FailsClosedAndProvisionsNothing;
-  // worth re-authoring here against a live environment, by temporarily pointing
-  // SecureRecord:BusinessUnitName at a name that does not exist.
-  test.skip('TC-070-14: should return 404 when umbrella BU does not exist', async () => {
-    const projectRef = `E2E-UMBRELLA-NF-${Date.now()}`;
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
-      sprk_projectname: `E2E Umbrella Not Found ${projectRef}`,
-      sprk_projectref: projectRef,
-      sprk_issecure: true,
-      sprk_description: 'E2E test — safe to delete',
-    });
-    trackForCleanup(ENTITY_SETS.project, projectId, `project for umbrella-not-found test`);
+  // OPERATOR-ARMED (task 047 step 7). It runs only when an operator has pointed the BFF's
+  // `SecureRecord:BusinessUnitName` at a name that does not exist and set E2E_SECURE_BU_MISCONFIGURED=true. Restore the
+  // setting afterwards: while it is wrong, EVERY secure create in the environment fails. Provisioning must fail closed
+  // with `sdap.provision.secure_bu_not_found` before any write, and never fall back to the root or the caller's BU.
+  // Offline: ProvisionProject_WhenTheSecureBusinessUnitIsAbsent_FailsClosedAndProvisionsNothing.
+  test('TC-070-14: should fail closed, changing nothing, when the configured Secure Record BU is absent', async () => {
+    test.skip(
+      process.env.E2E_SECURE_BU_MISCONFIGURED !== 'true',
+      'Operator-armed: set SecureRecord:BusinessUnitName to a nonexistent name and E2E_SECURE_BU_MISCONFIGURED=true'
+    );
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
 
-    const nonExistentBuId = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+    const projectRef = `E2E-BU-NF-${Date.now()}`;
+    const projectId = await creatorApi.createRecord(ENTITY_SETS.project, buildProjectPayload(projectRef));
+    trackForCleanup(ENTITY_SETS.project, projectId, `project for secure-BU-not-found test`);
+    const before = await queryProject(creatorApi, projectId);
+    expect(before).not.toBeNull();
 
-    const { status, body } = await callProvisionProject({
-      projectId,
-      projectRef,
-      umbrellaBuId: nonExistentBuId,
-    });
+    const { status, body } = await callProvisionProject({ projectId, projectRef });
 
-    expect(status).toBe(404);
-    const problem = body as { detail?: string };
-    expect(problem.detail).toContain(nonExistentBuId);
+    expect(status, JSON.stringify(body)).toBe(500);
+    expect((body as ProblemBody).reasonCode).toBe(REASON.secureBuNotFound);
+
+    const after = await queryProject(creatorApi, projectId);
+    expect(after).not.toBeNull();
+    expect(after!.sprk_issecure).toBe(false);
+    expect(after!._owninguser_value).toBe(before!._owninguser_value);
+    expect(after!._owningteam_value ?? null).toBe(before!._owningteam_value ?? null);
+    expect(after!.sprk_containerid).toBeFalsy();
   });
 
   // ==========================================================================
@@ -734,39 +640,20 @@ test.describe('Secure Project Creation — Validation & Error Paths @e2e @secure
 // ============================================================================
 
 test.describe('Secure Project — Infrastructure Reference Verification @e2e @secure-project', () => {
-  let dataverseApi: DataverseAPI;
-  let bffToken: string;
+  let appApi: DataverseAPI;
+  let creatorApi: DataverseAPI;
 
   const resourcesToCleanup: { entitySet: string; id: string; label: string }[] = [];
 
   test.beforeAll(async () => {
-    const dvToken = await DataverseAPI.authenticate(
-      process.env.TENANT_ID || '',
-      process.env.CLIENT_ID || '',
-      process.env.CLIENT_SECRET || '',
-      DATAVERSE_API_URL
-    );
-    dataverseApi = new DataverseAPI(DATAVERSE_API_URL, dvToken);
-
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: process.env.CLIENT_ID || '',
-        client_secret: process.env.CLIENT_SECRET || '',
-        scope: `api://${process.env.BFF_CLIENT_ID || process.env.CLIENT_ID}/.default`,
-      }),
-    });
-
-    const tokenJson = (await tokenResponse.json()) as { access_token?: string };
-    bffToken = tokenJson.access_token || '';
+    appApi = await connectAppDataverse();
+    creatorApi = connectCreatorDataverse();
   });
 
   test.afterAll(async () => {
     for (const resource of [...resourcesToCleanup].reverse()) {
       try {
-        await dataverseApi.deleteRecord(resource.entitySet, resource.id);
+        await appApi.deleteRecord(resource.entitySet, resource.id);
       } catch {
         console.warn(`[E2E] Cleanup failed for ${resource.label}`);
       }
@@ -778,8 +665,8 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
   }
 
   // ==========================================================================
-  // TC-070-20: Field Completeness — the container reference is stored, and the
-  //            CLIENT lookup is not touched
+  // TC-070-20: Field Completeness — the container reference is stored, and no
+  //            per-project security BU is stamped
   //
   // Was "all THREE references". Two of the three should never have existed:
   //   - sprk_securitybuid  → there is no per-project BU to reference
@@ -789,157 +676,40 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
   // silently failed for five months.
   // ==========================================================================
 
-  test('TC-070-20: the container reference is stored and the client lookup is untouched', async () => {
+  test('TC-070-20: the container reference is stored and no per-project security BU is stamped', async () => {
+    test.skip(CREATOR_TOKENS_MISSING, CREATOR_TOKENS_REASON);
     const projectRef = `E2E-REFS-${Date.now()}`;
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
-      sprk_projectname: `E2E Reference Check ${projectRef}`,
-      sprk_projectref: projectRef,
-      sprk_issecure: true,
-      sprk_description: 'E2E test — safe to delete',
-    });
+    const projectId = await creatorApi.createRecord(
+      ENTITY_SETS.project,
+      buildProjectPayload(projectRef, 'Reference Check')
+    );
     trackForCleanup(ENTITY_SETS.project, projectId, `project ${projectRef}`);
 
-    // Provision
-    const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bffToken}`,
-      },
-      body: JSON.stringify({ projectId, projectRef }),
-    });
+    // Provision, as the creator
+    const { status, body } = await callProvisionProject({ projectId, projectRef });
+    expect(status, JSON.stringify(body)).toBe(200);
+    const provisionResult = body as ProvisionProjectResponse;
+    console.log(`[E2E] TC-070-20 provisioned ${projectId}: container ${provisionResult.speContainerId}`);
 
-    expect(response.status).toBe(200);
-    const provisionResult = (await response.json()) as ProvisionProjectResponse;
+    // Provisioning creates no account and no per-project BU, so there is nothing extra to clean up. The canonical
+    // Secure Record BU must NEVER be tracked for deletion: it is shared infrastructure.
 
-    // No account and no per-project BU are created, so there is nothing extra to clean up — and the
-    // canonical Secure Record BU must NEVER be tracked for deletion; it is shared infrastructure.
+    // Read the project back from Dataverse, as the creator, to verify field persistence.
+    const record = await queryProject(creatorApi, projectId);
+    expect(record).not.toBeNull();
 
-    // Query the project record directly from Dataverse to verify field persistence.
-    // Every column named here exists on live sprk_project (verified 2026-08-25) — a $select naming a
-    // nonexistent column is a 400, which is how the retired version of this assertion could never
-    // have passed.
-    const projectRecord = await dataverseApi.queryRecords<ProjectRecord>(ENTITY_SETS.project, {
-      $filter: `sprk_projectid eq ${projectId}`,
-      $select: [
-        'sprk_projectid',
-        'sprk_issecure',
-        'sprk_containerid',
-        '_owningteam_value',
-        '_sprk_securitybu_value',
-      ].join(','),
-      $top: '1',
-    });
+    // sprk_issecure, set by provisioning (task 150), never by the create
+    expect(record!.sprk_issecure).toBe(true);
 
-    expect(projectRecord.length).toBe(1);
+    // sprk_containerid: the project's own container, the ONE reference provisioning records
+    expect(record!.sprk_containerid).toBeTruthy();
+    expect(record!.sprk_containerid).toBe(provisionResult.speContainerId);
 
-    const record = projectRecord[0];
-
-    // sprk_containerid — the project's own container, the ONE thing provisioning records
-    expect(record.sprk_containerid).toBeTruthy();
-    expect(record.sprk_containerid).toBe(provisionResult.speContainerId);
-
-    // Ownership — the security-relevant outcome
-    expect(record._owningteam_value).toBe(provisionResult.ownerTeamId);
+    // Ownership: the security-relevant outcome
+    expect(record!._owningteam_value).toBe(provisionResult.ownerTeamId);
 
     // No per-project security BU is stamped any more
-    expect(record._sprk_securitybu_value).toBeFalsy();
-  });
-
-  // ==========================================================================
-  // TC-070-21: Business Unit Naming Convention — SP-{ProjectRef}
-  // ==========================================================================
-
-  // OBSOLETE (task 021): the SP-{ProjectRef} convention named a per-project BU. design.md §5.1 says
-  // "no BU-per-project proliferation" — and those BUs were parented to the ROOT BU, placing them
-  // OUTSIDE the BU that NFR-05's standing assertion guards, so the convention was not merely
-  // redundant. The BU name is now whatever SecureRecord:BusinessUnitName resolves to.
-  test.skip('TC-070-21: Business Unit must follow SP-{ProjectRef} naming convention', async () => {
-    const uniqueRef = `REF-TEST-${Date.now()}`;
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
-      sprk_projectname: `E2E BU Naming Test ${uniqueRef}`,
-      sprk_projectref: uniqueRef,
-      sprk_issecure: true,
-      sprk_description: 'E2E test — safe to delete',
-    });
-    trackForCleanup(ENTITY_SETS.project, projectId, `project ${uniqueRef}`);
-
-    const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bffToken}`,
-      },
-      body: JSON.stringify({ projectId, projectRef: uniqueRef }),
-    });
-
-    expect(response.status).toBe(200);
-    const result = (await response.json()) as LegacyProvisionProjectResponse;
-
-    trackForCleanup(ENTITY_SETS.account, result.accountId, `account for ${uniqueRef}`);
-    trackForCleanup(ENTITY_SETS.businessUnit, result.businessUnitId, `BU SP-${uniqueRef}`);
-
-    // Verify the BU name strictly follows the SP-{ProjectRef} pattern
-    expect(result.businessUnitName).toBe(`SP-${uniqueRef}`);
-
-    // Verify in Dataverse directly
-    const buRecords = await dataverseApi.queryRecords<BusinessUnitRecord>(ENTITY_SETS.businessUnit, {
-      $filter: `businessunitid eq ${result.businessUnitId}`,
-      $select: 'businessunitid,name',
-      $top: '1',
-    });
-
-    expect(buRecords.length).toBe(1);
-    expect(buRecords[0].name).toBe(`SP-${uniqueRef}`);
-  });
-
-  // ==========================================================================
-  // TC-070-22: External Access Account Owned by Child BU
-  // ==========================================================================
-
-  // OBSOLETE (task 021): no account is created. Firms are `sprk_organization` in this codebase and
-  // nothing in the external-access model reads an `account`. Critically, the column the synthetic
-  // account was aimed at — `sprk_externalaccount` — is the project's CLIENT lookup
-  // (ProjectLiveFactResolver.cs:33), so had the stamp ever worked it would have overwritten the
-  // client. Provisioning must now never write that column; asserted offline by
-  // ProvisionProject_OnTheHappyPath_NeverWritesTheClientLookup.
-  test.skip('TC-070-22: External Access Account must be owned by the child Business Unit', async () => {
-    const projectRef = `E2E-ACC-OWN-${Date.now()}`;
-    const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
-      sprk_projectname: `E2E Account Ownership Test ${projectRef}`,
-      sprk_projectref: projectRef,
-      sprk_issecure: true,
-      sprk_description: 'E2E test — safe to delete',
-    });
-    trackForCleanup(ENTITY_SETS.project, projectId, `project ${projectRef}`);
-
-    const response = await fetch(`${EXTERNAL_ACCESS_BASE}/provision-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bffToken}`,
-      },
-      body: JSON.stringify({ projectId, projectRef }),
-    });
-
-    expect(response.status).toBe(200);
-    const result = (await response.json()) as LegacyProvisionProjectResponse;
-
-    trackForCleanup(ENTITY_SETS.account, result.accountId, `account for ${projectRef}`);
-    trackForCleanup(ENTITY_SETS.businessUnit, result.businessUnitId, `BU SP-${projectRef}`);
-
-    // Query the Account and verify its owning BU matches the child BU
-    const accountRecords = await dataverseApi.queryRecords<AccountRecord>(ENTITY_SETS.account, {
-      $filter: `accountid eq ${result.accountId}`,
-      $select: 'accountid,name,_owningbusinessunit_value',
-      $top: '1',
-    });
-
-    expect(accountRecords.length).toBe(1);
-
-    const account = accountRecords[0];
-    expect(account._owningbusinessunit_value).toBe(result.businessUnitId);
-    expect(account.name).toContain('External Access');
+    expect(record!._sprk_securitybu_value).toBeFalsy();
   });
 });
 
@@ -951,25 +721,27 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
  * NOTE: These are E2E tests that require a deployed environment.
  *
  * Prerequisites before running:
- *   1. BFF API deployed to dev: https://spe-api-dev-67e2xz.azurewebsites.net
+ *   1. BFF API deployed to dev: https://spaarke-bff-dev.azurewebsites.net
  *   2. Dataverse dev environment available: https://spaarkedev1.crm.dynamics.com
  *   3. SharePointEmbedded:ContainerTypeId configured on the BFF API
- *   4. Azure AD app registration with the following permissions:
- *      - Dataverse API: user_impersonation
- *      - Microsoft Graph: FileStorageContainer.Selected
- *   5. Configure tests/e2e/config/.env with:
+ *   4. An app registration (CLIENT_ID) with Dataverse access, used only for lookups and cleanup. It needs Delete on
+ *      sprk_project, because the creator's share does not include Delete.
+ *   5. ONE internal test user (the creator) with Create + Write on sprk_project, and delegated tokens for that user.
+ *   6. Configure tests/e2e/config/.env with:
  *      TENANT_ID=<your-tenant-id>
  *      CLIENT_ID=<app-client-id>
  *      CLIENT_SECRET=<app-client-secret>
- *      BFF_CLIENT_ID=<bff-api-client-id>
- *      BFF_API_URL=https://spe-api-dev-67e2xz.azurewebsites.net
+ *      BFF_API_URL=https://spaarke-bff-dev.azurewebsites.net
  *      DATAVERSE_API_URL=https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2
+ *      SECURE_CREATOR_BFF_TOKEN=<delegated token for the creator, audience the BFF app>
+ *      SECURE_CREATOR_DATAVERSE_TOKEN=<delegated token for the SAME user, audience Dataverse>
+ *      SPE_DEFAULT_CONTAINER_ID=<optional: the BFF's SharePointEmbedded:DefaultContainerId>
+ *      E2E_SECURE_BU_MISCONFIGURED=<true only while an operator has broken SecureRecord:BusinessUnitName (TC-070-14)>
+ *
+ * Without the two creator tokens, every case except TC-070-15 skips with a reason.
  *
  * Run all secure project creation tests:
  *   npx playwright test secure-project-creation.spec.ts
- *
- * Run only happy-path tests:
- *   npx playwright test secure-project-creation.spec.ts -g "@e2e @secure-project"
  *
  * Run a single test case by ID:
  *   npx playwright test secure-project-creation.spec.ts -g "TC-070-01"
@@ -979,9 +751,8 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
  *
  * Expected test execution time: ~2-5 minutes (depends on Dataverse and SPE latency)
  *
- * NOTE: SPE container creation requires the BFF API to have valid Graph credentials
- * with FileStorageContainer.Selected scope. If this is not configured, TC-070-01
- * through TC-070-03 and TC-070-20 through TC-070-22 will fail with a 500 response.
- * TC-070-10 through TC-070-15 (validation tests) will still pass as they test
- * early-exit paths before SPE container creation.
+ * NOTE: SPE container creation requires the BFF API to have valid Graph credentials with the
+ * FileStorageContainer.Selected scope. Without it, TC-070-01, TC-070-03 and TC-070-20 fail with a 500 response
+ * (`sdap.provision.container_creation_failed`). TC-070-10 through TC-070-15 still pass, because they test exit paths
+ * that come before SPE container creation.
  */

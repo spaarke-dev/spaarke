@@ -44,6 +44,39 @@
 var Spaarke = Spaarke || {};
 Spaarke.Event = Spaarke.Event || {};
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar dates (spaarke-ontology-platform-r1 task 098)
+//
+// sprk_duedate / sprk_finalduedate / sprk_basedate / sprk_completeddate / sprk_approveddate / sprk_meetingdate are
+// Dataverse Date Only columns: the Web API returns and accepts ONLY "YYYY-MM-DD" (a timestamp is HTTP 400). A plain
+// web resource cannot import @spaarke/ui-components, so these two helpers are local equivalents of its dateLocal
+// `formatDateOnly` / `parseDueDate` with the same semantics: the browser's LOCAL calendar day, never the UTC one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The LOCAL calendar date of a Date as "YYYY-MM-DD" (never toISOString(), which is the UTC date).
+ * @param {Date} date
+ * @returns {string}
+ */
+Spaarke.Event._toDateOnly = function(date) {
+    var m = String(date.getMonth() + 1);
+    var d = String(date.getDate());
+    return date.getFullYear() + "-" + (m.length < 2 ? "0" + m : m) + "-" + (d.length < 2 ? "0" + d : d);
+};
+
+/**
+ * Parse "YYYY-MM-DD" as that LOCAL calendar day (new Date("YYYY-MM-DD") is UTC midnight - the previous day west of
+ * UTC). Anything else is parsed as an instant. Returns null for empty/invalid input.
+ * @param {string} value
+ * @returns {Date|null}
+ */
+Spaarke.Event._parseDateOnly = function(value) {
+    if (!value) return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+    var date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+};
+
 /**
  * Event Status values (sprk_eventstatus custom field)
  * Replaces OOB statecode/statuscode for better control
@@ -200,7 +233,8 @@ Spaarke.Event.CompleteEvent = function(formContext) {
     var eventNameAttr = formContext.getAttribute("sprk_name");
     var eventName = eventNameAttr ? eventNameAttr.getValue() : "Event";
     var dueDateAttr = formContext.getAttribute("sprk_duedate");
-    var dueDate = dueDateAttr && dueDateAttr.getValue() ? dueDateAttr.getValue().toISOString() : "";
+    // Task 098: the form's Date Only value is the user's local day — pass it as that calendar date.
+    var dueDate = dueDateAttr && dueDateAttr.getValue() ? Spaarke.Event._toDateOnly(dueDateAttr.getValue()) : "";
 
     // Build URL with parameters
     var dialogUrl = "sprk_event_complete_dialog.html" +
@@ -239,7 +273,9 @@ Spaarke.Event.CompleteEvent = function(formContext) {
  * @private
  */
 Spaarke.Event._executeComplete = function(formContext, completedDateStr, notes) {
-    var completedDate = completedDateStr ? new Date(completedDateStr) : new Date();
+    // Task 098: the dialog returns "YYYY-MM-DD" — that LOCAL day (new Date("YYYY-MM-DD") was the previous day west
+    // of UTC). setValue on a Date Only attribute stores the Date's local calendar day.
+    var completedDate = Spaarke.Event._parseDateOnly(completedDateStr) || Spaarke.Event._parseDateOnly(Spaarke.Event._toDateOnly(new Date()));
 
     // Update Event Status (custom field)
     var eventStatusAttr = formContext.getAttribute("sprk_eventstatus");
@@ -348,12 +384,12 @@ Spaarke.Event.RescheduleEvent = function(formContext) {
     // TODO: Replace with custom dialog web resource for better UX
     var newDateStr = prompt(
         "Enter new due date (YYYY-MM-DD):",
-        currentDueDate ? currentDueDate.toISOString().split('T')[0] : ""
+        currentDueDate ? Spaarke.Event._toDateOnly(currentDueDate) : ""
     );
 
     if (newDateStr) {
-        var newDate = new Date(newDateStr);
-        if (isNaN(newDate.getTime())) {
+        var newDate = Spaarke.Event._parseDateOnly(newDateStr); // task 098: the typed LOCAL day
+        if (!newDate) {
             Xrm.Navigation.openAlertDialog({
                 title: "Invalid Date",
                 text: "Please enter a valid date in YYYY-MM-DD format."
@@ -780,7 +816,8 @@ Spaarke.Event.CompleteSelectedEvents = function(selectedControl) {
  * @private
  */
 Spaarke.Event._executeBulkComplete = function(eventIds, gridControl) {
-    var now = new Date().toISOString();
+    // Task 098: sprk_completeddate is Date Only — "YYYY-MM-DD", the user's local day (a timestamp is HTTP 400).
+    var now = Spaarke.Event._toDateOnly(new Date());
     var promises = eventIds.map(function(eventId) {
         return Xrm.WebApi.updateRecord("sprk_event", eventId, {
             sprk_eventstatus: Spaarke.Event.EventStatus.COMPLETED,
@@ -843,7 +880,7 @@ Spaarke.Event.Homepage.CompleteSelected = function(selectedIds, entityName) {
                 selectedIds,
                 Spaarke.Event.EventStatus.COMPLETED,
                 "Completed",
-                { sprk_completeddate: new Date().toISOString() }
+                { sprk_completeddate: Spaarke.Event._toDateOnly(new Date()) } // task 098: Date Only, local day
             );
         }
     });

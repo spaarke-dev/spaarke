@@ -21,7 +21,7 @@ const BUILD_DATE = new Date().toLocaleDateString('en-US', {
 // All values REQUIRED — no dev-specific fallbacks.
 // Set in .env (local dev) or CI/CD pipeline environment variables.
 const REQUIRED_ENV_VARS = ['ADDIN_CLIENT_ID', 'TENANT_ID', 'BFF_API_CLIENT_ID', 'BFF_API_BASE_URL'];
-const missingVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+const missingVars = REQUIRED_ENV_VARS.filter(v => !process.env[v]);
 if (missingVars.length > 0) {
   throw new Error(
     `[Office Add-in Webpack] Missing required environment variables: ${missingVars.join(', ')}.\n` +
@@ -55,6 +55,10 @@ const ENV_CONFIG = {
   // (unified-access-control-r2 task 161, on master via #1312). A local or other build without the setting
   // keeps the tab off.
   ADDIN_EMAIL_TAB_ENABLED: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true' ? 'true' : 'false',
+  // Optional: the dev-only sign-in Diagnostics view ("⋮ → Diagnostics", task 113 — provisioning's guest sign-in
+  // test). Default OFF; only the exact string "true" turns it on. The dev deploy workflow sets it; a production
+  // build must leave it unset.
+  ADDIN_DIAGNOSTICS_ENABLED: process.env.ADDIN_DIAGNOSTICS_ENABLED === 'true' ? 'true' : 'false',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -73,7 +77,8 @@ const ENV_CONFIG = {
  * see packaging/mergeUnifiedManifest.js and projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md.
  *
  * Two ids that the standalone JSON manifests used to CONFLATE are kept apart here:
- *   - ADDIN_CLIENT_ID  → the Entra app registration. Goes in `webApplicationInfo.id` ONLY.
+ *   - ADDIN_CLIENT_ID  → the Entra app registration. NOT in the package (task 115: no `webApplicationInfo`); the
+ *                        merge only refuses it as the package id.
  *   - ADDIN_APP_ID     → the app PACKAGE id. Its own GUID. The admin center identifies the app by it, so it
  *                        must stay STABLE for the life of the package — every release is an update of it.
  * Both live add-ins today are XML (Outlook 5e4d66d0-…, Word b3965ea0-…), so the package is a NEW app; the XML
@@ -84,11 +89,13 @@ const ENV_CONFIG = {
  * user sees is what the admin uploaded.
  *
  * 1.1.1 (task 089, UAT-10): the Word ribbon's Share is replaced by "Open Spaarke".
+ * 1.1.2 (task 115): no `webApplicationInfo` (a customer tenant's deployment failed on its consent step,
+ *   AADSTS700016); the 404 `CommandRuntime.code.script` entries removed.
  */
 const UNIFIED_PACKAGE = {
   APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
   TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
-  VERSION: '1.1.1',
+  VERSION: '1.1.2',
 };
 
 /** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
@@ -106,7 +113,9 @@ function readXmlAddinPermissions(relativePath) {
   const xml = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8');
   const match = /<Permissions>\s*([A-Za-z]+)\s*<\/Permissions>/.exec(xml);
   if (!match) {
-    throw new Error(`[Office Add-in Webpack] No <Permissions> found in ${relativePath}; cannot build the unified package.`);
+    throw new Error(
+      `[Office Add-in Webpack] No <Permissions> found in ${relativePath}; cannot build the unified package.`
+    );
   }
   return match[1];
 }
@@ -139,20 +148,24 @@ class SpaarkeUnifiedPackagePlugin {
             return Boolean(match) && fs.existsSync(path.join(assetsDir, match[1]));
           };
 
-          const production = mergeUnifiedManifest(readManifest('./outlook/manifest.json'), readManifest('./word/manifest.json'), {
-            appId: UNIFIED_PACKAGE.APP_ID,
-            clientId: ENV_CONFIG.ADDIN_CLIENT_ID,
-            version: UNIFIED_PACKAGE.VERSION,
-            legacyXmlIds: {
-              mail: readXmlAddinId('./outlook/outlook-manifest.xml'),
-              document: readXmlAddinId('./word/word-manifest.xml'),
-            },
-            legacyXmlPermissions: {
-              mail: readXmlAddinPermissions('./outlook/outlook-manifest.xml'),
-              document: readXmlAddinPermissions('./word/word-manifest.xml'),
-            },
-            assetExists,
-          });
+          const production = mergeUnifiedManifest(
+            readManifest('./outlook/manifest.json'),
+            readManifest('./word/manifest.json'),
+            {
+              appId: UNIFIED_PACKAGE.APP_ID,
+              clientId: ENV_CONFIG.ADDIN_CLIENT_ID,
+              version: UNIFIED_PACKAGE.VERSION,
+              legacyXmlIds: {
+                mail: readXmlAddinId('./outlook/outlook-manifest.xml'),
+                document: readXmlAddinId('./word/word-manifest.xml'),
+              },
+              legacyXmlPermissions: {
+                mail: readXmlAddinPermissions('./outlook/outlook-manifest.xml'),
+                document: readXmlAddinPermissions('./word/word-manifest.xml'),
+              },
+              assetExists,
+            }
+          );
           const test = deriveTestVariant(production, { appId: UNIFIED_PACKAGE.TEST_APP_ID });
 
           const { RawSource } = webpack.sources;
@@ -231,10 +244,7 @@ module.exports = async (env, options) => {
         // under `module.rules`.
         // Task 099 (ADR-012 amended 2026-10-05 / ADR-044): the ONE shared `cleanGuid` (`utils/guid.ts` — a pure
         // module, zero imports), by exact alias — replaces this package's former local copy.
-        '@spaarke/ui-components/guid$': path.resolve(
-          __dirname,
-          '../shared/Spaarke.UI.Components/src/utils/guid.ts'
-        ),
+        '@spaarke/ui-components/guid$': path.resolve(__dirname, '../shared/Spaarke.UI.Components/src/utils/guid.ts'),
         '@spaarke/ui-components/send-email-pane$': path.resolve(
           __dirname,
           '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
@@ -274,10 +284,7 @@ module.exports = async (env, options) => {
         },
         {
           test: /\.css$/,
-          use: [
-            mode === 'production' ? MiniCssExtractPlugin.loader : 'style-loader',
-            'css-loader',
-          ],
+          use: [mode === 'production' ? MiniCssExtractPlugin.loader : 'style-loader', 'css-loader'],
         },
         {
           test: /\.(png|jpg|jpeg|gif|svg|ico)$/,
@@ -338,8 +345,13 @@ module.exports = async (env, options) => {
             // URL substitution (ADDIN_BASE_URL) that resolves the manifest's Commands.Url also
             // resolves this page when word/commands/index.ts builds its displayDialogAsync URL
             // from window.location.origin at runtime (no separate substitution needed here).
-            from: './word/commands/notify.html',
+            from: './shared/commands/notify.html',
             to: 'word/commands-notify.html',
+          },
+          {
+            // task 118: the SAME page for the Outlook ribbon Quick Save dialog (one page, served per host).
+            from: './shared/commands/notify.html',
+            to: 'outlook/commands-notify.html',
           },
           {
             // Unified JSON manifest (email-communication-solution-r4 task 072 / FR-25) —
@@ -348,7 +360,7 @@ module.exports = async (env, options) => {
             // (never referenced by this build). Parameterize app IDs + base URL at build time.
             from: './outlook/manifest.json',
             to: 'outlook/manifest.json',
-            transform: (content) => {
+            transform: content => {
               let manifest = content.toString();
               // Replace hardcoded app ID in "id" and "webApplicationInfo.id"
               manifest = manifest.replace(
@@ -381,7 +393,7 @@ module.exports = async (env, options) => {
             // builds pointed at production — that bug is what this transform fixes.
             from: './word/word-manifest.xml',
             to: 'word/manifest.xml',
-            transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
+            transform: content => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
           },
           // (Task 078) The standalone `word/manifest.json` output was RETIRED here. It was a dev-sideload copy
           // whose top-level `id` webpack rewrote to ADDIN_CLIENT_ID — the same package id as the Outlook JSON —
@@ -397,7 +409,7 @@ module.exports = async (env, options) => {
             from: './outlook/outlook-manifest.xml',
             to: 'outlook/outlook-manifest.xml',
             noErrorOnMissing: true,
-            transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
+            transform: content => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
           // Mock Office.js for browser testing
@@ -415,6 +427,7 @@ module.exports = async (env, options) => {
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
         'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
         'process.env.ADDIN_EMAIL_TAB_ENABLED': JSON.stringify(ENV_CONFIG.ADDIN_EMAIL_TAB_ENABLED),
+        'process.env.ADDIN_DIAGNOSTICS_ENABLED': JSON.stringify(ENV_CONFIG.ADDIN_DIAGNOSTICS_ENABLED),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
         // Task 089: the pane footer shows the app-package version, not a hand-maintained literal.

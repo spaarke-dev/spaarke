@@ -4,7 +4,7 @@
     <title>AccessGrantModal: deny-list (ethical wall) management + level-bearing standing grants (FR-23 UI, FR-25 UI, design §6)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 064 (deny endpoints) + 066 (report-based rows) merged</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend writing authorization vetoes (ethical walls); tags pcf/frontend + auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,7 +13,7 @@
     <parallel-group>phase4-wave6</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Same component files as 065/066 (AccessGrantModal.tsx/types.ts) — solo wave.</parallel-reason>
-    <deps>064, 066</deps>
+    <deps>064</deps>
     <tags>pcf, frontend, fluent-ui, auth</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -32,7 +32,6 @@
     </relevant-files>
     <dependencies>
       <dependency task="064" status="pending">Deny-list add/remove endpoints + report rows carrying deny/veto state.</dependency>
-      <dependency task="066" status="pending">Report-based Current Access rendering this section composes with.</dependency>
     </dependencies>
   </context>
 
@@ -150,5 +149,11 @@ ADDITIONAL UI TESTS (binding — part of this task's ui-tests):
 - No Write: as a Read-only user on the same record, the person icon stays disabled and nothing opens Manage Access.
 - Dark mode: the labels are legible and distinct from the veto and suppressed styling.
 Depends on 064 (this amendment; already a dep). Task 153 depends on THIS task (it calls the plumbing); this task does not depend on 153.</amendment>
+  </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 067)">
+    <verdict>KEEP, NARROWED (owner round 59 item 3). A read-only No Access section plus suppressed and vetoed rows. 066 is folded in. Authoring stays in 154's form, so there is ONE place to author walls.</verdict>
+    <amendment n="1" title="Scope">(1) A read-only No Access section in Manage Access, listing the entry rows from 064's narrowed route (shown to Write holders only). (2) A veto marker on affected Current Access rows, so a walled contact's grant row no longer reads as active. (3) From 066: rows that Secure or Restricted cancels render as suppressed, styled on the client from accessPermissionState / isSecureRecord.</amendment>
+    <amendment n="2" title="Cut">Add/remove UI (154's form is the only authoring surface); the direct-open-to-section plumbing (optional initial section on onOpenGrantModal, the PCF host and IAccessGrantModalProps; no caller under O1-final); standing-level editing (FR-25 UI); enforcement labels; 066's server-report rebase.</amendment>
+    <amendment n="3" title="Dependencies and deploy">Depends on 064 only; 066 is absorbed, so it is removed from deps. Same PCF (TrackingFieldTrio / AccessGrantModal) as 099: run 067 then 099 and ship ONE PCF deploy (live session D, UI check as a read-only user and a Write user).</amendment>
   </amendments>
 </task>

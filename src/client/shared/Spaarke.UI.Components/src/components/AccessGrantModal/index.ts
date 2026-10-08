@@ -23,9 +23,13 @@ export type {
   // because the host file had been reviewed and never compiled — the first production build of
   // v1.0.31 failed on TS2305 for exactly these two names.
   IUserPick,
+  IUserPickOptions,
   ISecureOwnerInfo,
   ExternalGrantRootType,
   IAccessLevelOption,
   AccessPermissionState,
+  // Task 067: the No Access List entry (064's contract) and the host's organization-membership answer.
+  IRecordNoAccessEntry,
+  IContactOrganizationMembership,
 } from './types';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';

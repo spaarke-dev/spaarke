@@ -884,14 +884,26 @@ public class EventEntity
     /// <summary>Status reason (statuscode) — live values in <see cref="EventStatusCode"/>.</summary>
     public int StatusCode { get; set; }
 
-    /// <summary>Base date (sprk_basedate)</summary>
-    public DateTime? BaseDate { get; set; }
+    // Task 098: the six sprk_event date columns are calendar dates (Behavior DateOnly) — read with DataverseDateOnly,
+    // never converted to a local time. docs/data-model/sprk_event-date-columns.md.
 
-    /// <summary>Due date (sprk_duedate)</summary>
-    public DateTime? DueDate { get; set; }
+    /// <summary>Base date (sprk_basedate) — a calendar date.</summary>
+    public DateOnly? BaseDate { get; set; }
 
-    /// <summary>Completed date (sprk_completeddate)</summary>
-    public DateTime? CompletedDate { get; set; }
+    /// <summary>Due date (sprk_duedate) — a calendar date.</summary>
+    public DateOnly? DueDate { get; set; }
+
+    /// <summary>Final due date (sprk_finalduedate) — a calendar date.</summary>
+    public DateOnly? FinalDueDate { get; set; }
+
+    /// <summary>Completed date (sprk_completeddate) — the completing user's local calendar date.</summary>
+    public DateOnly? CompletedDate { get; set; }
+
+    /// <summary>Approved date (sprk_approveddate) — a calendar date.</summary>
+    public DateOnly? ApprovedDate { get; set; }
+
+    /// <summary>Meeting date (sprk_meetingdate) — a calendar date.</summary>
+    public DateOnly? MeetingDate { get; set; }
 
     /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
@@ -958,11 +970,11 @@ public class CreateEventRequest
     /// <summary>Event Type ID</summary>
     public Guid? EventTypeId { get; set; }
 
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
+    /// <summary>Base date (sprk_basedate) — a calendar date, written as yyyy-MM-dd (task 098).</summary>
+    public DateOnly? BaseDate { get; set; }
 
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
+    /// <summary>Due date (sprk_duedate) — a calendar date, written as yyyy-MM-dd (task 098).</summary>
+    public DateOnly? DueDate { get; set; }
 
     /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }

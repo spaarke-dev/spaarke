@@ -144,6 +144,59 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
     expect(bodyOf(fetchMock, '/api/v1/external-access/grant')).toBeUndefined();
   });
 
+  it('Grant on a user suggestion refused as external names the person (task 114 owner test, 2026-10-07)', async () => {
+    const base = fetchWith([PENDING_LINKED_USER]);
+    const fetchMock = jest.fn(async (url: string, init?: RequestInit) =>
+      String(url).endsWith('/share-user')
+        ? json(
+            {
+              title: 'Not shared',
+              detail:
+                'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.',
+              reasonCode: 'sdap.access.user_share.user_not_internal',
+            },
+            false,
+            422
+          )
+        : base(url, init)
+    );
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Ines Internal' }));
+
+    expect(
+      await screen.findByText(
+        'System user Ines Internal is an external user. Restricted records cannot be shared with external users.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('Grant on a user suggestion whose related records are still updating reports the grant, not a failure', async () => {
+    const base = fetchWith([PENDING_LINKED_USER]);
+    const fetchMock = jest.fn(async (url: string, init?: RequestInit) =>
+      String(url).endsWith('/share-user')
+        ? json(
+            {
+              title: 'Shared',
+              detail: '2 related records are not updated yet; they complete automatically.',
+              reasonCode: 'sdap.access.user_share.children_incomplete',
+            },
+            false,
+            500
+          )
+        : base(url, init)
+    );
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Ines Internal' }));
+
+    expect(
+      await screen.findByText(
+        /Granted Ines Internal access \(suggested from Assigned To \(Internal\)\)\. 2 related records are not updated yet/
+      )
+    ).toBeInTheDocument();
+  });
+
   it('Dismiss declines the suggestion through /assigned-access/dismiss', async () => {
     const fetchMock = fetchWith([PENDING_CONTACT]);
     renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);

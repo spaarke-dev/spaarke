@@ -1231,6 +1231,28 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
 
+### `Deploy-ExternalShareExpiryViews.ps1`
+**Purpose:** Creates two public views on `sprk_externalrecordaccess` in SpaarkeCore. "Active External Shares by Expiration" lists every active row, soonest expiry first. "External Shares Expiring in 30 Days" lists the same rows with an expiry on or before today + 30, using a relative filter that never goes stale. Together they answer what is about to lapse across all external shares, which the per-grant reminders (FR-33) cannot.
+**Usage:** 🟡 Per environment, once; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-07 by `unified-access-control-r2` task 101)
+**Dependencies:** Azure CLI (`az login`) with System Customizer or System Administrator in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-07, dry run and `-Verify` against `spaarkedev1`. Not applied (operator step).
+
+**Command:**
+```powershell
+# Dry run (default): checks every column against metadata, runs both queries live, prints the plan. Zero writes.
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1
+
+# Create, rewrite a same-named view that differs (snapshot to scripts/logs/ first), add to SpaarkeCore if missing, publish when anything was written or is unpublished, then verify.
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Apply
+
+# Check: exit 0 = both views exist once, are published with the right definition, are in SpaarkeCore, and return the right rows (all pages).
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Verify
+```
+
+Detail, including the measured semantics of the relative date operators: [`projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md`](../projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md).
+
 ### `Set-RecordNumberingSchema.ps1`
 **Purpose:** The INTERIM record numbering (owner decisions 2026-10-02, "until we build the numbering function"): Matters get `MAT-######`, Projects `PRJ-######`, sequential, from Dataverse's platform autonumber. `sprk_matternumber` / `sprk_projectnumber` are their tables' PRIMARY NAME, so a record without a number is nameless everywhere (write-path invariant **I-11**). Sets the `AutoNumberFormat`, seeds the sequence from the data (above the highest existing `MAT-`/`PRJ-` value), numbers blank rows oldest first, creates the alternate keys, and confirms `SpaarkeCore` carries the tables.
 **Usage:** 🔴 Per environment, after every solution import into a NEW environment (the seed is not carried by an import); `-Verify` any time. Idempotent.
