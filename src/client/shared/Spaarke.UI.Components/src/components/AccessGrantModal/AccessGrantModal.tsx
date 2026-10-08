@@ -174,6 +174,7 @@ import type {
   ISecureOwnerInfo,
 } from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
+import { isApiError, isAuthFailure, problemOf } from '../../utils/thrownFetchError';
 
 const useStyles = makeStyles({
   section: {
@@ -370,26 +371,48 @@ class AccessGrantModalApiError extends Error {
   static async fromResponse(response: Response): Promise<AccessGrantModalApiError> {
     const status = response.status;
     try {
-      const body = (await response.json()) as {
-        reasonCode?: string;
-        detail?: string;
-        title?: string;
-        // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
-        // carries these today; every other ProblemDetails leaves them undefined.
-        deactivatedCount?: number;
-        speContainerOutcome?: string;
-      };
-      const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
-      const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
-      const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
-      const speContainerOutcome =
-        typeof body?.speContainerOutcome === 'string'
-          ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
-          : undefined;
-      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
+      return AccessGrantModalApiError.fromBody(status, await response.json());
     } catch {
       return new AccessGrantModalApiError(status, `HTTP ${status}`);
     }
+  }
+
+  /**
+   * Builds an error from what `@spaarke/auth`'s `authenticatedFetch` THROWS for a non-OK response —
+   * it never returns one, so without this every `instanceof AccessGrantModalApiError` branch in this
+   * file is unreachable under the fetch every host injects. An `ApiError` carries the status and the
+   * already-parsed ProblemDetails (read exactly as {@link fromResponse} reads a body); an `AuthError`
+   * is the 401 whose retries ran out. Returns `null` for anything else (a network failure), which the
+   * caller rethrows untouched — it is not a server answer.
+   */
+  static fromThrown(err: unknown): AccessGrantModalApiError | null {
+    if (isApiError(err)) {
+      const problem = problemOf(err);
+      return problem ? AccessGrantModalApiError.fromBody(err.status, problem) : new AccessGrantModalApiError(err.status, err.message);
+    }
+    if (isAuthFailure(err)) {
+      return new AccessGrantModalApiError(401, err instanceof Error && err.message ? err.message : 'HTTP 401');
+    }
+    return null;
+  }
+
+  /** The shared ProblemDetails read behind {@link fromResponse} and {@link fromThrown}. */
+  private static fromBody(status: number, raw: unknown): AccessGrantModalApiError {
+    const body = (raw ?? {}) as {
+      reasonCode?: string;
+      detail?: string;
+      title?: string;
+      // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
+      // carries these today; every other ProblemDetails leaves them undefined.
+      deactivatedCount?: number;
+      speContainerOutcome?: string;
+    };
+    const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
+    const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
+    const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+    const speContainerOutcome =
+      typeof body?.speContainerOutcome === 'string' ? (body.speContainerOutcome as SpeContainerRevokeOutcome) : undefined;
+    return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
   }
 }
 
@@ -827,17 +850,35 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // Secure-record owner/BU read-only display (task 065, design.md §6).
   const [secureOwnerInfo, setSecureOwnerInfo] = React.useState<ISecureOwnerInfo | null>(null);
 
+  /** Calls the host `authenticatedFetch` and returns the OK response. A non-OK
+   * answer becomes {@link AccessGrantModalApiError} whichever way the fetch
+   * delivers it: THROWN (`@spaarke/auth`'s authenticatedFetch — every host
+   * today) or RETURNED (a non-throwing fetch). Anything else it throws (a
+   * network failure) is rethrown untouched. */
+  const requestOk = React.useCallback(
+    async (path: string, init: RequestInit): Promise<Response> => {
+      let res: Response;
+      try {
+        res = await authenticatedFetch(path, init);
+      } catch (err) {
+        throw AccessGrantModalApiError.fromThrown(err) ?? err;
+      }
+      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
+      return res;
+    },
+    [authenticatedFetch]
+  );
+
   /** GETs a relative BFF path via the host `authenticatedFetch` and returns
    * the parsed JSON body. Throws {@link AccessGrantModalApiError} on a non-OK
    * response (task-024 finding M8) instead of reading the failure body as a
    * success. */
   const getJson = React.useCallback(
     async <T,>(path: string): Promise<T> => {
-      const res = await authenticatedFetch(path, { method: 'GET' });
-      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
+      const res = await requestOk(path, { method: 'GET' });
       return (await res.json()) as T;
     },
-    [authenticatedFetch]
+    [requestOk]
   );
 
   /** Reads this record's internal system-user shares (task 063/065, FR-29) —
@@ -985,15 +1026,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * either the designed deny banner or a non-blocking notice. */
   const postJson = React.useCallback(
     async <T,>(path: string, body: unknown): Promise<T> => {
-      const res = await authenticatedFetch(path, {
+      const res = await requestOk(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
       return (await res.json()) as T;
     },
-    [authenticatedFetch]
+    [requestOk]
   );
 
   /** Outcome of a single {@link grantContact} call — the grant write itself

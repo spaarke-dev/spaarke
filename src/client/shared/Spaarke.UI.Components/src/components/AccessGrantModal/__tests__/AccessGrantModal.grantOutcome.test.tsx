@@ -24,6 +24,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAccessGrantModalProps, IAccessGrantCandidate } from '../types';
 
 const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
@@ -36,7 +37,8 @@ const CANDIDATE: IAccessGrantCandidate = {
 };
 
 function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Response {
-  return { ok, status, json: async () => body } as unknown as Response;
+  // A BFF ProblemDetails always carries `status`.
+  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
 }
 
 function problem(status: number, reasonCode: string, detail: string): Response {
@@ -45,7 +47,7 @@ function problem(status: number, reasonCode: string, detail: string): Response {
 
 /** Answers every read; the grant routes answer whatever `grantResponse` says. */
 function fetchWith(grantResponse: (url: string) => Response | null, shares: unknown[] = []): jest.Mock {
-  return jest.fn(async (url: string) => {
+  return throwingAuthenticatedFetch(async (url: string) => {
     const overridden = grantResponse(url);
     if (overridden) return overridden;
     if (url.includes('/user-shares')) return jsonResponse({ shares });
