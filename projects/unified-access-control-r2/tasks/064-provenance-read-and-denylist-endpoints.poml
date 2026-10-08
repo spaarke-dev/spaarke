@@ -4,7 +4,7 @@
     <title>BFF: record-access provenance read + deny-list management endpoints (FR-30 server half, FR-23 UI closure)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 032 (FR-19 evaluator), 038 (FR-23 deny store), 041 (FR-24 allow-list), 042 (FR-25 standing levels) + 060 merged; 063 precedes it in the exclusive zone</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs: the provenance read is the attestation-bearing inverse of the evaluator; deny-list writes are ethical-wall mutations.</rigor-reason>
     <model-tier>sonnet</model-tier>
