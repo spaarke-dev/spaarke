@@ -47,6 +47,12 @@ internal sealed record ChildAccessPermissionRun
     /// <summary>Writes that failed: carried, and the run is not a success.</summary>
     public int Failed { get; init; }
 
+    /// <summary>Rows whose value differs but were not written because the run reached its write cap (verifier F3).</summary>
+    public int Deferred { get; init; }
+
+    /// <summary>The run stopped writing at its cap: the caller keeps the window, so the next run continues.</summary>
+    public bool WriteCapReached { get; init; }
+
     /// <summary>Up to 50 "table id: reason" lines for undetermined and failed rows.</summary>
     public IReadOnlyList<string> Problems { get; init; } = [];
 
@@ -123,12 +129,15 @@ internal sealed class ChildAccessPermissionReconciler
     /// (<c>(null, Guid.Empty)</c>-like start: pass <see cref="SweepFromStart"/>).</param>
     /// <param name="sweepCap">Rows in the sweep window.</param>
     /// <param name="writes">False: decide and report only.</param>
+    /// <param name="maxWrites">The most rows this run writes (verifier F3). Past it a differing row is counted
+    /// <see cref="ChildAccessPermissionRun.Deferred"/> and left for the next run.</param>
     internal async Task<ChildAccessPermissionRun> RunAsync(
         DateTimeOffset since,
         IReadOnlyCollection<(string Table, Guid Id)> carried,
         (string Table, Guid Id)? sweepAfter,
         int sweepCap,
         bool writes,
+        int maxWrites,
         CancellationToken ct)
     {
         var candidates = new Dictionary<(string Table, Guid Id), Entity>();
@@ -210,7 +219,8 @@ internal sealed class ChildAccessPermissionReconciler
         }
 
         // Decide each row of the four tables.
-        int examined = 0, correct = 0, changed = 0, would = 0, parentless = 0, undetermined = 0, failed = 0;
+        int examined = 0, correct = 0, changed = 0, would = 0, parentless = 0, undetermined = 0, failed = 0, deferred = 0;
+        var attempted = 0;
         var problems = new List<string>();
         var changes = new List<(string, Guid, int?, int)>();
         var carry = new List<(string, Guid)>();
@@ -248,6 +258,12 @@ internal sealed class ChildAccessPermissionReconciler
                 continue;
             }
 
+            if (writes && attempted >= maxWrites)
+            {
+                deferred++; // F3: the window is kept, so the next run lists this row again and writes it
+                continue;
+            }
+
             if (changes.Count < MaxListed)
                 changes.Add((table, id, stored, inherited));
 
@@ -260,6 +276,7 @@ internal sealed class ChildAccessPermissionReconciler
                 continue;
             }
 
+            attempted++;
             try
             {
                 await _dataverse.UpdateAsync(table, id,
@@ -291,6 +308,8 @@ internal sealed class ChildAccessPermissionReconciler
             Parentless = parentless,
             Undetermined = undetermined,
             Failed = failed,
+            Deferred = deferred,
+            WriteCapReached = deferred > 0,
             Problems = problems,
             Changes = changes,
             Carry = carry,

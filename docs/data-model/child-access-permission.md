@@ -54,7 +54,9 @@ All four are Choice columns bound to the GLOBAL choice `sprk_accesspermission` (
 | A hand edit of a parented child | The same pass (the row changed) | Reverted within one run |
 | Rows nobody changed (created before task 173; drift after a restart) | The same pass's capped sweep window (`SecureChild:Reconciliation:MaxAccessPermissionRowsPerRun`, default 1000) until the instance has covered every row once | Within ceil(rows / cap) runs of a start |
 
-Report: the job's `ResultJson.accessPermission` (`changed`, `parentless`, `undetermined`, `changes[]`, `sweep`). A listing fault or a failed write makes the run unsuccessful; an undecidable row is reported and carried.
+Report: the job's `ResultJson.accessPermission` (`changed`, `parentless`, `undetermined`, `deferred`, `writeCapReached`, `changes[]`, `sweep`). A listing fault or a failed write makes the run unsuccessful; an undecidable row is reported and carried.
+
+**Write cap.** At most `SecureChild:Reconciliation:MaxAccessPermissionWritesPerRun` writes per run (default 500). A run that reaches it stops writing and keeps its window (the watermark and the sweep cursor stay), so the next run lists the same rows and writes the next ones; only differing rows are written, so a matter with thousands of children converges over several runs. The pass runs after the secure pass has saved its own cursor and watermark.
 
 ## The form
 

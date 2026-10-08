@@ -59,6 +59,13 @@ Escalation trigger 3 does not fire: no path writes these tables without the reco
 7. **Undetermined rows do not fail the run** (they are reported and carried, at most `MaxCarriedRows`); a listing fault or a failed write does. The value is display only, and a structural undeterminable row (a loop) would otherwise fail every run.
 8. **Not in `CoreAncestorRestamper.AfterWriteAsync`.** That cascade is also the AI update tool's narrow app-only step (`CoreAncestorAfterWriteRestamp`, owner round 8 item 1: stamp columns only). The refresh is a separate member that `ChildRecordEndpoints` calls.
 9. **Plain control added to two forms**: Communication "Message main form" (`b58ec3d8`) and "Document main form" (`9088d6a4`) — round 81 "a permission control on these child records, but NOT TrackingFieldTrio on Communication" (owner question O-2: which forms).
+11. **Verifier pass 1 (PR #1458) fixes:**
+    - F3: a per-run write cap, `SecureChild:Reconciliation:MaxAccessPermissionWritesPerRun`, default 500. A capped run keeps its watermark and sweep cursor and reports `deferred` / `writeCapReached`. The pass now runs AFTER the secure pass saves its cursor and watermark.
+    - `CoreAncestorResolver` is required, not optional, in the job; every job test harness registers it (`SecureChildShareWorld.CoreAncestorsOver`).
+    - The Office To Do with a record AND a carrier is recomputed after the carrier is set (`CoreAncestorResolver.ApplyInheritedAccessPermissionAsync`); this was the K2 in §8.
+    - The remaining "retired" comments in Communication.Components and TrackingFieldTrio are corrected.
+    - The restamper doc comment is moved.
+    - HELD: ADR-006 ("MUST NOT create legacy JavaScript web resources") vs `sprk_accesspermission_inherited.js`. The coordinator raises it with the owner as a §6.5 ADR conflict; the library stays thin (platform form APIs only, lineage map pinned by the parity test, no access decision).
 10. **Locked = disabled + not submitted + a bound PCF's change put back.** A form script cannot disable one parameter of the TrackingFieldTrio pill; the library reverts a change the pill makes while the record has a parent.
 
 ## 5. No access decision reads a child's value (AC 7, escalation trigger 2)
@@ -105,6 +112,8 @@ Scope (AC 10): the rule (ranking, null, unknown value), the walk (top of a deep 
 
 **Suite results (branch merged with master `6cd5d9a47`, 2026-10-08):** `Sprk.Bff.Api.Tests` 18,760 passed / 4 failed / 54 skipped in a 33-minute run — the 4 (`DocumentEmailIdentityContractTests`, `DocumentProfileContractTests`, `ChatAgentRouteProofTests`, the upload-session binding verifier test) each ran ~3 minutes (host start-up timeouts under load) and all pass on re-run in isolation (22/22); none touches this task's code. `Spaarke.ArchTests` 811/811. `Sprk.Bff.Api.IntegrationTests` 87 passed / 4 skipped. `Spe.Integration.Tests` 350 passed / 25 skipped. Task 173's own: 30 .NET (data-mutation + unit) + 3 contract additions, 8 jest, script `-SelfTest` 33 + 9.
 
+**Pass-1 fixes:** focused suites 341/341 (task tests, every job harness, Office and Event contracts, child-record routes). The record+carrier Office test goes red when the recompute is removed.
+
 **Seeding proof (the one the AC asks for)**, run 2026-10-08: in `ChildAccessPermissionReconciler.RunAsync`, replacing the `parents.Count == 0` branch with "a parentless row inherits Standard" turned `Run_AParentlessChildsOwnValue_AndAnUnfiledChildsLastValue_AreNeverOverwritten` red on its write assertion; dropping the branch alone turned it red on `parentless`. Restored; green.
 
 Beyond the AC's list, one line each: the event-create and email-draft payload cases prove the two `DeriveForHostAsync` callers emit the value (goal 2 names those paths); the parity test is the only guard on the form/server map; the world extensions are test infrastructure.
@@ -116,7 +125,6 @@ Beyond the AC's list, one line each: the event-create and email-draft payload ca
 - **K2** — after a restart the new instance's window starts 60 minutes back; older drift is reached by the sweep window, ceil(rows / 1000) runs.
 - **K4** — the `/api/v1/child-records` route's inline refresh is covered by the helper's own tests and backstopped by the reconcile, not by a route-level test (the route harness creates rows in a different in-memory world than its restamper reads).
 - **K2** — in an environment that lacks one of the 13 tables the pass lists (or a lineage lookup column), the listing fails every run and reports it (the run is unsuccessful; nothing is written wrongly). Same root cause and fix candidates as the secure pass's #1378; the pass has its own watermark, so it never stalls the secure pass.
-- **K2** — an `Office` To Do with a record regarding AND a carrier takes the record's value inline; when the carrier's filing is more restrictive, the reconcile raises it within a cycle (the carrier is set after the record's `StampAsync`).
 
 ## 9. Supersession (for `notes/decisions.md` "Superseded and withdrawn rules", on the work branch)
 

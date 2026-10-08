@@ -296,19 +296,9 @@ public class InheritedAccessPermissionStampTests
 
     private ParentLineageWalk Walk() => new(World(), Probe(), [Column]);
 
-    /// <summary>Every lineage lookup, root column and stamp column exists; so does sprk_accesspermission, except where named.</summary>
-    internal static CoreAncestorResolver.EntityColumnProbe Probe(params string[] tablesWithoutColumn) => (table, _) =>
-    {
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (SecureChildLineage.Children.TryGetValue(table, out var lineage))
-            columns.UnionWith(lineage.Lookups.Keys);
-        if (CoreAncestorResolver.IntermediateRootColumns.TryGetValue(table, out var roots))
-            columns.UnionWith(roots.Select(r => r.Column));
-        columns.UnionWith(CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
-        if (!tablesWithoutColumn.Contains(table, StringComparer.OrdinalIgnoreCase))
-            columns.Add(Column);
-        return Task.FromResult<IReadOnlySet<string>>(columns);
-    };
+    /// <summary>The world's column probe (every lineage lookup, root and stamp column; sprk_accesspermission except where named).</summary>
+    internal static CoreAncestorResolver.EntityColumnProbe Probe(params string[] tablesWithoutColumn) =>
+        SecureChildShareWorld.ColumnProbe(tablesWithoutColumn);
 
     private sealed class CapturingLogger : ILogger<CoreAncestorResolver>
     {

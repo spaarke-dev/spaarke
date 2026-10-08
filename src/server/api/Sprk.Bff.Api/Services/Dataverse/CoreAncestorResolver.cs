@@ -908,6 +908,24 @@ public sealed class CoreAncestorResolver
     }
 
     /// <summary>
+    /// Task 173 (owner round 81): set the inherited Access Permission on a payload from EVERY filing parent it names now —
+    /// for a writer that adds a parent after its <c>StampAsync</c> call (the Office To Do's carrier, set after the record
+    /// regarding was stamped). Leaves the payload as it is when the row is parentless or the parents cannot be decided.
+    /// Never throws (cancellation aside).
+    /// </summary>
+    public async Task<int?> ApplyInheritedAccessPermissionAsync(Entity child, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        var inherited = await InheritedAccessPermissionAsync(
+            child.LogicalName,
+            ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
+            null, Guid.Empty, ct, self: child.Id).ConfigureAwait(false);
+        if (inherited is { } level)
+            child[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        return inherited;
+    }
+
+    /// <summary>
     /// Task 173 (owner round 81): after a BFF write that created a row or changed what it is filed under, through a writer
     /// whose payload did not pass through <c>StampAsync</c> (the client's generic create and re-file,
     /// <c>/api/v1/child-records/{table}</c>), set the row's <c>sprk_accesspermission</c> to the value its parents give it,

@@ -436,6 +436,34 @@ internal sealed class SecureChildShareWorld
             accessCacheInvalidator);
     }
 
+    /// <summary>
+    /// Task 173: the REAL <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/> over this world, as the host
+    /// registers it unconditionally (<c>AddCoreAncestorResolver</c>) — so every job harness composes it like the host does
+    /// (no asymmetric registration; the reconciliation job requires it).
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver CoreAncestorsOver(
+        Func<SecureChildShareWorld> current, params string[] tablesWithoutAccessPermission) =>
+        new(EntitiesOver(current).Object, ColumnProbe(tablesWithoutAccessPermission),
+            NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
+
+    /// <summary>
+    /// Task 173: the column probe of this world — every lineage lookup, root column and stamp column exists, and so does
+    /// <c>sprk_accesspermission</c>, except on the tables named.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ColumnProbe(
+        params string[] tablesWithoutAccessPermission) => (table, _) =>
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (SecureChildLineage.Children.TryGetValue(table, out var lineage))
+            columns.UnionWith(lineage.Lookups.Keys);
+        if (Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.IntermediateRootColumns.TryGetValue(table, out var roots))
+            columns.UnionWith(roots.Select(r => r.Column));
+        columns.UnionWith(Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
+        if (!tablesWithoutAccessPermission.Contains(table, StringComparer.OrdinalIgnoreCase))
+            columns.Add("sprk_accesspermission");
+        return Task.FromResult<IReadOnlySet<string>>(columns);
+    };
+
     /// <summary>The two Secure Record names this world uses, as configuration.</summary>
     public static IConfiguration Configuration() =>
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

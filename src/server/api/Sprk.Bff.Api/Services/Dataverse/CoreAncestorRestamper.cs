@@ -150,12 +150,6 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
-    /// Whether a write of <paramref name="writtenColumns"/> to <paramref name="entityLogicalName"/> can move a stamp — it
-    /// changes what the record is filed under (a stamped child's source or pair) or its root (an intermediate with
-    /// children). A caller that constructs its dependencies inline asks this first, so a write that cannot move a stamp
-    /// costs nothing at all.
-    /// </summary>
-    /// <summary>
     /// Task 173 (owner round 81): after a create or re-file through a writer that did not stamp through
     /// <see cref="CoreAncestorResolver.StampAsync(Microsoft.Xrm.Sdk.Entity, string, Guid, CancellationToken)"/>, set the row's
     /// inherited Access Permission (<see cref="CoreAncestorResolver.RefreshInheritedAccessPermissionAsync"/>, the ONE
@@ -166,6 +160,12 @@ public sealed class CoreAncestorRestamper
     public Task<int?> RefreshInheritedAccessPermissionAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
         _coreAncestors.RefreshInheritedAccessPermissionAsync(entityLogicalName, recordId, ct);
 
+    /// <summary>
+    /// Whether a write of <paramref name="writtenColumns"/> to <paramref name="entityLogicalName"/> can move a stamp — it
+    /// changes what the record is filed under (a stamped child's source or pair) or its root (an intermediate with
+    /// children). A caller that constructs its dependencies inline asks this first, so a write that cannot move a stamp
+    /// costs nothing at all.
+    /// </summary>
     public static bool WriteCanMoveAStamp(string entityLogicalName, IEnumerable<string> writtenColumns)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName) || writtenColumns is null)

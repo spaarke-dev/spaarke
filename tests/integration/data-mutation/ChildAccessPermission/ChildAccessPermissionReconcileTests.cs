@@ -138,6 +138,37 @@ public class ChildAccessPermissionReconcileTests
         third.GetProperty("accessPermission").GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
     }
 
+    [Fact]
+    public async Task Run_WhenTheWriteCapIsReached_TheWindowIsKept_AndTheNextRunWritesTheRest_ThenItConverges()
+    {
+        // Verifier F3: a matter with many children turning Restricted must not be written in one run.
+        var job = new Harness(maxWritesPerRun: 2);
+        var matter = job.Root("sprk_matter", Standard);
+        var todos = Enumerable.Range(0, 3)
+            .Select(_ => job.Child("sprk_todo", Standard, ("sprk_regardingmatter", "sprk_matter", matter)))
+            .ToArray();
+        await job.RunAsync(); // settles (everything correct) and finishes the sweep
+        job.World.Set("sprk_matter", matter, Column, new OptionSetValue(Restricted));
+        job.World.Modified("sprk_matter", matter, job.Now.UtcDateTime);
+
+        var capped = (await job.RunAsync()).GetProperty("accessPermission");
+        var firstWrites = job.World.AccessPermissionWrites.Count;
+        var next = (await job.RunAsync()).GetProperty("accessPermission");
+        var settled = (await job.RunAsync()).GetProperty("accessPermission");
+
+        firstWrites.Should().Be(2, "the run stops writing at its cap");
+        capped.GetProperty("writeCapReached").GetBoolean().Should().BeTrue();
+        capped.GetProperty("deferred").GetInt32().Should().Be(1);
+        next.GetProperty("since").GetDateTime().Should().Be(capped.GetProperty("since").GetDateTime(),
+            "a capped run keeps its watermark, so the next run lists the same window");
+        next.GetProperty("changed").GetInt32().Should().Be(1, "only the row still differing is written");
+        next.GetProperty("writeCapReached").GetBoolean().Should().BeFalse();
+        job.World.AccessPermissionWrites.Select(w => w.Id).Should().BeEquivalentTo(todos, "every child, each written once");
+        settled.GetProperty("changed").GetInt32().Should().Be(0, "it converges: correct rows are not written again");
+        settled.GetProperty("since").GetDateTime().Should().BeAfter(capped.GetProperty("since").GetDateTime(),
+            "the window moves once a run finishes under the cap");
+    }
+
     /// <summary>The job over a world, as the scheduler builds it: one instance, the real reconciler, synchronizer and core-ancestor resolver per run.</summary>
     private sealed class Harness
     {
@@ -145,21 +176,19 @@ public class ChildAccessPermissionReconcileTests
         private readonly SecureChildReconciliationJob _job;
         private readonly ServiceProvider _provider;
 
-        public Harness(int? maxRowsPerRun = null)
+        public Harness(int? maxRowsPerRun = null, int? maxWritesPerRun = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => World).Object);
             services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => World, Shares, null!));
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(() => World, Shares));
-            services.AddSingleton(sp => new CoreAncestorResolver(
-                sp.GetRequiredService<IGenericEntityService>(),
-                InheritedAccessPermissionStampTests.Probe(),
-                NullLogger<CoreAncestorResolver>.Instance));
+            services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World));
             _provider = services.BuildServiceProvider();
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
                 [SecureChildReconciliationJob.MaxAccessPermissionRowsPerRunConfigKey] = maxRowsPerRun?.ToString(),
+                [SecureChildReconciliationJob.MaxAccessPermissionWritesPerRunConfigKey] = maxWritesPerRun?.ToString(),
             }).Build();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), _time, configuration,

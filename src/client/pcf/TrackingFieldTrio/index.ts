@@ -252,9 +252,10 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environme
 // sprk_matter and sprk_workassignment carry the identical option set (verified
 // live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
 // same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
-// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
-// column is retired (task 138, owner Q6): a communication inherits its parent's
-// permission and has no value of its own.
+// shared `TrackingFieldTrio` core (FR-14). The same global choice backs the
+// column on To Do, Event, Communication and Document, where it is a display copy
+// of the parent's value that enforcement never reads (task 173, owner round 81;
+// it was to be retired by task 138). No TrackingFieldTrio is placed on Communication.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;

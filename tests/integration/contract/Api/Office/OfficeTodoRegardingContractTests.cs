@@ -252,6 +252,44 @@ public class OfficeTodoRegardingContractTests
     }
 
     [Fact]
+    public async Task Post_OfficeCreateTodo_StandardRecordAndADocumentUnderARestrictedMatter_IsCreatedRestricted()
+    {
+        // The record regarding is stamped before the carrier is set; the value is computed again over both (verifier K2).
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+        var standardProject = Guid.NewGuid();
+        var restrictedMatter = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        factory.CarrierRows[("sprk_document", documentId)] = new Entity("sprk_document", documentId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", restrictedMatter),
+        };
+        factory.WalkRows[("sprk_document", documentId)] = factory.CarrierRows[("sprk_document", documentId)];
+        factory.WalkRows[("sprk_project", standardProject)] = new Entity("sprk_project", standardProject)
+        {
+            ["sprk_accesspermission"] = new OptionSetValue(100000000),
+        };
+        factory.WalkRows[("sprk_matter", restrictedMatter)] = new Entity("sprk_matter", restrictedMatter)
+        {
+            ["sprk_accesspermission"] = new OptionSetValue(100000002),
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Record and document",
+            RegardingEntityType = "Project",
+            RegardingRecordId = standardProject,
+            DocumentId = documentId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle().Which.GetAttributeValue<OptionSetValue>("sprk_accesspermission")!
+            .Value.Should().Be(100000002, "the document's matter is the more restrictive parent");
+    }
+
+    [Fact]
     public async Task Post_OfficeCreateTodo_WhenTheMatterCannotBeRead_IsStillCreated_WithoutAnAccessPermission()
     {
         // The value is display only: a parent the walk cannot read never fails the create, and no Standard is guessed.
