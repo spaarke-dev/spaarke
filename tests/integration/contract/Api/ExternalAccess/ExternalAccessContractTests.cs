@@ -442,6 +442,54 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     }
 
     // ================================================================================
+    // ===== (4c) Task 105 · ISS-002 — a cut-short list says so (additive field) =======
+    // ================================================================================
+
+    private static readonly string[] ListRoutes =
+    {
+        "/api/v1/external/projects",
+        $"/api/v1/external/projects/{ProjectA}/documents",
+        $"/api/v1/external/projects/{ProjectA}/events",
+        $"/api/v1/external/projects/{ProjectA}/contacts",
+        $"/api/v1/external/projects/{ProjectA}/organizations",
+    };
+
+    public static TheoryData<string> ListRouteData()
+    {
+        var data = new TheoryData<string>();
+        foreach (var route in ListRoutes)
+            data.Add(route);
+        return data;
+    }
+
+    /// <summary>
+    /// The list envelope carries <c>truncated: true</c> when the read was cut short, and OMITS the field for a complete
+    /// list — so a complete response is exactly the <c>{ "value": [...] }</c> shape the SPA has always read.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ListRouteData))]
+    public async Task ListRoute_CarriesTruncatedOnlyWhenTheReadWasCutShort(string route)
+    {
+        using (var complete = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA }))
+        {
+            var response = await complete.GetAsync(route);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "body was: {0}", await response.Content.ReadAsStringAsync());
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            doc.RootElement.TryGetProperty("value", out _).Should().BeTrue();
+            doc.RootElement.TryGetProperty("truncated", out _).Should().BeFalse("a complete list does not carry the field");
+        }
+
+        using (var cut = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA }))
+        {
+            cut.DefaultRequestHeaders.Add("X-Test-Truncated", "1");
+            var response = await cut.GetAsync(route);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "body was: {0}", await response.Content.ReadAsStringAsync());
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            doc.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue("a cut-short list says so (NFR-03)");
+        }
+    }
+
+    // ================================================================================
     // ===== (5) Provisioner idempotency (FR-08) ======================================
     // ================================================================================
 
@@ -1394,15 +1442,23 @@ internal sealed class StubExternalDataService : ExternalDataService
     // ── Task 136: the project READ seams, recorded. A route that admits a caller reaches one of these and
     // returns 200; a route that denies must never reach them (asserted through ExternalAccessContractFixture.DataReads).
 
-    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>> GetProjectsAsync(
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>> GetProjectsAsync(
         IEnumerable<Guid> projectIds, CancellationToken ct = default)
     {
         var ids = projectIds.ToList();
         _reads.Enqueue($"{nameof(GetProjectsAsync)}:{string.Join(",", ids)}");
-        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>>(ids
-            .Select(id => new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = id.ToString(), SprkName = "Project" })
-            .ToList());
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>
+        {
+            Value = ids
+                .Select(id => new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = id.ToString(), SprkName = "Project" })
+                .ToList(),
+            Truncated = TruncatedRequested,
+        });
     }
+
+    /// <summary>Task 105: <c>X-Test-Truncated</c> present ⇒ the read reports itself cut short.</summary>
+    private bool TruncatedRequested =>
+        _accessor.HttpContext?.Request.Headers.ContainsKey("X-Test-Truncated") == true;
 
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto?> GetProjectByIdAsync(
         Guid projectId, CancellationToken ct = default)
@@ -1412,36 +1468,32 @@ internal sealed class StubExternalDataService : ExternalDataService
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = projectId.ToString(), SprkName = "Project" });
     }
 
-    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>> GetDocumentsAsync(
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>> GetDocumentsAsync(
         Guid projectId, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetDocumentsAsync)}:{projectId}");
-        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>>(
-            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>());
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto> { Truncated = TruncatedRequested });
     }
 
-    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>> GetEventsAsync(
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>> GetEventsAsync(
         Guid projectId, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetEventsAsync)}:{projectId}");
-        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>>(
-            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>());
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto> { Truncated = TruncatedRequested });
     }
 
-    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>> GetContactsAsync(
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>> GetContactsAsync(
         Guid projectId, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetContactsAsync)}:{projectId}");
-        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>>(
-            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>());
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto> { Truncated = TruncatedRequested });
     }
 
-    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>> GetOrganizationsAsync(
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>> GetOrganizationsAsync(
         Guid projectId, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetOrganizationsAsync)}:{projectId}");
-        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>>(
-            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>());
+        return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto> { Truncated = TruncatedRequested });
     }
 
     public override Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(Guid documentId, CancellationToken ct = default)

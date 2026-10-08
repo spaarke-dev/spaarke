@@ -207,7 +207,7 @@ public sealed class EventRoutesLiveTests
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
             _out.WriteLine($"ExternalDataService.CreateEventAsync -> id={ext.SprkEventid} sprk_status={ext.SprkStatus}");
             ext.SprkStatus.Should().Be(EventStatusCode.Open);
-            var listedExternal = (await external.GetEventsAsync(projectId)).Single(e => e.SprkEventid == ext.SprkEventid);
+            var listedExternal = (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid);
             listedExternal.SprkName.Should().Be("zz-097-test external create");
 
             // ── A REAL child-BU user: denied on the operator's root-BU event, allowed on its own ─────────────────
