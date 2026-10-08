@@ -161,7 +161,7 @@ public sealed class MetadataService
             Attributes: projectedAttributes);
     }
 
-    private static AttributeDto ProjectAttribute(AttributeMetadata attr)
+    internal static AttributeDto ProjectAttribute(AttributeMetadata attr) // internal for tests (task 098)
     {
         var attributeType = attr.AttributeType?.ToString() ?? "Unknown";
         var format = ExtractFormat(attr);
@@ -176,7 +176,8 @@ public sealed class MetadataService
             Format: format,
             IsPrimaryName: isPrimaryName,
             IsPrimaryId: isPrimaryId,
-            OptionSet: optionSet);
+            OptionSet: optionSet,
+            DateTimeBehavior: (attr as DateTimeAttributeMetadata)?.DateTimeBehavior?.Value); // task 098
     }
 
     /// <summary>

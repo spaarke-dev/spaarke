@@ -92,7 +92,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-001',
       sprk_name: 'Signing Deadline',
-      sprk_duedate: '2026-04-15T00:00:00Z',
+      sprk_duedate: '2026-04-15',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-01-10T09:00:00Z',
@@ -100,7 +100,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-004',
       sprk_name: 'Regulatory approval — EU filing',
-      sprk_duedate: '2026-05-01T00:00:00Z',
+      sprk_duedate: '2026-05-01',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-02-01T09:00:00Z',
@@ -110,7 +110,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-005',
       sprk_name: 'Lender consent deadline',
-      sprk_duedate: '2026-04-30T00:00:00Z',
+      sprk_duedate: '2026-04-30',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-002',
       createdon: '2026-02-01T09:00:00Z',

@@ -92,6 +92,14 @@ export interface EntityAttributeMetadata {
   /** Sub-type for String attributes (e.g., 'Email', 'Phone', 'Url', 'TextArea'). */
   format?: string;
   /**
+   * DateTime attributes only: the column's BEHAVIOUR — `'UserLocal'`, `'DateOnly'` or `'TimeZoneIndependent'` —
+   * when the metadata source supplies it (Web API `DateTimeBehavior.Value`, the BFF's `dateTimeBehavior`, or the
+   * client API's numeric `Behavior` 1/2/3). `'DateOnly'` means the value is a calendar date (`YYYY-MM-DD`) that must
+   * not be read as a UTC instant (spaarke-ontology-platform-r1 task 098). `format: 'DateOnly'` alone does NOT mean
+   * that: a UserLocal column with Date Only format still stores an instant.
+   */
+  dateTimeBehavior?: string;
+  /**
    * User-localized DisplayName (e.g., "Invoice Number") from Xrm/BFF metadata.
    * Framework column-label resolution prefers this over humanized logical names.
    */

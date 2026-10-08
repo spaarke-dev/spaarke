@@ -497,6 +497,36 @@ public class PlaybookSchedulerJobTests
             .ReturnsAsync(new EntityCollection(playbooks));
     }
 
+    // Task 098: {{todayUtc}} feeds "Query Overdue Tasks" (`sprk_duedate lt {{todayUtc}}` on a Date Only column). The run
+    // is FOR this user, so it is THIS USER's local date. Pinned at 2026-10-06T01:00Z = 21:00 on Oct 5 in New York: the
+    // former value was the UTC timestamp "2026-10-06T01:00:00Z" — a task due Oct 5 was already "overdue".
+    [Fact]
+    public async Task ExecuteAsync_TodayParameters_AreTheUsersLocalDate()
+    {
+        var user = CreateUserEntity(Guid.NewGuid(), "Eastern User");
+        SetupPlaybookQuery(new List<Entity> { CreatePlaybookEntity(Guid.NewGuid(), "Overdue Tasks") });
+        SetupActiveUsers(new List<Entity> { user });
+        SetupUpdateNoop();
+        _entityServiceMock
+            .Setup(s => s.RetrieveAsync("usersettings", user.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("usersettings", user.Id) { ["timezonecode"] = 35 });
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "timezonedefinition"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("timezonedefinition") { ["standardname"] = "Eastern Standard Time" } }));
+        PlaybookRunRequest? captured = null;
+        _orchestrationServiceMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((req, _, _) => { captured = req; return EmptyStreamEvents(); });
+        var sut = new PlaybookSchedulerJob(_scopeFactoryMock.Object, _configuration, _loggerMock.Object,
+            new Microsoft.Extensions.Time.Testing.FakeTimeProvider(
+                DateTimeOffset.Parse("2026-10-06T01:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+
+        await sut.ExecuteAsync(BuildContext(), CancellationToken.None);
+
+        captured!.Parameters!["todayUtc"].Should().Be("2026-10-05", "the recipient's local today, a calendar date");
+        captured.Parameters!["dueSoonWindowUtc"].Should().Be("2026-10-08");
+    }
+
     private void SetupActiveUsers(List<Entity> users)
     {
         _entityServiceMock

@@ -323,6 +323,8 @@ public sealed class ExternalEventDto
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The event due date (<c>sprk_event.sprk_duedate</c>) as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse
+    /// Date Only). Parse it as a local calendar date (<c>parseDueDate</c>), never <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -351,6 +353,8 @@ public sealed class CreateExternalEventRequest
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
