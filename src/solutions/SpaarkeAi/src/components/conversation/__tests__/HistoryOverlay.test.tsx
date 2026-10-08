@@ -28,7 +28,8 @@ import {
   webLightTheme,
   webDarkTheme,
 } from "@fluentui/react-components";
-import type { AuthenticatedFetchFn } from "@spaarke/auth";
+import { ApiError, AuthError, type AuthenticatedFetchFn } from "@spaarke/auth";
+import * as errorTelemetry from "../../../telemetry/errorTelemetry";
 
 import {
   HistoryMenu,
@@ -44,40 +45,48 @@ const BFF_BASE_URL = "https://test-bff.example.com";
 
 interface FetchScript {
   sessions?: unknown[];
+  onGet?: (url: string) => { ok: boolean; status: number };
   onDelete?: (url: string) => { ok: boolean; status: number };
-  onPatch?: (url: string, body: string) => { ok: boolean; status: number };
+  onPatch?: (url: string, body: string) => { ok: boolean; status: number; detail?: string };
   onPost?: (url: string, body: string) => { ok: boolean; status: number; detail?: string };
+}
+
+/**
+ * The injected fetch in its PRODUCTION shape (`@spaarke/auth`'s authenticatedFetch): a 2xx is returned;
+ * a 401 throws AuthError; any other non-2xx throws ApiError(detail ?? title ?? "HTTP n", status,
+ * problemDetails). It never returns a non-OK Response. (The `@spaarke/auth` jest stub re-exports the
+ * real classes.)
+ */
+function respondOrThrow(result: { ok: boolean; status: number; detail?: string; sessions?: unknown }): Response {
+  if (result.ok) {
+    return { ok: true, status: result.status, json: async () => result.sessions ?? {} } as Response;
+  }
+  if (result.status === 401) {
+    throw new AuthError("Authentication failed after all retry attempts", "auth_exhausted");
+  }
+  const problem = result.detail ? { title: "Bad Request", status: result.status, detail: result.detail } : null;
+  throw new ApiError(problem?.detail ?? `HTTP ${result.status}`, result.status, problem);
 }
 
 function makeAuthenticatedFetch(script: FetchScript): jest.MockedFunction<AuthenticatedFetchFn> {
   return jest.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
     if (method === "GET") {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => script.sessions ?? [],
-      } as Response;
+      const result = script.onGet?.(url) ?? { ok: true, status: 200 };
+      return respondOrThrow({ ...result, sessions: script.sessions ?? [] });
     }
     if (method === "DELETE") {
-      const result = script.onDelete?.(url) ?? { ok: true, status: 204 };
-      return { ok: result.ok, status: result.status, json: async () => ({}) } as Response;
+      return respondOrThrow(script.onDelete?.(url) ?? { ok: true, status: 204 });
     }
     if (method === "PATCH") {
       const body = typeof init?.body === "string" ? init.body : "";
-      const result = script.onPatch?.(url, body) ?? { ok: true, status: 204 };
-      return { ok: result.ok, status: result.status, json: async () => ({}) } as Response;
+      return respondOrThrow(script.onPatch?.(url, body) ?? { ok: true, status: 204 });
     }
     if (method === "POST") {
       const body = typeof init?.body === "string" ? init.body : "";
-      const result = script.onPost?.(url, body) ?? { ok: true, status: 201 };
-      return {
-        ok: result.ok,
-        status: result.status,
-        json: async () => (result.detail ? { detail: result.detail } : {}),
-      } as Response;
+      return respondOrThrow(script.onPost?.(url, body) ?? { ok: true, status: 201 });
     }
-    return { ok: false, status: 404, json: async () => ({}) } as Response;
+    return respondOrThrow({ ok: false, status: 404 });
   }) as unknown as jest.MockedFunction<AuthenticatedFetchFn>;
 }
 
@@ -363,6 +372,66 @@ describe("HistoryMenu (task 037, FR-D6/D7/D8)", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't delete/i);
     expect(screen.getByText("Review the Acme NDA")).toBeInTheDocument();
+  });
+
+  it("treats a 404 on Delete as already deleted: the row goes and no error shows", async () => {
+    const onDelete = jest.fn().mockReturnValue({ ok: false, status: 404 });
+    renderMenu({ fetchScript: { sessions, onDelete } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-delete-s1"));
+    await user.click(await screen.findByTestId("delete-session-confirm"));
+
+    await waitFor(() => expect(screen.queryByText("Review the Acme NDA")).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the friendly sentence, not 'HTTP 500', when Rename fails without a server detail", async () => {
+    const onPatch = jest.fn().mockReturnValue({ ok: false, status: 500 });
+    renderMenu({ fetchScript: { sessions, onPatch } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-rename-s1"));
+    await user.click(await screen.findByTestId("rename-session-confirm"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't rename this conversation. Try again.");
+    expect(alert).not.toHaveTextContent(/HTTP 500/);
+  });
+
+  it("shows the friendly sentence, not 'HTTP 500', when Set related record fails without a server detail", async () => {
+    const onPost = jest.fn().mockReturnValue({ ok: false, status: 500 });
+    renderMenu({ fetchScript: { sessions, onPost } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"));
+    await user.click(await screen.findByTestId("set-related-confirm"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't set the related record. Try again.");
+    expect(alert).not.toHaveTextContent(/HTTP 500/);
+  });
+
+  it("records the real HTTP status in load-failure telemetry", async () => {
+    const spy = jest.spyOn(errorTelemetry, "logTelemetryError").mockImplementation(() => undefined);
+    try {
+      renderMenu({ fetchScript: { sessions, onGet: () => ({ ok: false, status: 503 }) } });
+      await openHistoryMenu();
+      await screen.findByText(/couldn't load history/i);
+
+      expect(spy).toHaveBeenCalledWith(
+        errorTelemetry.TELEMETRY_HISTORY_LOAD_FAILURE,
+        expect.objectContaining({ status: 503, message: "HTTP 503" })
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   // -------------------------------------------------------------------------
