@@ -57,6 +57,9 @@ public class SecureParentReadVetoTests
     /// <summary>When set, any query whose id condition (Equal or In) names this row throws — a fault on that row alone.</summary>
     private (string Table, Guid Id)? _failingRow;
 
+    /// <summary>How many queries the failing row refused (they never reach the world's own count).</summary>
+    private int _refusedReads;
+
     /// <summary>The principal's derived contact (the contact axis), when a test gives it one.</summary>
     private Guid? _principalContact;
 
@@ -109,7 +112,10 @@ public class SecureParentReadVetoTests
             {
                 if (_failingRow is { } failing && query.EntityName == failing.Table && query.Criteria.Conditions.Any(c =>
                         c.AttributeName == query.EntityName + "id" && c.Values.OfType<Guid>().Contains(failing.Id)))
+                {
+                    _refusedReads++;
                     throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
+                }
                 return Task.FromResult(_world.Answer(query));
             });
         return entities.Object;
@@ -459,6 +465,65 @@ public class SecureParentReadVetoTests
 
         set.Rights.Should().HaveCount(200, "the other chunk is decided; the faulted chunk of 50 fails closed");
         set.Rights.Should().NotContainKey(candidates[210]);
+    }
+
+    [Fact(DisplayName = "#1410 F3: rows naming the same pair type whose read faults cost ONE type read, and are all removed")]
+    public async Task AFaultingPairType_IsReadOnce_ForEveryRowNamingIt()
+    {
+        var parent = Guid.Parse("14101410-1410-1410-1410-1410141014c9");
+        var projects = Enumerable.Range(0, 5).Select(i => Guid.Parse($"14101410-0000-0000-0006-{i:D12}")).ToArray();
+        foreach (var project in projects)
+            ProjectUnder(project, Project, parent); // all name ProjectType by the pair
+        _failingRow = ("sprk_recordtype_ref", ProjectType);
+
+        var set = await ComposeAsync(Project, projects);
+
+        set.Rights.Should().BeEmpty("whose list governs them is unknown: fail closed");
+        _refusedReads.Should().Be(1, "a type whose read faulted is not read again for every row naming it");
+    }
+
+    [Fact(DisplayName = "Round 82: a not-yet-secure child under a secure matter that is NOT walled stays")]
+    public async Task ANonSecureChild_UnderAnUnwalledSecureMatter_Stays()
+    {
+        SecureMatterRow(SecureMatter);
+        SecureMatterRow(OtherSecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        _denyList.DenySystemUserOnRecord(Walled, OtherSecureMatter); // a wall elsewhere
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa);
+
+        set.Rights.Should().ContainKey(OpenWa);
+    }
+
+    [Fact(DisplayName = "Round 82: the link read fails -> a not-yet-secure child below a secure parent is removed; an unfiled one stays")]
+    public async Task ALinkReadFault_RemovesANonSecureChildBelowASecureParent()
+    {
+        var links = new Mock<IContactIdentityStore>(MockBehavior.Strict);
+        links.Setup(l => l.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SystemUserLookup(LookupStatus.Failed, null));
+        _identities = links.Object;
+        SecureMatterRow(SecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        _world.Add(WorkAssignment, ControlWa, ("sprk_issecure", false)); // filed under nothing
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa, ControlWa);
+
+        set.Rights.Should().NotContainKey(OpenWa, "whose wall subjects could not be read: fail closed");
+        set.Rights.Should().ContainKey(ControlWa, "no secure parent: the subjects are not its question");
+    }
+
+    [Fact(DisplayName = "Round 82: the deny-list reader fails closed -> a not-yet-secure child below a secure parent is removed")]
+    public async Task ADenyListFault_RemovesANonSecureChildBelowASecureParent()
+    {
+        SecureMatterRow(SecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        _world.Add(WorkAssignment, ControlWa, ("sprk_issecure", false)); // filed under nothing
+        _denyList.Faults = true;
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa, ControlWa);
+
+        set.Rights.Should().NotContainKey(OpenWa);
+        set.Rights.Should().ContainKey(ControlWa, "it was never asked: no secure parent, no contact axis");
     }
 
     // ── Cost (NFR-02) ───────────────────────────────────────────────────────────────────────────────────────────────

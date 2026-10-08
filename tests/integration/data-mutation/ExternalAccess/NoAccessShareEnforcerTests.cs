@@ -817,6 +817,23 @@ public class NoAccessShareEnforcerTests
         _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
     }
 
+    /// <summary>Round 82: a NOT-yet-secure record filed under the matter whose filing type cannot be confirmed is left alone.</summary>
+    [Fact]
+    public async Task Enforce_ANotYetSecureRecordWhoseFilingIsUnconfirmed_IsLeftAlone_AndReportedIncomplete()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        SecureProjectFiledUnderTheMatterByThePair();
+        _h.ChildWorld.Set(Project, FiledProject, "sprk_issecure", false);
+        _h.ChildWorld.FailingQueriesOf("sprk_recordtype_ref");
+        _h.Shares.Seed(Project, FiledProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().ContainSingle(f => f.Kind == "children-incomplete" && f.RecordId == SecureMatter);
+        _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().Be(CollaborateMask, "nothing is removed on a guess");
+    }
+
     /// <summary>Round 82, N5 still holds: an author without Write on the not-yet-secure filed record removes nothing there.</summary>
     [Fact]
     public async Task Enforce_ANotYetSecureFiledRecord_WhenTheAuthorLacksWriteOnIt_KeepsTheShare()

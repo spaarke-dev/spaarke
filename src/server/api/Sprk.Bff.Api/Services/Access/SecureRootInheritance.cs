@@ -2381,6 +2381,7 @@ public sealed class SecureRootInheritance
         var climbs = starts.Select(id => new ParentClimb((table, id))).ToList();
         var facts = new Dictionary<(string Table, Guid Id), FactsRead>();
         var decisions = new Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)>();
+        var faultedTypes = new HashSet<Guid>(); // #1410 F3: a pair type that could not be read is not read again in this call
         for (var level = 1; climbs.Any(c => c.Frontier.Count > 0); level++)
         {
             var rows = climbs.SelectMany(c => c.Frontier).Distinct().ToList();
@@ -2392,7 +2393,8 @@ public sealed class SecureRootInheritance
                     .Where(r => !decisions.ContainsKey(r) && facts[r].Facts is not null)
                     .Select(r => facts[r].Facts!)
                     .ToList();
-                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, decisions, batched, ct).ConfigureAwait(false);
+                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct)
+                    .ConfigureAwait(false);
             }
 
             foreach (var climb in climbs)
@@ -2491,9 +2493,11 @@ public sealed class SecureRootInheritance
     /// <summary>Decides what each of <paramref name="rows"/> is filed under, into <paramref name="into"/>: the one-record
     /// decision (<see cref="DecideParentsCoreAsync"/>) per row, or — batched — the same decision
     /// (<see cref="DecideNamedParents"/>) over parent flags read in chunks. Never throws a read fault.</summary>
+    /// <param name="faultedTypes">Batched only (#1410 F3): pair types whose read faulted earlier in this call; a later row
+    /// naming one is "could not be read" without another read (a throttle or fault never becomes N sequential reads).</param>
     private static async Task DecideParentsIntoAsync(
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<FilingFacts> rows,
-        ConcurrentDictionary<Guid, string?> recordTypes,
+        ConcurrentDictionary<Guid, string?> recordTypes, HashSet<Guid> faultedTypes,
         Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)> into,
         bool batched, CancellationToken ct)
     {
@@ -2507,7 +2511,7 @@ public sealed class SecureRootInheritance
         var named = new List<(FilingFacts Row, IReadOnlyList<(string Table, Guid Id)> Parents, string? Unknown)>();
         foreach (var row in rows)
         {
-            var (parents, unknown) = await NameParentsAsync(dataverse, logger, row, recordTypes, ct).ConfigureAwait(false);
+            var (parents, unknown) = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes).ConfigureAwait(false);
             named.Add((row, parents, unknown));
         }
 
@@ -2856,9 +2860,12 @@ public sealed class SecureRootInheritance
 
     /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, then the pair), and why
     /// any could not be named. Reads only the pair's TYPE (cached in <paramref name="recordTypes"/>).</summary>
+    /// <param name="faultedTypes">When given (the batched walk, #1410 F3), types whose read already faulted in this call are
+    /// answered "could not be read" without reading again, and a new fault is added. <c>null</c>: every row reads (the
+    /// one-record shape, as before).</param>
     private static async Task<(IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown)> NameParentsAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
-        CancellationToken ct)
+        CancellationToken ct, HashSet<Guid>? faultedTypes = null)
     {
         var named = new List<(string Table, Guid Id)>();
         string? unknown = null;
@@ -2880,6 +2887,10 @@ public sealed class SecureRootInheritance
                 {
                     unknown ??= $"it names a record in {PairIdColumn} without that record's type";
                 }
+                else if (faultedTypes is not null && faultedTypes.Contains(typeRef))
+                {
+                    unknown ??= "the type of the record it is filed under could not be read";
+                }
                 else
                 {
                     try
@@ -2893,6 +2904,7 @@ public sealed class SecureRootInheritance
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} could not be read.", typeRef);
+                        faultedTypes?.Add(typeRef);
                         unknown ??= "the type of the record it is filed under could not be read";
                     }
                 }

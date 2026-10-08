@@ -1410,12 +1410,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <param name="standingGrant">The standing-grant reader.</param>
     /// <param name="noAccessList">The deny-list reader.</param>
     /// <param name="identityStore">The status-bearing systemuser↔contact link reads (task 143 r1): the systemuser-plane
-    /// veto resolves a SECURE candidate's subjects through them, so a faulted link read removes the record instead of
-    /// reading as "no contact".</param>
+    /// veto resolves the subjects of a SECURE candidate, and of any candidate below a secure parent (#1410), through them, so
+    /// a faulted link read removes the record instead of reading as "no contact".</param>
     /// <param name="systemUsers">The authoritative <c>sprk_isexternal</c> read (task 114 verifier K1): a systemuser flagged
     /// external keeps no membership-term access to a Restricted record on this plane.</param>
-    /// <param name="dataverse">GitHub #1410: the app-only reads of what a secure work assignment or project is filed under,
-    /// for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
+    /// <param name="dataverse">GitHub #1410: the app-only reads of what EVERY work assignment or project candidate is filed
+    /// under, secure or not (owner round 82), for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
     /// parent walk the write-time guard and the enforcer use (registered unconditionally, GraphModule).</param>
     /// <param name="logger">Logger.</param>
     public AccessibleRecordSetService(
