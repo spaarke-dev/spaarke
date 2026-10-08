@@ -3,7 +3,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <summary>
 /// Stable <see cref="EventId"/>s for Signal-writer Error logs (task 030 rework — owner directive 2026-10-04:
 /// a refused write must not look like "no conditions found"). One <see cref="EventId"/> covers every refusal
-/// path; the log's structured <c>reason</c> property (one of
+/// path that throws; the owner-refusal SKIP (task 039) has its own Warning <see cref="WriteSkippedOwnerRefused"/>.
+/// The log's structured <c>reason</c> property (one of
 /// <see cref="Telemetry.OntologyWriterFailureReason"/>'s constants) distinguishes WHICH one — the same
 /// vocabulary <see cref="Telemetry.OntologyWriterTelemetry.RecordFailure"/> uses for the matching metric
 /// dimension, so a log query and a metric query always agree.
@@ -34,4 +35,14 @@ public static class OntologyWriterEvents
     /// text (all of which may echo admin-authored config content).
     /// </summary>
     public static readonly EventId PolicyVersionInvalid = new(50301, nameof(PolicyVersionInvalid));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per skipped write, by <see cref="SignalWriter"/> when uac-r2's ownership
+    /// resolver REFUSES an owner (task 039, D-33 — for example a root flagged Secure but not isolated): nothing is
+    /// written and nothing is thrown, the task 146 shape for a background writer. Metered as
+    /// <see cref="Telemetry.OntologyWriterFailureReason.OwnerRefused"/>. Structured properties: <c>policyCode</c>,
+    /// <c>subjectEntity</c>, <c>subjectId</c>, <c>matterId</c>, <c>reason</c> and <c>refusalCode</c> (one of
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/>'s codes) — never fact values or the sentence.
+    /// </summary>
+    public static readonly EventId WriteSkippedOwnerRefused = new(50302, nameof(WriteSkippedOwnerRefused));
 }
