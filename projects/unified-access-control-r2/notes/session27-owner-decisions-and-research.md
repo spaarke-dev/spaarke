@@ -1159,6 +1159,17 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **So:** `sprk_isexternal` is consulted only on Restricted records, Secure – Restricted included. A secure record that is not Restricted can be shared with an external-flagged, licensed system user. This is the rule as built by task 114, so nothing changes.
 - **Copy:** the refusal reads "... Restricted records cannot be shared with external users." (PR #1369); it does not mention secure.
 
+## Round 79 (2026-10-07/08): BINDING. OWNER decisions from the Manage Access test rounds
+
+- **Modal standard:** `SprkModal` is the canonical modal. Manage Access stays on it; WizardShell is for step flows only, and Manage Access has no steps. Not moved to a code-page dialog.
+- **Lookup over a modal:** "the lookup should always be on top of the parent modal." Applied to Manage Access and the email composer (#1371) through `SprkModal` `sidePaneLayering` (PR #1389). Docking left is only the fallback when the pane cannot be layered above the modal.
+- **Reconciliation settings on dev:** approved by the owner ("if it is just a bff ... that's fine").
+  - `ExternalAccess__Reconciliation__WritesEnabled=true`: the report-only run first showed 0 planned changes across R1–R4 (9 grants scanned), and the first write-mode run changed 0.
+  - `Communication__OwnershipHoldAlertUserIds__0` set to ralph.schroeder@spaarke.com (`1d02f31c…`).
+  - Set 2026-10-08 ~00:51Z; the BFF restarted and is healthy.
+- **Test containers:** the owner approved the cleanup of the 21 empty test containers; the owner runs `Remove-TestContainers.ps1` as SharePoint admin.
+- **Restricted share:** the owner confirmed it works (the "+ User" filter and the named refusal).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
