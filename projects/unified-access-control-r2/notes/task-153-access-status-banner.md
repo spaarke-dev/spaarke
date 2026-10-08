@@ -181,14 +181,93 @@ Pass 2 (full) confirmed the pass-1 fixes and the timeout. Fixed:
 ## Deploy (main session)
 
 1. Web resource: `scripts/Deploy-WebResourceInline.ps1 -DataverseUrl <env> -WebResourceName sprk_/scripts/accessstatus_banner.js
-   -FilePath src/solutions/webresources/sprk_accessstatus_banner.js -WebResourceType 3` (JScript), publish.
-2. Form registration, on each MAIN form (Project main form, Matter main form, Work Assignment main form; not
-   "Information", not quick-create): Form libraries — `sprk_/scripts/bff_auth.js` stays FIRST (already present), add
-   `sprk_/scripts/accessstatus_banner.js` after it. Event handler: OnLoad → library `sprk_/scripts/accessstatus_banner.js`,
-   function `Spaarke.AccessStatus.onLoad`, enabled, **pass execution context**. Do NOT add data-OnLoad or OnSave handlers
-   in the form editor (the library registers its own). Save, publish.
+   -FilePath src/solutions/webresources/sprk_accessstatus_banner.js -WebResourceType 3` (JScript; the script publishes).
+2. Form registration: `pwsh -File scripts/Register-AccessStatusBannerOnForms.ps1 -EnvironmentUrl <env>` (dry run), then
+   `-Apply` (snapshot of each form's XML in `scripts/logs/`, PATCH, publish the three tables, read back), then `-Verify`
+   (exit 0). Undo: `-RestoreFrom <snapshot>`.
 3. PCF: TrackingFieldTrio 1.0.41 via the pcf-deploy skill (solution import of the committed bundle; never `pac pcf push`).
 4. No BFF deploy (no server change).
+
+## Form registration script (coordinator request on PR #1450)
+
+`scripts/Register-AccessStatusBannerOnForms.ps1`, modelled on `Add-RegardingFilingPickerToForms.ps1` and
+`Deploy-NoAccessEntryForms.ps1` (Web API, no pac):
+
+- Targets ONLY the active main forms named `Project main form`, `Matter main form` and `Work Assignment main form`
+  (one each, by table and name; `-ProjectFormName` etc. override). Refuses a managed form (`MANAGED_FORM`).
+- Additive only: appends `sprk_/scripts/accessstatus_banner.js` at the END of `<formLibraries>` (so after
+  `sprk_/scripts/bff_auth.js`, which must already be registered: `AUTH_LIBRARY_MISSING` otherwise) and one
+  `Spaarke.AccessStatus.onLoad` handler (enabled, pass execution context) at the end of the form-level OnLoad. Never
+  removes, changes or reorders another library or handler, and never touches control-level events. A parsed
+  comparison (the result minus exactly the added nodes equals the original, node by node) runs on every transform,
+  including the dry run against the live XML. Stable ids from the form id: a re-run writes identical XML; a complete
+  form is left alone.
+- Refuses (never "fixes") a banner library registered before `bff_auth.js` (`LIBRARY_ORDER`) and a duplicated,
+  disabled, foreign-library or context-less banner handler (`HANDLER_MISCONFIGURED`); `-Verify` names each as a gap.
+- `-Apply` refuses while either web resource is missing (`PREREQ_MISSING`) or if a form changed between the scan and
+  its PATCH (`FORM_CHANGED`). `-RestoreFrom` refuses another environment's snapshot or a form changed since the apply.
+- No solution components are touched (forms are edited in place), so `DataverseSolutionMembership.ps1` does not apply;
+  the ArchTests' `SchemaScriptSolutionMembershipGuardTests` pass.
+
+Run 2026-10-08 (read-only; NOT applied, the main session's gate):
+
+- `-SelfTest`: **SELF-TEST PASS**, 44 checks. Fixtures follow the live spaarkedev1 form shapes. The checks cover:
+  - the project shape (`events` before `formLibraries`) and the matter shape (several handlers, JSON `parameters`);
+  - no form `events`, and an empty form OnLoad;
+  - libraries kept in order with the banner appended last; existing handlers byte-identical and in order;
+  - control-level events untouched; idempotent and deterministic;
+  - the refusals: no `bff_auth.js`, banner library first, duplicate / disabled / context-less handler;
+  - a form that has the library but no handler gains only the handler.
+- Dry run against spaarkedev1 (exit 0):
+
+```
+Register-AccessStatusBannerOnForms (task 153)  env: https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')  mode: DRY RUN (no writes)
+
+== Prerequisites
+   ok    web resource sprk_/scripts/bff_auth.js present
+   GAP   web resource sprk_/scripts/accessstatus_banner.js is not in the environment (deploy it first: scripts/Deploy-WebResourceInline.ps1)
+
+== sprk_project: 'Project main form'
+   PLAN  library sprk_/scripts/accessstatus_banner.js is not registered
+   PLAN  no form OnLoad handler Spaarke.AccessStatus.onLoad
+   PLAN  add 2 node(s); every existing library and handler kept, in order
+
+== sprk_matter: 'Matter main form'
+   PLAN  library sprk_/scripts/accessstatus_banner.js is not registered
+   PLAN  no form OnLoad handler Spaarke.AccessStatus.onLoad
+   PLAN  add 2 node(s); every existing library and handler kept, in order
+
+== sprk_workassignment: 'Work Assignment main form'
+   PLAN  library sprk_/scripts/accessstatus_banner.js is not registered
+   PLAN  no form OnLoad handler Spaarke.AccessStatus.onLoad
+   PLAN  add 2 node(s); every existing library and handler kept, in order
+
+DRY RUN: 3 form(s) would change: sprk_project, sprk_matter, sprk_workassignment. 1 prerequisite gap(s) must be closed before -Apply. Re-run with -Apply.
+```
+
+- `-Verify` against spaarkedev1 (exit 1, as expected before the web resource deploy and `-Apply`):
+
+```
+Register-AccessStatusBannerOnForms (task 153)  env: https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')  mode: VERIFY (read-only)
+
+== Prerequisites
+   ok    web resource sprk_/scripts/bff_auth.js present
+   GAP   web resource sprk_/scripts/accessstatus_banner.js is not in the environment (deploy it first: scripts/Deploy-WebResourceInline.ps1)
+
+== sprk_project: 'Project main form'
+   GAP   sprk_project 'Project main form': library sprk_/scripts/accessstatus_banner.js is not registered
+   GAP   sprk_project 'Project main form': no form OnLoad handler Spaarke.AccessStatus.onLoad
+
+== sprk_matter: 'Matter main form'
+   GAP   sprk_matter 'Matter main form': library sprk_/scripts/accessstatus_banner.js is not registered
+   GAP   sprk_matter 'Matter main form': no form OnLoad handler Spaarke.AccessStatus.onLoad
+
+== sprk_workassignment: 'Work Assignment main form'
+   GAP   sprk_workassignment 'Work Assignment main form': library sprk_/scripts/accessstatus_banner.js is not registered
+   GAP   sprk_workassignment 'Work Assignment main form': no form OnLoad handler Spaarke.AccessStatus.onLoad
+
+VERIFY FAIL: 7 gap(s).
+```
 
 ## Live gates (main session / owner)
 
