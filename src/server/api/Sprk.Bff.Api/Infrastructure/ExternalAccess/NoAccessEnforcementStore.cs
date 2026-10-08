@@ -14,11 +14,25 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// reader's (<see cref="NoAccessListReader.SubjectKindOf"/>).</param>
 /// <param name="StateCode">0 Active, 1 Inactive.</param>
 /// <param name="ModifiedBy">The entry's last modifier (<c>modifiedby</c>) — the author owner N5 checks.</param>
-internal sealed record NoAccessEntrySnapshot(NoAccessEntryRow Row, int? StateCode, Guid? ModifiedBy)
+/// <param name="Display">What a person reads about the entry (task 064: the per-record No Access read shows Write holders
+/// the entries over a record). Display only — no rule reads it; <c>null</c> when the read did not carry it.</param>
+internal sealed record NoAccessEntrySnapshot(
+    NoAccessEntryRow Row, int? StateCode, Guid? ModifiedBy, NoAccessEntryDisplay? Display = null)
 {
     /// <summary>Only an active entry is enforced.</summary>
     public bool IsActive => StateCode == 0;
 }
+
+/// <summary>
+/// The display side of one <c>sprk_noaccessentry</c> row (task 064): its name, the names Dataverse formats for its
+/// lookups, and when it was last changed. Never the Reason (owner O2 / task 143: a refusal never reveals it).
+/// </summary>
+internal sealed record NoAccessEntryDisplay(
+    string? Name,
+    string? SubjectName,
+    string? ObjectOrganizationName,
+    string? ModifiedByName,
+    DateTimeOffset? ModifiedOn);
 
 /// <summary>The person state of a systemuser the enforcer must reason about.</summary>
 public sealed record EnforcementSystemUser(Guid SystemUserId, bool? IsDisabled, Guid? ApplicationId)
@@ -46,8 +60,16 @@ public class NoAccessEnforcementStore
     /// <summary>Ids per OR-filter chunk — the module's bounded-URL precedent.</summary>
     internal const int IdChunkSize = 50;
 
-    /// <summary>The entry columns: the reader's projection plus state and author.</summary>
-    internal const string EntrySelect = NoAccessListReader.RowSelect + ",statecode,_modifiedby_value";
+    /// <summary>The entry columns: the reader's projection plus state and author, and (task 064) the primary name and
+    /// modified-on that the per-record read shows. Both are platform columns every environment has, so adding them here
+    /// cannot turn the read into a missing-column fault (the reader's <see cref="NoAccessListReader.RowSelect"/> is left
+    /// alone for that reason).</summary>
+    internal const string EntrySelect = NoAccessListReader.RowSelect + ",statecode,_modifiedby_value,sprk_name,modifiedon";
+
+    /// <summary>The <c>Prefer</c> header that makes Dataverse return each lookup's display name beside its id.</summary>
+    internal const string FormattedValuesPreference = "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"";
+
+    private const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -74,31 +96,56 @@ public class NoAccessEnforcementStore
     internal virtual async Task<NoAccessEntrySnapshot?> ReadEntryAsync(Guid entryId, CancellationToken ct)
     {
         using var doc = await GetAsync(
-            $"sprk_noaccessentries?$filter=sprk_noaccessentryid eq {entryId}&$select={EntrySelect}&$top=1", ct);
-        foreach (var row in Values(doc))
-        {
-            if (GuidOf(row, "sprk_noaccessentryid") != entryId)
-            {
-                continue;
-            }
+            $"sprk_noaccessentries?$filter=sprk_noaccessentryid eq {entryId}&$select={EntrySelect}&$top=1", ct,
+            prefer: FormattedValuesPreference);
+        return Values(doc).Select(row => EntryFrom(row, entryId)).FirstOrDefault(e => e is not null);
+    }
 
-            return new NoAccessEntrySnapshot(
-                new NoAccessEntryRow
-                {
-                    sprk_noaccessentryid = entryId,
-                    _sprk_subjectcontact_value = GuidOf(row, "_sprk_subjectcontact_value"),
-                    _sprk_subjectorganization_value = GuidOf(row, "_sprk_subjectorganization_value"),
-                    _sprk_subjectsystemuser_value = GuidOf(row, "_sprk_subjectsystemuser_value"),
-                    _sprk_objectorganization_value = GuidOf(row, "_sprk_objectorganization_value"),
-                    _sprk_objectrecordtype_value = GuidOf(row, "_sprk_objectrecordtype_value"),
-                    sprk_objectrecordid = row.TryGetProperty("sprk_objectrecordid", out var rid) &&
-                                          rid.ValueKind == JsonValueKind.String ? rid.GetString() : null,
-                },
-                row.TryGetProperty("statecode", out var sc) && sc.ValueKind == JsonValueKind.Number ? sc.GetInt32() : null,
-                GuidOf(row, "_modifiedby_value"));
+    /// <summary>
+    /// One entry row as the store returns it, or <c>null</c> when the row is not the entry asked for. Pure, so the
+    /// column reading is asserted without a transport double (ADR-038).
+    /// </summary>
+    internal static NoAccessEntrySnapshot? EntryFrom(JsonElement row, Guid entryId)
+    {
+        if (GuidOf(row, "sprk_noaccessentryid") != entryId)
+        {
+            return null;
         }
 
-        return null;
+        var entryRow = new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = entryId,
+            _sprk_subjectcontact_value = GuidOf(row, "_sprk_subjectcontact_value"),
+            _sprk_subjectorganization_value = GuidOf(row, "_sprk_subjectorganization_value"),
+            _sprk_subjectsystemuser_value = GuidOf(row, "_sprk_subjectsystemuser_value"),
+            _sprk_objectorganization_value = GuidOf(row, "_sprk_objectorganization_value"),
+            _sprk_objectrecordtype_value = GuidOf(row, "_sprk_objectrecordtype_value"),
+            sprk_objectrecordid = TextOf(row, "sprk_objectrecordid"),
+        };
+
+        // The subject's name is the formatted value of whichever subject lookup is set (a malformed row naming two
+        // keeps the first, in the reader's contact / organization / systemuser order; it is shown flagged anyway).
+        var subjectName = new[] { "_sprk_subjectcontact_value", "_sprk_subjectorganization_value", "_sprk_subjectsystemuser_value" }
+            .Where(c => GuidOf(row, c) is not null)
+            .Select(c => TextOf(row, c + FormattedValueSuffix))
+            .FirstOrDefault(n => n is not null);
+
+        var display = new NoAccessEntryDisplay(
+            TextOf(row, "sprk_name"),
+            subjectName,
+            TextOf(row, "_sprk_objectorganization_value" + FormattedValueSuffix),
+            TextOf(row, "_modifiedby_value" + FormattedValueSuffix),
+            row.TryGetProperty("modifiedon", out var on) && on.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(on.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var modifiedOn)
+                ? modifiedOn
+                : null);
+
+        return new NoAccessEntrySnapshot(
+            entryRow,
+            row.TryGetProperty("statecode", out var sc) && sc.ValueKind == JsonValueKind.Number ? sc.GetInt32() : null,
+            GuidOf(row, "_modifiedby_value"),
+            display);
     }
 
     /// <summary>Rows per page of the active-entry scan (<c>Prefer: odata.maxpagesize</c>).</summary>
@@ -364,6 +411,9 @@ public class NoAccessEnforcementStore
         => doc.RootElement.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray()
             : Enumerable.Empty<JsonElement>();
+
+    private static string? TextOf(JsonElement row, string column)
+        => row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String ? cell.GetString() : null;
 
     private static Guid? GuidOf(JsonElement row, string column)
         => row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&

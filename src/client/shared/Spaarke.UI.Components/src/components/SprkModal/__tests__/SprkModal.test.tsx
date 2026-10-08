@@ -4,10 +4,10 @@
  * maximize→full, browse nav, a11y (aria-modal), and the transform-robust portal.
  */
 import * as React from 'react';
-import { render, fireEvent, screen, within } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import { SprkModal } from '../SprkModal';
+import { SprkModal, type SprkModalNav } from '../SprkModal';
 
 const noop = () => {};
 
@@ -100,6 +100,59 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     expect(screen.getByRole('button', { name: /next record/i })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /next record/i }));
     expect(onNavigate).toHaveBeenCalledWith('next');
+  });
+
+  describe('nav.onBeforeNavigate (browse guard lifted from BrowseModal — ontology task 056)', () => {
+    const renderNav = (onBeforeNavigate: NonNullable<SprkModalNav['onBeforeNavigate']>, onNavigate = jest.fn()) => {
+      renderWithProviders(
+        <SprkModal open onClose={noop} title="Rec" nav={{ index: 1, total: 3, onNavigate, onBeforeNavigate }}>
+          <div>x</div>
+        </SprkModal>
+      );
+      return onNavigate;
+    };
+
+    it('a guard returning false blocks the move', async () => {
+      const guard = jest.fn().mockReturnValue(false);
+      const onNavigate = renderNav(guard);
+      fireEvent.click(screen.getByRole('button', { name: /next record/i }));
+      await waitFor(() => expect(guard).toHaveBeenCalledWith('next'));
+      await Promise.resolve();
+      expect(onNavigate).not.toHaveBeenCalled();
+    });
+
+    it('a guard resolving true allows the move', async () => {
+      const onNavigate = renderNav(jest.fn().mockResolvedValue(true));
+      fireEvent.click(screen.getByRole('button', { name: /previous record/i }));
+      await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('prev'));
+    });
+
+    it('a guard that rejects blocks the move (fail closed) and warns', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const rejecting = jest.fn().mockRejectedValue(new Error('boom'));
+        const onNavigate = renderNav(rejecting);
+        fireEvent.click(screen.getByRole('button', { name: /next record/i }));
+        await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error)));
+        expect(onNavigate).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('a guard that throws synchronously blocks the move and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const onNavigate = renderNav(() => {
+          throw new Error('boom');
+        });
+        fireEvent.click(screen.getByRole('button', { name: /next record/i }));
+        expect(onNavigate).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error));
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   it("dismiss='alert' uses the alert role (no light dismiss); 'light' uses the dialog role", () => {

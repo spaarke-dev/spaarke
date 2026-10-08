@@ -152,6 +152,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   hidden = false,
   yieldToSidePane = false,
   uiScale = 1,
+  legacySize,
   maximizable = true,
   nav,
   headerActions,
@@ -186,13 +187,49 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   }, [open]);
 
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
-  const surfaceStyle = getSurfaceStyle(effectiveSize, uiScale);
+  const namedSurfaceStyle = getSurfaceStyle(effectiveSize, uiScale);
+  // Deprecated WizardShell maxWidth/height carry-over (see `legacySize`); a maximized surface ignores it.
+  const surfaceStyle: React.CSSProperties =
+    legacySize && !maximized
+      ? {
+          ...namedSurfaceStyle,
+          ...(legacySize.width ? { width: legacySize.width } : {}),
+          ...(legacySize.height ? { height: legacySize.height, minHeight: legacySize.height } : {}),
+        }
+      : namedSurfaceStyle;
   const effectiveLayout: SprkModalLayout = layout ?? SIZE_SPEC[size].layout;
   // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
   // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened
   // over the modal stays interactive (see `nonBlocking` prop doc).
   const modalType = dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
   const hasFooter = Boolean(footer || footerStart);
+
+  // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
+  // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
+  // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
+  const handleNavigate = (dir: 'prev' | 'next') => {
+    if (!nav) return;
+    const guard = nav.onBeforeNavigate;
+    if (!guard) {
+      nav.onNavigate(dir);
+      return;
+    }
+    const reportGuardFailure = (err: unknown) =>
+      console.warn(`[SprkModal] nav.onBeforeNavigate failed for '${dir}'; navigation blocked.`, err);
+    let verdict: boolean | Promise<boolean>;
+    try {
+      verdict = guard(dir);
+    } catch (err) {
+      reportGuardFailure(err);
+      return;
+    }
+    void Promise.resolve(verdict).then(
+      allowed => {
+        if (allowed) nav.onNavigate(dir);
+      },
+      reportGuardFailure
+    );
+  };
 
   return (
     <Dialog
@@ -229,7 +266,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     size="small"
                     icon={<ChevronLeft20Regular />}
                     disabled={nav.index <= 0}
-                    onClick={() => nav.onNavigate('prev')}
+                    onClick={() => handleNavigate('prev')}
                     aria-label="Previous record"
                   />
                 </Tooltip>
@@ -242,7 +279,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     size="small"
                     icon={<ChevronRight20Regular />}
                     disabled={nav.index >= nav.total - 1}
-                    onClick={() => nav.onNavigate('next')}
+                    onClick={() => handleNavigate('next')}
                     aria-label="Next record"
                   />
                 </Tooltip>
