@@ -165,6 +165,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — A POML quoting a bare element name in prose breaks its XML parse — escape angle brackets; `scripts/Validate-TaskPoml.ps1` catches it. Apostrophes break bash heredocs — write commit messages to a file.
 - 2026-10-07 — A cross-session message to another Claude session can be held for approval and expire; use a GitHub issue as the durable channel.
 - 2026-10-07 — In PowerShell, `[IO.File]` resolves relative paths against the PROCESS directory (this worktree), not `cd`'s location: an edit meant for another worktree silently landed here. Always pass absolute paths to .NET file APIs.
+- 2026-10-07 — A PowerShell double-quoted here-string (`@"…"@`) treats the backtick as an escape: Markdown code spans lose their backticks and `` `t ``/`` `b `` become tab/backspace. Write Markdown with the Edit/Write tools or a single-quoted `@'…'@`, never `@"…"@`.
 
 ## 7. Key documents
 

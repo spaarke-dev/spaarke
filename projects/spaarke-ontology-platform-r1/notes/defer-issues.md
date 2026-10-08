@@ -296,7 +296,7 @@ foreign table it picked up with rcb 0.
 
 ---
 
-### ISS-009 — G5 AppendTo check denies every business-owned lookup target (systemuser/`team)
+### ISS-009 — G5 AppendTo check denies every business-owned lookup target (`systemuser`/`team`)
 
 | Field | Value |
 |---|---|
@@ -308,22 +308,23 @@ foreign table it picked up with rcb 0.
 
 **Description**
 
-After #1391, OwnedChildWrite.CheckCallerMayAppendToAsync answers AppendTo for user/team-owned targets
-(RetrievePrincipalAccess) and organization-owned targets (table AppendTo privilege + a caller read). Business-owned
-tables (systemuser, `team, `businessunit, measured live in spaarkedev1) fit neither path, so a lookup to them is
+After #1391, `OwnedChildWrite.CheckCallerMayAppendToAsync` answers AppendTo for user/team-owned targets
+(`RetrievePrincipalAccess`) and organization-owned targets (table AppendTo privilege + a caller read). Business-owned
+tables (`systemuser`, `team`, `businessunit`, measured live in spaarkedev1) fit neither path, so a lookup to them is
 denied with the uniform not-found for every caller. **Failure mode**: fails closed (nothing over-granted). No current
-browser create sends such a lookup; the chat dataverse.create_record tool and any future create that does will be refused.
+browser create sends such a lookup; the chat `dataverse.create_record` tool and any future create that does will be refused.
 
 **Why not in #1391**: for business-owned tables Dataverse checks AppendTo at a depth relative to the target's business
 unit; choosing that rule is uac-r2's access-model call, and getting it wrong over-grants. The issue carries a suggested fix.
 
-**Entry-points**: src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs (CheckCallerMayAppendToAsync)
+**Entry-points**: `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs` (`CheckCallerMayAppendToAsync`)
 
 **Estimated effort**: small once uac-r2 picks the depth rule
 **Blockers**: uac-r2 decision
 **Related**: #1391 · D-68 · task 046 (work-assignment create, if it sends a user/team lookup) · task 048 (moves this file)
 
 ---
+
 ## Deferred scope
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
