@@ -2,7 +2,7 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 43 (context-handoff before /compact) — 218a ✅ ADR-027 amended; 218b ✅ H6 = one SpaarkeMaster, managed by default; 218c ✅ package scope rule + drift + export; 218e waits for the owner's OK (live dev changes). Tree clean and pushed.
+> **Last Updated**: 2026-10-08 SESSION 44 — owner answers recorded: relays all delivered; multi-tenant superseded (add-in package 1.1.2 has no webApplicationInfo); mistaken tenant deleted in Entra (its Azure link resource remains); T240c APPROVED. 218e still waits for the owner's OK.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
@@ -13,37 +13,35 @@
 | **Status** | waiting on the owner's OK for 218e's live dev changes. |
 | **Next Action** | On the owner's OK: `task-execute` 218e — (1) `Test-SolutionCompleteness.ps1 -FailOnDrift:$false -SkipInventory` (read-only) → classify the 53 missing (ship / exclude with reason; the 4 April PCFs by form usage); (2) remove from SpaarkeMaster what is OUTSIDE THE RULE (5 Microsoft tables, 8 env-var values) + the Provisioning Registry role; (3) `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, then without (adds + re-adds the 8 shells, bumps the version); (4) `Export-SpaarkeMasterSource.ps1` (pac auth with access to spaarkedev1) → commit src/dataverse/solutions/SpaarkeMaster; then 218d (CI pack + publish). Without the OK: continue with T235. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
-| **Order** | 218c → 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240c (owner OK for the service) → T240d → T257 → T186. T240b when word-add-in-r1 answers. |
+| **Order** | 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
 ### T218 facts for 218e/218d (details in 218c's POML notes)
 - Live SpaarkeMaster in dev (2026-10-08, read-only): 520 in scope, 18 excluded, **53 missing**, **8 sprk_ tables packaged as shells** (incl. sprk_signal, sprk_noaccessentry, sprk_policy), Provisioning Registry role packaged though excluded, **13 outside the rule** (5 Microsoft tables dragged in by the 2026-08-23 rebuild, 8 env-var values).
 - Roles: "Spaarke Basic User" (H11 default) EXISTS and is in SpaarkeMaster; "Secure Record Owner" is a root role in the child unit "Secure Record". (Two earlier wrong notes came from 20-row-capped MCP queries — pass `top` or use the scripts.)
 - The store `sprkcpartifactsdev/provisioning-artifacts` holds the hand-made old-format manifest → a real run fails at H6 (missing-solution-zips) until 218d publishes. Manifest format: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
 
-### T240b (blocked)
-Deploying the add-in package in another organization fails at consent (`AADSTS700016`): the add-in apps are single-tenant — dev `c1258e2d…` AND production `1958aec2…` (word-add-in-r1 created it 2026-10-07, master `cbee69b68`). Customer BFFs now pre-authorize `1958aec2` (Worker Bicep, `4d41cb026`). Message `notes/coordination/2026-10-08-to-word-add-in-r1-4.md` (+ addendum for the production app).
+### T240b (unblocked 2026-10-08)
+The AADSTS700016 consent failure is fixed on the add-in side: word-add-in-r1 task 115 (master `849bac800`, owner decision 2026-10-08) ships package **1.1.2 without `webApplicationInfo`**; both add-in apps (dev `c1258e2d…`, production `1958aec2…`) stay single-tenant. Next (owner, live): upload 1.1.2 in the test tenant's Integrated apps, then the guest runs the Diagnostics view in Outlook/Word (expect `acct` 1 = guest) and a BFF call. Customer BFFs pre-authorize `1958aec2` (Worker Bicep, `4d41cb026`) — still needed for NAA without a consent prompt.
 
 ### Test organization
 Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b`); guest `ralph@deweycheatham.onmicrosoft.com` (object `bc596ecd-b61c-43f7-8664-0f27a2267a67`) Accepted in Spaarke's tenant and in dev Dataverse. Business Basic only (web Office). CLI: private `AZURE_CONFIG_DIR` + device code (CLAUDE.md §6). Add-in package: `C:\Users\RalphSchroeder\Downloads\spaarke-addin-package\spaarke-addin-1.1.1.zip`.
 
 ## Owner items
 
-1. **Relay messages** (owner has the paths): `notes/coordination/2026-10-07-to-word-add-in-r1-2.md` (if not sent), `…-to-word-add-in-r1-3.md` (prod site ready), `2026-10-08-to-word-add-in-r1-4.md` (multi-tenant finding **+ addendum: production app `1958aec2` is single-tenant too**), `2026-10-07-to-external-access-r3-2.md` (owner decisions). Replies go into `notes/coordination/2026-10-0x-from-*.md`.
-2. **Delete the mistaken External ID tenant** `spaarketestpartner.onmicrosoft.com` (Entra admin center, then its leftover Azure resource in `rg-spaarke-dev`; NEVER `spaarkeextid` beside it). Offer to remove the Azure resource with OK.
-3. **Approve the multi-tenant change** on `c1258e2d…` (dev) and `1958aec2…` (production) once word-add-in-r1 agrees.
-4. **T240c**: OK for a new shared-prod directory service (recommendation in `notes/t240-plan.md`).
-5. **Next control-plane deploy** carries T240a's Worker Bicep (`EntraAppRegOptions__SpaarkeTenantId`, `PreAuthorizedClientAppIds`) — needs OK; W7 is blocked by the Api site's pending slot swap (every `platform-controlplane` deploy fails its Api module until it resolves).
-6. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
-7. Board Status "Active" vs Status Reason "On hold" on Issue #438.
-8. **ISS-005 / #1401 (escalation from 218b)**: `Deploy-Release.ps1` (deploy-new-release skill, Spaarke's own envs) and the legacy `Provision-Customer.ps1` still call `Deploy-DataverseSolutions.ps1`, whose list names 6 nonexistent solutions. Recommendation: package type per Spaarke environment in `config/environments.json`, then retire the PS list in favour of the CI-published SpaarkeMaster zips.
-9. **218e live steps (ASK NOW)**: changes to SpaarkeMaster in spaarkedev1 — add the missing components, remove the 5 Microsoft tables + 8 env-var values + Provisioning Registry role, re-add the 8 shell tables, bump the version, export to git. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
-10. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
+1. **218e live steps (ASK NOW)**: changes to SpaarkeMaster in spaarkedev1 — add the missing components, remove the 5 Microsoft tables + 8 env-var values + Provisioning Registry role, re-add the 8 shell tables, bump the version, export to git. **218d**: first CI publish to `sprkcpartifactsdev` (ask when reached).
+2. **Control-plane deploy blocker (ASK)**: the dev L2 API site `spaarke-provisioning-controlplane-dev` (sub `484bc857…`, `rg-spaarke-platform-dev`) has a half-done "swap with preview" — ARM refuses every change to it ("configuration settings have been prepared for swap", last failure 2026-10-05). Recommendation: reset (cancel) the pending swap, then deploy the branch's control plane (Worker Bicep: `EntraAppRegOptions__SpaarkeTenantId`, `PreAuthorizedClientAppIds` = `1958aec2`; code: T218b H6, T240a H3, T227/T230/T251 changes). Both live actions; owner said "should be OK" on the deploy (2026-10-08) — confirm with the exact commands first.
+3. **Leftover Azure resource** `spaarketestpartner.onmicrosoft.com` (`Microsoft.AzureActiveDirectory/ciamDirectories`, `rg-spaarke-dev`, sub `484bc857…`): the tenant was deleted in Entra (owner 2026-10-08); the Azure link resource remains. Remove with OK. NEVER `spaarkeextid` beside it.
+4. **T240b live re-test** with add-in package 1.1.2 (owner, in the test tenant).
+5. **G36** (ADR-027 management group) and **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
+6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
+7. **#1401 (ISS-005)**: `Deploy-Release.ps1` (Spaarke's own environments) and the legacy `Provision-Customer.ps1` still import a 9-solution list via `Deploy-DataverseSolutions.ps1`; 6 of the 9 do not exist. Recommendation: one SpaarkeMaster for Spaarke's own environments too, package type per environment in `config/environments.json`, from the CI-published zips (after 218d). (The owner asked about #1402 — that is ontology's ISS-011, not ours.)
+8. **`sprk_solutionversion` format** changed to `SpaarkeMaster {version} ({type})` (supersedes owner D17's fingerprint; matrix doc v3) — inform, no action.
 
 ## Cross-project deliveries (track until delivered)
 
 - **UAC-r2**: relay message handed to the owner 2026-10-07 (INCOMING-141/145 ack, #1364 `sprk_noaccessentry`, #1363 demo-grant marker, §13.9(b) do-not-mint, task-171 merge notes). Open: their answer on #1364 (T256/T218/T186 wait) and the #1363 fix.
-- **word-add-in-r1**: diagnostics build (acct/idp/tid/oid/iss/aud), prod deployment to `addins.spaarke.com`, multi-tenant app decision, admin guide drift (`spe-office-addins-prod` never existed).
-- **external-access-r3**: adopted the requirements into its design.md (starts 2026-10-07); owes its Teams client app id and the T240d CIAM design session.
+- **word-add-in-r1**: all four messages delivered and acted on (tasks 113 diagnostics, 114 production identity, 115 package 1.1.2). Open: their first production deploy to `addins.spaarke.com` waits for our T240c.
+- **external-access-r3**: second message delivered (design.md `9f8a61e2e`: external.spaarke.com, NAA only, 240d positions). Owes its Teams client app id and the T240d CIAM design session.
 
 ## Live state
 
