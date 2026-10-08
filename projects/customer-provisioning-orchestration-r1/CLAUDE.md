@@ -85,7 +85,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 **How to work**
 - Build the process, not the environment (2026-08-23). Never `pac admin copy` from another environment as a shortcut; every gap found is fixed here.
 - End state: provisioning runs E2E with no human interaction (2026-09-01). L2 has no web UI in r1.
-- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30).
+- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30). Its purpose: build a brand-new environment to execute, test and confirm the end-to-end process (owner 2026-10-08).
 - T218 defines the complete solution package and is a hard blocker for T186 (2026-09-28). All solutions ship to every customer (2026-09-01).
 - Every environment, Spaarke's own included, imports only the canonical SpaarkeMaster built by CI from git — never solutions the dev team creates or manages by hand (owner 2026-10-08, #1401 → T218f).
 - Every defect found is fixed in scope, or filed and reported. Review limits cap ceremony, never fixing (2026-10-06; task-execute Step 9.5).
@@ -171,10 +171,17 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - The session's primary working directory can switch to the main repo (`C:\code_files\spaarke`) mid-session. Use absolute worktree paths in every command (2026-10-07).
 
 **Dataverse packaging**
+- Only roles of the ROOT business unit can be packaged ("Subcomponent … cannot be added … root component Role is missing"). A role contained in a child unit by design (Secure Record Owner) is created per environment by provisioning (H7b), never shipped (2026-10-08).
+- `RemoveSolutionComponent`'s `SolutionComponent` reference takes the COMPONENT's id (objectid), not the solutioncomponent row id (that fails 0x8004f021) (2026-10-08).
+- `Export-SpaarkeMasterSource.ps1` needs an output folder ≤ 140 characters: past the Windows path limit the unpack is silently incomplete (2026-10-08).
+- An attribute PUT does not change a LOCAL option set's description, and a metadata GET right after a PUT can return the cached old value — re-read with header `Consistency: Strong` (2026-10-08).
+- The authoring copy of SpaarkeMaster had read 1.0.0.0 although 1.1.0.0 was shipped (2026-08-21): set versions with `Assemble-SpaarkeMasterSolution.ps1 -Version` (must be higher), never trust the dev number alone (2026-10-08).
 - `AddSolutionComponent` with `AddRequiredComponents = true` drags whole Microsoft tables into SpaarkeMaster (five on 2026-08-23). Add with subcomponents and no dependencies; the F12 leak is caught at export (`Export-SpaarkeMasterSource.ps1` fails on a missing dependency on `solution="Active"`) (2026-10-07).
 - Solution import from code: use `ImportSolutionAsync` / `StageAndUpgradeAsync` and poll `asyncoperations`. The synchronous actions hold the request for the whole import and outlive HttpClient's 100 s default (2026-10-07).
 
 **Code and tests**
+- Pester 3.4 under pwsh: a bare `Should Throw` (no message) always fails — always pass the expected message (2026-10-08).
+- A script with `SupportsShouldProcess` passes `-WhatIf` to `New-Item`/`Remove-Item` too: create local scratch folders with `-WhatIf:$false`, or the dry run itself fails (2026-10-08).
 - The .NET configuration binder appends to an initialised list. Apply a list default after binding (e.g. `EffectiveGuestSecurityRoleNames`) (2026-10-07).
 - To separate a timeout from caller cancellation, catch with `ex is not OperationCanceledException || !ct.IsCancellationRequested` (2026-10-07).
 - A process-wide `Meter` leaks between tests running in parallel. Select your own measurement by a tag unique to the fixture (2026-10-07).
@@ -183,6 +190,8 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - Pester for `tests/scripts/*.Tests.ps1`: `Import-Module Pester -RequiredVersion 3.4.0`. 6.x rejects `-Script` / `Should Be`, so `Auth-V4-Operator-Script-Gates.Tests.ps1` fails 27/27 under 6.2; it is not in CI (2026-10-06).
 
 **Git and editing**
+- Before merging this branch to master, list master's push-triggered workflows for the changed paths: `deploy-spaarke-ai` deploys the Console to DEV on any master push touching shared UI paths; `publish-provisioning-arm-artifacts` uploads to `sprkcpartifactsdev` (2026-10-08).
+- `Router` is the only required check: merge only when EVERY PR check is terminal and green, not when Router passes (2026-10-08).
 - Write edit scripts with the Write tool; bash heredocs fail on quoting. In Python use `'''` when the text holds `"` before `"""` or C# raw strings, and restrict line-prefix replacements to the intended line (2026-10-06).
 - Parallel sub-agents share the git index (2026-08-19):
   - commit with `git commit --only <paths>`, never `git add -A` / `git add .`;
