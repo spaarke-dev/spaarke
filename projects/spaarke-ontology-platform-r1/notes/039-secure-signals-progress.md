@@ -122,7 +122,7 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
   - Row owned by another team → `secure_owner_mismatch`, no update.
   - Mutation-checked: with the reconcile call passing `null` instead of `secureTeamId`, both fail; restored afterwards.
   - Totals: SignalWriter tests 47 passed (44 unit; the 3 seam tests return early without the live env vars). ArchTests rebuilt: 818 passed.
-- **B-1 (F2):** the `SignalWriter` remarks no longer claim the lineage lists `sprk_signal`. They now state that the lineage entry and the `prvReadsprk_Signal` config entry come from master PR #1390, and that until #1390 reaches this branch a Secure-team-owned Signal is owned correctly but its sharees are not mirrored.
+- **B-1 (F2):** the `SignalWriter` remarks no longer claim the lineage lists `sprk_signal`. They now state that the lineage entry and the `prvReadsprk_Signal` config entry come from master PR #1390, and that until #1390 reaches this branch a Secure-team-owned Signal create is likely REFUSED (403 `0x80040299`, `DataverseAccessDenied`) because the owner team lacks `prvReadsprk_Signal`, as recorded live for `sprk_spendsignal`; not reproduced for `sprk_signal` (re-check 2026-10-07).
   - **Sequence (coordinator):** #1390 → master → merge master into this branch → add the pin test (`SecureChildLineage.Children` contains `sprk_signal`; the config grants `prvReadsprk_Signal`) → merge this branch into `docs/ontology-platform-design`. The pin test is NOT added yet; it would be red here.
   - **Do not run `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Apply` from this branch before #1390 is in it** (coordinator's rule, kept as a precaution). Factual note: uac-r2 states on #1355 (§2 item 1) that the script removes nothing, including privileges outside the config. From this branch, `-Verify` would list the two Reads as extra and `-Apply` would add nothing. The real hazard of running it from the wrong branch is a misleading Verify reading, not a stripped privilege.
 - **B-4 (F4): publish size.**
@@ -134,7 +134,7 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
 | ontology base merged into this branch | `a157d44bd` | 192 | 36.26 MB (38,020,857 B) |
 | this branch | `13c002d85` | 192 | 36.26 MB (38,022,437 B) |
 
-  - **Branch vs master: +0.04 MB (+43,473 B).** That is the whole ontology branch's BFF work, not only 039.
+  - **Branch vs master: +0.04 MB (+43,473 B).** That is the ontology branch's BFF work NET of master-only changes: the baseline `cf66c14c3` is not an ancestor of the branch (master has 27 `src/server` files since merge base `fc13ab03e` that the branch lacks). The 039-only figure (+1,580 B vs its ancestor base `a157d44bd`) is the clean one.
   - **039's own contribution (branch vs its ontology base): +1,580 B (≈ 0.00 MB).**
   - File counts are equal on all three sides. No package change. Far under every threshold (+5 MB / 55 MB / 60 MB).
 
