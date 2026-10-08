@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// </summary>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
-    private static readonly Guid RecordTypeMatter = Guid.Parse("a0460000-0000-4000-8000-000000000001");
+    private static readonly Guid WaRecordTypeMatter = Guid.Parse("a0460000-0000-4000-8000-000000000001");
     private static readonly Guid LawFirm = Guid.Parse("a0460000-0000-4000-8000-000000000002");
 
     /// <summary>The wizard's create payload for a work assignment regarding <paramref name="matter"/>.</summary>
@@ -37,7 +37,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ["sprk_description"] = "Second draft",
         ["sprk_responseduedate"] = "2026-10-20",
         ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})",
-        ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({WaRecordTypeMatter:D})",
         ["sprk_regardingrecordid"] = matter.ToString("D"),
         ["sprk_regardingrecordname"] = "Lease dispute",
         ["sprk_regardingrecordurl"] = $"https://org/main.aspx?etn=sprk_matter&id={matter:D}",
@@ -108,6 +108,22 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
         ReasonCode(result).Should().Be(WorkAssignmentCreateService.NameRequiredCode);
         _appCreates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_containerid", "b!container-of-someone-else")]
+    [InlineData("sprk_issecure", true)]
+    [InlineData("sprk_SecurityBU@odata.bind", "/businessunits(a0460000-0000-4000-8000-0000000000b9)")]
+    public async Task WorkAssignmentCreate_NamingAServerOwnedRootColumn_Is400_AndNothingIsCreated(string column, object value)
+    {
+        var payload = WizardPayload(OrdinaryMatter);
+        payload[column] = value;
+
+        var result = await CreateWorkAssignment(payload);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(WorkAssignmentCreateService.ServerOwnedColumnCode);
+        _appCreates.Should().BeEmpty("a root's container and secure state are the server's (task 076 W1, task 150)");
     }
 
     [Fact]

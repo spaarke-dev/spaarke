@@ -169,6 +169,16 @@ public sealed class WorkAssignmentCreateService
                 "A work assignment needs a name. Nothing was created.");
         }
 
+        // A root's storage and secure state are the SERVER's (task 076 W1: the container is derived from the record at upload
+        // time; task 150: the secure flag and the secure business unit are written only by provisioning). The G5 core refuses
+        // owner, audit, creator and field-secured columns; these are refused here so an app-only create can never honour a
+        // caller-chosen value for them — the same set RecordCreationService protects on a matter or project.
+        if (ServerOwnedRootColumnIn(webApiPayload) is { } serverOwned)
+        {
+            return WorkAssignmentCreateResult.Refused(WorkAssignmentCreateFailureKind.InvalidPayload, ServerOwnedColumnCode,
+                $"'{serverOwned}' is set by the server on a work assignment — omit it. Nothing was created.");
+        }
+
         // The payload mapped AS THE CALLER against the table's own metadata (navigation properties, lookup targets).
         var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(_user, Table, webApiPayload, ct).ConfigureAwait(false);
         if (mapped.ValidationError is { } invalid)
@@ -235,6 +245,27 @@ public sealed class WorkAssignmentCreateService
 
         return new WorkAssignmentCreateResult { Id = id, Isolated = owned.Isolated is not null, Warnings = warnings };
     }
+
+    /// <summary>
+    /// The first payload property naming a column the server owns on a work assignment (a value, or a lookup bind such as
+    /// <c>sprk_SecurityBU@odata.bind</c>), or <c>null</c>. Compared case-insensitively on the name before any <c>@</c>.
+    /// </summary>
+    internal static string? ServerOwnedRootColumnIn(JsonElement payload) =>
+        payload.EnumerateObject()
+            .Select(p => p.Name)
+            .FirstOrDefault(name =>
+            {
+                var column = name.Contains('@') ? name[..name.IndexOf('@')] : name;
+                return ServerOwnedRootColumns.Contains(column.Trim());
+            });
+
+    /// <summary>The refusal code for a payload naming a server-owned root column.</summary>
+    internal const string ServerOwnedColumnCode = "work_assignment.server_owned_column";
+
+    private static readonly IReadOnlySet<string> ServerOwnedRootColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_containerid", "sprk_issecure", "sprk_securitybu",
+    };
 
     private static bool HasName(JsonElement payload) =>
         payload.EnumerateObject().Any(p =>

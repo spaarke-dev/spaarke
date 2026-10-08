@@ -93,7 +93,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given identical inputs, when one assignment is created by the old browser path and one by the BFF, then every field in the parity table matches, including owner and owning business unit.</criterion>
+    <criterion testable="true">Given identical inputs, when one assignment is created by the old browser path and one by the BFF, then every field in the parity table's matching rows (1-12) is equal; the owner, owning business unit, creator person and secure handling (rows 13-16) follow the server's root rule instead — owned by the business-unit team the ownership resolver names (the regarding record's), sprk_createdbyperson = the caller, created secure under a Secure parent — as accepted by D-59 (amended 2026-10-07; was "including owner and owning business unit").</criterion>
     <criterion testable="true">Given the existing Create Work Assignment wizard, when used after the switch, then it creates through the BFF and its UI is unchanged.</criterion>
     <criterion testable="true">Given task 043, when it calls the service in-process, then the created id is returned for sprk_followons.</criterion>
     <criterion testable="true">Negative: a caller without Create on sprk_workassignment or AppendTo on the regarding record is refused before writing; an unresolved caller gets 403; the route is in the census.</criterion>

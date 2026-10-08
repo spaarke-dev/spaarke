@@ -1,5 +1,101 @@
 # Task 046 — server-side work-assignment create: parity table and escalation
 
+> **2026-10-07, second pass — owner decision D-59 (option A): BUILT, live-proven; merge waits on uac-r2.** §0 is the
+> execution record. Sections 1-4 below are the first pass's escalation record, kept unchanged (its §2 parity table is
+> corrected by §0.3 where the live proof showed otherwise).
+
+## 0. Execution record (D-59)
+
+### 0.1 What was built, and one deviation from D-59's letter
+
+| File | What |
+|---|---|
+| `Services/WorkAssignments/WorkAssignmentCreateService.cs` (new) | The create: maps the wizard's Web API payload AS THE CALLER, then `OwnedChildWrite.CreateAsync(…, SecureRootFilingGate)` (G5: Create/Append privilege, **AppendTo on every bound record — the regarding record every time**, no owner/audit/creator/field-secured column; app-only create owned by the resolver's team; `sprk_createdbyperson` = caller; the I-13 L1 plan — created INTO isolation under a secure parent), `CompleteIsolatedCreateAsync` for an isolated row, then the I-12 Assigned-To materializer. Refuses a nameless payload and a root's server-owned columns (`sprk_containerid`, `sprk_issecure`, `sprk_securitybu`). Callable in-process (task 043). |
+| `Api/WorkAssignments/WorkAssignmentEndpoints.cs` (new) | `POST /api/v1/record-creation/workassignment` — **PROVISIONAL name** (uac-r2 asked to name it, #1355). Unresolved caller → the single 403 `sdap.access.deny.caller_unresolved`; 201 `{id, isolated, warnings}`; refusals as ProblemDetails with `reasonCode`. |
+| `Infrastructure/DI/SignalsModule.cs`, `EndpointMappingExtensions.cs` | One unconditional scoped registration; one mapping line (§F.1). |
+| `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` (uac-r2's) | GovernedFile + HandlerDecision (`IDataverseUserClient` via one hop), census 117 → 118. Minimal. |
+| `CreateWorkAssignmentWizard/workAssignmentService.ts` | The SAME payload is POSTed to the route instead of `Xrm.WebApi.createRecord`; server warnings carried; client `syncAssignedAccess` dropped for this create (the server materializes inline); UI unchanged. A pre-existing unreachable `else if` (eslint `no-dupe-else-if`) removed. |
+| `utils/adapters/bffChildWriteAdapter.ts` (uac-r2's) | `failureOf` exported (one word) so the wizard reuses its ProblemDetails reader. |
+
+**Deviation from D-59's letter (recorded, raised on #1355):** D-59 says "build it on `RecordCreationService`". That was
+my own first-pass recommendation, written before I found that **`OwnedChildWrite.CreateAsync` with the secure-create
+plan already creates work-assignment roots** (the chat `dataverse.create_record` tool, `DataverseCreateRecordHandler.cs:341-373`).
+A work-assignment path in `RecordCreationService` would be a **third** root-create for the same table — a parallel
+mechanism the coordination constraint forbids — and would need a typed request plus a server re-implementation of the
+ADR-024 resolver fields the wizard already builds. The service therefore runs the existing core in the chat tool's order.
+Everything D-59 names holds: uac-r2's pattern, team-owned, creator stamped, secured at create, AppendTo on the parent every
+time, under uac-r2's review. If the owner or uac-r2 want `RecordCreationService` regardless, the service is the only file
+that changes.
+
+### 0.2 Live proof (spaarkedev1, 2026-10-08 ~00:49 UTC) — `WorkAssignmentCreateLiveTests` (opt-in)
+
+The REAL route in-process against spaarkedev1 (harness pattern of 097's `EventRoutesLiveTests`; substituted: the inbound
+token carries the acting user's real oid; `IDataverseUserClient` uses the operator's az token + `MSCRMCallerID` for another
+user, with the production error mapping; outbound identity = AzureCliCredential). Browser leg = the same payload POSTed to
+`sprk_workassignments` as the operator (what `Xrm.WebApi.createRecord` sends).
+
+| Leg | Result |
+|---|---|
+| Operator (System Administrator, root BU), matter CMRCL-441482 (BU1): browser path | created `63baf70e…` |
+| Same payload through `POST /api/v1/record-creation/workassignment` | **201** `3aa859b9…`, isolated false, no warnings |
+| Field by field (17 columns: name, priority, description, response due date, search index name, AI search index, regarding matter, record type, record id/name/number/url, matter type, practice area, container id (null on both), state, status) | **all equal** |
+| Owner | browser = the user `1d02f31c…`; server = BU1's default team `cf15f587…` (I-6, record-first) — intended |
+| Owning BU | browser = root `06fbf21c…`; server = BU1 `cb15f587…` — intended |
+| Creator person | browser = null; server = the operator — intended |
+| `# UAC Child BU Test User` (BU1, holds Create+Append on WA, **no access** to root-BU matter EMPL-847770) | **404** `work_assignment.not_found`; zz-046 count unchanged |
+| Cleanup | 2 of 2 deleted; **0 zz-046 work assignments remain** |
+
+**Secure-parent leg: not run live.** Completing an isolated create runs provisioning (its own SPE container via Graph,
+the creator share), which the in-process host cannot do with the operator's credential and fake Graph settings, and the
+only secure parent in dev is uac-r2's live test project `31e232ae…` (their owner is testing on it now). Proving it needs
+a dev BFF deploy of this branch after uac-r2's review — an Azure change for the owner to approve. The isolated path is
+the chat tool's, covered by uac-r2's `SecureRootInheritanceWriterTests`; this service passes the same gate to the same core.
+
+### 0.3 Corrections to the first-pass parity table (§2)
+
+- **Rows 5-6 (BU search defaults): ✅ parity**, not ⚠️ — the wizard puts them in the payload from the user's BU, and the
+  server writes the payload as given (live: both rows `spaarke-files-index` / `dd04e55f…`).
+- **Row 14 (owning BU)**: the server owner is the **regarding record's** business-unit team (I-6 record-first), the
+  caller's only when the record is unfiled — as measured live.
+- **Row 17**: AppendTo on every bound record is checked by the core for ordinary filings too (the project path in
+  `RecordCreationService` does it only under a secure parent) — so D-59's "every time" holds without new code.
+
+### 0.4 Defect found: uac-r2's G5 core refused every ADR-024 payload (fixed in PR #1391)
+
+The first live run was **404 for a System Administrator**. `OwnedChildWrite.CheckCallerMayAppendToAsync` asks
+`RetrievePrincipalAccess` for every bound lookup; on an ORGANIZATION-OWNED table (`sprk_recordtype_ref`,
+`sprk_mattertype_ref`, `sprk_practicearea_ref`) Dataverse answers `400 0x80040800 … does not support entities of type
+'sprk_recordtype_ref'`, read as no rights → uniform 404. Every ADR-024 resolver payload binds `sprk_RegardingRecordType`,
+so **uac-r2's own `POST /api/v1/child-records/{table}` refuses the Create To Do / Event / Invoice / Report Card wizards'
+payloads whenever the record is filed under something** — live on dev (master `dc189faac`). Measured through the real route:
+the same `zz-046` to-do is **201** without the record-type lookup, **404** with it, and **201** with the fix.
+Fix: an org-owned target is allowed when the caller holds its AppendTo **privilege** and can read the row (what a
+run-as-user create checks); otherwise the uniform 404 stands. The harness answered RetrievePrincipalAccess for every
+table (why it slipped) — now it refuses org-owned tables as live does. **PR #1391** to master
+(`fix/g5-appendto-org-owned-reference`, heads `1e8b27b9e` + `c23ba5032`), uac-r2 to review; **not merged**. Cherry-picked
+onto this branch (`d0f1fb469` + the guard commit) because task 046 cannot work without it. Reported on #1355.
+
+### 0.5 Gates
+
+- Tests: 7 cases in `SecureChildOwnershipAiToolTests.WorkAssignmentCreate.cs` (created team-owned with the creator stamp and
+  every wizard field; no AppendTo on the regarding matter = the same 404 as a missing matter; no Create privilege 403; no
+  name 400; server-owned root column 400 ×3; unreadable parent flag 409; unresolved caller the single 403 before any
+  Dataverse call) + 3 jest cases (route + no `Xrm.WebApi`; refusal message; warnings → partial) + the live test.
+- Code review (Step 9.5): findings 1 (server-owned root columns honoured on an app-only create — F1, fixed), 2 (non-string
+  `OwnershipType` would throw in the fix — fixed), 3 (stale header comment — fixed); known limits: K — the CRUD service uses
+  `OwnedChildWrite`/`DataverseWriteItemMapper` (namespace `Services/Ai/Handlers/Dataverse`) and the endpoint
+  `ICallerSystemUserResolver` (`Services/Ai/Context`) — Dataverse write/identity cores, not AI capability, the same placement
+  uac-r2's `ChildRecordEndpoints`/`EventEndpoints` use (**ADR-013 tension, proposed path A**, for the main session to log in
+  spec §6 if it agrees); K4 — `Created` location has no GET; K — the live test copies two small harness classes from 097's.
+- ADR check: no violations; ADR-013 warning as above; ADR-010 low (registered in this project's SignalsModule).
+- Arch tests (route/ownership/secure-child subset): 125/125. Full unit suite, publish size, CVE: §0.6.
+
+### 0.6 Measurements
+
+(publish size, CVE, full suites — filled at completion)
+
+## First pass (escalation record, unchanged)
+
 > **Date**: 2026-10-07 · stream C2 · **Status**: 🔔 **STOPPED at both escalation triggers — no code written.**
 > The POML requires the parity table to be reviewed by the work-assignment area owner **before** any code (constraint 1-2,
 > step 1), and it says to stop if uac-r2's code has changed in a way that invalidates the plan. Both apply:

@@ -2,7 +2,8 @@
  * workAssignmentService.ts
  * Service for the Work Assignment wizard.
  *
- * Creates sprk_workassignment records in Dataverse via IDataService.
+ * Creates sprk_workassignment records through the BFF's work-assignment create route (ontology task 046):
+ * the wizard builds the Web API payload and the server writes it (WP-3). Reads still go through IDataService.
  * Follows the nav-prop discovery pattern from MatterService/EventService.
  *
  * Dependencies are injected via constructor -- no solution-specific imports.
@@ -617,9 +618,10 @@ export class WorkAssignmentService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
+    // (A former `else if (uploadedFiles.length > 0 && !this._containerId)` "no SPE container configured" branch was
+    // unreachable — its condition is covered by the `if` above — and lost its meaning when task 076 made the server pick
+    // the container. Removed by ontology task 046; eslint no-dupe-else-if.)
 
     return {
       status: warnings.length > 0 ? 'partial' : 'success',
