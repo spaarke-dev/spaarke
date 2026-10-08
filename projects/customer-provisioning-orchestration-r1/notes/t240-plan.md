@@ -77,6 +77,10 @@ invited as a guest to Spaarke's tenant. Finding: a Model 1 user's Outlook/Word r
 add-in must be installed there (by the customer's admin, Integrated apps) — a customer onboarding step to document in
 240c, and the test tenant exercises it.
 
+**Owner decision 2026-10-07:** customer staff (B2B guests) use the Word/Outlook add-ins; the customer's IT deploys them
+in the customer's own tenant (Microsoft 365 admin center → Integrated apps) as a standard onboarding step. Store
+(AppSource) publishing for self-install can follow later. The deployment guide gains this step in 240c.
+
 ### Test organization — set up 2026-10-07 (owner, in the portals; checked read-only)
 
 | Item | Value |
