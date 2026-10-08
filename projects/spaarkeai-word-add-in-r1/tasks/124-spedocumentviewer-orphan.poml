@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>SpeDocumentViewer: deployed on the Document main form with no source — restore and fix, or replace; audit the other source-less deployed controls</title>
+    <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth + a deployed control with no source of record.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Needs a judgement: restore vs replace, and a form-binding audit.</model-tier-reason>
+    <effort>high</effort>
+    <deps>122</deps>
+    <tags>frontend, auth, pcf, dataverse</tags>
+  </metadata>
+  <prompt>Read `notes/122-guest-signin-review.md`. The guest's AADSTS700016 popup names app `b36e9b91…` ("SPE File Viewer PCF", `config/spaarke-resources.yaml:180`). That is SpeDocumentViewer 1.0.27, still bound to the Document main form in spaarkedev1, whose source was deleted as an orphan in 5b4cca898 (2026-06-22). Its authInit ignores its `tenantId` property and builds the `SDAP.Access` scope.</prompt>
+  <goal>The Document main form's preview works for members and guests from a control whose source is in master; the other source-less deployed controls are classified (bound to a form/used? calls the BFF?) and each has a decision.</goal>
+  <constraints>
+    <constraint>Read-only against Dataverse until the owner approves a deploy/form change (task 125). No form edits in this task — produce the change, the plan and the evidence.</constraint>
+    <constraint>Prefer an existing maintained preview surface over resurrecting the old control if one already serves the Document form's need (check what replaced it; why the orphan cleanup judged it unused).</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>Find what SpeDocumentViewer does on the Document main form and whether a maintained control/code page already provides it. Decide restore-and-fix (from 5b4cca898^, tenant passed, `user_impersonation`, the shared MSAL client) vs replace; record the reasoning.</step>
+    <step>Implement the chosen option in source (restore + fix with tests, or the replacement binding plan).</step>
+    <step>Audit the other deployed controls with no source (AnalysisWorkspace, AnalysisBuilder, PlaybookBuilderHost, AssociationResolver, FieldMappingAdmin, LegalWorkspace PCF, RegardingLink, EventFormController, DueDatesWidget, EventCalendarFilter, EventAutoAssociate): bound to which forms, do they call the BFF/sign in, recommendation each. Report the orphan-cleanup gate gap (it missed the Document main form).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A decision note with evidence; the Document form's preview source is in master and builds; it signs in with a tenant-specific authority.</criterion>
+    <criterion testable="true">A table for the 11 other source-less controls with a recommendation each; issues filed for any that sign in or call the BFF.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>The deployed control and its deleted source in history.</existing>
+    <extension>Restore/fix or replace with an existing control — decided in the task.</extension>
+    <cost-of-doing-nothing>Document preview fails for every Model 1 user, and the control cannot be fixed without source.</cost-of-doing-nothing>
+  </justification>
+</task>

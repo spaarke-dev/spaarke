@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>@spaarke/auth: always sign in against the environment's tenant (never /organizations in a Dataverse host); account selection; no token-less requests</title>
+    <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth library used by every client surface; security-sensitive.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared auth change with cross-surface blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>frontend, auth, shared-library, unit-test</tags>
+  </metadata>
+  <prompt>Read `notes/122-guest-signin-review.md` first. A B2B guest (home tenant ≠ Spaarke's) gets AADSTS700016 on every Dataverse control because `src/client/shared/Spaarke.Auth/src/config.ts` resolveConfig() falls back to `https://login.microsoftonline.com/organizations` when no authority/tenantId is passed and `Xrm…organizationSettings.tenantId` is empty (it usually is). `/organizations` signs a guest into their HOME tenant. Fix the library so a Dataverse-hosted surface always signs in against the environment's tenant. Members must keep working exactly as today (for them the tenant-specific authority equals their home tenant).</prompt>
+  <goal>No @spaarke/auth path produces an `/organizations`, `/common`, `/consumers`, `/undefined`, `/null` or empty-tenant authority in a Dataverse host; the tenant is found from a defined chain; the library never sends a BFF request without a token and opens at most one interactive prompt for concurrent callers.</goal>
+  <constraints>
+    <constraint>Library only: `src/client/shared/Spaarke.Auth/**` (src + tests + its README/docs). Do NOT edit consumers (task 123), the BFF, or other projects' files. `errorGuards.ts` / `index.ts` exports are being changed by PR #1451 (client-error-handling-r1) — do not edit `errorGuards.ts`; keep `index.ts` edits to added exports only.</constraint>
+    <constraint>Public API stays backward compatible: existing `IAuthConfig` fields, `initAuth`, `createCodePageAuthInitializer`, `resolveRuntimeConfig`, `resolveTenantIdSync`, `authenticatedFetch` signatures unchanged; additions are optional.</constraint>
+    <constraint>The 2026-05-13 regression (ef57fc3f35) was a malformed `/undefined` authority — validate every tenant value; never accept 'undefined', 'null', 'common', 'organizations', 'consumers', ''.</constraint>
+    <constraint>No new npm packages.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>Add `isValidTenant(value)` (GUID, or a domain containing a dot; rejects the reserved/garbage values) and apply it to `userConfig.tenantId`, the tenant segment of `userConfig.authority`, and every discovered value; log and fall through on rejection.</step>
+    <step>Synchronous order in resolveConfig: explicit authority → tenantId → Xrm `organizationSettings.tenantId` (frame-walk) → `window.__SPAARKE_TENANT_ID__` (new; published by `setRuntimeConfig` in `createRuntimeConfigStore.ts`) → cached runtime config in localStorage (`__spaarke_rtc__`) → unresolved.</step>
+    <step>Async step in `initAuth` and `createCodePageAuthInitializer` when still unresolved: Dataverse env var `sprk_TenantId` (reuse the existing env-var query used by resolveRuntimeConfig), then BFF `/api/config/client` (cache the result — the endpoint is limited to 10/min/IP). Only then `/organizations`, with `console.error`. New optional `requireTenantAuthority` (default true when an Xrm host is detected): throw an AuthError instead of using `/organizations`.</step>
+    <step>`initAuth` coalescing: when an existing provider for the same clientId is on a non-tenant authority and the new config resolves a valid tenant, replace (dispose) the old provider instead of keeping it.</step>
+    <step>Account selection in `BrowserMsalStrategy` (and `OfficeNaaStrategy._pickAccount` if the same pattern applies without changing NAA behaviour): `getActiveAccount()` → an account whose `tenantId` equals the resolved tenant → `[0]`; `setActiveAccount` after success; login hint from the chosen account.</step>
+    <step>`authenticatedFetch`: if no token is obtained, throw `AuthError` (do not send an unauthenticated request); `InMemoryCache.acquire` shares one in-flight promise across concurrent callers.</step>
+    <step>Fix docs/comments that contradict the code (`resolveTenantIdSync.ts:10-17`, `types.ts:27`, `BrowserMsalStrategy.ts:131`); `resolveTenantIdSync` validates the authority segment (trailing slash, `/v2.0`, `consumers`).</step>
+    <step>Tests: update `config.test.ts` (it currently asserts `/organizations` as correct) and add tests for every step above incl. a guest account whose home tenant differs from its `tenantId`, concurrent callers → one prompt, and no request without a token.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">With no tenant from config or Xrm, initAuth resolves the tenant from `sprk_TenantId`, else from `/api/config/client`; the MSAL authority is `https://login.microsoftonline.com/{that GUID}`.</criterion>
+    <criterion testable="true">'undefined', 'null', 'common', 'organizations', 'consumers', '' and a malformed authority are rejected wherever accepted; none becomes the authority.</criterion>
+    <criterion testable="true">In an Xrm host with no resolvable tenant, initAuth throws an AuthError (no /organizations); outside Xrm without `requireTenantAuthority`, behaviour falls back as before with console.error.</criterion>
+    <criterion testable="true">A second initAuth with the same clientId and a valid tenant replaces a provider built on /organizations.</criterion>
+    <criterion testable="true">With two cached accounts, the one matching the resolved tenant is used for silent acquisition and the login hint.</criterion>
+    <criterion testable="true">authenticatedFetch never sends a request without an Authorization header; three concurrent cold-cache calls trigger one acquisition.</criterion>
+    <criterion testable="true">Members: a config with a valid tenant behaves exactly as before (existing tests pass unchanged except those asserting /organizations).</criterion>
+    <criterion testable="true">Spaarke.Auth build + tests green; the office add-ins still build and their jest/typecheck gates pass (they consume the library).</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>resolveRuntimeConfig already has the env-var → Xrm → /api/config/client chain; initAuth's default path does not use it.</existing>
+    <extension>Yes — extend resolveConfig/initAuth to reuse that chain; no new module beyond a small validator.</extension>
+    <cost-of-doing-nothing>Every Model 1 customer user (a B2B guest) is blocked on ~19 Dataverse surfaces with AADSTS700016.</cost-of-doing-nothing>
+  </justification>
+</task>
