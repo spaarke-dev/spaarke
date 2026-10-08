@@ -77,7 +77,7 @@ invited as a guest to Spaarke's tenant. Finding: a Model 1 user's Outlook/Word r
 add-in must be installed there (by the customer's admin, Integrated apps) — a customer onboarding step to document in
 240c, and the test tenant exercises it.
 
-### Test organization — set up 2026-10-07 (owner, in the portals; checked read-only):**
+### Test organization — set up 2026-10-07 (owner, in the portals; checked read-only)
 
 | Item | Value |
 |---|---|
