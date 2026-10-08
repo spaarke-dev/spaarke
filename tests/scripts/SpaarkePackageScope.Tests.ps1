@@ -248,6 +248,24 @@ Describe 'Find-LeakyDependencies (T218c F12 guard)' {
     }
 }
 
+Describe 'Get-NextPackageVersion (T218e)' {
+    It 'bumps each part as four parts (the inline bump produced 1.0.0.1.0)' {
+        Get-NextPackageVersion -Current '1.0.0.0' -Kind Build | Should Be '1.0.1.0'
+        Get-NextPackageVersion -Current '1.0.3.7' -Kind Minor | Should Be '1.1.0.0'
+        Get-NextPackageVersion -Current '1.4.3.7' -Kind Major | Should Be '2.0.0.0'
+        Get-NextPackageVersion -Current '1.0.0.0' -Kind Revision | Should Be '1.0.0.1'
+        Get-NextPackageVersion -Current '1.2' -Kind Build | Should Be '1.2.1.0'
+    }
+
+    It 'sets an explicit version only when it is higher' {
+        Get-NextPackageVersion -Current '1.0.0.0' -Version '1.2.0.0' | Should Be '1.2.0.0'
+        Get-NextPackageVersion -Current '1.0.0.0' -Version '1.2' | Should Be '1.2.0.0'
+        { Get-NextPackageVersion -Current '1.2.0.0' -Version '1.2' } | Should Throw 'not higher'
+        { Get-NextPackageVersion -Current '1.2.0.0' -Version '1.1.9.9' } | Should Throw 'not higher'
+        { Get-NextPackageVersion -Current '1.0.0.0' -Version '1.x' } | Should Throw 'Not a version'
+    }
+}
+
 Describe 'Find-EnvironmentVariableValues (T218c value guard)' {
     It 'finds a values file in an unpacked folder and passes a clean one' {
         $dirty = Join-Path $TestDrive 'dirty/environmentvariabledefinitions/sprk_X'

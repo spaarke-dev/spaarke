@@ -19,15 +19,29 @@
     by rule. An OOB table whose sprk_ column, view or form is added goes in as a SHELL first (DoNotIncludeSubcomponents
     + empty IncludedComponentSettingsValues - rootcomponentbehavior 2), so Spaarke never ships Microsoft's table metadata. A sprk_ table packaged as a shell (behavior != 0) is re-added with all subcomponents.
 
+    -RemoveUnexplained (T218e) also removes from the solution what the rule does not explain: components packaged
+    OUTSIDE THE RULE (e.g. Microsoft tables dragged in as dependencies, environment-variable VALUES) and components
+    EXCLUDED BUT PACKAGED. RemoveSolutionComponent only takes a component out of the solution; it deletes nothing from
+    the environment. Without the switch these are reported, never removed.
+
     Export is a separate step: Export-SpaarkeMasterSource.ps1.
 
 .PARAMETER WhatIf
-    Report what would be added and the new version; change nothing.
+    Report what would be added (and removed, with -RemoveUnexplained) and the new version; change nothing.
+
+.PARAMETER Version
+    Set this exact version instead of a -VersionBumpKind bump. It must be higher than the current version (H6 refuses
+    downgrades; v1.1.0.0 was exported on 2026-08-21 although the authoring copy later read 1.0.0.0).
+
+.PARAMETER RemoveUnexplained
+    Remove components packaged outside the rule and excluded components from the solution (owner-approved run).
 
 .EXAMPLE
     ./Assemble-SpaarkeMasterSolution.ps1 -WhatIf
 .EXAMPLE
     ./Assemble-SpaarkeMasterSolution.ps1 -VersionBumpKind Minor
+.EXAMPLE
+    ./Assemble-SpaarkeMasterSolution.ps1 -RemoveUnexplained -WhatIf
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -36,7 +50,9 @@ param(
     [string]$MasterSolutionUniqueName = 'SpaarkeMaster',
     [string]$ScopePath = "$PSScriptRoot/../../docs/data-model/package-scope.json",
     [ValidateSet('Build', 'Revision', 'Minor', 'Major')]
-    [string]$VersionBumpKind = 'Build'
+    [string]$VersionBumpKind = 'Build',
+    [string]$Version,
+    [switch]$RemoveUnexplained
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,34 +98,34 @@ $shells = @($diff.PackagedAsShell)
 Write-Host "    In scope: $($rule.Count) (excluded: $(@($rule | Where-Object Excluded).Count)) ; already in $MasterSolutionUniqueName : $($rule.Count - $toAdd.Count - @($rule | Where-Object Excluded).Count)"
 foreach ($g in ($toAdd | Group-Object TypeName | Sort-Object Name)) { Write-Host ("    +{0,-32} {1,5}" -f $g.Name, $g.Count) -ForegroundColor Yellow }
 foreach ($x in $shells) { Write-Host "    ~ shell -> full: $($x.Name)" -ForegroundColor Yellow }
-foreach ($x in $diff.ExcludedButInPackage) { Write-Warning "Excluded but packaged: $($x.TypeName) $($x.Name) - remove it from $MasterSolutionUniqueName (owner-approved) or drop the exclusion." }
+# What the rule does not explain: removed only with -RemoveUnexplained, otherwise reported.
+$toRemove = [System.Collections.Generic.List[object]]::new()
+foreach ($x in $diff.ExcludedButInPackage) {
+    $toRemove.Add([PSCustomObject]@{ ComponentType = $x.ComponentType; ObjectId = $x.ObjectId; Label = "excluded $($x.TypeName) $($x.Name)" })
+}
 if (@($diff.OutsideRule).Count -gt 0) {
     $entityNames = Get-EntityNameMap -Get $get
     foreach ($x in $diff.OutsideRule) {
         $label = if ($x.ComponentType -eq 1 -and $entityNames.ContainsKey($x.ObjectId)) { "table $($entityNames[$x.ObjectId])" } else { "type $($x.ComponentType) $($x.ObjectId)" }
-        Write-Warning "Packaged outside the rule: $label - remove it from $MasterSolutionUniqueName (owner-approved) unless the rule should cover it."
+        $toRemove.Add([PSCustomObject]@{ ComponentType = $x.ComponentType; ObjectId = $x.ObjectId; Label = "outside the rule: $label" })
     }
+}
+if (-not $RemoveUnexplained) {
+    foreach ($x in $toRemove) { Write-Warning "Not explained by the rule: $($x.Label) - re-run with -RemoveUnexplained (owner-approved) or change the rule." }
+    $toRemove.Clear()
 }
 foreach ($x in $diff.UnmatchedExclusions) { Write-Warning "Stale exclusion (matches nothing): $($x.type) $($x.name)" }
 foreach ($x in $diff.UnmatchedAlsoIncluded) { Write-Warning "roleNamesAlsoIncluded matches no root role: $x" }
 
-if ($toAdd.Count -eq 0 -and $shells.Count -eq 0) { Write-Host "==> Nothing to add. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
+if ($toAdd.Count -eq 0 -and $shells.Count -eq 0 -and $toRemove.Count -eq 0) { Write-Host "==> Nothing to change. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
 
-$newVersion = & {
-    $parts = @(($master.version -split '\.') + @('0', '0', '0', '0'))[0..3] | ForEach-Object { [int]$_ }
-    switch ($VersionBumpKind) {
-        'Major' { $parts = @($parts[0] + 1, 0, 0, 0) }
-        'Minor' { $parts = @($parts[0], $parts[1] + 1, 0, 0) }
-        'Build' { $parts = @($parts[0], $parts[1], $parts[2] + 1, 0) }
-        'Revision' { $parts = @($parts[0], $parts[1], $parts[2], $parts[3] + 1) }
-    }
-    $parts -join '.'
-}
+$newVersion = Get-NextPackageVersion -Current $master.version -Kind $VersionBumpKind -Version $Version
 
 if ($WhatIfPreference) {
     $toAdd | Sort-Object TypeName, Name | ForEach-Object { Write-Host "    WOULD ADD: $($_.TypeName) $($_.Name)" -ForegroundColor DarkYellow }
     $shells | ForEach-Object { Write-Host "    WOULD RE-ADD WITH SUBCOMPONENTS: $($_.Name)" -ForegroundColor DarkYellow }
-    Write-Host "    WOULD BUMP: $($master.version) -> $newVersion ($VersionBumpKind)" -ForegroundColor DarkYellow
+    $toRemove | ForEach-Object { Write-Host "    WOULD REMOVE FROM THE SOLUTION: $($_.Label)" -ForegroundColor DarkYellow }
+    Write-Host "    WOULD SET VERSION: $($master.version) -> $newVersion" -ForegroundColor DarkYellow
     exit 0
 }
 
@@ -127,6 +143,22 @@ function Add-Component([string]$Id, [int]$Type, [bool]$Required, [bool]$NoSubcom
 }
 
 $failed = @()
+foreach ($x in $toRemove) {
+    try {
+        # SolutionComponent is a reference whose id is the COMPONENT's id (objectid), not the solutioncomponent row id
+        # (verified live 2026-10-08: the row id fails with 0x8004f021 "Cannot find solution component").
+        Invoke-DataverseWrite 'RemoveSolutionComponent' 'POST' @{
+            SolutionComponent  = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.solutioncomponent'; solutioncomponentid = $x.ObjectId }
+            ComponentType      = $x.ComponentType
+            SolutionUniqueName = $MasterSolutionUniqueName
+        } | Out-Null
+        Write-Host "    - $($x.Label)" -ForegroundColor Green
+    } catch {
+        $failed += $x
+        Write-Warning "    FAILED to remove: $($x.Label) : $($_.Exception.Message)"
+    }
+}
+
 $addedTables = @{}
 foreach ($item in (@($toAdd) + @($shells) | Sort-Object ComponentType, Name)) {
     try {
@@ -143,17 +175,19 @@ foreach ($item in (@($toAdd) + @($shells) | Sort-Object ComponentType, Name)) {
 }
 
 if ($failed.Count -gt 0) {
-    Write-Error "$($failed.Count) component(s) failed to add - version NOT bumped. Fix and re-run (idempotent), then Test-SolutionCompleteness.ps1."
+    Write-Error "$($failed.Count) component(s) failed to add or remove - version NOT bumped. Fix and re-run (idempotent), then Test-SolutionCompleteness.ps1."
     exit 1
 }
 
 # Verify before bumping: re-read membership; every in-scope table must now be packaged WITH its subcomponents.
 $after = Compare-PackageScope -RuleComponents $rule -MembershipKeys (Get-SolutionMembershipKeys -Get $get -SolutionUniqueName $MasterSolutionUniqueName) -Scope $scope
-if (@($after.MissingFromPackage).Count -gt 0 -or @($after.PackagedAsShell).Count -gt 0) {
+$stillUnexplained = if ($RemoveUnexplained) { @($after.ExcludedButInPackage).Count + @($after.OutsideRule).Count } else { 0 }
+if (@($after.MissingFromPackage).Count -gt 0 -or @($after.PackagedAsShell).Count -gt 0 -or $stillUnexplained -gt 0) {
     @($after.MissingFromPackage) + @($after.PackagedAsShell) | ForEach-Object { Write-Warning "Still not packaged in full: $($_.TypeName) $($_.Name)" }
+    if ($stillUnexplained -gt 0) { Write-Warning "$stillUnexplained unexplained component(s) are still in the solution after removal." }
     Write-Error "The adds did not take effect for every component - version NOT bumped. Investigate (a shell may need removing and re-adding), then re-run."
     exit 1
 }
 Invoke-DataverseWrite "solutions($($master.solutionid))" 'PATCH' @{ version = $newVersion } | Out-Null
-Write-Host "==> $MasterSolutionUniqueName $($master.version) -> $newVersion ; added $($toAdd.Count), re-added $($shells.Count) with subcomponents" -ForegroundColor Green
+Write-Host "==> $MasterSolutionUniqueName $($master.version) -> $newVersion ; added $($toAdd.Count), re-added $($shells.Count) with subcomponents, removed $($toRemove.Count)" -ForegroundColor Green
 Write-Host '    Next: Test-SolutionCompleteness.ps1 (must exit 0), then Export-SpaarkeMasterSource.ps1.'

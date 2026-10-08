@@ -318,5 +318,41 @@ function Find-LeakyDependencies {
     }
 }
 
+function Get-NextPackageVersion {
+    <#
+    .SYNOPSIS The package's next version: an explicit -Version (must be higher than the current one, compared part by
+              part with missing parts as 0, like H6's SpaarkePackage.CompareVersions), or the current version bumped
+              by -Kind. Always four parts. H6 refuses a downgrade, so a version at or below one already shipped is
+              refused here rather than at a customer import.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Current,
+        [ValidateSet('Build', 'Revision', 'Minor', 'Major')][string]$Kind = 'Build',
+        [string]$Version
+    )
+    $parse = {
+        param([string]$v)
+        $p = @($v -split '\.')
+        if ($p.Count -gt 4 -or @($p | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0) { throw "Not a version: '$v'." }
+        @(0..3 | ForEach-Object { if ($_ -lt $p.Count) { [int]$p[$_] } else { 0 } })
+    }
+    $cur = & $parse $Current
+    if ($Version) {
+        $next = & $parse $Version
+        $cmp = 0
+        foreach ($i in 0..3) { if ($next[$i] -ne $cur[$i]) { $cmp = $next[$i] - $cur[$i]; break } }
+        if ($cmp -le 0) { throw "Version $Version is not higher than the current $Current." }
+    } else {
+        $next = switch ($Kind) {
+            'Major' { @(($cur[0] + 1), 0, 0, 0) }
+            'Minor' { @($cur[0], ($cur[1] + 1), 0, 0) }
+            'Build' { @($cur[0], $cur[1], ($cur[2] + 1), 0) }
+            'Revision' { @($cur[0], $cur[1], $cur[2], ($cur[3] + 1)) }
+        }
+    }
+    return ($next -join '.')
+}
+
 Export-ModuleMember -Function Get-PackageComponentTypeCode, Read-PackageScope, Get-PackageRuleComponents, `
-    Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies
+    Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies, `
+    Get-NextPackageVersion

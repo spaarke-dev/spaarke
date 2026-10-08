@@ -38,6 +38,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'SpaarkePackageScope.psm1') -Force
 $OutputFolder = [IO.Path]::GetFullPath($OutputFolder)
+# The deepest unpacked path is ~105 characters below the folder (Entities/<table>/FormXml/<type>/{guid}_managed.xml,
+# 2026-10-08). Past Windows' 260-character limit the unpack is silently incomplete (seen 2026-10-08 from a deep temp
+# folder: only Entities/ was left), so refuse a folder too deep for it.
+if ($OutputFolder.Length -gt 140) { throw "Output folder path is $($OutputFolder.Length) characters; the unpack needs it at most 140 (Windows path limit). Use a shorter folder." }
 
 $unmanagedZip = Join-Path $WorkFolder "$SolutionName.zip"
 $managedZip = Join-Path $WorkFolder "${SolutionName}_managed.zip"   # SolutionPackager pairs X.zip with X_managed.zip

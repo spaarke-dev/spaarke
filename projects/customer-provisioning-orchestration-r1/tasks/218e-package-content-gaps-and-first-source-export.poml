@@ -69,5 +69,10 @@
     <trigger>UAC-r2's #1364 answer changes sprk_noaccessentry's schema after the export — re-export, do not hand-edit the unpacked XML.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-08">IN PROGRESS (SESSION 44, owner OK 2026-10-08 "yes update Spaarke Master"). Classification of the 54 missing: SHIP all but five PCFs. Excluded with reasons (package-scope.json): AnalysisBuilder + AssociationResolver (source gone from the repo, no form/view use), ThemeEnforcer, ScopeConfigEditor, UpdateRelatedButton (no form, view or default-control use in dev). Shipped although not on a form: RegardingLink (6 views), CommunicationAttachments (2 views), CommunicationActions/Connections/TimelineRegarding (email-communication-intelligence places them; architecture doc: all 11 regarding-family forms), the AI Setup admin app + site map (AI configuration and playbooks).
+    LIVE (dev SpaarkeMaster): Assemble added 53 components and re-added the 8 shell tables with subcomponents; -RemoveUnexplained took out of the SOLUTION (nothing deleted from the environment) the 5 Microsoft tables, the 8 env-var values and the Spaarke Provisioning Registry role. Version NOT bumped yet: one add refused.
+    FOUND + FIXED: (1) the 218c version bump produced five parts (1.0.0.0 -> 1.0.0.1.0: PowerShell parses "$parts[2] + 1, 0" comma-first) -> Get-NextPackageVersion + tests; -Version sets an explicit higher version (dev reads 1.0.0.0 although v1.1.0.0 was exported 2026-08-21; target 1.2.0.0). (2) Assemble could not remove -> -RemoveUnexplained; RemoveSolutionComponent's SolutionComponent reference takes the COMPONENT id (the solutioncomponent row id fails 0x8004f021). (3) An export into a deep folder (> ~155 chars) unpacks silently incomplete -> the export refuses an output folder over 140 characters. Probe export to C:	mp: 0 F12 leaks, 0 env-var values.
+    OPEN: "Secure Record Owner" was created in the child business unit "Secure Record"; Dataverse refuses it in a solution ("root component Role is missing" — only root-unit roles are solution-aware). Owner decision asked.</note>
+  </notes>
 </task>
