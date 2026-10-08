@@ -192,10 +192,10 @@ public sealed class CommunicationRiActionService
             //    communication, owned by the responsible user). A Spaarke task is a sprk_event (event type = Task),
             //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
             //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
-            // 🔴 Due dates added 2026-09-29. Previously BOTH were left null, and
-            // DailyBriefingCollector's task channels FILTER BY DATE (sprk_duedate alone since D-27; then
-            // sprk_finalduedate first) — so every RI task ever created was outside the briefing's window and could
-            // never surface there, however correctly it was written. The day counts are DECLARED on the
+            // 🔴 Due dates added 2026-09-29. Before that both were left null, and DailyBriefingCollector's task
+            // channels select tasks BY DUE DATE, so no RI task could ever surface in the briefing, however correctly
+            // it was written. (Since D-27 those channels read sprk_duedate only; sprk_finalduedate is informational.)
+            // The day counts are DECLARED on the
             // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
             // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so
             // an operator retunes the SLA by editing a row rather than shipping code.

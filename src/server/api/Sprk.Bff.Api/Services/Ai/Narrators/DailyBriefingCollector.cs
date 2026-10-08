@@ -8,7 +8,7 @@
 //
 // MVP SCOPE (this file) — 6 operator-specified channels per wave12-mvp-completion-plan §2.1:
 //   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate in next N days, status=Open
-//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate > 5 days past, status=Open
+//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate before the caller's local today, status=Open (D-43)
 //   (D-27, task 065 folded into 098: sprk_duedate is THE due date — the one the Do lane shows and Reschedule
 //   writes. sprk_finalduedate is informational and never decides membership, order or the displayed date.)
 //   3. Documents      — sprk_document, modifiedon in the recency window
@@ -139,8 +139,8 @@ public class DailyBriefingCollector : ICodedWorkflow
     // the upcoming-task + recency windows are now overridable per-user via the briefing
     // Display Parameters (see BriefingWindowOptions); these constants are the fallback when
     // no options are supplied (scheduled email leg, tests, and cold-load before prefs resolve).
-    // TaskOverdueDaysPast stays fixed — "overdue" has no user-facing control.
-    private const int TaskOverdueDaysPast = 5;
+    // "Overdue" has no user-facing control: since D-43 it is any task due before the caller's local today (it was
+    // "5 or more days past", which left tasks due 1-4 days ago in neither task channel).
     // Kept for BriefingWindowOptions.Default only (see below).
     internal const int DefaultDueWithinDays = 5;
     internal const int DefaultRecencyHours = 120; // 5 days
@@ -457,39 +457,41 @@ public class DailyBriefingCollector : ICodedWorkflow
         string IdColumn,
         string NameColumn,
         string? DescriptionColumn,
+        // ONE due-date column per entity, never a fallback: D-27 (task 065) — an sprk_event is judged by sprk_duedate
+        // alone, so there is deliberately no second column for sprk_finalduedate to come back through.
         string? DueDateColumn,
-        string? FallbackDueDateColumn,
         string KindLabel,
         bool IncludeStateFilter);
 
     private static readonly HighPriorityEntitySpec[] HighPriorityEntitySpecs =
     {
         new(EntityMatter, "sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matterdescription",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Matter", IncludeStateFilter: true),
+            DueDateColumn: null, KindLabel: "Matter", IncludeStateFilter: true),
         new(EntityProject, "sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_description",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Project", IncludeStateFilter: true),
+            DueDateColumn: null, KindLabel: "Project", IncludeStateFilter: true),
         // Invoice has sprk_invoicedate (invoice date, NOT payment due date) — don't map to
         // DueDate. Include all flagged invoices regardless of date. Operator can refine later.
         new(EntityInvoice, "sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_description",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Invoice", IncludeStateFilter: true),
+            DueDateColumn: null, KindLabel: "Invoice", IncludeStateFilter: true),
         new(EntityDocument, "sprk_documents", "sprk_documentid", "sprk_documentname", "sprk_documentdescription",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Document", IncludeStateFilter: true),
+            DueDateColumn: null, KindLabel: "Document", IncludeStateFilter: true),
         new(EntityWorkAssignment, "sprk_workassignments", "sprk_workassignmentid", "sprk_name", "sprk_description",
-            DueDateColumn: "sprk_responseduedate", FallbackDueDateColumn: null, KindLabel: "Work Assignment",
+            DueDateColumn: "sprk_responseduedate", KindLabel: "Work Assignment",
             IncludeStateFilter: true),
         // Event has both sprk_duedate and sprk_finalduedate. D-27 (task 065, folded into 098): sprk_duedate ALWAYS —
-        // it is the date the Do lane shows and Reschedule writes; sprk_finalduedate is informational and is NOT a
-        // fallback (an event with only a final due date has no due date here). Same column as the task channels.
+        // it is the date the Do lane shows and Reschedule writes; sprk_finalduedate is informational and the spec has
+        // no fallback column (an event with only a final due date has no due date here). Same column as the task
+        // channels.
         // 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1, master #1032): the description column was
         // "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real column is "sprk_description", exactly
         // as every sibling entry in this list already uses. The bad column made Dataverse reject the whole retrieve, so
         // this channel threw on every briefing run and the briefing could not see tasks at all (AP-14). Merged with task
         // 152's people-targeting spec shape (entity set, no per-spec owner switch).
         new(EntityEvent, "sprk_events", "sprk_eventid", "sprk_eventname", "sprk_description",
-            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "Task",
+            DueDateColumn: "sprk_duedate", KindLabel: "Task",
             IncludeStateFilter: false),
         new(EntityTodo, "sprk_todos", "sprk_todoid", "sprk_name", "sprk_description",
-            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "To Do", IncludeStateFilter: true),
+            DueDateColumn: "sprk_duedate", KindLabel: "To Do", IncludeStateFilter: true),
     };
 
     /// <summary>
@@ -513,7 +515,6 @@ public class DailyBriefingCollector : ICodedWorkflow
         var columns = new List<string> { spec.IdColumn, spec.NameColumn, "sprk_highpriority", "sprk_monitor", "modifiedon" };
         if (!string.IsNullOrEmpty(spec.DescriptionColumn)) columns.Add(spec.DescriptionColumn);
         if (!string.IsNullOrEmpty(spec.DueDateColumn)) columns.Add(spec.DueDateColumn);
-        if (!string.IsNullOrEmpty(spec.FallbackDueDateColumn)) columns.Add(spec.FallbackDueDateColumn);
 
         var filters = new List<string> { "(sprk_highpriority eq true or sprk_monitor eq true)" };
         if (spec.IncludeStateFilter)
@@ -549,11 +550,6 @@ public class DailyBriefingCollector : ICodedWorkflow
             {
                 dueDate = GetDate(row, spec.DueDateColumn);
                 dueColumn = spec.DueDateColumn;
-                if (dueDate is null && !string.IsNullOrEmpty(spec.FallbackDueDateColumn))
-                {
-                    dueDate = GetDate(row, spec.FallbackDueDateColumn);
-                    dueColumn = spec.FallbackDueDateColumn;
-                }
             }
 
             var highPriority = GetBool(row, "sprk_highpriority") ?? false;
@@ -588,18 +584,14 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// R7 W12 feedback (2026-07-01) — server-side classification of the "action" column
-    /// for a high-priority item. Result strings are widget-facing enums:
-    ///   - "Overdue"  — dueDate is before today UTC start
-    ///   - "DueToday" — dueDate is today UTC
-    ///   - "DueSoon"  — dueDate is within next 7 days
-    ///   - "Recent"   — no dueDate but modifiedon within last 7 days (fresh activity)
-    ///   - "None"     — no dueDate + no recent modifiedon
-    /// Widget renders as a badge with distinct intent color per action class.
-    /// </summary>
-    /// <summary>
-    /// Overdue / DueToday / DueSoon from the due date's CALENDAR DAY against the caller's LOCAL today (task 098 — the
-    /// former UTC "today" called a task due today overdue from 20:00 Eastern), else Recent / None from modifiedon.
+    /// Server-side classification of the "action" column for a high-priority item (R7 W12 feedback, 2026-07-01). The
+    /// due date's CALENDAR DAY is compared with the caller's LOCAL today (task 098; the former UTC "today" called a task
+    /// due today overdue from 20:00 Eastern). Widget-facing results, each a badge with its own intent colour:
+    ///   - "Overdue"  — due before today (the Overdue Tasks channel's boundary, D-43)
+    ///   - "DueToday" — due today
+    ///   - "DueSoon"  — due within the next 7 days
+    ///   - "Recent"   — no due date, but modifiedon within the last 7 days
+    ///   - "None"     — no due date and no recent modifiedon
     /// </summary>
     private async Task<string> ClassifyActionAsync(string? rawDueDate, DateTimeOffset? modifiedOn, Lazy<Task<UserDay>> userDay)
     {
@@ -872,7 +864,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// Overdue Tasks — sprk_event of type Task, due more than 5 days ago, status Open.
+    /// Overdue Tasks — sprk_event of type Task, due before the caller's local today (D-43), status Open.
     /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
     private async Task<ChannelResult> QueryOverdueTasksAsync(
@@ -883,12 +875,15 @@ public class DailyBriefingCollector : ICodedWorkflow
         Lazy<Task<UserDay>> userDay,
         CancellationToken ct)
     {
-        // "Overdue" = on or before (today - TaskOverdueDaysPast), today being the caller's LOCAL day (task 098).
+        // D-43 (owner decision): "Overdue" = due BEFORE today (on or before yesterday), today being the caller's LOCAL
+        // day (task 098 / D-25: the person the briefing is for). Upcoming starts AT today, so a task due in the past or
+        // in the Due-soon window is in exactly one task channel; the former "on or before today - 5" left tasks due
+        // 1-4 days ago in neither. Same boundary as High Priority's ClassifyAction ("Overdue" = due < today).
         // Nothing FOR the caller → nothing is read, so the time zone is not read either.
         var today = events.Ids.Count + matters.Ids.Count + projects.Ids.Count > 0
             ? (await userDay.Value.ConfigureAwait(false)).Today
             : DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
-        var cutoff = DataverseDateOnly.Format(today.AddDays(-TaskOverdueDaysPast));
+        var cutoff = DataverseDateOnly.Format(today.AddDays(-1));
         return await QueryEventsAsync(
             ChannelOverdueTasks,
             systemUserId,

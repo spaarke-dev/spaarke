@@ -806,8 +806,8 @@ public sealed class DailyBriefingCollectorTests
         await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
-            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("PropertyValue='2026-09-30'"),
-                "overdue = on or before (local today Oct 5 - 5 days); the UTC day gave 2026-10-01");
+            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-04'"),
+                "overdue = due before the local today Oct 5 (D-43), i.e. on or before Oct 4; the UTC day gave 2026-10-05");
         inner.Calls.Where(c => c.EntitySet == "sprk_todos")
             .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("OnOrAfter(PropertyName='sprk_duedate',PropertyValue='2026-10-05')"),
                 "a to-do due today (Oct 5 for the caller) stays in the digest");
@@ -821,7 +821,7 @@ public sealed class DailyBriefingCollectorTests
         await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         query.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
-            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-01'"));
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-05'"));
     }
 
     /// <summary>A caller-context seam whose time-zone read times out (HttpClient: a TaskCanceledException nobody requested).</summary>
@@ -844,7 +844,7 @@ public sealed class DailyBriefingCollectorTests
 
         await act.Should().NotThrowAsync("only the caller's own cancellation may propagate; a timeout dates by UTC");
         inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
-            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-01'"));
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-05'"));
     }
 
     [Theory]
@@ -925,10 +925,54 @@ public sealed class DailyBriefingCollectorTests
             ["sprk_finalduedate"] = finalDueDate,
         });
 
+    /// <summary>
+    /// D-43 (owner decision): "overdue" starts at 1 day. A task due yesterday or three days ago is in the Overdue Tasks
+    /// channel — before D-43 the channel took only tasks due 5+ days ago and Upcoming starts today, so these two were in
+    /// NEITHER channel. A task due today stays in Upcoming. Same boundary as High Priority's "Overdue" (due &lt; today).
+    /// </summary>
+    [Fact]
+    public async Task CollectAsync_OverdueTasks_StartsTheDayAfterTheDueDate_NoGapBeforeUpcoming()
+    {
+        var dueYesterday = Guid.NewGuid();
+        var dueThreeDaysAgo = Guid.NewGuid();
+        var dueToday = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", DatedEventRow(dueYesterday, "Due yesterday", "2026-10-04", "2026-10-20"), dueYesterday);
+        inner.Add("sprk_events", DatedEventRow(dueThreeDaysAgo, "Due three days ago", "2026-10-02", "2026-10-20"), dueThreeDaysAgo);
+        inner.Add("sprk_events", DatedEventRow(dueToday, "Due today", "2026-10-05", "2026-10-20"), dueToday);
+        var query = new EasternCallerQuery(new DateEvaluatingEventsQuery(inner, new DateOnly(2026, 10, 5)));
+        var resolver = PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { dueYesterday, dueThreeDaysAgo, dueToday },
+        });
+
+        var request = await SutAt(query, resolver)
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        string[] Ids(string category) =>
+            request.Channels.SingleOrDefault(c => c.Category == category)?.Items.Select(i => i.Id).ToArray() ?? Array.Empty<string>();
+        Ids(DailyBriefingCollector.ChannelOverdueTasks).Should().BeEquivalentTo(
+            new[] { dueYesterday.ToString(), dueThreeDaysAgo.ToString() },
+            "anything past due is Overdue (D-43); the former 5-day threshold left these two in neither task channel");
+        Ids(DailyBriefingCollector.ChannelUpcomingTasks).Should().Equal(new[] { dueToday.ToString() },
+            "a task due today is not overdue yet");
+
+        // High Priority classifies the same days the same way: before today is Overdue, today is DueToday.
+        var flagged = new FakeCallerQuery();
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "Due yesterday", ("sprk_duedate", "2026-10-04")), dueYesterday);
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueThreeDaysAgo, "Due three days ago", ("sprk_duedate", "2026-10-02")), dueThreeDaysAgo);
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "Due today", ("sprk_duedate", "2026-10-05")), dueToday);
+        var items = (await SutAt(new EasternCallerQuery(flagged), resolver).CollectHighPriorityAsync(SystemUserId, CancellationToken.None)).Items;
+        string ActionOf(Guid id) => items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(dueYesterday).Should().Be("Overdue");
+        ActionOf(dueThreeDaysAgo).Should().Be("Overdue");
+        ActionOf(dueToday).Should().Be("DueToday");
+    }
+
     [Fact]
     public async Task CollectAsync_TaskChannels_SelectOrderAndShowBySprkDuedate_NotTheFinalDueDate()
     {
-        var overdue = Guid.NewGuid();     // due Sep 28 (past the 5-day cutoff, Sep 30); final due Oct 7 (in the window)
+        var overdue = Guid.NewGuid();     // due Sep 28 (before today, Oct 5); final due Oct 7 (in the window)
         var rescheduled = Guid.NewGuid(); // a reschedule moved sprk_duedate to Oct 8; the final due date Sep 20 has passed
         var dueOct9 = Guid.NewGuid();     // due Oct 9, final due Oct 6
         var dueOct7 = Guid.NewGuid();     // due Oct 7, final due Oct 30 (outside the window)

@@ -57,11 +57,24 @@ namespace Sprk.Bff.Api.IntegrationTests.Events;
 public sealed class EventRoutesLiveTests
 {
     private const string UrlVar = "SPAARKE_LIVE_EVENTS_DATAVERSE_URL";
+
+    /// <summary>
+    /// A live leg: reported as SKIPPED (not passed) when <see cref="UrlVar"/> is not set, so a run that never touched
+    /// Dataverse cannot read as live evidence (task 098 review K6).
+    /// </summary>
+    private sealed class LiveEventsFactAttribute : FactAttribute
+    {
+        public LiveEventsFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(UrlVar)))
+                Skip = $"Live leg: set {UrlVar} (and the SPAARKE_LIVE_EVENTS_* ids) to run it against a real environment.";
+        }
+    }
     private readonly ITestOutputHelper _out;
 
     public EventRoutesLiveTests(ITestOutputHelper output) => _out = output;
 
-    [Fact]
+    [LiveEventsFact]
     public async Task LiveMode_EventRoutes_WriteAndReadBackAgainstRealDataverse()
     {
         var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
@@ -304,7 +317,7 @@ public sealed class EventRoutesLiveTests
     /// UTC date differs); the external create stores the date an earlier SPA build's toISOString() meant.
     /// Same opt-in, same cleanup discipline as the 097 test; records are named "zz-098-test …".
     /// </summary>
-    [Fact]
+    [LiveEventsFact]
     public async Task LiveMode_EventDates_AreCalendarDates_AndCompletionIsTheCallersLocalDate()
     {
         var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
@@ -411,7 +424,7 @@ public sealed class EventRoutesLiveTests
     /// DIFFER are written to the environment and read back; the PRODUCTION collector then reads them AS the operator
     /// through the production impersonated query. Same opt-in and cleanup discipline as the other legs ("zz-098-test").
     /// </summary>
-    [Fact]
+    [LiveEventsFact]
     public async Task LiveMode_DailyBriefing_JudgesTasksBySprkDuedate_NotTheFinalDueDate()
     {
         var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
@@ -447,7 +460,19 @@ public sealed class EventRoutesLiveTests
                 });
                 Log($"POST sprk_events '{name}' (due {due}, final due {finalDue})", r);
                 r.EnsureSuccessStatusCode();
-                var id = Guid.Parse(r.Headers.GetValues("OData-EntityId").Single().Split('(', ')')[1]);
+                if (!r.Headers.TryGetValues("OData-EntityId", out var entityIds))
+                {
+                    // A created row we cannot name would leak: find it by its (unique, zz-098-test) name for cleanup,
+                    // then fail loudly.
+                    var found = await dv.GetFromJsonAsync<JsonElement>(
+                        $"sprk_events?$select=sprk_eventid&$filter=sprk_eventname eq '{name}'");
+                    createdEvents.AddRange(found.GetProperty("value").EnumerateArray().Select(e => e.GetProperty("sprk_eventid").GetGuid()));
+                    throw new InvalidOperationException(
+                        $"POST sprk_events '{name}' returned {(int)r.StatusCode} without an OData-EntityId header; "
+                        + $"{createdEvents.Count} row(s) found by name are registered for cleanup.");
+                }
+
+                var id = Guid.Parse(entityIds.Single().Split('(', ')')[1]);
                 createdEvents.Add(id);
                 return id;
             }
@@ -456,6 +481,8 @@ public sealed class EventRoutesLiveTests
             var overdue = await CreateTaskAsync("zz-098-test d27 overdue by due date", Day(-8), Day(2));
             // A reschedule moved sprk_duedate into the window; the final due date has passed.
             var rescheduled = await CreateTaskAsync("zz-098-test d27 rescheduled", Day(2), Day(-8));
+            // D-43: due yesterday is already overdue (the former 5-day threshold put it in neither task channel).
+            var dueYesterday = await CreateTaskAsync("zz-098-test d43 due yesterday", Day(-1), Day(20));
 
             // The live read: both events really carry two DIFFERENT due dates.
             foreach (var (id, due, finalDue) in new[] { (overdue, Day(-8), Day(2)), (rescheduled, Day(2), Day(-8)) })
@@ -472,7 +499,7 @@ public sealed class EventRoutesLiveTests
             resolver.Setup(r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid _, string entity, MembershipResolveOptions? _, CancellationToken _) =>
                 {
-                    var ids = entity == "sprk_event" ? new[] { overdue, rescheduled } : Array.Empty<Guid>();
+                    var ids = entity == "sprk_event" ? new[] { overdue, rescheduled, dueYesterday } : Array.Empty<Guid>();
                     return Task.FromResult(new MembershipResponse(entity, new PersonIdentity(operatorId), ids,
                         new Dictionary<string, IReadOnlyList<Guid>>(), ids.Length, DateTimeOffset.UtcNow.AddMinutes(5)));
                 });
@@ -494,6 +521,7 @@ public sealed class EventRoutesLiveTests
                 "overdue is judged by sprk_duedate; the rescheduled task's passed final due date does not make it overdue");
             upcomingChannel.Should().Contain(rescheduled.ToString()).And.NotContain(overdue.ToString(),
                 "due soon is judged by sprk_duedate; the overdue task's final due date in the window does not pull it in");
+            overdueChannel.Should().Contain(dueYesterday.ToString(), "D-43: anything due before today is overdue");
 
             var highPriority = await collector.CollectHighPriorityAsync(operatorId, CancellationToken.None);
             string ActionOf(Guid id) => highPriority.Items.Single(i => i.EntityId == id.ToString()).Action;
