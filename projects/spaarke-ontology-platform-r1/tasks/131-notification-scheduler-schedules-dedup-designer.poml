@@ -43,6 +43,7 @@ Deploy lint C (task 120) now refuses canvas stubs at deploy time, but nothing pr
 
   <acceptance-criteria>
     <criterion testable="true">A playbook declaring an N-hour cadence runs at that cadence, and one declaring a due-within or time window queries that window (tests that fail on the old scheduler).</criterion>
+    <criterion testable="true">ADDED 2026-10-08 (#1461 review K3): after a total-failure retry (D-78 keeps sprk_lastrundate so the next tick retries), a notification the user already READ for the same item is not created again. Dedup today checks unread rows only; a test covers read-then-retry.</criterion>
     <criterion testable="true">Dedup is either enforced (a test proves no duplicate notification for the same item and user in a window) or the dead blocks are removed with a documented reason.</criterion>
     <criterion testable="true">A Designer save that would replace a runtime config with a canvas stub is refused or preserves the runtime fields (test).</criterion>
     <criterion testable="true">Negative: no change to the seven playbooks' membership scope or list form (task 120's), and no live change without owner approval.</criterion>
