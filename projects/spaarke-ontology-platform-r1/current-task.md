@@ -23,7 +23,7 @@
 2. **#1391 small follow-ups (D-68)** — SENT to the author; awaiting its report. Was: resume `a87c76386416d9b61` (author) to fix the stale `OwnedChildWrite` class doc
    (review F2) and file the follow-up issue for business-owned lookups (systemuser/team) via `/project-defer-issue-tracking`.
    Optional F3: cache `OwnershipType`. Do not merge — waits for uac-r2 + green.
-3. **039 independent review** — DONE: #1390 merge-ready once uac-r2 approves the PR (no reviews yet). Writer branch: B-2 re-evaluation tests, B-4 publish size, B-1 comment sent to the author `a810b83c36e7d8f39`. **Merge order (B-1):** #1390 → master → merge master into `stream/039-signal-writer` → add pin test (lineage lists sprk_signal) → only then merge the writer into this branch; never run `Set-SecureRecordOwnerRolePrivileges -Apply` from the writer branch before that. After the fixes: independent re-check of the fix diff. POMLs 039 (D-36) and 031 (D-61) amended by the main session. Was: review PR #1390 (lineage + role config) and branch `stream/039-signal-writer`
+3. **039 independent review** — DONE: #1390 merge-ready once uac-r2 approves the PR (no reviews yet). Writer branch fixes DONE `13c002d85` (B-2 tests fail on the mutation; B-1 comment; B-4 +1,580 bytes for 039, +0.04 MB whole branch vs master); independent re-check running `a79ad1380103246e3`. **Merge order (B-1):** #1390 → master → merge master into `stream/039-signal-writer` → add pin test (lineage lists sprk_signal) → only then merge the writer into this branch; (`Set-SecureRecordOwnerRolePrivileges` only adds, never removes — verified on master; running it from the writer branch only misreports `-Verify`.) After the fixes: independent re-check of the fix diff. POMLs 039 (D-36) and 031 (D-61) amended by the main session. Was: review PR #1390 (lineage + role config) and branch `stream/039-signal-writer`
    (`C:\wts-039w`; writer → uac-r2 ownership resolver, EventId 50304, `owner_refused`, `secure_owner_mismatch`) before
    merging the writer branch into this branch. #1390 merges only after uac-r2 approves (D-67), then deploy master to dev
    (owner-approved by D-67) and finish the live gate (zz-039 Secure matter + its SPE container to delete afterwards).
@@ -46,10 +46,11 @@
 | a17154f00e69eeced | 060 author, PR #1384 (round 2 done, awaits #1359) — next 068 after #1359 | idle |
 | af7588b2ed6612c5f | 056 author, PR #1386 — resume for review fixes | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) | running |
-| a810b83c36e7d8f39 | 039 author — doing review fixes B-1/B-2/B-4 | running |
+| a810b83c36e7d8f39 | 039 author — review fixes done `13c002d85` | idle |
 | a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 — doing F2 + defer issue | running |
 | a1bcb0bae3c363ca9 | 074 author — waits for owner labels | idle |
 | ab5b1f4de577106f2 | Reviewer: PR #1390 + `stream/039-signal-writer` (done) | idle |
+| a79ad1380103246e3 | Re-checker: 039 writer fix `13c002d85` | running |
 | af2686291a99e5351 | 073 — blocked until 037 + 039 + 031 | idle |
 | a0c39a85690aeed2a | Stream C author (036/026, merged) | idle |
 | ab5429413019d8fb9 | Stream D author (072, merged) | idle |

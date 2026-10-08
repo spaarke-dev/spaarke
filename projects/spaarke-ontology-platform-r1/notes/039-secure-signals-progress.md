@@ -115,6 +115,29 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
 - New unit tests (4), the contract set: secure (owner in the create, no BU, `owningteam` read back, resolver parents), read-back mismatch (part of "verify by reading back owningteam"), not secure (FR-14 unchanged), refused (no write, Warning 50304, `owner_refused`).
 - Publish size (#1390): fresh master `36ff14147` 36.22 MB / 192 files vs branch `0615f9781` 36.22 MB / 192 files, `Compress-Archive` Optimal from short paths. Delta 0.00 MB. No package change.
 
+## 8a. Independent review of stream/039-signal-writer (2026-10-08): B-1, B-2, B-4 fixed in `13c002d85`
+
+- **B-2 (F2):** two reconcile-path tests under a Secure answer.
+  - Existing row owned by the Secure team → only `sprk_lastevaluated` is updated.
+  - Row owned by another team → `secure_owner_mismatch`, no update.
+  - Mutation-checked: with the reconcile call passing `null` instead of `secureTeamId`, both fail; restored afterwards.
+  - Totals: SignalWriter tests 47 passed (44 unit; the 3 seam tests return early without the live env vars). ArchTests rebuilt: 818 passed.
+- **B-1 (F2):** the `SignalWriter` remarks no longer claim the lineage lists `sprk_signal`. They now state that the lineage entry and the `prvReadsprk_Signal` config entry come from master PR #1390, and that until #1390 reaches this branch a Secure-team-owned Signal is owned correctly but its sharees are not mirrored.
+  - **Sequence (coordinator):** #1390 → master → merge master into this branch → add the pin test (`SecureChildLineage.Children` contains `sprk_signal`; the config grants `prvReadsprk_Signal`) → merge this branch into `docs/ontology-platform-design`. The pin test is NOT added yet; it would be red here.
+  - **Do not run `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Apply` from this branch before #1390 is in it** (coordinator's rule, kept as a precaution). Factual note: uac-r2 states on #1355 (§2 item 1) that the script removes nothing, including privileges outside the config. From this branch, `-Verify` would list the two Reads as extra and `-Apply` would add nothing. The real hazard of running it from the wrong branch is a misleading Verify reading, not a stripped privilege.
+- **B-4 (F4): publish size.**
+  - Method: fresh detached worktrees at short paths (`C:\wt039m`, `C:\wt039o`, `C:\wt039w2`), `dotnet publish -c Release`, PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, file counts compared.
+
+| Side | Commit | Files | Zip |
+|---|---|---|---|
+| origin/master | `cf66c14c3` | 192 | 36.22 MB (37,978,964 B) |
+| ontology base merged into this branch | `a157d44bd` | 192 | 36.26 MB (38,020,857 B) |
+| this branch | `13c002d85` | 192 | 36.26 MB (38,022,437 B) |
+
+  - **Branch vs master: +0.04 MB (+43,473 B).** That is the whole ontology branch's BFF work, not only 039.
+  - **039's own contribution (branch vs its ontology base): +1,580 B (≈ 0.00 MB).**
+  - File counts are equal on all three sides. No package change. Far under every threshold (+5 MB / 55 MB / 60 MB).
+
 ## 9. Quality gates (Step 9.5)
 
 - **code-review**: one F2 found and fixed: the new method had stolen `EnsureOwningBusinessUnitMatches`'s XML doc. One census F1 found by ArchTests and fixed: the owner write now goes through `ApplyTo`.
