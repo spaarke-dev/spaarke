@@ -57,6 +57,12 @@ public class SecureParentReadVetoTests
     /// <summary>When set, any query whose id condition (Equal or In) names this row throws — a fault on that row alone.</summary>
     private (string Table, Guid Id)? _failingRow;
 
+    /// <summary>The principal's derived contact (the contact axis), when a test gives it one.</summary>
+    private Guid? _principalContact;
+
+    /// <summary>The link store the veto reads; the unlinked default unless a test records the reads.</summary>
+    private IContactIdentityStore? _identities;
+
     // ── Fixtures ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private void SecureMatterRow(Guid id) => _world.SecureRoot(Matter, id);
@@ -70,6 +76,17 @@ public class SecureParentReadVetoTests
             ("sprk_issecure", true),
             (parentTable == Matter ? "sprk_regardingmatter" : "sprk_regardingproject", new EntityReference(parentTable, parentId)));
         _participations.Flags[wa] = SecureFlags;
+    }
+
+    /// <summary>A work assignment filed under <paramref name="parentTable"/> by its typed lookup that is NOT secure (yet):
+    /// inheritance pending, or ended Refused or Failed (owner round 82: the parent's list governs it all the same).</summary>
+    private void OpenWaUnder(Guid wa, string parentTable, Guid parentId)
+    {
+        _world.Add(WorkAssignment, wa,
+            ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
+            ("sprk_issecure", false),
+            (parentTable == Matter ? "sprk_regardingmatter" : "sprk_regardingproject", new EntityReference(parentTable, parentId)));
+        _participations.Flags[wa] = RootRecordFlags.None;
     }
 
     /// <summary>A project filed under <paramref name="parentTable"/> <paramref name="parentId"/> by the pair.</summary>
@@ -111,13 +128,13 @@ public class SecureParentReadVetoTests
 
         var sut = new AccessibleRecordSetService(
             membership.Object, _participations, Mock.Of<ISubjectStandingGrantReader>(), _denyList,
-            UnlinkedIdentityStore(), InternalSystemUsers(), Entities(), NullLogger<AccessibleRecordSetService>.Instance);
+            _identities ?? UnlinkedIdentityStore(), InternalSystemUsers(), Entities(), NullLogger<AccessibleRecordSetService>.Instance);
 
         return sut.ComposeAsync(new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
             SystemUserId = Walled,
-            ContactId = null,
+            ContactId = _principalContact,
             Oid = Guid.NewGuid().ToString("D"),
             TenantId = "14101410-0000-0000-0000-000000000000",
         }, entityType, CancellationToken.None);
@@ -194,18 +211,125 @@ public class SecureParentReadVetoTests
         set.Rights.Should().NotContainKey(ChildWa, "a filing is a filing, secure or not: the secure matter above still applies");
     }
 
-    [Fact(DisplayName = "#1410: a NON-secure candidate is not walked (Q4 scope) — no parent read, and it stays")]
-    public async Task ANonSecureCandidate_IsNotWalked()
+    [Fact(DisplayName = "Round 82: a NOT-yet-secure work assignment under a walled secure matter is removed (the parent permissions control)")]
+    public async Task ANonSecureCandidate_UnderAWalledSecureParent_IsRemoved()
     {
         SecureMatterRow(SecureMatter);
-        SecureWaUnder(OpenWa, Matter, SecureMatter);
-        _participations.Flags[OpenWa] = RootRecordFlags.None; // reads not secure
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
         _denyList.DenySystemUserOnRecord(Walled, SecureMatter);
 
         var set = await ComposeAsync(WorkAssignment, OpenWa);
 
-        set.Rights.Should().ContainKey(OpenWa);
-        _world.QueriedTables.Should().BeEmpty("the parent walk runs for secure candidates only");
+        set.Rights.Should().NotContainKey(OpenWa, "a record filed under a secure parent is governed by its list whatever its own flag reads");
+    }
+
+    [Theory(DisplayName = "Round 82: a contact- or organization-subject entry on the secure parent removes a not-yet-secure child WHOLE")]
+    [InlineData("contact")]
+    [InlineData("organization")]
+    public async Task AContactOrOrganizationWallOnTheParent_RemovesTheNonSecureChildWhole(string subject)
+    {
+        var contact = Guid.Parse("14101410-1410-1410-1410-1410141014a2");
+        _principalContact = contact;
+        _participations.GrantSets[contact] = new ExternalGrantSet
+        {
+            Projects = Array.Empty<ExternalParticipation>(),
+            MatterGrants = Array.Empty<ExternalRootGrant>(),
+            WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
+        };
+        _participations.ContactOrganizations[contact] = new[] { Organization };
+        SecureMatterRow(SecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        if (subject == "contact")
+            _denyList.DenyContactOnRecord(contact, SecureMatter);
+        else
+            _denyList.DenyOrganizationOnRecord(Organization, SecureMatter);
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa);
+
+        set.Rights.Should().NotContainKey(OpenWa,
+            "the parent's wall removes the record whole — membership term included — not only the contact's contribution (N3 is the child's OWN list)");
+    }
+
+    [Fact(DisplayName = "Round 82: a not-yet-secure child reached THROUGH a non-secure project to a walled secure matter is removed")]
+    public async Task ANonSecureChild_ThroughANonSecureProject_IsRemoved()
+    {
+        SecureMatterRow(SecureMatter);
+        ProjectUnder(MiddleProject, Matter, SecureMatter, secure: false);
+        OpenWaUnder(OpenWa, Project, MiddleProject);
+        _denyList.DenySystemUserOnRecord(Walled, SecureMatter);
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa);
+
+        set.Rights.Should().NotContainKey(OpenWa);
+    }
+
+    [Fact(DisplayName = "Round 82: a non-secure child under a NON-secure matter whose wall would match stays")]
+    public async Task ANonSecureChild_UnderANonSecureMatter_Stays()
+    {
+        _world.OrdinaryRoot(Matter, OpenMatter);
+        OpenWaUnder(OpenWa, Matter, OpenMatter);
+        _denyList.DenySystemUserOnRecord(Walled, OpenMatter);
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa);
+
+        set.Rights.Should().ContainKey(OpenWa, "only a SECURE parent's list reaches what is filed below it");
+    }
+
+    [Fact(DisplayName = "Round 82 / Q4: a systemuser entry on the non-secure child ITSELF (no secure parent) removes nothing")]
+    public async Task ASystemUserEntryOnTheNonSecureChildItself_RemovesNothing()
+    {
+        _world.OrdinaryRoot(Matter, OpenMatter);
+        OpenWaUnder(OpenWa, Matter, OpenMatter);
+        _denyList.DenySystemUserOnRecord(Walled, OpenWa);
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa);
+
+        set.Rights.Should().ContainKey(OpenWa, "the internal wall binds secure records; the child's own list is unchanged (Q4)");
+    }
+
+    [Fact(DisplayName = "Round 82: a not-yet-secure child whose parent cannot be read is removed; an unfiled sibling stays")]
+    public async Task ANonSecureChildsFilingFault_RemovesIt_AndLeavesAnUnaffectedSibling()
+    {
+        SecureMatterRow(SecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        _world.Add(WorkAssignment, ControlWa, ("sprk_issecure", false)); // filed under nothing
+        _failingRow = (Matter, SecureMatter);
+
+        var set = await ComposeAsync(WorkAssignment, OpenWa, ControlWa);
+
+        set.Rights.Should().NotContainKey(OpenWa, "whose list governs it is unknown: fail closed (ADR-003)");
+        set.Rights.Should().ContainKey(ControlWa);
+    }
+
+    [Fact(DisplayName = "Round 82: a secure and a not-yet-secure child under the walled matter are both removed, in ONE walk")]
+    public async Task AMixedBatch_UnderAWalledMatter_IsRemovedInOneWalk()
+    {
+        SecureMatterRow(SecureMatter);
+        SecureWaUnder(ChildWa, Matter, SecureMatter);
+        OpenWaUnder(OpenWa, Matter, SecureMatter);
+        _denyList.DenySystemUserOnRecord(Walled, SecureMatter);
+
+        var set = await ComposeAsync(WorkAssignment, ChildWa, OpenWa);
+
+        set.Rights.Should().NotContainKey(ChildWa);
+        set.Rights.Should().NotContainKey(OpenWa);
+        _world.QueriedTables.Count(t => t == WorkAssignment).Should().Be(1, "both rows are read in one chunk");
+        _world.QueriedTables.Count(t => t == Matter).Should().Be(1, "the matter's flag is read once");
+    }
+
+    [Fact(DisplayName = "#1410: a project composition where an ancestor is ALSO a candidate — both removed, the ancestor asked once")]
+    public async Task AProjectComposition_WhereAnAncestorIsAlsoACandidate()
+    {
+        SecureMatterRow(SecureMatter);
+        ProjectUnder(MiddleProject, Matter, SecureMatter);
+        var lower = Guid.Parse("14101410-1410-1410-1410-1410141014c3");
+        ProjectUnder(lower, Project, MiddleProject);
+        _denyList.DenySystemUserOnRecord(Walled, MiddleProject);
+
+        var set = await ComposeAsync(Project, MiddleProject, lower);
+
+        set.Rights.Should().NotContainKey(MiddleProject, "its own entry");
+        set.Rights.Should().NotContainKey(lower, "the project above it is walled");
     }
 
     [Fact(DisplayName = "#1410: a matter composition reads no filing (a matter files under nothing) — unchanged")]
@@ -317,7 +441,51 @@ public class SecureParentReadVetoTests
         set.Rights.Should().NotContainKey(MiddleProject);
     }
 
+    [Fact(DisplayName = "#1410: one chunk's filing fault removes that chunk only; the other chunk is decided")]
+    public async Task OneChunksFault_LeavesTheOtherChunkAlone()
+    {
+        var candidates = new List<Guid>();
+        for (var i = 0; i < 250; i++)
+        {
+            var wa = Guid.Parse($"14101410-0000-0000-0003-{i:D12}");
+            _world.Add(WorkAssignment, wa, ("sprk_issecure", true)); // secure, filed under nothing
+            _participations.Flags[wa] = SecureFlags;
+            candidates.Add(wa);
+        }
+
+        _failingRow = (WorkAssignment, candidates[210]); // one row of one 200/50 chunk
+
+        var set = await ComposeAsync(WorkAssignment, candidates.ToArray());
+
+        set.Rights.Should().HaveCount(200, "the other chunk is decided; the faulted chunk of 50 fails closed");
+        set.Rights.Should().NotContainKey(candidates[210]);
+    }
+
     // ── Cost (NFR-02) ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "Round 82 cost pin: 250 non-secure work assignments under non-secure matters — 2 row reads, 2 flag reads, nothing else")]
+    public async Task ManyNonSecureCandidates_UnderNonSecureMatters_CostOnlyTheBatchedWalk()
+    {
+        var links = new Mock<IContactIdentityStore>(MockBehavior.Strict); // any link read fails the test
+        _identities = links.Object;
+        var candidates = new List<Guid>();
+        for (var i = 0; i < 250; i++)
+        {
+            var matter = Guid.Parse($"14101410-0000-0000-0004-{i:D12}");
+            var wa = Guid.Parse($"14101410-0000-0000-0005-{i:D12}");
+            _world.OrdinaryRoot(Matter, matter);
+            OpenWaUnder(wa, Matter, matter);
+            candidates.Add(wa);
+        }
+
+        var set = await ComposeAsync(WorkAssignment, candidates.ToArray());
+
+        set.Rights.Should().HaveCount(250);
+        _world.QueriedTables.Count(t => t == WorkAssignment).Should().Be(2, "250 rows in chunks of 200");
+        _world.QueriedTables.Count(t => t == Matter).Should().Be(2, "250 parent flags in chunks of 200");
+        _world.QueriedTables.Should().HaveCount(4, "no other read");
+        _denyList.Queries.Should().Be(0, "no secure candidate, no secure parent, no contact axis: no deny-list query");
+    }
 
     [Fact(DisplayName = "#1410: 250 secure work assignments are walked in batched reads, never one per record")]
     public async Task ManyCandidates_AreWalkedInBatches()

@@ -2327,11 +2327,11 @@ public sealed class SecureRootInheritance
     /// <summary>
     /// GitHub #1410: the ONE parent walk (<see cref="ReadSecureParentsAsync"/>) asked about MANY records of one table at
     /// once — for the Teams/SPA read-time No Access veto, which composes every record a user can reach and must not climb
-    /// each one with its own round trips. The same climb, the same decision and the same fault rules, per record; only the
-    /// reads are batched: each level's rows are read per table in chunks of <see cref="IdsPerQuery"/>, and the flags of the
-    /// records they are filed under likewise. A chunk read that faults leaves every record that needed it
-    /// <see cref="SecureParentsAnswer.Unverifiable"/> (fail closed). Every asked id has an answer; a table whose rows file
-    /// under nothing (a matter) answers "no parents" for each.
+    /// each one with its own round trips. The same climb and the same decision per record; the reads are batched, and
+    /// their faults are CHUNK-granular and fail closed: each level's rows are read per table in chunks of
+    /// <see cref="IdsPerQuery"/>, and the flags of the records they are filed under likewise, so a chunk read that faults
+    /// leaves every record that needed it <see cref="SecureParentsAnswer.Unverifiable"/>. Every asked id has an answer; a
+    /// table whose rows file under nothing (a matter) answers "no parents" for each.
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>> ReadSecureParentsOfManyAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyCollection<Guid> recordIds,
