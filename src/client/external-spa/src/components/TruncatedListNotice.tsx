@@ -20,11 +20,15 @@ export const TruncatedListNotice: React.FC<{
 }> = ({ truncated, shown, noun }) => {
   if (!truncated) return null;
 
+  // Nothing read at all (the first page failed) is not "an empty list": say it could not be loaded.
+  const text =
+    shown === 0
+      ? `The ${noun} could not be loaded just now, so none are shown. This does not mean there are none — please try again.`
+      : `This list is incomplete: only ${shown} ${noun} could be shown. Some ${noun} are not listed here.`;
+
   return (
     <MessageBar intent="warning" data-testid="truncated-list-notice">
-      <MessageBarBody>
-        {`This list is incomplete: only ${shown} ${noun} could be shown. Some ${noun} are not listed here.`}
-      </MessageBarBody>
+      <MessageBarBody>{text}</MessageBarBody>
     </MessageBar>
   );
 };

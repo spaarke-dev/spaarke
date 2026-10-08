@@ -827,17 +827,20 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
           </div>
         )}
 
-        <div className={styles.emptyState}>
-          <DocumentRegular className={styles.emptyStateIcon} />
-          <Text size={400} weight="semibold">
-            No Documents
-          </Text>
-          <Text size={300} className={styles.emptyStateText}>
-            {canActOnDocuments
-              ? 'No documents have been uploaded to this project yet. Use the Upload button to add your first document.'
-              : 'No documents have been uploaded to this project yet.'}
-          </Text>
-        </div>
+        {/* Task 105: an incomplete empty list is not "no documents" — the notice above says it could not be read. */}
+        {!truncated && (
+          <div className={styles.emptyState}>
+            <DocumentRegular className={styles.emptyStateIcon} />
+            <Text size={400} weight="semibold">
+              No Documents
+            </Text>
+            <Text size={300} className={styles.emptyStateText}>
+              {canActOnDocuments
+                ? 'No documents have been uploaded to this project yet. Use the Upload button to add your first document.'
+                : 'No documents have been uploaded to this project yet.'}
+            </Text>
+          </div>
+        )}
 
         {/* Upload dialog */}
         <UploadDialog

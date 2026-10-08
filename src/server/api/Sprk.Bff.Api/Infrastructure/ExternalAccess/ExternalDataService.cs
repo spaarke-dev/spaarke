@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Azure.Core;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -106,8 +107,10 @@ public class ExternalDataService
         LaterPageFailed = 2,
 
         /// <summary>
-        /// The first page failed: no rows. Logged and returned empty, which is this service's behaviour from before
-        /// task 105 (out of its scope; every reader of it is a display list, none an access decision).
+        /// The first page failed: NOTHING was read — TRUNCATED, never "an empty list". Before task 105 this came back as
+        /// an empty, unflagged list, so a Dataverse fault showed the user "no documents" (round of 2026-10-08: fixed in
+        /// the same PR, the same honesty class). A create-payload reader must fail its request instead
+        /// (<see cref="ResolveRecordTypeRefAsync"/>).
         /// </summary>
         FirstPageFailed = 3,
     }
@@ -115,8 +118,8 @@ public class ExternalDataService
     /// <summary>The rows a collection read returned and how it ended.</summary>
     internal sealed record CollectionRead<TRow>(IReadOnlyList<TRow> Rows, CollectionReadOutcome Outcome)
     {
-        /// <summary>The rows are known to be INCOMPLETE — never to be shown as a complete list.</summary>
-        public bool Truncated => Outcome is CollectionReadOutcome.CapReached or CollectionReadOutcome.LaterPageFailed;
+        /// <summary>The rows are known to be INCOMPLETE (possibly empty) — never to be shown as a complete list.</summary>
+        public bool Truncated => Outcome != CollectionReadOutcome.Complete;
     }
 
     /// <summary>The project columns the external SPA reads (internal so <see cref="MapProject"/> is testable).</summary>
@@ -1216,6 +1219,15 @@ public class ExternalDataService
     /// Resolve the <c>sprk_recordtype_ref</c> GUID + display name for an entity logical name.
     /// Cached per service instance.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Absent and unreadable are different answers (task 105).</b> A COMPLETE read with no row means the type is
+    /// not configured: <c>null</c>, cached, and the create proceeds without the type bind (the caller logs it — the
+    /// pre-existing, non-fatal design). A read that FAILED proves nothing, so it is never cached and never treated as
+    /// absent: the create is refused with a 503 problem, because writing it would silently drop the fourth ADR-024
+    /// resolver field. Before task 105 a failure (and any exception) was cached as "absent" for the instance's life.</para>
+    /// </remarks>
+    /// <exception cref="SdapProblemException">503 <c>todo_record_type_unreadable</c> — the lookup failed; nothing was
+    /// created.</exception>
     private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
         string entityLogicalName, CancellationToken ct)
     {
@@ -1239,6 +1251,19 @@ public class ExternalDataService
                       "&$select=sprk_recordtype_refid,sprk_recorddisplayname&$orderby=sprk_recordtype_refid asc";
 
             var read = await GetCollectionAsync<RecordTypeRefRow>(url, ct);
+            if (read.Outcome != CollectionReadOutcome.Complete)
+            {
+                _logger.LogError(
+                    "[EXT-DATA] sprk_recordtype_ref for '{Entity}' could not be read ({Outcome}); the to-do create is "
+                    + "refused rather than written without its record-type bind. Not cached.",
+                    entityLogicalName, read.Outcome);
+                throw new SdapProblemException(
+                    "todo_record_type_unreadable",
+                    "The to-do could not be created",
+                    "Its record type could not be read just now, so nothing was created. Please try again.",
+                    StatusCodes.Status503ServiceUnavailable);
+            }
+
             var row = read.Rows.FirstOrDefault();
             if (row?.Id is not null && Guid.TryParse(row.Id, out var refId))
             {
@@ -1250,14 +1275,7 @@ public class ExternalDataService
                 return entry;
             }
 
-            _recordTypeRefCache[entityLogicalName] = null;
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[EXT-DATA] Failed to query sprk_recordtype_ref for '{Entity}'. Caching negative result.",
-                entityLogicalName);
+            // A complete read with no row: the type is not configured — the one answer worth caching as absent.
             _recordTypeRefCache[entityLogicalName] = null;
             return null;
         }
@@ -1309,8 +1327,8 @@ public class ExternalDataService
     /// </summary>
     /// <remarks>
     /// Rows come back in chunk order; a caller with more than one chunk re-sorts. Truncated when any chunk was
-    /// truncated, or when some chunks failed while others were read (a partial set). When EVERY chunk fails the result
-    /// is <see cref="CollectionReadOutcome.FirstPageFailed"/> — the single-read behaviour from before task 105.
+    /// truncated or failed (a failed chunk is a first-page failure, which is itself truncated); when EVERY chunk fails
+    /// the outcome is <see cref="CollectionReadOutcome.FirstPageFailed"/> — nothing was read.
     /// </remarks>
     private async Task<CollectionRead<TRow>> GetByIdsAsync<TRow>(
         string entitySet, string idColumn, IReadOnlyList<string> ids, string select, string orderBy, CancellationToken ct)
@@ -1344,7 +1362,6 @@ public class ExternalDataService
                 "[EXT-DATA] collection_truncated: {Failed} of {Chunks} id chunks of {EntitySet} failed; returning {Count} "
                 + "rows for {Ids} ids flagged truncated.",
                 failedChunks, chunks.Count, entitySet, rows.Count, ids.Count);
-            truncated = true;
         }
 
         return new CollectionRead<TRow>(
@@ -1364,8 +1381,10 @@ public class ExternalDataService
     /// — never as a complete list — and the cut is logged with the url and the row count. A plain loop, deliberately not
     /// the iterator shape of <c>PrivilegeGroupResolver</c> that double-counts page 1 (ISS-001 / #962): each response's
     /// rows are added exactly once.</para>
-    /// <para><b>A first-page failure</b> keeps the behaviour from before task 105: logged, and returned empty. Every
-    /// reader of this method is a display list — none treats the empty result as an access decision.</para>
+    /// <para><b>A first-page failure</b> is truncated too: logged, and returned EMPTY AND FLAGGED, never as an empty list
+    /// (before task 105 it was an unflagged empty list, so a Dataverse fault read as "nothing here"). The display lists
+    /// surface the flag; the one create-payload reader (<see cref="ResolveRecordTypeRefAsync"/>) fails its request on
+    /// it. No reader makes an access decision from this method.</para>
     /// <para><b>A <c>nextLink</c> is used unchanged</b> and with the same <c>Prefer</c> value (Microsoft Learn, "Page
     /// results"), and only when it points at this service's own Web API base: the bearer token is never sent to another
     /// host. One that does not is treated as a failed later page.</para>
@@ -1388,7 +1407,13 @@ public class ExternalDataService
             if (result is null)
             {
                 if (page == 1)
+                {
+                    _logger.LogError(
+                        "[EXT-DATA] collection_truncated: page 1 failed; nothing was read — {Url}. Returned empty and "
+                        + "flagged truncated, never as an empty list.",
+                        url);
                     return new CollectionRead<TRow>(rows, CollectionReadOutcome.FirstPageFailed);
+                }
 
                 _logger.LogError(
                     "[EXT-DATA] collection_truncated: page {Page} failed after {Count} rows were read — {Url}. The list "

@@ -639,18 +639,21 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
 
       {/* Event list or empty state */}
+      {/* Task 105: an incomplete empty list is not "no events" — the notice says it could not be read. */}
       {events.length === 0 ? (
-        <div className={styles.emptyState}>
-          <CalendarEmptyRegular className={styles.emptyStateIcon} />
-          <Text size={400} weight="semibold">
-            No events yet
-          </Text>
-          <Text size={300} className={styles.emptyStateText}>
-            {canCreate
-              ? 'No events have been added to this project. Use the Create Event button to add the first event.'
-              : 'No events have been added to this project yet.'}
-          </Text>
-        </div>
+        truncated ? null : (
+          <div className={styles.emptyState}>
+            <CalendarEmptyRegular className={styles.emptyStateIcon} />
+            <Text size={400} weight="semibold">
+              No events yet
+            </Text>
+            <Text size={300} className={styles.emptyStateText}>
+              {canCreate
+                ? 'No events have been added to this project. Use the Create Event button to add the first event.'
+                : 'No events have been added to this project yet.'}
+            </Text>
+          </div>
+        )
       ) : (
         <div className={styles.eventList}>
           {events.map((event, index) => (

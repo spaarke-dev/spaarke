@@ -79,6 +79,38 @@ describe('each list view says when its list was cut short', () => {
     expect(screen.getAllByText(/This list is incomplete/).length).toBe(notices);
   });
 
+  it.each(views)(
+    '%s: a list whose first page failed (empty, truncated) says it could not be loaded — never "none"',
+    async (_name, view, notices) => {
+      // What the BFF sends when Dataverse failed before returning anything: no rows, flagged truncated.
+      bffApiCall.mockResolvedValue({ value: [], truncated: true });
+      renderView(view);
+
+      await waitFor(() => expect(screen.getAllByTestId('truncated-list-notice')).toHaveLength(notices));
+      expect(screen.getAllByText(/could not be loaded just now/).length).toBe(notices);
+      // The view's own "nothing here" empty state would contradict the notice, so it is not shown.
+      expect(
+        screen.queryByText(
+          /No Documents|No tasks yet|No events yet|No contacts are associated|No organisations are associated/
+        )
+      ).toBeNull();
+    }
+  );
+
+  it.each(views)('%s: a COMPLETE empty list keeps its own empty state and shows no notice', async (_name, view) => {
+    bffApiCall.mockResolvedValue({ value: [] });
+    renderView(view);
+
+    expect(
+      (
+        await screen.findAllByText(
+          /No Documents|No tasks yet|No events yet|No contacts are associated|No organisations are associated/
+        )
+      ).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByTestId('truncated-list-notice')).toBeNull();
+  });
+
   it.each(views)('%s: a complete list shows no notice', async (_name, view) => {
     answerEveryList(false);
     renderView(view);

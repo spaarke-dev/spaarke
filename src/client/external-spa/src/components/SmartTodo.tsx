@@ -752,7 +752,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
 
           {/* Empty state */}
-          {!isLoading && !loadError && tasks.length === 0 && (
+          {/* Task 105: an incomplete empty list is not "no tasks" — the notice says it could not be read. */}
+          {!isLoading && !loadError && !truncated && tasks.length === 0 && (
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>

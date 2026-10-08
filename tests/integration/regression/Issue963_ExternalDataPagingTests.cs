@@ -214,18 +214,41 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             "$top suppresses the nextLink — the cliff ISS-002 was");
     }
 
-    /// <summary>A first-page failure keeps its behaviour from before task 105 (out of the task's scope): empty, logged.</summary>
-    [Fact]
-    public async Task AFirstPageThatFails_KeepsTheEarlierBehaviour_EmptyAndNotTruncated()
+    /// <summary>
+    /// A FIRST page that fails is not "an empty list": nothing was read, so the empty result is flagged truncated and
+    /// logged (before task 105 it came back empty and unflagged — a Dataverse fault read as "nothing here").
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(FourReads))]
+    public async Task AFirstPageThatFails_ReturnsEmptyFlaggedTruncated_NeverAnEmptyList(string read)
     {
-        Seed("documents", 250);
-        _dataverse.FailPage("sprk_documents", page: 1);
+        Seed(read, 250);
+        _dataverse.FailPage(PagedSetOf(read), page: 1);
 
-        var (ids, truncated) = await ReadAsync("documents");
+        var (ids, truncated) = await ReadAsync(read);
 
         ids.Should().BeEmpty();
-        truncated.Should().BeFalse();
-        _dataverse.RequestsTo("sprk_documents").Should().HaveCount(1);
+        truncated.Should().BeTrue("nothing was read, which is not the same as nothing being there");
+        _dataverse.RequestsTo(PagedSetOf(read)).Should().HaveCount(1);
+        _logger.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Error && e.Message.Contains("collection_truncated") && e.Message.Contains("page 1 failed")
+            && e.Message.Contains($"/api/data/v9.2/{PagedSetOf(read)}?"));
+    }
+
+    /// <summary>Every id chunk failing is a read of nothing — flagged, like a first-page failure.</summary>
+    [Fact]
+    public async Task EveryIdChunkFailing_ReturnsEmptyFlaggedTruncated()
+    {
+        var ids = Enumerable.Range(0, 150).Select(i => Guid.Parse(IdFor(i))).ToList();
+        foreach (var id in ids)
+            _dataverse.Add("sprk_projects", new JsonObject { ["sprk_projectid"] = id.ToString(), ["sprk_issecure"] = false });
+        _dataverse.FailRequest("sprk_projects", requestNumber: 1);
+        _dataverse.FailRequest("sprk_projects", requestNumber: 2);
+
+        var projects = await _sut.GetProjectsAsync(ids);
+
+        projects.Value.Should().BeEmpty();
+        projects.Truncated.Should().BeTrue();
     }
 
     /// <summary>A nextLink that leaves the Dataverse Web API base is not followed: the bearer token never goes there.</summary>
@@ -332,6 +355,51 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             .Should().Be($"/sprk_recordtype_refs({typeRef})", "all four ADR-024 resolver fields are written");
     }
 
+    /// <summary>
+    /// The record-type lookup of a to-do CREATE that fails is not "the type is not configured": the create is refused
+    /// with a 503 problem and nothing is written — writing it would silently drop the fourth ADR-024 resolver field —
+    /// and the failure is not cached, so the next create, once Dataverse answers, binds the type.
+    /// </summary>
+    [Fact]
+    public async Task AnExternalTodoCreate_WhoseRecordTypeReadFails_IsRefused_NotWrittenWithoutTheBind_AndNotCached()
+    {
+        var typeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+        _dataverse.Add("sprk_recordtype_refs", new JsonObject
+        {
+            ["sprk_recordtype_refid"] = typeRef.ToString(), ["sprk_recorddisplayname"] = "Project",
+            ["sprk_recordlogicalname"] = "sprk_project",
+        });
+        _dataverse.FailRequest("sprk_recordtype_refs", requestNumber: 1);
+
+        var create = () => _sut.CreateTodoAsync(
+            ExternalDataService.TodoRootKind.Project, Root,
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+
+        var refused = await create.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>();
+        refused.Which.StatusCode.Should().Be(503);
+        refused.Which.Code.Should().Be("todo_record_type_unreadable");
+        _dataverse.Posted("sprk_todos").Should().BeEmpty("nothing is created when the type could not be read");
+
+        await create();
+
+        _dataverse.Posted("sprk_todos").Should().ContainSingle().Which["sprk_RegardingRecordType@odata.bind"]!
+            .GetValue<string>().Should().Be($"/sprk_recordtype_refs({typeRef})", "the failure was not cached as 'absent'");
+    }
+
+    /// <summary>The control: a type that is genuinely not configured (a complete read, no row) still creates without the bind.</summary>
+    [Fact]
+    public async Task AnExternalTodoCreate_WhoseRecordTypeIsNotConfigured_IsStillCreated_WithoutTheBind()
+    {
+        await _sut.CreateTodoAsync(
+            ExternalDataService.TodoRootKind.Project, Root,
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+
+        _dataverse.Posted("sprk_todos").Should().ContainSingle().Which.ContainsKey("sprk_RegardingRecordType@odata.bind")
+            .Should().BeFalse();
+    }
+
     // =========================================================================================================
     // The fake Dataverse Web API
     // =========================================================================================================
@@ -412,17 +480,6 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             if (set.EndsWith(')'))
                 return Json(200, new JsonObject { ["sprk_projectname"] = "Project 105" });
 
-            // sprk_recordtype_ref: only the LIVE column filters (metadata, spaarkedev1 2026-10-08); any other property is
-            // the 400 0x80060888 Dataverse answers — never a double that agrees with the code's own column name (G-13).
-            if (set == "sprk_recordtype_refs")
-            {
-                var clause = StringClause.Match(query.TryGetValue("$filter", out var f) ? f.ToString() : string.Empty);
-                if (!clause.Success || clause.Groups[1].Value != "sprk_recordlogicalname")
-                    return Json(400, new JsonObject { ["error"] = new JsonObject { ["code"] = "0x80060888" } });
-                var match = Rows(set).Where(r => r["sprk_recordlogicalname"]!.GetValue<string>() == clause.Groups[2].Value);
-                return Json(200, new JsonObject { ["value"] = ToArray(match) });
-            }
-
             int requestNumber;
             lock (_gate)
             {
@@ -433,6 +490,17 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             var page = query.TryGetValue("$skiptoken", out var token) ? int.Parse(token!) : 1;
             if (_failPages.Contains((set, page)) || _failRequests.Contains((set, requestNumber)))
                 return Json(503, new JsonObject { ["error"] = new JsonObject { ["message"] = "Service unavailable" } });
+
+            // sprk_recordtype_ref: only the LIVE column filters (metadata, spaarkedev1 2026-10-08); any other property is
+            // the 400 0x80060888 Dataverse answers — never a double that agrees with the code's own column name (G-13).
+            if (set == "sprk_recordtype_refs")
+            {
+                var clause = StringClause.Match(query.TryGetValue("$filter", out var f) ? f.ToString() : string.Empty);
+                if (!clause.Success || clause.Groups[1].Value != "sprk_recordlogicalname")
+                    return Json(400, new JsonObject { ["error"] = new JsonObject { ["code"] = "0x80060888" } });
+                var match = Rows(set).Where(r => r["sprk_recordlogicalname"]!.GetValue<string>() == clause.Groups[2].Value);
+                return Json(200, new JsonObject { ["value"] = ToArray(match) });
+            }
 
             IEnumerable<JsonObject> rows = Rows(set);
             if (query.TryGetValue("$filter", out var filter) && KeyColumns.TryGetValue(set, out var keyColumn))
