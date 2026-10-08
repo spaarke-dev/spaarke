@@ -1,21 +1,14 @@
 // -----------------------------------------------------------------------------
 // DataverseWebApiSolutionVerifier.cs
 //
-// Production <see cref="ISolutionVerifier"/> implementation (task 141, Wave
-// G-4, Option D hybrid) — trivial pure-HttpClient GET
-// `/api/data/v9.2/solutions?$select=uniquename,version,solutionid` port of
-// the retired PacCliSolutionVerifier's pac-CLI solution-listing shell-out. Per the
-// POML's own framing ("trivial Dataverse Web API GET"), this collaborator is
-// deliberately the simplest of the two H6 ports — a single stateless read,
-// no polling, no retry loop.
+// Production <see cref="ISolutionVerifier"/> implementation (task 141; T218b) —
+// one stateless GET of the SpaarkeMaster solution row
+// (`uniquename, version, solutionid, ismanaged`): present AND ismanaged equal
+// to the run's package type, or Missing. No polling, no retry loop.
 //
-// CREDENTIAL: unlike the retired PacCliSolutionVerifier (which reused the
-// importer's already-created pac auth profile — see that file's now-obsolete
-// "NON-GOALS" note), this verifier is a fully independent stateless client
-// and acquires its OWN bearer token via Azure.Identity.ClientSecretCredential
-// using the SAME BFF app-reg identity (ClientId/ClientSecret) the importer
-// used — task 141 extended SolutionVerificationRequest with a ClientSecret
-// field for exactly this reason (see ISolutionVerifier.cs).
+// CREDENTIAL: acquires its OWN bearer token through the FR-39 ordered chain
+// (WorkerDataverseCredentialFactory — MI-FIC first) as the same BFF app-reg
+// identity the importer used.
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
@@ -28,10 +21,8 @@ using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
-/// <see cref="ISolutionVerifier"/> implementation that issues a single
-/// <c>GET /api/data/v9.2/solutions?$select=uniquename,version,solutionid</c>
-/// against the target Dataverse environment and cross-references the result
-/// against the expected catalog.
+/// <see cref="ISolutionVerifier"/> implementation that issues a single filtered <c>GET /api/data/v9.2/solutions</c>
+/// for SpaarkeMaster against the target Dataverse environment and checks presence + type.
 /// </summary>
 public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
 {
@@ -106,13 +97,6 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientId);
         // A44.5: ClientSecret deliberately NOT required — empty on secret-free
         // envs (the signal, §9.1); the FR-39 credential factory selects MI-FIC.
-        if (request.ExpectedCatalog.IsDefaultOrEmpty)
-        {
-            throw new ArgumentException(
-                "ExpectedCatalog must be non-empty — verifier cannot check against an empty catalog.",
-                nameof(request));
-        }
-
         if (!Uri.TryCreate(request.TargetDataverseUrl, UriKind.Absolute, out var envUri))
         {
             return AllMissing(
@@ -143,7 +127,8 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
             return AllMissing(request, $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
         }
 
-        var requestUri = new Uri(envUri, "/api/data/v9.2/solutions?$select=uniquename,version,solutionid");
+        var requestUri = new Uri(envUri,
+            $"/api/data/v9.2/solutions?$select=uniquename,version,solutionid,ismanaged&$filter=uniquename eq '{SpaarkePackage.SolutionUniqueName}'");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Get, requestUri);
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -176,20 +161,17 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
                     $"'{request.TargetDataverseUrl}'. Body: {Truncate(bodyText, DiagnosticTailBudget)}");
             }
 
-            return ParseSolutionsResponse(bodyText, request.ExpectedCatalog);
+            return ParseSolutionsResponse(bodyText, request.Managed);
         }
     }
 
     /// <summary>
-    /// Parses the JSON <c>solutions</c> collection response + cross-references
-    /// against the expected catalog. Exposed <c>internal</c> for direct unit
-    /// testing (parity with the retired PacCliSolutionVerifier.ParseListOutput).
+    /// Parses the JSON <c>solutions</c> response and checks SpaarkeMaster is present with <c>ismanaged</c> equal to
+    /// <paramref name="managed"/>. Exposed <c>internal</c> for direct unit testing.
     /// </summary>
-    internal static SolutionVerificationOutcome ParseSolutionsResponse(
-        string bodyText,
-        ImmutableArray<CanonicalSolutionEntry> expectedCatalog)
+    internal static SolutionVerificationOutcome ParseSolutionsResponse(string bodyText, bool managed)
     {
-        var installed = new Dictionary<string, (string Version, string SolutionId)>(StringComparer.OrdinalIgnoreCase);
+        var name = SpaarkePackage.SolutionUniqueName;
         try
         {
             using var doc = JsonDocument.Parse(bodyText);
@@ -197,60 +179,47 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
             {
                 foreach (var element in array.EnumerateArray())
                 {
-                    if (element.TryGetProperty("uniquename", out var un) && un.ValueKind == JsonValueKind.String)
+                    if (!(element.TryGetProperty("uniquename", out var un) && un.ValueKind == JsonValueKind.String
+                          && string.Equals(un.GetString(), name, StringComparison.OrdinalIgnoreCase)))
                     {
-                        var version = element.TryGetProperty("version", out var ver) && ver.ValueKind == JsonValueKind.String
-                            ? ver.GetString()!
-                            : string.Empty;
-                        var solutionId = element.TryGetProperty("solutionid", out var sid) && sid.ValueKind == JsonValueKind.String
-                            ? sid.GetString()!
-                            : string.Empty;
-                        installed[un.GetString()!] = (version, solutionId);
+                        continue;
                     }
+
+                    var version = element.TryGetProperty("version", out var ver) && ver.ValueKind == JsonValueKind.String
+                        ? ver.GetString()!
+                        : string.Empty;
+                    var solutionId = element.TryGetProperty("solutionid", out var sid) && sid.ValueKind == JsonValueKind.String
+                        ? sid.GetString()!
+                        : string.Empty;
+                    var isManaged = element.TryGetProperty("ismanaged", out var m) && m.ValueKind == JsonValueKind.True;
+
+                    if (isManaged != managed)
+                    {
+                        return new SolutionVerificationOutcome.Missing(
+                            ImmutableArray.Create(name),
+                            $"{name} {version} is installed as {(isManaged ? "managed" : "unmanaged")}, but the run " +
+                            $"imported the {(managed ? "managed" : "unmanaged")} package.");
+                    }
+
+                    return new SolutionVerificationOutcome.AllPresent(ImmutableArray.Create(
+                        new ImportedSolutionRecord(name, version, solutionId, isManaged)));
                 }
             }
         }
         catch (JsonException ex)
         {
             return new SolutionVerificationOutcome.Missing(
-                expectedCatalog.Select(e => e.SolutionUniqueName).ToImmutableArray(),
+                ImmutableArray.Create(name),
                 $"Solutions GET response could not be parsed as JSON: {ex.Message}. Body tail: {Truncate(bodyText, DiagnosticTailBudget)}");
         }
 
-        var manifest = ImmutableArray.CreateBuilder<ImportedSolutionRecord>(expectedCatalog.Length);
-        var missing = ImmutableArray.CreateBuilder<string>();
-
-        foreach (var expected in expectedCatalog)
-        {
-            if (installed.TryGetValue(expected.SolutionUniqueName, out var found))
-            {
-                manifest.Add(new ImportedSolutionRecord(
-                    SolutionUniqueName: expected.SolutionUniqueName,
-                    Version: found.Version,
-                    SolutionId: found.SolutionId,
-                    Tier: expected.Tier));
-            }
-            else
-            {
-                missing.Add(expected.SolutionUniqueName);
-            }
-        }
-
-        if (missing.Count > 0)
-        {
-            var diagnostic =
-                $"Dataverse solutions collection did not return the following expected solutions after import: " +
-                $"{string.Join(", ", missing)}. Body tail: {Truncate(bodyText, DiagnosticTailBudget)}";
-            return new SolutionVerificationOutcome.Missing(missing.ToImmutable(), diagnostic);
-        }
-
-        return new SolutionVerificationOutcome.AllPresent(manifest.ToImmutable());
+        return new SolutionVerificationOutcome.Missing(
+            ImmutableArray.Create(name),
+            $"Dataverse did not return {name} after the import. Body tail: {Truncate(bodyText, DiagnosticTailBudget)}");
     }
 
     private static SolutionVerificationOutcome AllMissing(SolutionVerificationRequest request, string diagnostic)
-        => new SolutionVerificationOutcome.Missing(
-            request.ExpectedCatalog.Select(e => e.SolutionUniqueName).ToImmutableArray(),
-            diagnostic);
+        => new SolutionVerificationOutcome.Missing(ImmutableArray.Create(SpaarkePackage.SolutionUniqueName), diagnostic);
 
     private static string Truncate(string s, int max)
         => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";

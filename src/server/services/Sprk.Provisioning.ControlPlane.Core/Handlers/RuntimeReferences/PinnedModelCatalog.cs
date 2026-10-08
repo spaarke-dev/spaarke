@@ -21,7 +21,7 @@
 //   - ADR-020 (versioning) — model deployments MUST be pinned to specific
 //     versions, never "latest". H2a's ArmTemplateInspector asserts the
 //     deployed template pins every version (BicepDeployRejectionCodes.ModelVersionNotPinned).
-//   - Parity with H6's CanonicalSolutionCatalog / H2b's ICanonicalIndexCatalog
+//   - Parity with H2b's ICanonicalIndexCatalog
 //     pattern (a single source of truth other handlers can diff against).
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-17 acceptance:
 //     "Endpoint URIs reference pinned model deployment versions per ADR-020."

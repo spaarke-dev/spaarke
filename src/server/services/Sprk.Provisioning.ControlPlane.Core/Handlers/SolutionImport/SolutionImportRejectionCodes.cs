@@ -8,28 +8,14 @@
 // pattern.
 //
 // SPEC / DESIGN references:
-//   - projects/customer-provisioning-orchestration-r1/spec.md FR-09 (H6):
-//       Package Deployer import of the 9 authoritative solutions per §11.1a
-//       with Tier 1 → Tier 2 → Tier 3 dependency ordering; upgrade mode
-//       retires the holding solution via --stage-and-upgrade.
-//   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H6:
-//       Idempotency key `solimport-{customerId}-{solutionVer}`; the PS script
-//       Deploy-DataverseSolutions.ps1 is the authoritative solution-list
-//       source ($SolutionImportOrder), NOT a hardcoded list in this handler.
+//   - ADR-027 §3-§4 (amended 2026-10-07, T218): ONE package, SpaarkeMaster —
+//       managed by default, unmanaged only on explicit instruction; H6 refuses
+//       a managed↔unmanaged switch and a downgrade.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback:
-//       Package Deployer partial-import is complex to unwind (holding
-//       solutions may be left behind after --stage-and-upgrade fails mid-
-//       flight) → QuarantineRequired. Auth / rate-limit / quota → Resumable.
-//       Timeout → Resumable (partial state may or may not exist — err toward
-//       Resumable so operator can inspect and escalate to quarantine if
-//       partial state is confirmed via `pac solution list`).
+//       a failed StageAndUpgrade may leave a holding solution behind →
+//       QuarantineRequired. Auth / rate-limit / quota / timeout → Resumable.
 //   - .claude/adr/ADR-004-job-contract.md: idempotency contract requires
 //       stable rejection codes across retries.
-//   - .claude/adr/ADR-039: single AI routing surface — retired dispatcher +
-//       spaarke-playbook-embeddings must never be re-introduced via a
-//       solution. A defense-in-depth catalog scan enforces this at the
-//       handler layer even though the 9 authoritative solutions in the PS
-//       script's $SolutionImportOrder do not include any retired artifact.
 //
 // STABILITY:
 //   Codes are string constants used by external tools (reconciler queries,
@@ -60,15 +46,14 @@ public static class SolutionImportRejectionCodes
     /// Target Dataverse environment URL missing. Populated by upstream H5
     /// into <see cref="Models.InterStepState.DataverseEnvUrl"/>;
     /// absence means the customer's Dataverse env hasn't been created yet and
-    /// H6 cannot proceed. Handler MUST NOT invoke the PS script in this case.
+    /// H6 cannot proceed. Nothing is imported in this case.
     /// </summary>
     public const string MissingDataverseUrl = "missing-dataverse-url";
 
     /// <summary>
     /// BFF Entra app registration id missing. Populated by upstream H3 into
-    /// <see cref="Models.InterStepState.BffAppRegId"/>; the PS script's
-    /// <c>pac auth create --applicationId</c> requires this to authenticate
-    /// against the customer's Dataverse env.
+    /// <see cref="Models.InterStepState.BffAppRegId"/>; the importer signs in to the customer's Dataverse env as
+    /// this application (H10 made it System Administrator there).
     /// </summary>
     public const string MissingBffAppRegId = "missing-bff-app-reg-id";
 
@@ -81,16 +66,16 @@ public static class SolutionImportRejectionCodes
     public const string MissingClientSecret = "missing-client-secret";
 
     /// <summary>
-    /// Solution ZIPs missing on disk at the configured solution path. Build /
-    /// deployment error — verify <c>src/solutions/**/bin/Release/*.zip</c>
-    /// ships in the L2 publish output or is mounted at the configured path.
-    /// Classified Resumable — operator rebuilds the solution pack + resumes.
+    /// The package artifact is unusable: the provisioning-artifacts manifest is missing or unparseable, has no
+    /// SpaarkeMaster entry or no blob for the run's package type, the blob is missing, or the package version cannot
+    /// be determined. H6 never falls back to the other type or a local path. Classified Resumable — publish the
+    /// package (publish-dataverse-solutions-manifest.yml) and resume.
     /// </summary>
     public const string MissingSolutionZips = "missing-solution-zips";
 
     /// <summary>
-    /// PAC CLI reported an authentication / authorization failure (missing
-    /// System Administrator role on Dataverse env, expired secret, etc.).
+    /// Authentication / authorization failure against the customer's Dataverse env (token acquisition failed, or the
+    /// importing identity lacks System Administrator). Code name kept for stability.
     /// Classified Resumable — operator refreshes creds + resumes.
     /// </summary>
     public const string PacAuthFailure = "pac-auth-failure";
@@ -110,48 +95,56 @@ public static class SolutionImportRejectionCodes
     public const string QuotaExhausted = "quota-exhausted";
 
     /// <summary>
-    /// PS script timed out during solution import. Classified Resumable —
-    /// operator inspects `pac solution list` to determine what completed and
-    /// resumes (Package Deployer is idempotent on retry). Distinct code so
-    /// operator dashboards can branch on timeout vs partial-import.
+    /// The import job did not finish within SolutionImportOptions.ImportTimeout. Classified Resumable — a re-run
+    /// re-reads the installed version and skips or upgrades (idempotent). Distinct code so operator dashboards can
+    /// branch on timeout vs partial-import.
     /// </summary>
     public const string ImportTimeout = "import-timeout";
 
     /// <summary>
-    /// PS script exited non-zero AFTER at least one solution was imported —
-    /// partial state left in Dataverse. Package Deployer's <c>--stage-and-
-    /// upgrade</c> may leave a holding solution behind on mid-flight failure.
-    /// Classified QuarantineRequired — operator inspects `pac solution list`,
-    /// manually retires any orphaned holding solutions, and either re-runs
-    /// (idempotent) or escalates to full decommission per §4C.
+    /// A <c>StageAndUpgrade</c> of SpaarkeMaster failed after it started — a holding solution
+    /// (<c>SpaarkeMaster_Upgrade</c>) may be left in the environment. Classified QuarantineRequired — the operator
+    /// inspects the environment's solutions, removes or completes the holding solution, then re-runs or escalates per §4C.
     /// </summary>
     public const string PartialImportDetected = "partial-import-detected";
 
     /// <summary>
-    /// PS script exited non-zero without a classified subtype and the
-    /// verifier confirmed NO solutions imported. Classified Resumable — no
-    /// external side effect, operator inspects stderr + resumes.
+    /// The import (or the pre-import read of the installed solution) failed without a classified subtype and no
+    /// upgrade was in progress. Classified Resumable — no partial state; the operator reads the diagnostic and resumes.
     /// </summary>
     public const string ImportInvocationFailed = "import-invocation-failed";
 
     /// <summary>
-    /// Post-import verification failed: PS script reported success but the
-    /// verifier's `pac solution list` query shows at least one of the 8
-    /// authoritative solutions is missing OR at a wrong version.
-    /// Classified QuarantineRequired — script reported success but state
-    /// disagrees, indicating out-of-band mutation or a script bug the
-    /// operator must diagnose before advance.
+    /// Post-import verification failed: the importer reported success but the environment does not hold SpaarkeMaster,
+    /// or holds it with the wrong type (<c>ismanaged</c> ≠ the run's package type). Classified QuarantineRequired —
+    /// state disagrees with the import result; the operator diagnoses before advancing.
     /// </summary>
     public const string VerificationFailed = "verification-failed";
 
     /// <summary>
-    /// Defense-in-depth: the canonical solution catalog contains a name that
-    /// matches an ADR-039 retired-artifact pattern. Task 008 audit's R5
-    /// binding + ADR-039 amendment 2026-07-05 forbid reintroducing the
-    /// retired dispatcher / embeddings surface via any solution.
-    /// Classified QuarantineRequired — deployment-time code review missed
-    /// a retired-artifact reintroduction; operator must review + revert.
+    /// T218b — the environment already holds SpaarkeMaster of the OTHER type (managed vs unmanaged) than the run asks
+    /// for. Nothing is imported: a silent switch is refused (ADR-027 §3, amended 2026-10-07). Resumable — the operator
+    /// re-runs with the environment's type, or an owner-approved conversion is done first.
     /// </summary>
+    public const string PackageTypeMismatch = "package-type-mismatch";
+
+    /// <summary>
+    /// T218b — the environment holds a HIGHER SpaarkeMaster version than the published package. Nothing is imported
+    /// (no downgrade). Resumable — publish the right package, then re-run.
+    /// </summary>
+    public const string DowngradeRefused = "downgrade-refused";
+
+    /// <summary>
+    /// T218b — the run's <c>solutionPackageType</c> is neither <c>managed</c> nor <c>unmanaged</c> (a run created
+    /// before POST /api/runs validated it). Resumable — nothing was touched.
+    /// </summary>
+    public const string PackageTypeInvalid = "package-type-invalid";
+
+    /// <summary>
+    /// RETIRED (T218b): H6 imports one package, SpaarkeMaster, so there is no catalog to scan. Kept per the stability
+    /// rule above; never emitted.
+    /// </summary>
+    [Obsolete("T218b — H6 imports one package (SpaarkeMaster); there is no catalog to scan. Never emitted.")]
     public const string RetiredSolutionReintroduction = "retired-solution-reintroduction";
 
     /// <summary>

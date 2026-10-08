@@ -1,50 +1,32 @@
 // -----------------------------------------------------------------------------
 // H6SolutionImportHandler.cs
 //
-// L2 CONTROL-PLANE H6 Package Deployer solution-import handler (task 049,
-// wave C4 Batch 3D).
+// L2 CONTROL-PLANE H6 solution-import handler (task 049; T218b).
 //
 // PURPOSE:
-//   Imports the 9 authoritative Spaarke managed solutions (spec.md §11.1a +
-//   FR-09) into the per-customer Dataverse env created by H5. Wraps the
-//   wave-0 (task 012) hardened scripts/Deploy-DataverseSolutions.ps1 which
-//   IS the runtime source of truth for the solution list ($SolutionImportOrder
-//   per task 008 R5 binding) + dependency-tier ordering (Tier 1 SpaarkeCore →
-//   Tier 2 webresources → Tier 3 six feature solutions) + Package Deployer
-//   stage-and-upgrade semantics (retires holding solution on upgrade per
-//   spec.md FR-09 acceptance).
+//   Imports the ONE Spaarke Dataverse package, SpaarkeMaster, into the
+//   customer's Dataverse environment adopted by H5 — managed by default,
+//   unmanaged only when the run's solutionPackageType says so (ADR-027 §3-§4,
+//   amended 2026-10-07, owner D8). The importer refuses — nothing imported —
+//   a managed↔unmanaged switch and a downgrade; an equal version is skipped;
+//   an older version is upgraded with StageAndUpgrade. The verifier then
+//   proves SpaarkeMaster is present with the requested type.
 //
 // SPEC / DESIGN references:
-//   - projects/customer-provisioning-orchestration-r1/spec.md FR-09:
-//       Package Deployer 8-solution import with dependency ordering + upgrade
-//       mode retires holding solution.
-//   - projects/customer-provisioning-orchestration-r1/spec.md §11.1a:
-//       Authoritative list of 9 solutions per Deploy-DataverseSolutions.ps1
-//       $SolutionImportOrder (v3 correction from "~10" to 8).
+//   - docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md — the package, its
+//       release, first import and upgrade (runbook).
+//   - projects/customer-provisioning-orchestration-r1/notes/t218-plan.md —
+//       why one package (the former 9-entry catalog named 6 solutions that
+//       existed nowhere).
 //   - projects/customer-provisioning-orchestration-r1/spec.md §4D I1:
 //       No hardcoded default tenant — MUST flow tenantId through explicitly.
-//   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H6:
-//       Long-running (up to 60 min); idempotency key
-//       `solimport-{customerId}-{solutionVer}` (solutionVer = catalog hash).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.2 (v3.2):
 //       Fire-and-forget handler execution model — L2 REST endpoints enqueue
 //       + return 202; reconciler owns advancement.
-//   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback:
-//       Auth / rate-limit / quota → Resumable (no side effect OR PS idempotent
-//       on retry). Partial-import + verification-failure + retired-artifact
-//       reintroduction → QuarantineRequired (partial state or ADR violation).
-//       Timeout → Resumable (PS is idempotent; re-run resumes safely).
+//   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback.
 //   - projects/customer-provisioning-orchestration-r1/design.md §6.2
-//       interStepState field: `importedSolutions` is the H6-owned slot
-//       (controlled schema extension per task 049; see InterStepState.cs).
+//       interStepState field: `importedSolutions` is the H6-owned slot.
 //   - .claude/adr/ADR-004-job-contract.md: idempotent + at-least-once safe.
-//   - .claude/adr/ADR-010-di-minimalism.md: 3 seams (catalog + importer +
-//       verifier) — ≥2 impls each (production + test), no NIH.
-//   - .claude/adr/ADR-036-background-job-infrastructure.md: reuse Service
-//       Bus + IJobHandler infrastructure (spec FR-22 / R20).
-//   - .claude/adr/ADR-039-grounded-execution-closed-catalogs.md: single AI
-//       routing surface — defense-in-depth guard against retired-artifact
-//       reintroduction via any solution (catalog scan at pre-check).
 //   - .claude/adr/ADR-044-dataverse-guid-canonicalization.md: solution ids
 //       are Dataverse GUIDs — canonicalize on write to Cosmos.
 //
@@ -57,15 +39,17 @@
 //   │ Missing InterStepState.BffAppRegId (H3)     │ Resumable                 │
 //   │ Missing bound ClientSecret (Wave C5 wire)   │ Resumable                 │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
-//   │ Retired-solution catalog match (ADR-039)    │ QuarantineRequired        │
-//   │ pac auth failure                            │ Resumable                 │
+//   │ solutionPackageType not managed/unmanaged   │ Resumable                 │
+//   │ Auth failure                                │ Resumable                 │
 //   │ Rate-limited                                │ Resumable                 │
 //   │ Quota exhausted                             │ Resumable                 │
-//   │ Missing solution ZIPs (build error)         │ Resumable                 │
-//   │ pac timeout (import window)                 │ Resumable (ImportTimeout) │
-//   │ Partial import (Tier N fail after Tier N-1) │ QuarantineRequired        │
+//   │ Package artifact unusable / missing         │ Resumable                 │
+//   │ Env holds the other package type            │ Resumable (nothing done)  │
+//   │ Env holds a newer version (downgrade)       │ Resumable (nothing done)  │
+//   │ Import timeout                              │ Resumable (ImportTimeout) │
+//   │ Failed StageAndUpgrade (holding solution)   │ QuarantineRequired        │
 //   │ Unknown invocation failure (no partial)     │ Resumable                 │
-//   │ Verifier reports missing solutions          │ QuarantineRequired        │
+//   │ Verifier: absent or wrong type              │ QuarantineRequired        │
 //   │ Importer infrastructure exception           │ Resumable                 │
 //   │ Concurrent Cosmos writer conflict           │ Resumable                 │
 //   │ Run row deleted mid-flight                  │ Resumable                 │
@@ -79,11 +63,11 @@
 //           with H0 / H0.5 / H1 / H2a / H5 / H12a).
 //   Level 3 (handler body durable dedup): scans
 //           ProvisioningRun.CompletedPhases for (Phase == "H6",
-//           IdempotencyKey == solimport-{customerId}-{catalogHash}). Match →
+//           IdempotencyKey == solimport-{customerId}-{packageType}). Match →
 //           Success no-op (no importer / verifier invocation, no state mutation).
-//           A catalog change (adding a solution, changing a Tier) produces
-//           a new hash + new key → forces re-import (Package Deployer handles
-//           per-solution version dedup idempotently on the Dataverse side).
+//           CompletedPhases is per run, so the key only has to be stable within
+//           one run; a new (upgrade) run re-imports, and the importer itself
+//           skips an equal version.
 //
 // DOWNSTREAM ENQUEUE (WAVE C4 NOTE):
 //   H6's successor is H7 (env-var values — task 050, Wave 3E). Wave C4 does
@@ -117,7 +101,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     public const string SolutionsImportedGateId = "h6-solutions-imported";
 
     private readonly IProvisioningRunRepository _repository;
-    private readonly ISolutionCatalog _catalog;
     private readonly ISolutionImporter _importer;
     private readonly ISolutionVerifier _verifier;
     private readonly IRequiredApplicationsInstaller _requiredAppsInstaller;
@@ -142,14 +125,13 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     /// F13 + F14 verbatim absorption: the required-applications installer
     /// (msft_PowerBI_Anchor) + Org Settings contract applier
     /// (maxuploadfilesize=25MB) both run BEFORE
-    /// CanonicalSolutionCatalog resolve so a missing pre-req fails H6 fast
+    /// the package import so a missing pre-req fails H6 fast
     /// with a specific rejection code instead of surfacing 5 min into the
     /// solution import as MissingDependency / "Webresource content size is
     /// too big".
     /// </summary>
     public H6SolutionImportHandler(
         IProvisioningRunRepository repository,
-        ISolutionCatalog catalog,
         ISolutionImporter importer,
         ISolutionVerifier verifier,
         IRequiredApplicationsInstaller requiredAppsInstaller,
@@ -161,7 +143,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         ILogger<H6SolutionImportHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(importer);
         ArgumentNullException.ThrowIfNull(verifier);
         ArgumentNullException.ThrowIfNull(requiredAppsInstaller);
@@ -173,7 +154,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
-        _catalog = catalog;
         _importer = importer;
         _verifier = verifier;
         _requiredAppsInstaller = requiredAppsInstaller;
@@ -225,11 +205,19 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
 
         var run = read.Run;
         var etag = read.ETag;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, _catalog.CatalogHash);
+        // T218b: managed by default (stored at CreateRun); unmanaged only on explicit instruction.
+        var packageType = IntakeParameterCatalog.ResolveSolutionPackageType(run.Parameters.NonSecret);
+        if (!IntakeParameterCatalog.AllowedSolutionPackageTypes.Contains(packageType))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, SolutionImportRejectionCodes.PackageTypeInvalid,
+                $"Run parameter '{IntakeParameterCatalog.SolutionPackageType}' is '{packageType}'; allowed values are " +
+                $"{IntakeParameterCatalog.ManagedSolutionPackage} | {IntakeParameterCatalog.UnmanagedSolutionPackage}. " +
+                "Nothing was imported.", cancellationToken).ConfigureAwait(false);
+        }
+        var managed = string.Equals(packageType, IntakeParameterCatalog.ManagedSolutionPackage, StringComparison.Ordinal);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, packageType);
 
-        // (2) Level-3 idempotency: durable no-op on duplicate. A catalog change
-        //     (add solution, change Tier) produces a new hash → new key →
-        //     re-import (Package Deployer handles per-solution dedup).
+        // (2) Level-3 idempotency: durable no-op on duplicate within this run.
         if (run.CompletedPhases.Any(cp =>
                 string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
                 && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
@@ -241,24 +229,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (3) ADR-039 defense-in-depth: catalog MUST NOT reintroduce retired
-        //     artifacts. Runs BEFORE any Dataverse-side operation so an
-        //     ADR-violating deployment fails at pre-check with a clean
-        //     diagnostic instead of importing then discovering the problem.
-        var retiredHit = FindRetiredMatch(_catalog);
-        if (retiredHit is not null)
-        {
-            var diagnostic =
-                $"Canonical solution catalog contains retired-artifact match: " +
-                $"solution '{retiredHit.Value.SolutionUniqueName}' matches retired pattern '{retiredHit.Value.Pattern}'. " +
-                "ADR-039 (single AI routing surface) + amendment 2026-07-05 forbid reintroducing the retired " +
-                "dispatcher / embeddings surface via any solution. Handler did NOT invoke Deploy-DataverseSolutions.ps1 — " +
-                "review the CanonicalSolutionCatalog vs the retired-artifact list before re-running H6.";
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                SolutionImportRejectionCodes.RetiredSolutionReintroduction, diagnostic, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
         // (4) §4D I1 tenant guard — H6 MUST NOT fall back to a default tenant.
         //     Fires BEFORE any Dataverse-side call so acceptance criterion
         //     (no importer call fired) holds by construction.
@@ -268,7 +238,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             var diagnostic =
                 "Run parameter 'tenantId' is required by H6 (§4D I1 no-hardcoded-tenant). " +
                 "Upstream handler (H0.5 for Model 2, L2 endpoint for Model 1) MUST populate this before H6 dispatches. " +
-                "pac auth create --tenant requires an explicit tenant — H6 refuses to guess.";
+                "The importer signs in to an explicit tenant — H6 refuses to guess.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingTenantId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -282,20 +252,20 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             var diagnostic =
                 "Target Dataverse URL not present on ProvisioningRun.interStepState.dataverseEnvUrl. " +
                 "H5 (Dataverse env adoption) MUST complete before H6 dispatches. " +
-                "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
+                "Nothing was imported.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingDataverseUrl, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
         // (6) BFF app-reg id guard — sourced from InterStepState.BffAppRegId
-        //     (written by H3). Required for pac auth create --applicationId.
+        //     (written by H3). The importer signs in as this application.
         var clientId = run.InterStepState.BffAppRegId;
         if (string.IsNullOrWhiteSpace(clientId))
         {
             var diagnostic =
                 "BFF app-reg id not present on ProvisioningRun.interStepState.bffAppRegId. " +
                 "H3 (Entra app registration) MUST complete before H6 dispatches. " +
-                "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
+                "Nothing was imported.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingBffAppRegId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -321,7 +291,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 "wave C4 requires operator to set the app-setting explicitly. " +
                 "Secret-free environments instead configure " +
                 "SolutionImportOptions:Credentials:Order:0=ManagedIdentityFederated (A44.5). " +
-                "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
+                "Nothing was imported.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -408,7 +378,8 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             TenantId: tenantId,
             ClientId: clientId,
             ClientSecret: clientSecret,
-            TargetDataverseUrl: targetDataverseUrl);
+            TargetDataverseUrl: targetDataverseUrl,
+            Managed: managed);
 
         SolutionImportOutcome importOutcome;
         try
@@ -425,8 +396,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 "H6 importer infrastructure fault: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             var diagnostic =
-                $"Solution importer infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify pwsh + scripts/Deploy-DataverseSolutions.ps1 are on the L2 App Service.";
+                $"Solution importer infrastructure error: {ex.GetType().Name}: {ex.Message}.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.ImportInvocationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -439,13 +409,13 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         }
 
         // (9) Post-import verification — POML acceptance criterion #1.
-        //     Independently confirms the 9 catalog solutions are installed +
-        //     builds the Cosmos manifest with actual (version, solutionId).
+        //     Independently confirms SpaarkeMaster is installed with the requested
+        //     type + builds the Cosmos manifest with actual (version, solutionId).
         var verifyRequest = new SolutionVerificationRequest(
             TargetDataverseUrl: targetDataverseUrl,
             TenantId: tenantId,
             ClientId: clientId,
-            ExpectedCatalog: _catalog.Solutions,
+            Managed: managed,
             ClientSecret: clientSecret);
 
         SolutionVerificationOutcome verifyOutcome;
@@ -464,7 +434,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 envelope.RunId, envelope.CustomerId);
             var diagnostic =
                 $"Solution verifier infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "Import may have succeeded — operator inspects `pac solution list` manually + resumes.";
+                "Import may have succeeded — the operator checks the environment's solutions + resumes.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SolutionImportRejectionCodes.VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -472,10 +442,9 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         if (verifyOutcome is SolutionVerificationOutcome.Missing missing)
         {
             var diagnostic =
-                $"Post-import verification FAILED: importer reported Success but the following expected " +
-                $"solutions are missing on the target env: {string.Join(", ", missing.MissingUniqueNames)}. " +
-                $"Verifier detail: {missing.Diagnostic}. " +
-                "Operator inspects `pac solution list --environment {envUrl}` to reconcile before resume.";
+                $"Post-import verification FAILED: the importer reported Success but the environment does not hold " +
+                $"{string.Join(", ", missing.MissingUniqueNames)} as {packageType}. Verifier detail: {missing.Diagnostic}. " +
+                "The operator reconciles the environment's solutions before resume.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SolutionImportRejectionCodes.VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -492,22 +461,22 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             allPresent.ImportedRecords.Length, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, allPresent.ImportedRecords, envelope, cancellationToken)
+            run, etag, idempotencyKey, packageType, allPresent.ImportedRecords, envelope, cancellationToken)
             .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Computes the deterministic H6 idempotency key:
-    /// <c>solimport-{customerId}-{catalogHash}</c>. Exposed <c>internal</c>
+    /// <c>solimport-{customerId}-{packageType}</c> (T218b). Exposed <c>internal</c>
     /// so unit tests can construct expected keys without duplicating the format.
     /// Parity with H2a's <c>infra-{customerId}-{bicepVer}</c> +
     /// H12a's <c>h12a-{customerId}-{manifestHash}</c>.
     /// </summary>
-    internal static string BuildIdempotencyKey(string customerId, string catalogHash)
+    internal static string BuildIdempotencyKey(string customerId, string packageType)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(catalogHash);
-        return $"solimport-{customerId}-{catalogHash}";
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageType);
+        return $"solimport-{customerId}-{packageType}";
     }
 
     /// <summary>
@@ -533,29 +502,13 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 (SolutionImportRejectionCodes.ImportTimeout, FailureClass.Resumable),
             SolutionImportFailureKind.UnknownInvocationFailure =>
                 (SolutionImportRejectionCodes.ImportInvocationFailed, FailureClass.Resumable),
+            SolutionImportFailureKind.PackageTypeMismatch =>
+                (SolutionImportRejectionCodes.PackageTypeMismatch, FailureClass.Resumable),
+            SolutionImportFailureKind.DowngradeRefused =>
+                (SolutionImportRejectionCodes.DowngradeRefused, FailureClass.Resumable),
             _ =>
                 (SolutionImportRejectionCodes.ImportInvocationFailed, FailureClass.Resumable),
         };
-
-    /// <summary>
-    /// Cross-references the catalog entries against the retired-artifact list.
-    /// Returns the FIRST match (solution + pattern) or null if the catalog is
-    /// clean. Exposed <c>internal</c> for direct testing.
-    /// </summary>
-    internal static (string SolutionUniqueName, string Pattern)? FindRetiredMatch(ISolutionCatalog catalog)
-    {
-        foreach (var entry in catalog.Solutions)
-        {
-            foreach (var retired in catalog.RetiredSolutionUniqueNames)
-            {
-                if (entry.SolutionUniqueName.Contains(retired, StringComparison.OrdinalIgnoreCase))
-                {
-                    return (entry.SolutionUniqueName, retired);
-                }
-            }
-        }
-        return null;
-    }
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters,
@@ -625,6 +578,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         ProvisioningRun run,
         string etag,
         string idempotencyKey,
+        string packageType,
         ImmutableArray<ImportedSolutionRecord> importedRecords,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
@@ -650,18 +604,17 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         run.InterStepState.ImportedSolutions = importedRecords.ToList();
 
         // Verified-gate entry — one for the solutions-imported post-condition.
-        // Evidence captures per-solution version + solutionId + tier so an
-        // operator sees the manifest without pulling logs.
+        // Evidence captures the package version + solutionId + type so an
+        // operator sees it without pulling logs.
         var evidencePayload = new
         {
-            catalogHash = _catalog.CatalogHash,
-            solutionCount = importedRecords.Length,
+            packageType,
             solutions = importedRecords.Select(r => new
             {
                 uniqueName = r.SolutionUniqueName,
                 version = r.Version,
                 solutionId = r.SolutionId,
-                tier = r.Tier,
+                isManaged = r.IsManaged,
             }).ToArray(),
         };
         var evidence = JsonDocument.Parse(JsonSerializer.Serialize(evidencePayload)).RootElement.Clone();

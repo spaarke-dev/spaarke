@@ -85,7 +85,7 @@ Created by the operator before the provisioning run; the run verifies them and n
 
 | Resource | Deployment | Naming | Created by | Status vs target |
 |---|---|---|---|---|
-| Spaarke Dataverse solution package | Dedicated (imported into each customer environment) | **One solution, `SpaarkeMaster`** (publisher `Spaarke`, prefix `sprk`) — **managed by default, unmanaged on explicit instruction** | **H6** | 🔲 **T218b–e** — defined 2026-10-07 (ADR-027 §3 amended); H6 still reads the old 9-entry catalog until 218b |
+| Spaarke Dataverse solution package | Dedicated (imported into each customer environment) | **One solution, `SpaarkeMaster`** (publisher `Spaarke`, prefix `sprk`) — **managed by default, unmanaged on explicit instruction** | **H6** | 🟡 **T218** — defined 2026-10-07 (ADR-027 §3 amended); H6 imports it (218b ✅); the package content, git source and CI publish are 218c–218e |
 | 7 environment-variable **values** | Dedicated | `sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId` | **H7** | ✅ — `sprk_BffApiAppId` / `sprk_MsalClientId` carry the **customer's own** BFF app registration (D-13); `sprk_TenantId` is Spaarke's tenant for every Model 1 customer (I1 still forbids a hard-coded default) |
 | Per-customer M365 Copilot agent | Dedicated | — | TBD (INCOMING §9 Q2 answered: per customer) | 🔲 **T257** — an M365 package, not Dataverse content (split from T218) |
 
@@ -95,8 +95,9 @@ exclusion list. Git holds the unpacked source; CI publishes the managed and unma
 the run's `solutionPackageType` is `unmanaged`, refuses a type switch and a downgrade; environment-variable values never
 ship (H7). Binding rule: [ADR-027 §3–§4](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md);
 runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md); evidence:
-`projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`. **Replaced** (being removed by 218b): the 9-zip
-catalog in `Deploy-DataverseSolutions.ps1` / `CanonicalSolutionCatalog`, 6 of whose solutions exist nowhere.
+`projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`. **Replaced** (218b, 2026-10-07): H6's 9-entry
+`CanonicalSolutionCatalog`, 6 of whose solutions existed nowhere. `Deploy-DataverseSolutions.ps1` (used by `Deploy-Release.ps1`
+for Spaarke's own environments) still carries that list — filed as ISS-005.
 
 ## Registry row (admin environment — Shared)
 

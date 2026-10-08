@@ -201,6 +201,21 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
   staging/dev needs a per-stamp registration first (`notes/defer-issues.md`).
 
+## Dataverse package — one SpaarkeMaster, managed by default (BINDING, ADR-027 §3–§4 amended 2026-10-07; T218)
+
+- **One solution, `SpaarkeMaster`**, is the whole Dataverse package (`SolutionImport/SpaarkePackage.cs`); no per-feature
+  solution list exists. Its scope is a rule (every `sprk` component in spaarkedev1 + OOB-table columns − committed
+  exclusions) — runbook `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`.
+- **Managed by default; unmanaged only on explicit instruction** — intake `solutionPackageType` (`managed` | `unmanaged`,
+  exact case; absent → `managed` stored at CreateRun). Never add an environment- or server-level default that flips it.
+- H6 **refuses** (Resumable, nothing imported) a managed↔unmanaged switch (`package-type-mismatch`) and a downgrade
+  (`downgrade-refused`); a failed read of the installed solution is a failure, never "assume a fresh install". It never
+  falls back to the other package type's blob.
+- The manifest H6 reads: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
+- H9 waits for H6 (the BFF never starts against an older schema). H13 records `sprk_solutionversion` =
+  `SpaarkeMaster {version} ({managed|unmanaged})` — the package type on the registry row.
+- Environment-variable **values** never ship in the package (H7 writes them).
+
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 
 - Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke, Model 2 by the customer. No cost concept may assume a shared platform: no `shared-trial` tier, no "marginal" or "shared floor" envelope, no per-model cost branch.

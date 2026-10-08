@@ -222,7 +222,7 @@ public sealed class ProvisioningRunProductionSerializerTests
         s.SystemUserId = "su";
         s.BffAppRegSystemUserId = "bsu";
         s.SpeConsentCorrelationId = "corr";
-        s.ImportedSolutions = new List<ImportedSolutionRecord> { new("Spaarke.Core", "1.0.0.0", "sol-id", 1) };
+        s.ImportedSolutions = new List<ImportedSolutionRecord> { new("SpaarkeMaster", "1.0.0.0", "sol-id", true) };
         s.ResourceGroupName = "rg-acme";
         s.AppServiceName = "app-acme";
         s.AppServiceStagingSlotName = "staging";

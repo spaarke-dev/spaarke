@@ -25,7 +25,8 @@
 //     │       ├── H8 (SPE container CREATION — H8-B, task 214; container-type is a pre-existing operator prereq per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md;
 //     │       │        also waits for H5 — it binds the container to the environment's root business unit; H7 waits for H8)
 //     │       └── H9 (BFF deploy — needs H3 AND H4b so KV refs + batched
-//     │                app-settings are landed before BFF boot / F20 chain)
+//     │                app-settings are landed before BFF boot / F20 chain;
+//     │                T218b: AND H6, so the package lands before the BFF it serves)
 //     └── H5 (Dataverse env ADOPT — the operator created it; T228)
 //           ↓
 //           H10 (Dataverse App Users + Graph parity — also waits for H3; T228: before H6, whose BFF-app identity it registers)
@@ -159,7 +160,7 @@ public sealed class DagAdvancer : IDagAdvancer
             // customer environment's ROOT business unit, known only once H5 has adopted the environment — a container
             // nobody can bind is never created. (T227e: H8 also reads that environment's recorded container.)
             [HandlerH8] = new[] { HandlerH3, HandlerH5 },                   // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 is a data edge (T227b): H8 grants H3's BffAppRegId (and H2a's MiClientId — H2a is upstream of H3) on the container-type registration before creating the container; it authenticates as the container type's OWNING app (SpeContainerOptions.ContainerTypeOwners), not as the BFF app.
-            [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).
+            [HandlerH9] = new[] { HandlerH3, HandlerH4b, HandlerH6 },       // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4). T218b: + H6 — on an upgrade run the new BFF must not start against the old schema (the package lands first).
             // T228: H10 needs only H3 (BffAppRegId), H2a (MiClientId / MiObjectId — upstream of H3 and H5) and H5
             // (DataverseEnvUrl); it registers the application users the later Dataverse handlers act as. H11 stays after H7:
             // T232 — it makes each B2B guest a Dataverse user holding the solution's role(s), which H6 imports (H6 → H7).

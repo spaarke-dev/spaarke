@@ -43,7 +43,7 @@ SpaarkeMaster is not converted silently — H6 refuses, and a conversion is an o
 The 9/8-solution lists, `Deploy-DataverseSolutions.ps1` and the Phase 1–4 table below are history.
 
 Runbook: [`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md).
-Implementation: customer-provisioning-orchestration-r1 tasks 218b–218e (until they land, H6 still reads its old catalog).
+Implementation: customer-provisioning-orchestration-r1 task 218b (H6, 2026-10-07) and tasks 218c–218e (scope rule, git source, CI publish).
 
 ---
 

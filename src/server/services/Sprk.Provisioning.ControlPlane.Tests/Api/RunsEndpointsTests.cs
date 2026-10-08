@@ -907,6 +907,43 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Fact]
+    public async Task PostRuns_SolutionPackageTypeAbsent_StoresManagedOnTheRun()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest("testcust"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret
+            .Should().Contain(IntakeParameterCatalog.SolutionPackageType, "managed",
+                "managed by default; the stored value is what H6 imports and H13 records (ADR-027 §3, owner D8)");
+    }
+
+    [Theory]
+    [InlineData("Managed")]   // exact case
+    [InlineData("both")]
+    [InlineData("")]
+    public async Task PostRuns_SolutionPackageTypeNotAllowed_Returns400_BeforeCosmosOrEnqueue(string value)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [IntakeParameterCatalog.SolutionPackageType] = value,
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be("intake-invalid-solution-package-type");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task PostRuns_ProvisionEnvironmentSkillStep40Payload_Returns202()
     {
         // The exact key set /provision-environment Step 4.0 sends (SKILL.md) must stay accepted.

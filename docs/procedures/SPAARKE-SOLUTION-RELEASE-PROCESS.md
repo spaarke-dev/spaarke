@@ -7,8 +7,9 @@
 > (amended 2026-10-07): one solution, `SpaarkeMaster`, **managed by default** in customer environments, **unmanaged only
 > on explicit instruction**. Design and evidence: `projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`.
 >
-> **Build status** (2026-10-07). Steps marked *(218b)*, *(218c)*, *(218d)* or *(218e)* describe behaviour that
-> customer-provisioning-orchestration-r1 is building; until each lands, the current state is noted beside it.
+> **Build status** (2026-10-07). H6 (first import, upgrade, refusals) is built — task 218b. Steps marked *(218c)*,
+> *(218d)* or *(218e)* describe behaviour customer-provisioning-orchestration-r1 is still building; the current state is
+> noted beside each.
 
 ---
 
@@ -52,7 +53,7 @@ the M365 Copilot agent (task 257), BFF code (H9).
 | Built artifacts | CI packs `SpaarkeMaster_{version}_managed.zip` and `_unmanaged.zip` from git *(218d)* |
 | Provisioning store | `sprkcpartifacts{env}` / container `provisioning-artifacts`: both zips + `dataverse-solutions-latest.json` *(218d; today: a hand-uploaded `SpaarkeMaster.zip` and a hand-written manifest from 2026-08-21)* |
 
-Manifest schema read by H6 *(218b)*:
+Manifest schema read by H6:
 
 ```json
 { "solutions": { "SpaarkeMaster": {
@@ -83,12 +84,12 @@ Manifest schema read by H6 *(218b)*:
 
 - **Order in the run**: H5 (environment adopted) → H3 + H10 (the importing identity is an application user) → **H6
   imports SpaarkeMaster** → H7 (environment-variable values) and H11 (users get the package's roles). The BFF deploy
-  (H9) waits for H6 *(218b; today H9 waits only for H3 + H4b)*.
+  (H9) waits for H6.
 - **Type**: intake `solutionPackageType` = `managed` (default) or `unmanaged` (explicit instruction only); stored on the
-  run and the registry row *(218b; today H6 imports whatever the zip is)*.
+  run and the registry row (`sprk_solutionversion` = `SpaarkeMaster {version} ({managed|unmanaged})`, written by H13).
 - **Pre-import steps**: required Power Platform apps and org settings (e.g. `maxuploadfilesize`) are applied before the
   import (task 253 moves them off `pac`).
-- **Verification**: SpaarkeMaster present **and** `ismanaged` equals the requested type *(218b; today presence only)*.
+- **Verification**: SpaarkeMaster present **and** `ismanaged` equals the requested type.
 
 ## 5. Upgrade
 
@@ -98,8 +99,8 @@ Re-run H6 for the customer (normally as part of an upgrade run of the whole pipe
 |---|---|
 | Installed version = package version | Skip (success, nothing imported) |
 | Installed version lower | `StageAndUpgrade`. In a **managed** environment, a component removed from the package is **deleted** together with its data — check the release note's removal list before rolling out. |
-| Installed version higher | **Refused** (Resumable, named, nothing imported) — no downgrade *(218b)* |
-| Installed type ≠ requested type | **Refused** — an environment is never switched silently between managed and unmanaged *(218b)*. Converting unmanaged → managed is an owner-approved operation: back up, remove overlapping unmanaged components, import managed. |
+| Installed version higher | **Refused** (Resumable, `downgrade-refused`, nothing imported) — no downgrade |
+| Installed type ≠ requested type | **Refused** (Resumable, `package-type-mismatch`, nothing imported) — an environment is never switched silently between managed and unmanaged. Converting unmanaged → managed is an owner-approved operation: back up, remove overlapping unmanaged components, import managed. |
 | Environment-variable values | Persist: they are never in the package, so an upgrade cannot overwrite them; H7 re-applies the run's values. |
 
 The BFF and the package release from the same master; because H9 waits for H6, a new BFF never starts against an older

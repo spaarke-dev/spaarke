@@ -6,18 +6,19 @@
 // over a real HttpClient wrapping a hand-rolled fake HttpMessageHandler (NOT
 // Mock&lt;HttpMessageHandler&gt;, banned per testing.md).
 //
-// COVERAGE (maps to POML acceptance criteria):
-//   T1  AllPresent happy path — parses uniquename/version/solutionid per
-//       catalog entry, preserving Tier from the catalog.
-//   T2  Missing — one expected solution absent from the response.
-//   T3  Token acquisition failure -> Missing (all names, diagnostic notes auth).
+// COVERAGE (T218b — one package, SpaarkeMaster, checked for presence AND type):
+//   T1  Present with the requested type → AllPresent (version, solutionid,
+//       isManaged); the GET filters on SpaarkeMaster and selects ismanaged.
+//   T1b Unmanaged requested + unmanaged installed → AllPresent.
+//   T2  Absent → Missing naming SpaarkeMaster.
+//   T2b Installed with the OTHER type → Missing (wrong type is not success).
+//   T3  Token acquisition failure -> Missing, diagnostic notes auth, no HTTP.
 //   T4  Non-success HTTP status -> Missing.
 //   T5  Malformed JSON response -> Missing (does not throw).
 //   T6  Invalid target URL -> Missing, zero HTTP calls made.
 //   T7  Source grep defense-in-depth — no "pac solution"/"ProcessStartInfo".
 // -----------------------------------------------------------------------------
 
-using System.Collections.Immutable;
 using System.Net;
 using System.Text;
 using Azure.Core;
@@ -36,49 +37,63 @@ public sealed class DataverseWebApiSolutionVerifierTests
     private const string ClientSecret = "test-client-secret-placeholder";
     private const string EnvUrl = "https://acme.crm.dynamics.com/";
 
-    private static ImmutableArray<CanonicalSolutionEntry> Catalog() => ImmutableArray.Create(
-        new CanonicalSolutionEntry("SolA", "SolA", "Solution A", Tier: 1),
-        new CanonicalSolutionEntry("SolB", "SolB", "Solution B", Tier: 2));
+    private const string SolutionId = "11111111-2222-3333-4444-555555555555";
 
-    // ---------- T1 happy path ----------
+    // ---------- T1 present with the requested type ----------
 
     [Fact]
-    public async Task VerifyAsync_AllPresent_ReturnsManifestWithCorrectTiers()
+    public async Task VerifyAsync_PresentManaged_ManagedRequested_ReturnsRecord()
     {
-        var json = SolutionsJson(
-            ("SolA", "1.0.0.0", "11111111-2222-3333-4444-555555555555"),
-            ("SolB", "2.0.0.0", "22222222-3333-4444-5555-666666666666"));
-        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, json));
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson(("1.2.0.0", true))));
         var verifier = BuildVerifier(handler);
 
-        var outcome = await verifier.VerifyAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await verifier.VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
-        var allPresent = outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>().Subject;
-        allPresent.ImportedRecords.Should().HaveCount(2);
-        var solA = allPresent.ImportedRecords.Single(r => r.SolutionUniqueName == "SolA");
-        solA.Version.Should().Be("1.0.0.0");
-        solA.SolutionId.Should().Be("11111111-2222-3333-4444-555555555555");
-        solA.Tier.Should().Be(1);
-        allPresent.ImportedRecords.Single(r => r.SolutionUniqueName == "SolB").Tier.Should().Be(2);
+        var record = outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>().Subject
+            .ImportedRecords.Should().ContainSingle().Subject;
+        record.SolutionUniqueName.Should().Be("SpaarkeMaster");
+        record.Version.Should().Be("1.2.0.0");
+        record.SolutionId.Should().Be(SolutionId);
+        record.IsManaged.Should().BeTrue();
 
         var request = handler.Requests.Should().ContainSingle().Which;
         request.AbsolutePath.Should().Be("/api/data/v9.2/solutions");
-        request.Query.Should().Contain("uniquename").And.Contain("version").And.Contain("solutionid");
+        Uri.UnescapeDataString(request.Query).Should().Contain("ismanaged").And.Contain("uniquename eq 'SpaarkeMaster'");
     }
 
-    // ---------- T2 missing ----------
+    [Fact]
+    public async Task VerifyAsync_PresentUnmanaged_UnmanagedRequested_ReturnsRecord()
+    {
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson(("1.2.0.0", false))));
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(BuildRequest(managed: false), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>()
+            .Which.ImportedRecords.Single().IsManaged.Should().BeFalse();
+    }
+
+    // ---------- T2 absent / wrong type ----------
 
     [Fact]
-    public async Task VerifyAsync_OneSolutionMissing_ReturnsMissingOutcome()
+    public async Task VerifyAsync_Absent_ReturnsMissing()
     {
-        var json = SolutionsJson(("SolA", "1.0.0.0", "11111111-2222-3333-4444-555555555555"));
-        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, json));
-        var verifier = BuildVerifier(handler);
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson()));
 
-        var outcome = await verifier.VerifyAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildVerifier(handler).VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>()
+            .Which.MissingUniqueNames.Should().ContainSingle().Which.Should().Be("SpaarkeMaster");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_InstalledWithOtherType_ReturnsMissing()
+    {
+        var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, SolutionsJson(("1.2.0.0", false))));
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
         var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
-        missing.MissingUniqueNames.Should().ContainSingle().Which.Should().Be("SolB");
+        missing.Diagnostic.Should().Contain("installed as unmanaged");
     }
 
     // ---------- T3 token acquisition failure ----------
@@ -89,10 +104,10 @@ public sealed class DataverseWebApiSolutionVerifierTests
         var handler = new FakeHandler(_ => throw new InvalidOperationException("should not be called"));
         var verifier = BuildVerifier(handler, throwingCredential: true);
 
-        var outcome = await verifier.VerifyAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await verifier.VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
         var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
-        missing.MissingUniqueNames.Should().BeEquivalentTo(new[] { "SolA", "SolB" });
+        missing.MissingUniqueNames.Should().Equal("SpaarkeMaster");
         missing.Diagnostic.Should().Contain("Token acquisition failed");
         handler.Requests.Should().BeEmpty();
     }
@@ -105,10 +120,10 @@ public sealed class DataverseWebApiSolutionVerifierTests
         var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
         var verifier = BuildVerifier(handler);
 
-        var outcome = await verifier.VerifyAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await verifier.VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
         var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
-        missing.MissingUniqueNames.Should().BeEquivalentTo(new[] { "SolA", "SolB" });
+        missing.MissingUniqueNames.Should().Equal("SpaarkeMaster");
         missing.Diagnostic.Should().Contain("403");
     }
 
@@ -120,7 +135,7 @@ public sealed class DataverseWebApiSolutionVerifierTests
         var handler = new FakeHandler(_ => JsonResponse(HttpStatusCode.OK, "{ not valid json"));
         var verifier = BuildVerifier(handler);
 
-        var act = async () => await verifier.VerifyAsync(BuildRequest(), CancellationToken.None);
+        var act = async () => await verifier.VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
         var outcome = await act.Should().NotThrowAsync();
         outcome.Subject.Should().BeOfType<SolutionVerificationOutcome.Missing>();
@@ -137,7 +152,7 @@ public sealed class DataverseWebApiSolutionVerifierTests
             TargetDataverseUrl: "not-a-url",
             TenantId: TenantId,
             ClientId: ClientId,
-            ExpectedCatalog: Catalog(),
+            Managed: true,
             ClientSecret: ClientSecret);
 
         var outcome = await verifier.VerifyAsync(request, CancellationToken.None);
@@ -159,11 +174,11 @@ public sealed class DataverseWebApiSolutionVerifierTests
 
     // ---------- helpers ----------
 
-    private static SolutionVerificationRequest BuildRequest() => new(
+    private static SolutionVerificationRequest BuildRequest(bool managed) => new(
         TargetDataverseUrl: EnvUrl,
         TenantId: TenantId,
         ClientId: ClientId,
-        ExpectedCatalog: Catalog(),
+        Managed: managed,
         ClientSecret: ClientSecret);
 
     private static DataverseWebApiSolutionVerifier BuildVerifier(FakeHandler handler, bool throwingCredential = false)
@@ -178,10 +193,10 @@ public sealed class DataverseWebApiSolutionVerifierTests
             Factory);
     }
 
-    private static string SolutionsJson(params (string UniqueName, string Version, string SolutionId)[] entries)
+    private static string SolutionsJson(params (string Version, bool IsManaged)[] entries)
     {
         var items = entries.Select(e =>
-            $$"""{"uniquename":"{{e.UniqueName}}","version":"{{e.Version}}","solutionid":"{{e.SolutionId}}"}""");
+            $$"""{"uniquename":"SpaarkeMaster","version":"{{e.Version}}","solutionid":"{{SolutionId}}","ismanaged":{{(e.IsManaged ? "true" : "false")}}}""");
         return $$"""{"value":[{{string.Join(",", items)}}]}""";
     }
 

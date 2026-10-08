@@ -96,6 +96,11 @@
       "maximum": 1000000,
       "description": "OPTIONAL (T254, owner G37). Monthly Azure OpenAI spend limit of the stamp in USD. Omit it for no limit — the default; never set it to 0. When present, H4b writes AiSpendLimit__MonthlyLimitUsd on both slots and the BFF refuses model calls with 429 (Retry-After = next UTC month) once its list-price estimate reaches it. Change or remove it later with scripts/Set-AiSpendLimit.ps1. POST /api/runs refuses a value that is not a plain decimal in (0, 1000000] (OpenAiMonthlyLimitRule)."
     },
+    "solutionPackageType": {
+      "type": "string",
+      "enum": ["managed", "unmanaged"],
+      "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
+    },
     "skipExternalPrereqs": {
       "type": "boolean",
       "default": false,

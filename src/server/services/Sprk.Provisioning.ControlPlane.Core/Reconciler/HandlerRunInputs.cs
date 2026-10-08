@@ -167,6 +167,8 @@ public static class HandlerRunInputs
             [HandlerIds.H6] =
             [
                 Tenant,
+                // T218b: managed (default, stored at CreateRun) | unmanaged — explicit instruction only.
+                RunInput.Intake(IntakeParameterCatalog.SolutionPackageType, required: false),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],

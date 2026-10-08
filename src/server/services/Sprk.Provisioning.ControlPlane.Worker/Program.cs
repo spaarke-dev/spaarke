@@ -582,44 +582,26 @@ builder.Services.AddScoped<H12aAiSeedChainHandler>();
 // cross-dependency; both handlers can fire post-H7.
 builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
 
-// Task 049 / task 141 (Wave G-4, Option D hybrid): H6 solution-import handler
-// + 3 collaborator seams. Task 141 replaced the two shell-out collaborators
-// (DeployDataverseSolutionsScriptImporter / PacCliSolutionVerifier — both
-// RETIRED, kept on disk unregistered per the Wave G-2/G-3/G-4 retirement
-// convention) with pure HttpClient ports: ISolutionImporter =
-// DataverseWebApiSolutionImporter (Dataverse Web API ImportSolution /
-// StageAndUpgrade actions + importjobs polling, resolving the 8 solution
-// ZIPs from a versioned blob-artifact manifest in the SAME
-// `provisioning-artifacts` container task 116/117/132 use — never a local
-// filesystem path); ISolutionVerifier = DataverseWebApiSolutionVerifier (a
-// trivial GET /api/data/v9.2/solutions?$select=uniquename,version,solutionid).
-// ISolutionCatalog = CanonicalSolutionCatalog is UNCHANGED (C#-side mirror of
-// Deploy-DataverseSolutions.ps1's $SolutionImportOrder per task 008 R5
-// binding) — it is now the RUNTIME ordering authority the new importer reads
-// directly (the PS script itself is no longer invoked; see
-// DataverseWebApiSolutionImporter.cs file header for the ordering-fidelity
-// rationale).
+// Task 049 / task 141 / T218b: H6 solution-import handler + 2 collaborator seams.
+// ISolutionImporter = DataverseWebApiSolutionImporter imports the ONE Spaarke
+// package, SpaarkeMaster (managed by default, unmanaged on explicit
+// instruction — ADR-027 §3 amended 2026-10-07), through the Dataverse Web API
+// (ImportSolution / StageAndUpgrade + importjobs polling), resolving the ZIP
+// from the versioned blob-artifact manifest in the `provisioning-artifacts`
+// container (never a local path); it refuses a package-type switch and a
+// downgrade. ISolutionVerifier = DataverseWebApiSolutionVerifier (one GET of
+// the SpaarkeMaster row: present + ismanaged as requested).
 //
-// ArmClient/BlobContainerClient pattern: the artifacts container is
-// constructed via a factory lambda reusing the shared UAMI-pinned
-// TokenCredential singleton (ADR-028 MI-outbound) — parity with H9's
-// ArtifactManifestVerifier/BlobArtifactDownloader registration comment above
-// (self-contained against sibling handler ports). This credential is
-// DISTINCT from the per-customer ClientSecretCredential the importer/verifier
-// construct internally to authenticate INTO the customer's Dataverse env
-// (task 142's H7 credential precedent — BFF app-reg secret from H4-populated
-// KV, NOT a new S2S secret) — two intentionally separate trust boundaries.
-//
-// LIVE-CEREMONY GAP (documented, not a defect of this task — see
-// SolutionImportOptions.SolutionArtifactManifestBlobName doc comment): no CI
-// workflow publishes the solution-artifact manifest yet as of task 141. This
-// handler is fully buildable/unit-testable today; a live E2E run additionally
-// requires the provisioning-artifacts storage account (live-ceremony backlog
-// item #4) AND a new CI publish step for the 8 solution ZIPs + manifest.
+// BlobContainerClient pattern: the artifacts container is constructed via a
+// factory lambda reusing the shared UAMI-pinned TokenCredential singleton
+// (ADR-028 MI-outbound) — parity with H9's ArtifactManifestVerifier /
+// BlobArtifactDownloader registration. This credential is DISTINCT from the
+// credential the importer/verifier select (FR-39 chain) to authenticate INTO
+// the customer's Dataverse env — two intentionally separate trust boundaries.
+// The manifest + zips are published by publish-dataverse-solutions-manifest.yml (T218d).
 builder.Services.Configure<SolutionImportOptions>(
     builder.Configuration.GetSection(nameof(SolutionImportOptions)));
 builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
-builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
 builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName);
 // A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
 // OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
@@ -637,10 +619,9 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
     var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiSolutionImporter.HttpClientName);
-    var catalog = sp.GetRequiredService<ISolutionCatalog>();
     var workerCredentialFactory = sp.GetRequiredService<WorkerDataverseCredentialFactory>();
     var logger = sp.GetRequiredService<ILogger<DataverseWebApiSolutionImporter>>();
-    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, workerCredentialFactory, logger);
+    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, options, workerCredentialFactory, logger);
 });
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the

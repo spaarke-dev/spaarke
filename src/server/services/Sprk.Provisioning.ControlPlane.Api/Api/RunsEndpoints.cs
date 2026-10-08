@@ -475,6 +475,16 @@ public static class RunsEndpoints
                     $"allowed values are {string.Join(" | ", IntakeParameterCatalog.AllowedEnvironmentNames.Order(StringComparer.Ordinal))} " +
                     $"(customer.bicep environmentName). Omit it for '{IntakeParameterCatalog.DefaultEnvironmentName}'.");
             }
+
+            // T218b: managed by default, unmanaged only on explicit instruction (ADR-027 §3, owner D8).
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SolutionPackageType, out var packageTypeValue)
+                && !IntakeParameterCatalog.AllowedSolutionPackageTypes.Contains(packageTypeValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidSolutionPackageType,
+                    $"nonSecretParameters['{IntakeParameterCatalog.SolutionPackageType}'] is '{packageTypeValue}'; " +
+                    $"allowed values are {IntakeParameterCatalog.ManagedSolutionPackage} | {IntakeParameterCatalog.UnmanagedSolutionPackage} " +
+                    $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
+            }
         }
 
         // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
@@ -702,6 +712,12 @@ public static class RunsEndpoints
         if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.EnvironmentName))
         {
             run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
+        }
+
+        // T218b: store the package type actually used, so H6 and the registry row (H13) agree with the intake.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.SolutionPackageType))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = IntakeParameterCatalog.ManagedSolutionPackage;
         }
 
         // T228: canonical forms — the URL H5 compares against and hands on (https://{host}/), and the two GUIDs in the

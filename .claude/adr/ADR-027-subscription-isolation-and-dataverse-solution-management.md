@@ -71,8 +71,7 @@ cross-*subscription* prohibition is load-bearing here.
   from there. No hand-built or hand-uploaded artifact.
 - Upgrade = re-run H6 (`StageAndUpgrade`; a component removed from the package is deleted in managed environments).
 - Runbook: [`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../../docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md).
-  *(Being built in customer-provisioning-orchestration-r1 tasks 218b–218e; until they land, H6 still reads the 9-entry
-  catalog.)*
+  *(H6 side built 2026-10-07, task 218b; the scope rule, git source and CI publish are tasks 218c–218e.)*
 
 ## Constraints
 

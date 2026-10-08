@@ -342,6 +342,22 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().Be(Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule.MaxLimitUsd);
     }
 
+    /// <summary>
+    /// T218b: solutionPackageType is OPTIONAL (managed is the default) and the schema's enum is exactly the set
+    /// POST /api/runs accepts (IntakeParameterCatalog.AllowedSolutionPackageTypes).
+    /// </summary>
+    [Fact]
+    public void T218b_SolutionPackageType_IsOptional_WithTheIntakeValues()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.SolutionPackageType);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("solutionPackageType", "managed is the default (D8)");
+        property.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [

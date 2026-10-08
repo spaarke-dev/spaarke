@@ -184,19 +184,31 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH3AndH4b_UnlocksH9()
+    public void ComputeReadyHandlers_AfterH3AndH4b_H9StillWaitsForH6()
     {
-        // EXEC-01 companion — the "green path": H3 + H4b + H4 all done → H9 finally ready.
+        // T218b: H9 also waits for H6 — on an upgrade run the new BFF must not start against the old schema.
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H4", "H4b", "H3");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().Contain("H9",
-            "EXEC-01 green path: with H3 + H4b both landed, H9 (BFF deploy) is finally " +
-            "unblocked; BFF boots against complete KV refs + batched app-settings.");
+        ready.Should().NotContain("H9", "H6 (the Dataverse package) has not landed yet (T218b)");
         ready.Should().NotContain("H8",
             "H8 is unchanged by the H4b addition — it is gated on H3 and H5 (task 165), and H5 has not run here.");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH3H4bAndH6_UnlocksH9()
+    {
+        // EXEC-01 green path + T218b: H3 + H4b (KV refs + batched app-settings) and H6 (the package) → H9 ready.
+        var run = MakeRun(RunStatus.Running,
+            "H0", "H1", "H2a", "H4", "H4b", "H3", "H5", "H10", "H6");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H9",
+            "with H3 + H4b + H6 landed, H9 (BFF deploy) is unblocked: complete KV refs + batched app-settings, " +
+            "and the schema the BFF reads is already in the environment.");
     }
 
     [Fact]

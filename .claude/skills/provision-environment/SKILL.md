@@ -609,6 +609,7 @@ if ($BatchIntakeFile) {
   $tier           = $intake.tier                # T229 — REQUIRED for every model: smb | enterprise | dedicated (Step 1b-ter)
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
+  $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -853,6 +854,18 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
       $parsedLimit -le 0 -or $parsedLimit -gt 1000000) {
     Write-Error "❌ openAiMonthlyLimitUsd must be a plain number of USD greater than 0 and at most 1000000 (e.g. 500), or empty for no limit."; exit 1
   }
+}
+```
+
+#### 1b-quinquies. `solutionPackageType` (OPTIONAL — T218b, owner D8)
+
+Customer environments receive the Spaarke package (`SpaarkeMaster`) **managed**. Do not ask; set `unmanaged` only when
+the owner explicitly instructs it for this environment (ADR-027 §3, amended 2026-10-07). H6 refuses to switch an
+environment that already holds the other type, so on an UPGRADE run send the type the environment already has.
+
+```powershell
+if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType") -and "$solutionPackageType" -cnotin @('managed','unmanaged')) {
+  Write-Error "❌ solutionPackageType must be managed or unmanaged (exact case), or omitted for managed."; exit 1
 }
 ```
 
@@ -1573,6 +1586,10 @@ $runRequest = @{
 if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
   $runRequest.nonSecretParameters.openAiMonthlyLimitUsd = ([decimal]$openAiMonthlyLimitUsd).ToString([cultureinfo]::InvariantCulture)
 }
+# T218b — the package type (Step 1b-quinquies): sent only when the owner instructed unmanaged; absent = managed.
+if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
+  $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
+}
 $body = $runRequest | ConvertTo-Json -Depth 5
 
 $response = Invoke-RestMethod `
@@ -1976,19 +1993,12 @@ $kvName             = $isv.keyVaultName                # H2a output (the CUSTOME
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
-# sprk_solutionversion — ImportedSolutionSet: SHA-256 of the ordinal-sorted, distinct "uniqueName=version"
-# lines of H6's importedSolutions joined by "\n", first 32 lowercase hex digits ($null when none).
-$solutionPairs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-foreach ($sol in @($isv.importedSolutions)) {
-  if ($sol -and -not [string]::IsNullOrWhiteSpace($sol.solutionUniqueName)) {
-    [void]$solutionPairs.Add("$($sol.solutionUniqueName.Trim())=$("$($sol.version)".Trim())")
-  }
-}
+# sprk_solutionversion — ImportedSolutionSet (T218b): "SpaarkeMaster {version} ({managed|unmanaged})" from H6's
+# importedSolutions SpaarkeMaster entry ($null when absent or versionless).
 $deployedSolutionVer = $null
-if ($solutionPairs.Count -gt 0) {
-  $sortedPairs = [string[]]@($solutionPairs); [Array]::Sort($sortedPairs, [StringComparer]::Ordinal)
-  $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($sortedPairs -join "`n")))
-  $deployedSolutionVer = [Convert]::ToHexString($hash).ToLowerInvariant().Substring(0, 32)
+$pkg = @($isv.importedSolutions) | Where-Object { $_ -and "$($_.solutionUniqueName)".Trim() -ieq 'SpaarkeMaster' } | Select-Object -First 1
+if ($pkg -and -not [string]::IsNullOrWhiteSpace("$($pkg.version)")) {
+  $deployedSolutionVer = "SpaarkeMaster $("$($pkg.version)".Trim()) ($(if ($pkg.isManaged) { 'managed' } else { 'unmanaged' }))"
 }
 
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
@@ -2051,7 +2061,7 @@ if (-not $script:RegistryStale) {
   $fields = @{
     sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
     sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
-    sprk_solutionversion          = $deployedSolutionVer # fingerprint of run.interStepState.importedSolutions (H6)
+    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {version} ({type})" from run.interStepState.importedSolutions (H6, T218b)
     sprk_azuresubscriptionid      = $azureSubId
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName

@@ -72,6 +72,24 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string DefaultEnvironmentName = "prod";
 
+    /// <summary>
+    /// T218b — the Dataverse package type H6 imports: <see cref="ManagedSolutionPackage"/> (default) or
+    /// <see cref="UnmanagedSolutionPackage"/>. Managed by default; unmanaged only on explicit instruction (ADR-027 §3,
+    /// amended 2026-10-07, owner D8). Absent → the default is stored at CreateRun, so the run (and the registry row H13
+    /// writes) records the type actually used.
+    /// </summary>
+    public const string SolutionPackageType = "solutionPackageType";
+
+    /// <summary><see cref="SolutionPackageType"/> value for the managed package (the default).</summary>
+    public const string ManagedSolutionPackage = "managed";
+
+    /// <summary><see cref="SolutionPackageType"/> value for the unmanaged package (explicit instruction only).</summary>
+    public const string UnmanagedSolutionPackage = "unmanaged";
+
+    /// <summary>Values <see cref="SolutionPackageType"/> may take (exact case).</summary>
+    public static readonly IReadOnlySet<string> AllowedSolutionPackageTypes =
+        new HashSet<string>(StringComparer.Ordinal) { ManagedSolutionPackage, UnmanagedSolutionPackage };
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -155,6 +173,7 @@ public static class IntakeParameterCatalog
 
         // --- Stamp shape (defaults applied at CreateRun or in the handler) ----------
         new(EnvironmentName, "Customer stamp environment segment (dev | staging | prod). Absent → 'prod' stored at CreateRun. H2a, H2b, H4b."),
+        new(SolutionPackageType, "Dataverse package type H6 imports: managed | unmanaged. Absent → 'managed' stored at CreateRun (ADR-027 §3 amended 2026-10-07, owner D8: unmanaged only on explicit instruction). H6; H13 records it on the registry row (sprk_solutionversion)."),
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
@@ -195,6 +214,19 @@ public static class IntakeParameterCatalog
         return nonSecretParameters.TryGetValue(EnvironmentName, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : DefaultEnvironmentName;
+    }
+
+    /// <summary>
+    /// T218b: the run's package type — the stored <see cref="SolutionPackageType"/> value, or
+    /// <see cref="ManagedSolutionPackage"/> when absent (a run created before CreateRun stored the default). The value is
+    /// returned as stored; callers check it against <see cref="AllowedSolutionPackageTypes"/>.
+    /// </summary>
+    public static string ResolveSolutionPackageType(IDictionary<string, string> nonSecretParameters)
+    {
+        ArgumentNullException.ThrowIfNull(nonSecretParameters);
+        return nonSecretParameters.TryGetValue(SolutionPackageType, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : ManagedSolutionPackage;
     }
 
     /// <summary>True when <paramref name="key"/> is an accepted intake key (ordinal).</summary>
