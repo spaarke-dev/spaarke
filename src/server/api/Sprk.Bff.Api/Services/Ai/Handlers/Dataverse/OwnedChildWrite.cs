@@ -38,7 +38,13 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// <para><b>What "as the user" covers</b> — everything a run-as-user create would have had Dataverse check, so the
 /// app-only create grants nothing the caller lacks: (1) the table's Create privilege, and Append when the row sets a
 /// lookup, by the privilege names the table's own metadata declares (activity tables share <c>prvCreateActivity</c>);
-/// (2) AppendTo on every record a lookup names (<c>RetrievePrincipalAccess</c>); (3) no column under field-level security
+/// (2) AppendTo on every record a lookup names (<see cref="CheckCallerMayAppendToAsync"/>): <c>RetrievePrincipalAccess</c> for a
+/// user- or team-owned target; for an ORGANIZATION-OWNED target (the ADR-024 record-type catalog <c>sprk_recordtype_ref</c>,
+/// the matter-type and practice-area reference tables), which that message refuses (400 0x80040800), the table's AppendTo
+/// PRIVILEGE plus a read of the row as the caller (<see cref="CallerMayAppendToOrganizationOwnedAsync"/>) — what a
+/// run-as-user create checks there. A target neither path can answer (a BUSINESS-OWNED table such as <c>systemuser</c> or
+/// <c>team</c>, which RetrievePrincipalAccess also refuses) is denied, and a missing row answers like an unappendable one
+/// (the uniform not-found); (3) no column under field-level security
 /// (refused: an app-only write would pass the caller's column security); (4) no owner or audit column (the server sets
 /// the owner). Every question is asked through <see cref="IDataverseUserClient"/> under the caller's own token, so the
 /// identity is the credential, not data. Any failure denies.</para>
