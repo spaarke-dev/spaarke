@@ -99,3 +99,16 @@ The other construction sites (12) pass `AccessibleRecordSetTestFactory.NoFilingE
 
 - #1425: the contact plane ignores a secure parent's list.
 - #1426: the synchronizer checks only direct parents.
+
+## P1: the enforcer, the same ruling (pre-existing, fixed here)
+
+`NoAccessShareEnforcer.EnforceOnFiledRecordsAsync` reported a CONFIRMED record filed under a walled secure matter or project as `NotSecure` when its own flag was not set, and kept the walled user's direct share. Its comment, "the next enforcement reaches it", is false once inheritance ends Refused or Failed. `EnforceForRecordAsync` inherited the gap through `EnforceEntryAsync`.
+
+**Fix:** the `FlaggedSecure` gate is dropped for confirmed filed records (owner round 82). N5 (the author holds Write on the filed record) and S5 (never the last reader) still apply. An unconfirmed filing is still left alone and reported `children-incomplete`. The entry's OWN object record still answers `NotSecure` when it is not secure (Q4).
+
+**Tests (`NoAccessShareEnforcerTests`):**
+- the old "not the wall's" test is inverted: the share is removed;
+- N5 negative and S5 negative on a not-yet-secure filed record;
+- Update Access (`EnforceForRecordAsync`) on the not-yet-secure record removes the share.
+
+**Seeding proof:** with the gate restored, all 4 tests fail (55 others pass).
