@@ -103,11 +103,24 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
 
 ## 5. Known limits (K-class, no fix)
 
-- **K4.** `GetCollectionPageAsync` still swallows cancellation like the old reader. A client that disconnects during page 2 logs one `collection_truncated` error.
 - **K4.** The dashboard reads every project's full document list, up to 5,000 each (before: 200), to show 10 and a count. The live maximum today is 6 per project.
-- **Found in passing, reported, not fixed:** `GetRootDisplayNameAsync` (the to-do create's root-name read) goes through `GetSingleAsync`, which returns `null` both for a missing record and for a failed read. A transient failure there writes an empty `sprk_regardingrecordname` on the new to-do. It is not a reader of the paged collection, and fixing it means changing `GetSingleAsync`'s callers.
+- **Found in passing, reported, filed as #1409:** `GetRootDisplayNameAsync` (the to-do create's root-name read) goes through `GetSingleAsync`, which returns `null` both for a missing record and for a failed read. A transient failure there writes an empty `sprk_regardingrecordname` on the new to-do. It is not a reader of the paged collection, and fixing it means changing `GetSingleAsync`'s callers.
 - The project list's `truncated` is in the response but not bannered: the dashboard's rows come from `/me`, so a cut detail read shows an id in place of a name, not a missing row.
 
 ## 6. Live gate (after merge; needs the owner's OK for the seed writes)
 
 Deploy the BFF and the external SPA. Then on a test project, seed 250 `sprk_document` rows: `GET /api/v1/external/projects/{id}/documents` returns 250 and no `truncated`, and the SPA shows no notice. The cap path (5,001 rows) is a unit-level proof; seeding it live is not proposed. No app setting, role or schema change.
+
+## 7. Verifier round (2026-10-08): no F1/F2; every finding fixed
+
+| Finding | Fix |
+|---|---|
+| F3: dashboard empty states claimed "nothing" for a truncated list, and the events fetch dropped `truncated` | Recent Activity, Upcoming and My Documents show `TruncatedListNotice` ("could not be loaded") in place of their empty state when the list is empty and truncated. The events fetch carries `truncated` the way documents does. A read that throws is shown as could-not-be-loaded, not as an empty list. Tests: empty-truncated, thrown read, complete-empty control, "N+" count and exact-count control |
+| F3: the "ADR-024 Resolver-field application" comment still said an unresolvable type is non-fatal | Rewritten. Absent (a complete read, no active row) means create without the field. Unreadable means a 503 problem, with nothing written and nothing cached. The comment also notes that `SecureRootInheritance` reads `sprk_regardingrecordtype` (its `PairTypeColumn`) |
+| F4: the record-type lookup lacked `statecode eq 0` | Added, verified live (200, one Matter row). The fake honours it, and an inactive row served first is never bound |
+| F4: a stale truncated flag could sit next to a load error | `ContactsOrganizations` (contacts and organisations) and `SmartTodo` reset the flag at the start of each fetch. Test: a truncated read, then a failed read, shows the error and no notice |
+| F4: the list-envelope contract covered 5 routes | Added the to-dos route, through a `GetTodosAsync` override on the contract stub |
+| F4: the `GetRootDisplayNameAsync` defect was not cited | #1409, in §5 and the PR body |
+| K (done): cancellation was swallowed | `GetCollectionPageAsync` rethrows `OperationCanceledException` when the caller's token is cancelled. Test: a cancelled 250-contact read throws, with no `collection_truncated` and no error logs |
+
+Perturbations, each failing at least one test: dropping `statecode eq 0`, removing the cancellation rethrow, removing SmartTodo's flag reset, and the dashboard dropping the events flag.
