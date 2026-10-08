@@ -378,11 +378,10 @@ if ($planOnly) {
 #              KV-then-live-admin-key fallback, UNCHANGED, for backwards
 #              compatibility.
 #
-# Model 1 (shared KV) vs Model 2 fleet consistency (§10.3): this gate checks
-# exactly the ONE Key Vault it is given via -KeyVaultName and makes no
-# assumption about vault topology — under Model 1 that is the single shared
-# vault, under Model 2 the caller passes the ONE per-customer
-# `kv-{customerId}-{secretsVer}` vault relevant to this invocation. It does
+# Fleet consistency (§10.3): this gate checks exactly the ONE Key Vault it is
+# given via -KeyVaultName and makes no assumption about vault topology. Since
+# D-12 every customer stamp (Model 1 and Model 2) has its own vault, so the
+# caller passes the ONE per-customer vault relevant to this invocation. It does
 # NOT iterate an N-vault fleet itself (a missed marker on one vault in an
 # N-vault Model 2 fleet is its own silent-skip failure per A38a's
 # fleet-consistency note); fleet-level enumeration is A38a's proposed

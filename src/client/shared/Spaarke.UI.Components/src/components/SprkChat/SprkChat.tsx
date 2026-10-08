@@ -51,7 +51,13 @@ import { SprkChatTypingIndicator } from './SprkChatTypingIndicator';
 import { SprkChatUploadZone } from './SprkChatUploadZone';
 import type { UploadedDocument } from './SprkChatUploadZone';
 import type { InlineAiAction, InlineActionBroadcastEvent } from '../InlineAiToolbar/inlineAiToolbar.types';
-import { useSseStream, parseSseEvent, readSseStream } from '../../hooks/useSseStream';
+import {
+  useSseStream,
+  parseSseEvent,
+  readSseStream,
+  describeTooManyRequests,
+  requestFailedMessage,
+} from '../../hooks/useSseStream';
 import { useChatSession } from './hooks/useChatSession';
 import { useChatPlaybooks } from './hooks/useChatPlaybooks';
 import { useSelectionListener } from './hooks/useSelectionListener';
@@ -1879,6 +1885,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               updateLastMessage('Plan not found. It may have expired (30-minute limit). Please resend your request.');
               return;
             }
+            if (err.status === 429) {
+              // Task 254: rate limiting or the stamp's monthly AI usage limit — each with its own message.
+              updateLastMessage(describeTooManyRequests(err.bodyText));
+              return;
+            }
             updateLastMessage(`Plan approval failed (${err.status}): ${err.bodyText}`);
             return;
           }
@@ -2349,8 +2360,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             },
             getAccessToken,
             signal: controller.signal,
+            // Task 254: a 429 may be the stamp's monthly AI usage limit — requestFailedMessage shows its message.
             mapHttpError: async response =>
-              new Error(`Refine request failed (${response.status}): ${await response.text()}`),
+              new Error(requestFailedMessage('Refine request', response.status, await response.text())),
             onLine: (line: string) => {
               const event = parseSseEvent(line);
               if (!event) return;

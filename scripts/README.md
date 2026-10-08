@@ -291,6 +291,27 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+### `Set-AiSpendLimit.ps1`
+**Purpose:** Add, change or remove a customer stamp's OPTIONAL monthly Azure OpenAI spend limit (`AiSpendLimit__MonthlyLimitUsd`) on the BFF's production AND staging slots — customer-provisioning-orchestration-r1 task 254, owner G37 (no limit is the default)
+**Usage:** 🟡 Occasional - when a customer's agreement calls for a cap, or to lift one
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login` as the operator); write access to the stamp's App Service
+**Owner:** DevOps Team
+**Last Used:** October 2026 (new)
+
+**Command:**
+```powershell
+# Set or change (idempotent — writes only a slot whose value differs)
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -MonthlyLimitUsd 500
+
+# Remove (back to no limit); -WhatIf previews either
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -Remove -WhatIf
+```
+
+**Notes:** same value rule as intake (`OpenAiMonthlyLimitRule`: plain decimal in (0, 1,000,000]); `--subscription` on every az call; an app-setting change restarts the site. Behaviour of the limit: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §3.2b. Tests: `tests/scripts/Set-AiSpendLimit.Tests.ps1` (Pester 3.4).
+
+---
+
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
@@ -320,28 +341,18 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
 - Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
 
-**SPE topology mode** (added 2026-08-30, task 213.4 — creates the container-type OWNING and BFF app-regs per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)):
+**SPE topology mode** (added 2026-08-30, task 213.4; trimmed by task 227a — creates the Model 1 container-type OWNING app-reg per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)). Per-customer BFF app-regs are created by H3 (`spaarke-bff-api-{customerId}`) and granted container-type access by H8 — there is no shared-tier BFF app (D-12/D-13):
 
 ```powershell
 # ONE-TIME operator setup (NOT per-customer). Follow the 8-step runbook:
 #   docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
 
-# Owning app-reg (permanent 1:1 with a container-type; SS3A rows 1-3)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1
+# Owning app-reg (permanent 1:1 with the "Spaarke Model 1" container type)
 .\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model2
-
-# BFF app-reg — shared per tier (Trial 1 + Model 1); per-customer for Model 2 (SS3A rows 4-6)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Trial1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model2 -CustomerName Acme
-
-# Both in one invocation:
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1 -CreateBffApp Trial1
 ```
 
 Topology-mode behavior (idempotent; safe to re-run):
-- Model 2 owning app is the ONLY multi-tenant app-reg (`AzureADMultipleOrgs`); all others single-tenant (`AzureADMyOrg`).
+- The owning app is single-tenant (`AzureADMyOrg`).
 - **NO client secret minted** on any topology app-reg (ADR-028 A4 + KV credential-lifecycle rule 1).
 - **NO Key Vault writes** (H4 handler owns per-customer KV wiring at provisioning time).
 - Not combinable with `-CreateFederatedCredential` / `-FicOnly` / `-AllowClientSecretMint` (throws with actionable message).
@@ -634,7 +645,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 - `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
 - `-SkipBuild` — Shortcut for `-SkipPhase Build`
 - `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
-- `-ClientSecret` — Service principal client secret for Dataverse solution import (falls back to `SPAARKE_SP_CLIENT_SECRET` env var)
+- `-ClientSecret` — ignored since T218f (warns): Phase 3 imports SpaarkeMaster with your own az/pac sign-in
 
 **Pipeline Phases:**
 | Phase | Script Called | Description |
@@ -642,7 +653,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
-| 3 | `Deploy-DataverseSolutions.ps1` | Dataverse solution import (per environment) |
+| 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
 | 6 | (built-in) | Tag release in git |
@@ -1139,9 +1150,11 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 ```
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
-`Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
-that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
-`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
+`Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,
+task 227g — read both back, remove the container if either did not land), used by every script that creates a container
+(`New-BusinessUnitContainer.ps1 -CustomerId`, `Provision-Customer.ps1` step 10, `Create-NewContainerType.ps1
+-CreateTestContainer -TestContainerBusinessUnitId <bu> -TestContainerCustomerId <id>`). `SpeContainerMarkerParityTests` fails
+the build on a call without `-CustomerId`. `SpeAdminContainerBindingGuardTests`
 fails the build on a script that creates a container without it — including a URI held in a variable, a splat, `az rest`,
 or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 item 5).
 

@@ -1,0 +1,804 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Document.Checkin.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="15">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Checkin.Button.Alt" Command="sprk.Document.Checkin.Command" Id="sprk.Document.Checkin.Button" Image32by32="/_imgs/ribbon/DocumentApproval_32.png" Image16by16="/_imgs/ribbon/DocumentApproval_16.png" LabelText="$LocLabels:sprk.Document.Checkin.Button.LabelText" Sequence="15" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Checkin.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Checkin.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.Checkout.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="16">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Checkout.Button.Alt" Command="sprk.Document.Checkout.Command" Id="sprk.Document.Checkout.Button" Image32by32="/_imgs/ribbon/Lock_32.png" Image16by16="/_imgs/ribbon/Lock_16.png" LabelText="$LocLabels:sprk.Document.Checkout.Button.LabelText" Sequence="16" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Checkout.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Checkout.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.Delete.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="65">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Delete.Button.Alt" Command="sprk.Document.Delete.Command" Id="sprk.Document.Delete.Button" Image32by32="/_imgs/ribbon/Delete_32.png" Image16by16="/_imgs/ribbon/Delete_16.png" LabelText="$LocLabels:sprk.Document.Delete.Button.LabelText" Sequence="65" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Delete.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Delete.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.Discard.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="17">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Discard.Button.Alt" Command="sprk.Document.Discard.Command" Id="sprk.Document.Discard.Button" Image32by32="/_imgs/ribbon/Cancel_32.png" Image16by16="/_imgs/ribbon/Cancel_16.png" LabelText="$LocLabels:sprk.Document.Discard.Button.LabelText" Sequence="17" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Discard.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Discard.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.Download.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="73">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Download.Button.Alt" Command="sprk.Document.Download.Command" Id="sprk.Document.Download.Button" Image32by32="/_imgs/ribbon/Download_32.png" Image16by16="/_imgs/ribbon/Download_16.png" LabelText="$LocLabels:sprk.Document.Download.Button.LabelText" Sequence="73" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Download.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Download.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.NewUpload.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.NewUpload.Grid.Button.Alt" Command="sprk.Document.NewUpload.Grid.Command" Id="sprk.Document.NewUpload.Grid.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Document.NewUpload.Grid.Button.LabelText" Sequence="1" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.NewUpload.Grid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.NewUpload.Grid.Button.ToolTipDescription" ModernImage="CommandBarNewIcon" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.OpenInDesktop.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="72">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.OpenInDesktop.Button.Alt" Command="sprk.Document.OpenInDesktop.Command" Id="sprk.Document.OpenInDesktop.Button" Image32by32="/_imgs/ribbon/OpenInNewWindow_32.png" Image16by16="/_imgs/ribbon/OpenInNewWindow_16.png" LabelText="$LocLabels:sprk.Document.OpenInDesktop.Button.LabelText" Sequence="72" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.OpenInDesktop.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.OpenInDesktop.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.OpenInWeb.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="71">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.OpenInWeb.Button.Alt" Command="sprk.Document.OpenInWeb.Command" Id="sprk.Document.OpenInWeb.Button" Image32by32="/_imgs/ribbon/NewWindow_32.png" Image16by16="/_imgs/ribbon/NewWindow_16.png" LabelText="$LocLabels:sprk.Document.OpenInWeb.Button.LabelText" Sequence="71" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.OpenInWeb.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.OpenInWeb.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.Refresh.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="70">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.Refresh.Button.Alt" Command="sprk.Document.Refresh.Command" Id="sprk.Document.Refresh.Button" Image32by32="/_imgs/ribbon/Refresh_32.png" Image16by16="/_imgs/ribbon/Refresh_16.png" LabelText="$LocLabels:sprk.Document.Refresh.Button.LabelText" Sequence="70" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.Refresh.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Refresh.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.SendToIndex.Form.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="74">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.SendToIndex.Form.Button.Alt" Command="sprk.Document.SendToIndex.Form.Command" Id="sprk.Document.SendToIndex.Form.Button" Image32by32="/_imgs/ribbon/Search_32.png" Image16by16="/_imgs/ribbon/Search_16.png" LabelText="$LocLabels:sprk.Document.SendToIndex.Form.Button.LabelText" Sequence="74" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.Form.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.Form.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.SendToIndex.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.SendToIndex.Grid.Button.Alt" Command="sprk.Document.SendToIndex.Grid.Command" Id="sprk.Document.SendToIndex.Grid.Button" Image32by32="/_imgs/ribbon/Search_32.png" Image16by16="/_imgs/ribbon/Search_16.png" LabelText="$LocLabels:sprk.Document.SendToIndex.Grid.Button.LabelText" Sequence="100" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.Grid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.Grid.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Document.SendToIndex.Subgrid.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="6">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Document.SendToIndex.Subgrid.Button.Alt" Command="sprk.Document.SendToIndex.Subgrid.Command" Id="sprk.Document.SendToIndex.Subgrid.Button" Image32by32="/_imgs/ribbon/Search_32.png" Image16by16="/_imgs/ribbon/Search_16.png" LabelText="$LocLabels:sprk.Document.SendToIndex.Subgrid.Button.LabelText" Sequence="6" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.Subgrid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.Subgrid.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_document.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_document.NewRecord" />
+    <CustomAction Id="sprk.Navigator.Document.Form.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Document.Form.Button" Command="sprk.Navigator.Document.Open.Command" LabelText="$LocLabels:sprk.Navigator.Document.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Document.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Document.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Document.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Navigator.Document.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Document.Grid.Button" Command="sprk.Navigator.Document.Open.Command" LabelText="$LocLabels:sprk.Navigator.Document.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Document.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Document.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Document.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.SecureChild.sprk_document.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_document.SubGrid.New" Command="sprk.SecureChild.sprk_document.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_document.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Spaarke.Document.AddMultiple.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="5">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="sprk_/icons/cmd/add.svg" Image16by16="sprk_/icons/cmd/add.svg" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" ModernImage="sprk_/icons/cmd/add.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.SpaarkeAi.Document.OpenInCompose.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Actions.Controls._children" Sequence="230">
+      <CommandUIDefinition>
+        <Button Id="sprk.SpaarkeAi.Document.OpenInCompose.Button" Command="sprk.SpaarkeAi.Document.OpenInCompose.Command" LabelText="$LocLabels:sprk.SpaarkeAi.OpenInCompose.Label" Alt="$LocLabels:sprk.SpaarkeAi.OpenInCompose.Label" ToolTipTitle="$LocLabels:sprk.SpaarkeAi.OpenInCompose.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.SpaarkeAi.OpenInCompose.ToolTipDescription" Image16by16="/_imgs/ribbon/Edit_16.png" Image32by32="/_imgs/ribbon/Edit_32.png" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <FlyoutAnchor Command="sprk.ThemeMenu.FlyoutCommand" Id="sprk.ThemeMenu.FlyoutAnchor" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" LabelText="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.ToolTipDescription">
+          <Menu Id="sprk.ThemeMenu.FlyoutAnchor.Menu">
+            <MenuSection Id="sprk.ThemeMenu.MenuSection" Title="$LocLabels:sprk.ThemeMenu.MenuSection.Title" Sequence="10" DisplayMode="Menu16">
+              <Controls Id="sprk.ThemeMenu.MenuSection.Controls">
+                <Button Command="sprk.ThemeMenu.SetAuto" Id="sprk.ThemeMenu.Auto" Image16by16="$webresource:sprk_ThemeAuto16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Auto.LabelText" Sequence="10" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Auto.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Auto.ToolTipDescription" />
+                <Button Command="sprk.ThemeMenu.SetLight" Id="sprk.ThemeMenu.Light" Image16by16="$webresource:sprk_ThemeLight16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Light.LabelText" Sequence="20" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Light.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Light.ToolTipDescription" />
+                <Button Command="sprk.ThemeMenu.SetDark" Id="sprk.ThemeMenu.Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Dark.LabelText" Sequence="30" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Dark.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Dark.ToolTipDescription" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.AddNewRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="sprk.SecureChild.sprk_document.NativeNewAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.HideAddNewForChildEntities" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Open.addNewFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+          <CrmParameter Value="FirstPrimaryItemId" />
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Spaarke.Document.AddMultiple.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_AddMultipleDocuments" Library="$webresource:sprk_subgrid_commands">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Checkin.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Checkin.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.checkinDocument" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Checkout.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Checkout.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.checkoutDocument" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Delete.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Delete.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.deleteDocument" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Discard.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Discard.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.discardCheckout" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Download.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Download.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.downloadDocument" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.NewUpload.Grid.Command">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_UploadDocumentsStandalone" Library="$webresource:sprk_subgrid_commands" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.OpenInDesktop.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.OpenInDesktop.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.openInDesktop" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.OpenInWeb.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.OpenInWeb.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.openInWeb" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.Refresh.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Refresh.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.refreshDocument" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.SendToIndex.Form.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.sendToIndex" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.SendToIndex.Grid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Grid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.sendToIndex" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="SelectedControl" />
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Document.SendToIndex.Subgrid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Subgrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Document.sendToIndex" Library="$webresource:sprk_DocumentOperations.js">
+          <CrmParameter Value="SelectedControl" />
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Navigator.Document.Open.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Navigator.Document.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_document.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_document.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_document" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SpaarkeAi.Document.OpenInCompose.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_spaarkeai_documentcomposelaunch" FunctionName="Sprk.SpaarkeAi.DocumentComposeLaunch.openInCompose">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.FlyoutCommand">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.Document.Form.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule">
+        <CrmClientTypeRule Type="Web" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Checkin.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canCheckin" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Checkout.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canCheckout" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Delete.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDelete" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Discard.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDiscard" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Download.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDownload" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.OpenInDesktop.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canOpenInDesktop" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.OpenInWeb.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canOpenInWeb" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.Refresh.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canRefresh" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.SendToIndex.Form.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canSendToIndex" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.SendToIndex.Grid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+      </EnableRule>
+      <EnableRule Id="sprk.Document.SendToIndex.Subgrid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+      </EnableRule>
+      <EnableRule Id="sprk.Navigator.Document.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_document.NativeNewAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_document.NewAvailable.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule">
+        <FormStateRule State="Existing" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.Alt">
+      <Titles>
+        <Title description="Add Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.LabelText">
+      <Titles>
+        <Title description="Add Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Upload multiple files to SharePoint Embedded and create Document records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Upload a file to create a document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.Button.Alt">
+      <Titles>
+        <Title description="Check In" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.Button.LabelText">
+      <Titles>
+        <Title description="Check In" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Save your changes and unlock the document for other users to edit." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Check In Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.Button.Alt">
+      <Titles>
+        <Title description="Check Out" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.Button.LabelText">
+      <Titles>
+        <Title description="Check Out" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Lock this document for editing. Other users will not be able to edit until you check it in." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Check Out Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.Button.Alt">
+      <Titles>
+        <Title description="Delete" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.Button.LabelText">
+      <Titles>
+        <Title description="Delete" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Permanently delete this document and its file from storage. This action cannot be undone." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Delete Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.Button.Alt">
+      <Titles>
+        <Title description="Discard Checkout" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.Button.LabelText">
+      <Titles>
+        <Title description="Discard Checkout" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Discard your changes and unlock the document. The document will be restored to its previous state." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Discard Checkout" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.Button.Alt">
+      <Titles>
+        <Title description="Download" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.Button.LabelText">
+      <Titles>
+        <Title description="Download" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Download a copy of this document to your local computer." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Download Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.NewUpload.Grid.Button.Alt">
+      <Titles>
+        <Title description="+New Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.NewUpload.Grid.Button.LabelText">
+      <Titles>
+        <Title description="+New Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.NewUpload.Grid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open Document Upload Wizard to upload new documents" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.NewUpload.Grid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="New Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.Button.Alt">
+      <Titles>
+        <Title description="Open in Desktop" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.Button.LabelText">
+      <Titles>
+        <Title description="Open in Desktop" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open this document in the desktop application (Word, Excel, or PowerPoint)." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Open in Desktop Application" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.Button.Alt">
+      <Titles>
+        <Title description="Open in Web" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.Button.LabelText">
+      <Titles>
+        <Title description="Open in Web" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open this document in Office Online in a new browser tab." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Open in Office Online" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.Button.Alt">
+      <Titles>
+        <Title description="Refresh" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.Button.LabelText">
+      <Titles>
+        <Title description="Refresh" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Refresh the form to show the latest document data and checkout status." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Refresh Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Form.Button.Alt">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Form.Button.LabelText">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Form.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Index this document for semantic search. The document will be searchable using AI-powered search queries." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Form.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Send to Search Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Grid.Button.Alt">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Grid.Button.LabelText">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Grid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Index this document for semantic search. The document will be searchable using AI-powered search queries." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Grid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Send to Search Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Subgrid.Button.Alt">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Subgrid.Button.LabelText">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Subgrid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Index this document for semantic search. The document will be searchable using AI-powered search queries." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.Subgrid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Send to Search Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Document.Button.Alt">
+      <Titles>
+        <Title description="Open the Navigator side pane" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Document.Button.LabelText">
+      <Titles>
+        <Title description="Navigator" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Document.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open or focus the Navigator (Recent, Bookmarks, Monitored, Views). Its enable rule also registers the pane on load." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_document.New.LabelText">
+      <Titles>
+        <Title description="New Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_document.New.ToolTipDescription">
+      <Titles>
+        <Title description="Add a Document to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.Label">
+      <Titles>
+        <Title description="Open in Compose" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.ToolTipDescription">
+      <Titles>
+        <Title description="Open this document in the SpaarkeAi Compose editor for AI-assisted drafting and revision." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.ToolTipTitle">
+      <Titles>
+        <Title description="Open in Compose" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.LabelText">
+      <Titles>
+        <Title description="Auto (follows system)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.ToolTipDescription">
+      <Titles>
+        <Title description="Uses your operating system's theme preference" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.ToolTipTitle">
+      <Titles>
+        <Title description="Auto" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.LabelText">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.ToolTipDescription">
+      <Titles>
+        <Title description="Dark background with light text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.ToolTipTitle">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.LabelText">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.ToolTipDescription">
+      <Titles>
+        <Title description="Choose your preferred color theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.ToolTipTitle">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.LabelText">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.ToolTipDescription">
+      <Titles>
+        <Title description="Light background with dark text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.ToolTipTitle">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.MenuSection.Title">
+      <Titles>
+        <Title description="Color Theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

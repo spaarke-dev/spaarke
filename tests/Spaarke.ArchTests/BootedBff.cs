@@ -177,6 +177,9 @@ public sealed class BootedApp : IDisposable
                 ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://archtests.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
                 ["ServiceBus:ConnectionString"] = "Endpoint=sb://archtests.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
                 ["ServiceBus:QueueName"] = "sdap-jobs",
+                // customer-provisioning-orchestration-r1 T246: outside Development/Testing the BFF refuses to start without a
+                // Content Safety endpoint (keyless, UAMI) — a placeholder is enough for a boot that makes no AI call.
+                ["AiSafety:ContentSafety:Endpoint"] = "https://archtests.cognitiveservices.azure.com/",
 
                 ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
 

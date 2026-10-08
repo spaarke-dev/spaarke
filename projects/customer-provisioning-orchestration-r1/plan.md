@@ -456,7 +456,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 - [ ] Provisioning run: fresh `trial-{yyyymmdd}` stamp reaches `Setup Status = Ready`
 - [ ] Verification report at `notes/phase-f-e2e-acceptance-2026-XX-XX.md` with all trap + invariant + naming + cost checks
 - [ ] Model 1/2 differences verified per §4.1a (or explicit note if only Model 1 dry-runnable)
-- [ ] `/health` succeeds; sample analysis + sample doc upload+index + workspace-layout render + wizard field-map all succeed
+- [ ] `/health` succeeds; sample analysis + sample doc upload+index + workspace-layout render + wizard field-map all succeed — as a SIGNED-IN USER (T230b: H13 no longer runs these per run; it runs the keyless proof + ARM keyless check)
 - [ ] Cleanup: discretionary teardown OR leave trial for reference
 
 **Inputs**: All Phase A/B/C/C'/D/E/G/H deliverables

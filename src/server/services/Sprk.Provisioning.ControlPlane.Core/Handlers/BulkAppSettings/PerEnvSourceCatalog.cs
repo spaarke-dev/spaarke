@@ -53,12 +53,20 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:service_bus_fqns", HandlerIds.H2a, nameof(InterStepState.ServiceBusFullyQualifiedNamespace), r => r.InterStepState.ServiceBusFullyQualifiedNamespace),
         // T242: the stamp's Azure Managed Redis endpoint (host:10000) — a plain setting; the cache has no keys.
         Output("from-h2a-output:redis_endpoint", HandlerIds.H2a, nameof(InterStepState.RedisEndpoint), r => r.InterStepState.RedisEndpoint),
+        // T246: the stamp's Azure AI Content Safety endpoint — a plain setting; the account has local auth disabled.
+        Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
         // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
         // write: H5 runs after H4). H4b ← H5 in the DAG.
         Output("from-h5-output:dataverse_env_url", HandlerIds.H5, nameof(InterStepState.DataverseEnvUrl), r => r.InterStepState.DataverseEnvUrl),
+        // T227c (G18): the customer's SPE container — a plain setting (EmailProcessing__DefaultContainerId,
+        // Communication__ArchiveContainerId). It was a KV secret nothing could write (H8 runs after H4). H4b ← H8.
+        Output("from-h8-output:spe_container_id", HandlerIds.H8, nameof(InterStepState.SpeContainerId), r => r.InterStepState.SpeContainerId),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
+        // T254: the OPTIONAL monthly OpenAI spend limit (G37) — read by a `required: false` entry, so a run without it
+        // writes nothing (no limit).
+        Intake("from-intake-parameter:openai_monthly_limit_usd", IntakeParameterCatalog.OpenAiMonthlyLimitUsd),
         // T238 (D-14): the run's own customerId — the POST /api/runs body field, validated there by
         // CustomerIdStandard. Read verbatim: no trim, no case change, no derivation (INCOMING-CUSTOMER-
         // RUNTIME-IDENTITY §1.1 — a second derivation is how two components end up with two spellings).

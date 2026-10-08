@@ -4,8 +4,8 @@
 // L2 abstraction over Entra app-registration provisioning for handler H3.
 //
 // TASK 130 (Wave G-3) REWRITE: replaces the Wave-C4 shell-out design
-// (<c>RegisterEntraAppRegScriptProvisioner</c>, RETIRED — see that file's
-// retirement banner) with a pure Microsoft.Graph 6.x SDK port
+// (<c>RegisterEntraAppRegScriptProvisioner</c>, RETIRED and since deleted — its
+// script was scripts/Register-EntraAppRegistrations.ps1) with a pure Microsoft.Graph 6.x SDK port
 // (<see cref="GraphAppRegistrationProvisioner"/>), per design.md §4.1's H3
 // SDK-surface table + Option D's zero-shell-out invariant (spec.md MUST rule
 // post-line-254 block).
@@ -114,7 +114,7 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// deletion of both KV copies. Post-task-222 (D-13) EVERY newly-provisioned
 /// environment is a per-customer stamp — Model 1 (Spaarke-tenant) + Model 2
 /// (Spaarke-hosted or customer-owned) — and ALL are secret-free by construction
-/// per constraint rule 1, so <see cref="H3EntraAppRegHandler.HandleModel2Async"/>
+/// per constraint rule 1, so H3's per-customer provisioning path
 /// passes <c>true</c> unconditionally in both models. The parameter is threaded
 /// through the request DTO (not read from an ambient option) so the intent is
 /// visible at every call site + any future non-secret-free profile can opt IN
@@ -122,13 +122,24 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// FORBIDDEN — this is the load-bearing safety default; changing it re-opens
 /// the exact silent-mint path the verify workflow surfaced.
 /// </param>
+/// <param name="SpaRedirectUris">
+/// T240a: the app registration's exact <c>spa.redirectUris</c> — the customer's own Dataverse origin, where its code
+/// pages sign in (<c>redirectUri = window.location.origin</c>). H3 sets exactly this list. <c>null</c> leaves the
+/// registration's redirects untouched (never "clear them").
+/// </param>
+/// <param name="PreAuthorizedClientAppIds">
+/// T240a: the shared client apps pre-authorized on the app's <c>user_impersonation</c> scope (H3 sets exactly this list;
+/// empty removes every pre-authorization). <c>null</c> leaves the pre-authorizations untouched.
+/// </param>
 public sealed record EntraAppRegRequest(
     string CustomerId,
     string TenantId,
     string VaultName,
     string UamiPrincipalId,
     string Profile,
-    bool RequireSecretFreeIdentity = true);
+    bool RequireSecretFreeIdentity = true,
+    IReadOnlyList<string>? SpaRedirectUris = null,
+    IReadOnlyList<string>? PreAuthorizedClientAppIds = null);
 
 /// <summary>
 /// Deploy outputs H3 needs to (a) populate <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.BffAppRegId"/>

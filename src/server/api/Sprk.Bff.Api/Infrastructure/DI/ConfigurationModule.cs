@@ -148,14 +148,8 @@ public static class ConfigurationModule
         // project-pre-fill, ai-summary, and summarize-file flows exclusively through
         // IConsumerRoutingService (see Infrastructure/DI/RoutingModule.cs).
 
-        // SharePoint Embedded options — StagingContainerId used by pre-fill services (matter/project)
-        // for staged file uploads. Nullable with code-side fallback (in-memory text extraction when
-        // unset), so binding succeeds even when the "SharePointEmbedded" section is absent.
-        services
-            .AddOptions<SharePointEmbeddedOptions>()
-            .Bind(configuration.GetSection(SharePointEmbeddedOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        // (SharePointEmbeddedOptions was removed by customer-provisioning-orchestration-r1 task 227f: its staging-container
+        // key was configured nowhere and nothing injected the options; SharePointEmbedded:ContainerTypeId is read directly.)
 
         // Sharing-link bounds for POST /api/documents/{documentId}/share-link
         // (unified-access-control-r2 task 072). ValidateOnStart is load-bearing here rather than

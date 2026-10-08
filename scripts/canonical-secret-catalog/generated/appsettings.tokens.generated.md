@@ -33,14 +33,10 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `Communication-WebhookUrl` | communication | N/A | - | from-bicep-output |
 | `Compose-Webhook-ClientState` | compose | 90-days | - | generated |
 | `Compose-Webhook-SigningKey` | compose | 90-days-or-on-incident | - | generated |
-| `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
-| `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
-| `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
 | `TenantId` | identity | N/A | - | from-intake-parameter |
 
 ## Per-secret detail
@@ -224,20 +220,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
   - `compose-webhook-signingkey`
 
-### `ContentSafety-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, key
-- **Exception note**: Prefer MI when AiSafety:ContentSafety:ManagedIdentity:Enabled=true.
-- **Consumers**:
-  - BFF: AiSafety:ContentSafety:ApiKey
-- **App-setting keys**:
-  - `AiSafety__ContentSafety__ApiKey`
-
 ### `Dataverse-ClientSecret`
 
 - **Category**: auth
@@ -295,46 +277,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: Email:WebhookSigningKey
 - **App-setting keys**:
   - `Email__WebhookSigningKey`
-
-### `SPE-CommunicationArchiveContainerId`
-
-- **Category**: spe
-- **Purpose**: SPE communication-archive container ID (archived email / communication payloads).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: communication, public, spe
-- **Consumers**:
-  - BFF: Communication:ArchiveContainerId
-- **App-setting keys**:
-  - `Communication__ArchiveContainerId`
-
-### `SPE-ContainerTypeId`
-
-- **Category**: spe
-- **Purpose**: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-topology-constants
-- **Tags**: public, spe, topology-scoped
-- **Exception note**: SEMANTICS CHANGED 2026-08-30 (task 214, H8-B rewrite): value is topology-scoped (once per tier from spaarke-constants.yaml), not per-customer + populated by H8. Retirement of prior H8 write-here behavior driven by topology doc §R5 empirical verification. See task 214 POML + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
-- **Consumers**:
-  - BFF: DEFAULT_CT_ID / SharePointEmbedded:ContainerTypeId
-- **App-setting keys**:
-  - `DEFAULT_CT_ID`
-
-### `SPE-DefaultContainerId`
-
-- **Category**: spe
-- **Purpose**: SPE default container ID (per-customer root container for uploaded files).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: public, spe
-- **Consumers**:
-  - BFF: Email:DefaultContainerId
-- **App-setting keys**:
-  - `Email__DefaultContainerId`
 
 ### `TenantId`
 

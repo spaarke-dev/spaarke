@@ -69,7 +69,7 @@ Wire into CI to prevent operators from editing `generated/` by hand:
      never_delete: false            # true ONLY for Dataverse-ClientSecret + BFF-API-ClientSecret (BINDING)
      exception_note: ""
      aliases: []                    # any drift spellings to alias-collapse (never emitted as separate secrets)
-     value_source: "generated"      # from-existing-kv | from-bicep-output | from-run-parameter | from-topology-constants | generated
+     value_source: "generated"      # from-existing-kv | from-bicep-output | from-run-parameter | from-intake-parameter | written-by-h3 | generated
      app_settings:
        - "MyModule__MySetting"
      tags: ["communication"]

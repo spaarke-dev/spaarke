@@ -6,21 +6,22 @@
 // HttpClient probe path against ARM (sites/list + config/appsettings/list) via
 // a hand-rolled FakeHttpMessageHandler — never Mock<HttpMessageHandler> per
 // ADR-038 path #1 + testing.md's ban. Complements
-// SpeContainerResolverInvariantProbeTests (task 176 BFF-diagnostic variant);
+// the task-176 BFF-diagnostic variant's tests (retired with it by task 227f);
 // this file exercises the INDEPENDENT ARM-config-read variant.
 //
-// PATH: tests/CLAUDE.md 7 KEEP paths — component-scoped unit test of the probe
+// PATH: ADR-038 KEEP paths (eight, incl. Amendment A1) — component-scoped unit test of the probe
 // class through its PUBLIC ProbeAsync surface. Sits alongside sibling H13
-// real-probe test files (SpeContainerResolverInvariantProbeTests,
+// real-probe test files (the retired task-176 probe tests,
 // AiSearchTenantFilterInvariantProbeTests, CosmosPartitionKeyInvariantProbeTests).
 //
 // COVERAGE — every branch enumerated in the SpeContainerTenantDerivationInvariantProbe.cs
 // file header § "EDGE CASES + INFRA-FAULT DISCIPLINE":
 //   AC-1 Kind property = InvariantKind.I4SpeContainerResolver.
-//   AC-2 (Fail) — app-setting value is a canonical `b!...` SPE container id
-//        literal (CATASTROPHIC — the class-of-bug this probe exists to catch).
-//   AC-2 (Fail) — app-setting missing / blank / non-KV-reference string.
-//   AC-3 (Pass) — app-setting value is a `@Microsoft.KeyVault(...)` reference.
+//   Task 227c rewrite (owner D28): the probe compares the deployed settings with the run's own values.
+//   AC-2 (Fail) — a container setting names another container (CATASTROPHIC — another customer's
+//        documents); container setting missing / blank; container type missing / blank / not the run's.
+//   AC-3 (Pass) — container type = the run's; both container settings = H8's container.
+//   InfraFault — the run's containerTypeId or SpeContainerId is empty (no ARM call).
 //   AC-InfraFault — every non-verdictable branch: token failure, ARM sites/list
 //        401/403/404/5xx, empty sites/list response, no matching site, config/
 //        appsettings/list 401/403/404/5xx, malformed JSON, timeout, transport
@@ -52,8 +53,17 @@ public sealed class SpeContainerTenantDerivationInvariantProbeTests
         $"/subscriptions/{SubscriptionId}/resourceGroups/{ResourceGroupName}" +
         $"/providers/Microsoft.Web/sites/{SiteName}";
 
-    private static readonly string CanonicalContainerIdLiteral =
-        "b!" + new string('A', 20) + "-_" + new string('B', 20) + "_" + new string('C', 20);
+    private const string ContainerTypeId = "fb3817a8-5a55-42ba-8cc9-12cf055168b8";
+    private const string ContainerId = "b!AAAAAAAAAAAAAAAAAAAA-_BBBBBBBBBBBBBBBBBBBB_customerA";
+    private const string OtherCustomersContainerId = "b!AAAAAAAAAAAAAAAAAAAA-_BBBBBBBBBBBBBBBBBBBB_customerB";
+
+    /// <summary>What H4b writes for this run: the run's container type and H8's container (task 227c).</summary>
+    private static Dictionary<string, string> CorrectSettings() => new()
+    {
+        ["SharePointEmbedded__ContainerTypeId"] = ContainerTypeId,
+        ["EmailProcessing__DefaultContainerId"] = ContainerId,
+        ["Communication__ArchiveContainerId"] = ContainerId,
+    };
 
     // -----------------------------------------------------------------------
     // AC-1: probe metadata + IInvariantProbe contract
@@ -81,21 +91,16 @@ public sealed class SpeContainerTenantDerivationInvariantProbeTests
     }
 
     // -----------------------------------------------------------------------
-    // AC-3: Pass — app-setting value is a KV reference expression
+    // AC-3: Pass — the deployed settings name this run's container type and this customer's container (task 227c)
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task ProbeAsync_ContainerTypeSetToKvReference_ReturnsPassedViaGenuineArmCalls()
+    public async Task ProbeAsync_SettingsNameTheRunsContainerTypeAndContainer_ReturnsPassedViaGenuineArmCalls()
     {
-        var kvRef = "@Microsoft.KeyVault(SecretUri=https://spaarke-kv-acme.vault.azure.net/secrets/SPE-ContainerTypeId/)";
         var handler = new FakeHttpMessageHandler(req =>
         {
             if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SharePointEmbedded__ContainerTypeId"] = kvRef,
-                });
+            if (IsAppSettingsListCall(req, SiteResourceId)) return AppSettingsResponse(CorrectSettings());
             return Unexpected(req);
         });
         var probe = BuildProbe(handler);
@@ -112,148 +117,107 @@ public sealed class SpeContainerTenantDerivationInvariantProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_ColonFormAppSettingName_AlsoPasses()
+    public void ClassifyAppSettings_ColonFormContainerTypeName_AlsoPasses()
     {
-        var kvRef = "@Microsoft.KeyVault(SecretUri=https://spaarke-kv-acme.vault.azure.net/secrets/SPE-ContainerTypeId/)";
-        var handler = new FakeHttpMessageHandler(req =>
-        {
-            if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SharePointEmbedded:ContainerTypeId"] = kvRef,
-                });
-            return Unexpected(req);
-        });
-        var probe = BuildProbe(handler);
+        var settings = CorrectSettings();
+        settings.Remove("SharePointEmbedded__ContainerTypeId");
+        settings["SharePointEmbedded:ContainerTypeId"] = ContainerTypeId.ToUpperInvariant();
 
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
-    }
-
-    [Fact]
-    public void ClassifyContainerTypeAppSetting_KvReferenceExpressionReturnsPassed()
-    {
-        var probe = BuildProbe();
-        var settings = new Dictionary<string, string>
-        {
-            ["SharePointEmbedded__ContainerTypeId"] =
-                "@Microsoft.KeyVault(SecretUri=https://vault.vault.azure.net/secrets/foo/)",
-        };
-
-        var outcome = probe.ClassifyContainerTypeAppSetting(settings, SiteResourceId);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
+        BuildProbe().ClassifyAppSettings(settings, SiteResourceId, ContainerTypeId, ContainerId)
+            .Should().BeOfType<InvariantVerificationOutcome.Passed>();
     }
 
     // -----------------------------------------------------------------------
-    // AC-2: Fail — CATASTROPHIC hardcoded literal branch (class-of-bug)
+    // AC-2: Fail — another customer's container (CATASTROPHIC under owner D28)
     // -----------------------------------------------------------------------
 
-    [Fact]
-    public async Task ProbeAsync_ContainerTypeSetToCanonicalLiteral_ReturnsFailedCatastrophic()
+    [Theory]
+    [InlineData("EmailProcessing__DefaultContainerId")]
+    [InlineData("Communication__ArchiveContainerId")]
+    public void ClassifyAppSettings_ContainerSettingNamesAnotherContainer_FailsCatastrophic(string setting)
     {
-        var handler = new FakeHttpMessageHandler(req =>
-        {
-            if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SharePointEmbedded__ContainerTypeId"] = CanonicalContainerIdLiteral,
-                });
-            return Unexpected(req);
-        });
-        var probe = BuildProbe(handler);
+        var settings = CorrectSettings();
+        settings[setting] = OtherCustomersContainerId;
 
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+        var outcome = BuildProbe().ClassifyAppSettings(settings, SiteResourceId, ContainerTypeId, ContainerId);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("CATASTROPHIC")
-            .And.Contain("HARDCODED")
-            .And.Contain("cross-tenant leak");
+            .Which.Diagnostic.Should().Contain("CATASTROPHIC").And.Contain(setting).And.Contain("another customer");
     }
 
     [Fact]
-    public void ClassifyContainerTypeAppSetting_CanonicalLiteralReturnsFailedCatastrophic()
+    public void ClassifyAppSettings_ContainerSettingStillAKeyVaultReference_FailsWithoutCatastrophe()
     {
-        var probe = BuildProbe();
-        var settings = new Dictionary<string, string>
-        {
-            ["SharePointEmbedded__ContainerTypeId"] = CanonicalContainerIdLiteral,
-        };
+        var settings = CorrectSettings();
+        settings["EmailProcessing__DefaultContainerId"] = "@Microsoft.KeyVault(SecretUri=https://kv.vault.azure.net/secrets/SPE-DefaultContainerId/)";
 
-        var outcome = probe.ClassifyContainerTypeAppSetting(settings, SiteResourceId);
+        BuildProbe().ClassifyAppSettings(settings, SiteResourceId, ContainerTypeId, ContainerId)
+            .Should().BeOfType<InvariantVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("still a Key Vault reference").And.NotContain("CATASTROPHIC");
+    }
+
+    [Theory]
+    [InlineData("EmailProcessing__DefaultContainerId", null)]
+    [InlineData("Communication__ArchiveContainerId", "  ")]
+    public void ClassifyAppSettings_ContainerSettingMissingOrBlank_Fails(string setting, string? value)
+    {
+        var settings = CorrectSettings();
+        if (value is null) settings.Remove(setting); else settings[setting] = value;
+
+        var outcome = BuildProbe().ClassifyAppSettings(settings, SiteResourceId, ContainerTypeId, ContainerId);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("CATASTROPHIC");
+            .Which.Diagnostic.Should().Contain(setting).And.NotContain("CATASTROPHIC");
     }
 
     // -----------------------------------------------------------------------
-    // AC-2: Fail — missing / blank / non-KV-ref string
+    // AC-2: Fail — container type missing / blank / not the run's
     // -----------------------------------------------------------------------
 
     [Fact]
     public async Task ProbeAsync_ContainerTypeAppSettingMissing_ReturnsFailed()
     {
+        var settings = CorrectSettings();
+        settings.Remove("SharePointEmbedded__ContainerTypeId");
         var handler = new FakeHttpMessageHandler(req =>
         {
             if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SomeOtherSetting"] = "foo",
-                });
+            if (IsAppSettingsListCall(req, SiteResourceId)) return AppSettingsResponse(settings);
             return Unexpected(req);
         });
-        var probe = BuildProbe(handler);
 
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildProbe(handler).ProbeAsync(BuildRequest(), CancellationToken.None);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
             .Which.Diagnostic.Should().Contain("NO 'SharePointEmbedded__ContainerTypeId'");
     }
 
-    [Fact]
-    public async Task ProbeAsync_ContainerTypeAppSettingBlank_ReturnsFailed()
+    [Theory]
+    [InlineData("   ", "BLANK")]
+    [InlineData("99999999-0000-0000-0000-000000000099", "not configured with this run's container type")]
+    [InlineData("@Microsoft.KeyVault(SecretUri=https://kv.vault.azure.net/secrets/SPE-ContainerTypeId/)", "not configured with this run's container type")]
+    public void ClassifyAppSettings_ContainerTypeBlankOrNotTheRuns_Fails(string value, string expectedText)
     {
-        var handler = new FakeHttpMessageHandler(req =>
-        {
-            if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SharePointEmbedded__ContainerTypeId"] = "   ",
-                });
-            return Unexpected(req);
-        });
-        var probe = BuildProbe(handler);
+        var settings = CorrectSettings();
+        settings["SharePointEmbedded__ContainerTypeId"] = value;
 
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("BLANK");
+        BuildProbe().ClassifyAppSettings(settings, SiteResourceId, ContainerTypeId, ContainerId)
+            .Should().BeOfType<InvariantVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain(expectedText);
     }
 
-    [Fact]
-    public async Task ProbeAsync_ContainerTypeAppSettingNonKvReferenceString_ReturnsFailed()
+    [Theory]
+    [InlineData("", ContainerId)]
+    [InlineData(ContainerTypeId, "")]
+    public async Task ProbeAsync_RunValuesMissing_ReturnsInfraFault_WithoutCallingArm(string containerTypeId, string containerId)
     {
-        var handler = new FakeHttpMessageHandler(req =>
-        {
-            if (IsSitesListCall(req)) return SitesListResponse(SiteResourceId, SiteName);
-            if (IsAppSettingsListCall(req, SiteResourceId))
-                return AppSettingsResponse(new Dictionary<string, string>
-                {
-                    ["SharePointEmbedded__ContainerTypeId"] = "some-placeholder-value",
-                });
-            return Unexpected(req);
-        });
-        var probe = BuildProbe(handler);
+        var handler = new FakeHttpMessageHandler(req => Unexpected(req));
 
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildProbe(handler).ProbeAsync(
+            BuildRequest() with { ContainerTypeId = containerTypeId, SpeContainerId = containerId }, CancellationToken.None);
 
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("not a KV reference");
+        outcome.Should().BeOfType<InvariantVerificationOutcome.InfraFault>();
+        handler.RequestedUrls.Should().BeEmpty();
     }
 
     // -----------------------------------------------------------------------
@@ -522,7 +486,8 @@ public sealed class SpeContainerTenantDerivationInvariantProbeTests
             AiSearchEndpoint: string.Empty,
             CosmosEndpoint: string.Empty,
             BffApiUrl: bffApiUrl,
-            ProvisioningScriptsDirectory: string.Empty);
+            ContainerTypeId: ContainerTypeId,
+            SpeContainerId: ContainerId);
 
     private static bool IsSitesListCall(HttpRequestMessage req)
         => req.Method == HttpMethod.Get

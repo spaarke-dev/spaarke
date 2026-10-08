@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227g" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Align the customer's SPE containers with unified-access-control-r2: H7 links the root business unit to H8's container; every script-created container carries the customer marker; "one ROOT container per customer"</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (owner question 2026-10-06: "what about the Secure Record container?")</phase>
+    <gate>after 227e (✅), 227f (✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handler code (H7 Dataverse writer), PowerShell container scripts, ArchTests, binding constraints and guides.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded handler extension with a named reference implementation (scripts/Provision-Customer.ps1 step 10).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints and the provision-environment skill (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, spe, dataverse, tenant-isolation, model1-dedicated, testing</tags>
+    <deps>227e, 227f</deps>
+  </metadata>
+
+  <prompt>Make the customer's containers fit what unified-access-control-r2 builds: secure records get their own containers at runtime, and a record that is not secure stores its files in its business unit's container.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Dataverse Web API, SPE, PowerShell provisioning scripts).</role>
+
+  <goal>
+    H8 creates exactly ONE container per customer — the ROOT container (the root business unit's; the default, email and
+    communication-archive container). Other containers are created by the BFF at runtime and are not provisioning's: one per
+    secure project / matter / work assignment (ProvisionProjectEndpoint → ContainerOperations.CreateContainerAsync, bound to
+    the record's business unit and marked), and any further business-unit container through the SPE admin plane (bound and
+    marked). uac-r2 task 076 resolves a record that is NOT secure to its owning business unit's `sprk_containerid`; the
+    legacy Provision-Customer.ps1 step 10 wrote that column on the root unit, but L2 never did — so on a fresh Model 1 stamp
+    every non-secure record resolved to no container. (1) H7 links the root business unit to H8's container. (2) Every
+    container a script creates carries the `spaarkeCustomerId` marker the BFF requires (T227d), as BFF and H8 containers do.
+    (3) The wording says "one ROOT container per customer" and names the runtime containers. (4) The provisioning runbook
+    and skill require the secure-record environment setup uac-r2 documents (Secure Record business unit, named owner
+    team, Secure Record Owner role, sprk_issecure field security), gated by that guide's own verification checklist.
+  </goal>
+
+  <context>
+    <background>
+      Found 2026-10-06 answering the owner. Read-only live check: spaarke-bff-dev has `Customer__Id = spaarke`, so secure
+      containers created on dev are marked. uac-r2's branch (87 commits ahead of master) changes no container-creation code.
+      The Secure Record business unit deliberately has NO container (SECURE-PROJECT-ENVIRONMENT-SETUP §3) — each secure record
+      has its own.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/{H7DataverseEnvVarValuesHandler,DataverseWebApiEnvVarValuesWriter,IEnvVarValuesWriter,EnvVarValuesRejectionCodes}.cs</file>
+      <file>scripts/common/SpeContainerBinding.ps1; scripts/{New-BusinessUnitContainer,Provision-Customer,Create-NewContainerType}.ps1</file>
+      <file>tests/Spaarke.ArchTests/TenantIsolation/SpeContainerMarkerParityTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/{RecordContainerResolver,SecureContainerDecision}.cs (the consumer — read only)</file>
+      <file>docs/guides/{SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE,SECURE-PROJECT-ENVIRONMENT-SETUP}.md; docs/architecture/{SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY,SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY}.md; .claude/constraints/provisioning.md; .claude/skills/provision-environment/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="data">Never overwrite a root business unit's non-empty `sprk_containerid` that names another container: Resumable, naming both, nothing written (it would move the customer's non-secure files).</constraint>
+    <constraint source="tests">Real HTTP against a hand-written HttpMessageHandler fake — never Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="scope">Do not change uac-r2's resolver or the secure-record setup scripts; the runbook points at uac-r2's guide (one source), it does not copy its steps.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H7 writer: root-business-unit link after the env-var values (same token); typed failures; handler maps them; tests.</step>
+    <step order="2">Scripts: the marker in the PowerShell bind helper and its three callers; ArchTest parity + every call passes -CustomerId.</step>
+    <step order="3">Wording + runbook/skill secure-record setup phase; verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Root unit empty → PATCH then read back; equal → no write; another container → Resumable `root-business-unit-container-conflict` naming both, no PATCH; no root / two roots → Resumable `root-business-unit-unresolved`; a read-back mismatch fails (tests).</criterion>
+    <criterion testable="true">H7 passes H8's container as the link target (handler test).</criterion>
+    <criterion testable="true">ArchTests: the PowerShell marker constant equals the C# one and appears in one script; every Invoke-SpeContainerBindOrRemove call passes -CustomerId (with a seeded negative control).</criterion>
+    <criterion testable="true">No living doc says "one container per customer" without "root"; the inventory lists the runtime containers with both custom properties.</criterion>
+    <criterion testable="true">ControlPlane.Tests and ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 39). Owner question: "one container per customer, ever — but what about the Secure Record
+    container?" Answer: aligned in design — H8 makes ONE ROOT container; uac-r2 gives every secure project / matter / work
+    assignment its own container at runtime (ProvisionProjectEndpoint → ContainerOperations.CreateContainerAsync: bound to
+    the record's business unit, then marked spaarkeCustomerId); the Secure Record business unit itself has no container.
+    Three real gaps were found and closed:
+    - H7 now links the root business unit to H8's container (businessunit.sprk_containerid): equal → no write; empty →
+      PATCH + read back; another container → Resumable root-business-unit-container-conflict naming both, nothing written;
+      0/2 roots → Resumable root-business-unit-unresolved. uac-r2 task 076 resolves a non-secure record to its owning
+      unit's container; legacy Provision-Customer.ps1 step 10 wrote it, L2 never did — a fresh stamp would have stored no
+      non-secure file. The link runs BEFORE the values (deviation from step 1's "after": a conflict then writes nothing).
+      configVer carries a link version, so an H7 completed before the link existed does not short-circuit past it.
+    - Script-created containers carry the marker: Invoke-SpeContainerBindOrRemove takes -CustomerId (= the BFF's
+      Customer__Id, ordinal), writes + reads back both properties, removes the container if either did not land;
+      New-BusinessUnitContainer / Provision-Customer step 10 / Create-NewContainerType pass it. ArchTest
+      SpeContainerMarkerParityTests: one PS constant equal to the C# contract; every bind call passes -CustomerId (seeded
+      negative control).
+    - Secure-record environment setup (Secure Record BU, named owner team, role, depth, sprk_issecure FLS) is in no handler:
+      deployment guide §7.11 + provision-environment Step 6d now require uac-r2's SECURE-PROJECT-ENVIRONMENT-SETUP.md, gated by
+      its §7 checklist (one source — not copied).
+    - Wording: "one ROOT container per customer" in constraints, guide §7.5, topology doc, inventory (+ rows for secure-record
+      and further business-unit containers), write-path registry I-4, L2 comments. Kept deliberately: the catalog note in
+      manifest.yaml (editing it changes generated output) and a BFF comment in SpeAdminTenantScope (about config isolation;
+      not worth a BFF touch).
+    - Read-only live check: spaarke-bff-dev has Customer__Id = spaarke (secure containers created there are marked).
+      uac-r2's branch (87 commits ahead of master) changes no container-creation code.
+    - Step 9.5: adr-check 0 violations / 5 warnings (W1 configVer, W4 doc, W5 two doc sites — fixed; W2/W3 hand-written
+      HttpMessageHandler under the project's test folder = existing project convention). code-review 0 critical; fixed F4,
+      F5 (PATCH 403, read-back failure, timeout, cancellation tests), F9-F12; F3 recorded above; F6/F7/F8/F13 accepted
+      (timeout handling differs from the older UpsertOneAsync; no If-Match on a single-writer step; label cosmetic; regex
+      limits documented by the negative control). F1 → T186 live unknown: the BFF app registration (H7's identity, before
+      H10) can write businessunit. F2: no L2-provisioned stamp exists yet (T186 is the first live run), so nothing to backfill.
+    - Tests: ControlPlane 2191 (2189 + 2) / 0 failed; ArchTests 831/831; Worker build 0 warnings. No BFF code changed (no
+      publish-size measurement needed).
+  </notes>
+</task>

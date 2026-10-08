@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_AzureOpenAiKey">
+  <description default="API key for Azure OpenAI authentication. Store in Azure Key Vault and reference here.">
+    <label description="API key for Azure OpenAI authentication. Store in Azure Key Vault and reference here." languagecode="1033" />
+  </description>
+  <displayname default="Azure OpenAI Key">
+    <label description="Azure OpenAI Key" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000005</type>
+</environmentvariabledefinition>

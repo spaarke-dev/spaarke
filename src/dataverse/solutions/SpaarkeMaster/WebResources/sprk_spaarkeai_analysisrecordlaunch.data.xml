@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{ad86c369-748b-f111-8077-7ced8ddc4a05}</WebResourceId>
+  <Name>sprk_spaarkeai_analysisrecordlaunch</Name>
+  <DisplayName>SpaarkeAi Ribbon - AnalysisRecordLaunch</DisplayName>
+  <Description>SpaarkeAi ribbon script bundle: AnalysisRecordLaunch. Built from src/solutions/SpaarkeAi/src/ribbon/AnalysisRecordLaunch.ts via scripts/build-ribbon.mjs.</Description>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_spaarkeai_analysisrecordlaunchAD86C369-748B-F111-8077-7CED8DDC4A05</FileName>
+</WebResource>

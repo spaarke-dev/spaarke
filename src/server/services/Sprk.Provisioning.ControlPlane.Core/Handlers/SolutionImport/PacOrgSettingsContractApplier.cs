@@ -29,7 +29,7 @@
 //   (maxuploadfilesize + friends) use long-parse compare; unparseable values
 //   fall back to case-insensitive string equality.
 //
-// AUTH PROFILE ASSUMPTION (parity with the pre-Wave-G-4 PacCliSolutionVerifier):
+// AUTH PROFILE ASSUMPTION (parity with the retired pac-based solution verifier):
 //   pac CLI requires an authenticated profile pointing at the target env.
 //   This applier does NOT invoke `pac auth create` itself — it assumes the
 //   upstream L2 environment (either the App Service's UAMI-bound pac auth
@@ -61,7 +61,7 @@
 //
 // DIAGNOSTICS PRIVACY:
 //   Truncates pac stdout/stderr to bounded tails before including in the
-//   Failure diagnostic — matches PacCliSolutionVerifier / H4b's redaction
+//   Failure diagnostic — matches H4b's redaction
 //   discipline. pac org list-settings / update-settings do NOT print
 //   secret material (no client-secret or KV values pass through pac org
 //   commands), so no additional redaction is required beyond the tail cap.
@@ -251,7 +251,7 @@ public sealed class PacOrgSettingsContractApplier : IOrgSettingsContractApplier
     /// Parses pac org list-settings tabular stdout into a (settingName →
     /// currentValue) map. Format is name-then-value token per line; header
     /// / separator lines are rejected. Exposed <c>internal</c> for direct
-    /// unit testing (parity with <see cref="PacCliSolutionVerifier.ParseListOutput"/>).
+    /// unit testing (parity with the retired pac solution verifier's list parser, removed in T218b).
     ///
     /// Real pac CLI ≥ 1.30 shape (canonical, from a live session):
     /// <code>
