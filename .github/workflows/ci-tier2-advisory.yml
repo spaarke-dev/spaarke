@@ -607,7 +607,7 @@ jobs:
         id: instrpaths
         continue-on-error: true
         shell: pwsh
-        run: pwsh -NoProfile -File ./scripts/quality/Test-InstructionPaths.ps1
+        run: ./scripts/quality/Test-InstructionPaths.ps1
 
       - name: Report result
         id: report
@@ -615,7 +615,7 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ steps.instrpaths.outcome }}" -eq "failure") {
-            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "result=fail (instruction paths)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
             "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {

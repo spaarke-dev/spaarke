@@ -8,6 +8,8 @@
 .claude/constraints/bff-extensions.md|docs/adr/ADR-013-bff-ai-architecture.md
 .claude/constraints/bff-extensions.md|docs/guides/bff-deploy-coordination.md
 .claude/constraints/provisioning.md|scripts/provisioning-prereqs/reserved-suffixes.yaml
+.claude/FAILURE-MODES.md|infrastructure/ai-search/spaarke-knowledge-index-v2.json
+.claude/FAILURE-MODES.md|scripts/ai-search/Deploy-IndexSchemas.ps1
 .claude/patterns/ai/endpoint-di-symmetry.md|src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs
 .claude/patterns/ai/node-executor-authoring.md|src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts
 .claude/patterns/ai/node-executor-authoring.md|tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/CanvasServerMappingDriftTests.cs

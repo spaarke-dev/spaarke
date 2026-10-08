@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 $root = (git rev-parse --show-toplevel).Trim()
 Set-Location $root
 
-$corpus = @(git ls-files '*CLAUDE.md' '.claude/rules/*.md' '.claude/constraints/*.md' '.claude/patterns/*.md' '.claude/adr/*.md' '.claude/skills/*/SKILL.md') |
+$corpus = @(git ls-files '*CLAUDE.md' '.claude/FAILURE-MODES.md' '.claude/rules/*.md' '.claude/constraints/*.md' '.claude/patterns/*.md' '.claude/adr/*.md' '.claude/skills/*/SKILL.md') |
     Where-Object { $_ -notmatch '^(projects/|\.claude/archive/|\.claude/skills/_archived/|provisioning-runs/)' } |
     Sort-Object -Unique
 
@@ -51,6 +51,25 @@ $skipPattern = '[\*\{\}<>\[\]\|\$]|\.\.\.|…|https?:|\bX\.Y\b|\bNNN\b|\bXXX\b|/
 $srcChildren = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Directory | ForEach-Object Name)
 if ($srcChildren.Count -eq 0) { throw 'Could not list src/ — refusing to run with an empty folder list (it would skip every src/ path).' }
 
+# Resolve against what git TRACKS, case-sensitively - the same answer on a Windows workstation
+# (case-insensitive file system, untracked local files) as on the Linux CI runner.
+$tracked = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+foreach ($t in (git ls-files)) {
+    [void]$tracked.Add($t)
+    $parent = $t
+    while (($i = $parent.LastIndexOf('/')) -gt 0) { $parent = $parent.Substring(0, $i); if (-not $tracked.Add($parent)) { break } }
+}
+function Resolve-RepoPath([string]$base, [string]$rel) {
+    $joined = if ($base) { "$base/$rel" } else { $rel }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($seg in ($joined -split '/')) {
+        if ($seg -eq '' -or $seg -eq '.') { continue }
+        if ($seg -eq '..') { if ($parts.Count) { $parts.RemoveAt($parts.Count - 1) }; continue }
+        $parts.Add($seg)
+    }
+    return ($parts -join '/')
+}
+
 $findings = [System.Collections.Generic.List[string]]::new()
 foreach ($file in $corpus) {
     $dir = Split-Path $file -Parent
@@ -59,12 +78,12 @@ foreach ($file in $corpus) {
     foreach ($m in [regex]::Matches($text, $pathPattern)) {
         $p = $m.Groups[1].Value.TrimEnd('.', ',', ';', ':', ')')
         if ($p -match $skipPattern) { continue }
-        if ($p -match '^src/([^/]+)' -and $srcChildren -notcontains $Matches[1]) { continue }
+        if ($p -match '^src/([^/]+)' -and $srcChildren -cnotcontains $Matches[1]) { continue }
         $p = ($p -split '#')[0] -replace ':\d+(-\d+)?$', '' -replace ':\w+\(?$', ''   # drop anchors, :line and :member suffixes
         if (-not $p) { continue }
-        $candidates = @((Join-Path $root $p))
-        if ($dir) { $candidates += (Join-Path (Join-Path $root $dir) $p) }
-        if (-not ($candidates | Where-Object { Test-Path -LiteralPath $_ })) {
+        $candidates = @((Resolve-RepoPath '' $p))
+        if ($dir) { $candidates += (Resolve-RepoPath ($dir -replace '\\', '/') $p) }
+        if (-not ($candidates | Where-Object { $tracked.Contains($_) })) {
             # Build output and local config (out/, dist/, publish/, .env.local, ...) are gitignored and
             # legitimately absent from a checkout; naming them is not drift.
             git check-ignore -q --no-index -- $p 2>$null
@@ -77,7 +96,7 @@ $findings = @($findings | Sort-Object -Unique)
 
 if ($UpdateBaseline) {
     $header = @(
-        '# Missing paths named in instruction files, recorded 2026-10-08 (ratchet baseline).',
+        "# Missing paths named in instruction files, recorded $(Get-Date -Format yyyy-MM-dd) (ratchet baseline).",
         '# Listed lines are reported but do not fail; a NEW missing path fails. Delete a line when you fix it.',
         '# Format: instruction-file|path'
     )

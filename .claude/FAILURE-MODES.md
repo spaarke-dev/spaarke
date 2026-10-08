@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-10-08 (added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -53,6 +53,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
+- [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
 
 ---
 
