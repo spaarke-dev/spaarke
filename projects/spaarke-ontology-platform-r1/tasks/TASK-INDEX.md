@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **108 tasks** across 14 phases (50 ✅ · 2 🔄 · 55 🔲 · 1 cancelled; updated 2026-10-08)
+> (spec §9) · **109 tasks** across 14 phases (51 ✅ · 1 🔄 · 56 🔲 · 1 cancelled; updated 2026-10-08)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -233,7 +233,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 110 | [ADR-050 path B amendment (WizardShell preset, in-app launch rule)](110-adr-050-amendment-wizard-preset-and-launch-rule.poml) | FULL | **opus**/high | — | — | ⚠️ `.claude/` → **main session only**. Amendment text is in the POML `<notes>`. Can start now |
 | ✅ [done] 056 | [WizardShell: characterization tests, re-base on SprkModal, v4 props, delete WizardModal](056-wizardshell-rebase-on-sprkmodal.poml) | FULL | **opus**/high | 110 | — | Modal note P1-P3. Embedded markup must not move |
 | 🔲 [open] 111 | [**Deploy** + regression of non-embedded WizardShell consumers](111-wizard-consumer-regression-and-deploy.poml) | FULL | sonnet/high | 056 | — | Modal note P4; SemanticSearchControl PCF last (`build:prod`) |
-| 🔄 [wip] 112 | [Migrate Create wizards off `navigateTo` (in-app host)](112-migrate-create-wizards-in-app.poml) | FULL | **opus**/high | 056 | — | [PR #1422](https://github.com/spaarke-dev/spaarke/pull/1422) **open, awaiting owner merge** (head `0b2ec81bc`). `InAppWizardHost` mounted in the Console; bundle +3,584 B. Filed #1420, #1421 |
+| ✅ [done] 112 | [Migrate Create wizards off `navigateTo` (in-app host)](112-migrate-create-wizards-in-app.poml) | FULL | **opus**/high | 056 | — | [PR #1422](https://github.com/spaarke-dev/spaarke/pull/1422) **open, awaiting owner merge** (head `0b2ec81bc`). `InAppWizardHost` mounted in the Console; bundle +3,584 B. Filed #1420, #1421 |
 | 🔲 [open] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout. **+ #1421** (create-project widget) **+ #1420** (Work Assignment completion) (no-parking sweep) |
 | 🔲 [open] 114 | [**Deploy** the in-app wizard migration](114-deploy-in-app-wizard-migration.poml) | FULL | sonnet/high | 111, 113, 121 | — | Verify all nine in-app on dev, full page and in an Xrm dialog |
 
@@ -295,6 +295,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 128 | [Client test-harness repairs, own PR: #1416, #1417, #1388, #1392](128-client-test-harness-repairs-own-pr.poml) | FULL | sonnet/high | — | J | Test files/config only; rebase SemanticSearchControl after #1415 |
 | 🔲 [open] 129 | [D-63 completion: chart/view/grid definitions off `sprk_finalduedate` + deploy VisualHost 1.4.39 (068) without tenant-wide publish](129-visualhost-finalduedate-definitions-and-pcf-deploy.poml) | FULL | sonnet/high | 068 | — | Inventory read-only; **row edits and the import: owner approval required** |
 | 🔲 [open] 130 | [D-83: remove tenant-wide publish repo-wide (one scoped-publish procedure for scripts + skills)](130-scoped-publish-repo-wide.poml) | FULL | sonnet/high | — | J | Owner D-83. Skill text applied by the main session; live proof needs owner approval |
+| 🔲 [open] 131 | [Notification playbooks: honour schedules/windows, real or removed dedup, Designer cannot overwrite runtime config](131-notification-scheduler-schedules-dedup-designer.poml) | FULL | **opus**/high | 120 | F | From task 120's findings (no parking) |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 

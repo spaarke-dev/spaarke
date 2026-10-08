@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Notification playbooks after ISS-018: honour each playbook's schedule and window, make the dedup config real or remove it, and stop Designer saves overwriting runtime node config</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>after task 120 (PR #1461) merges</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Scheduler behaviour (when and how often users are notified) and Designer save paths for live playbook data.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master after #1461; own PR.</parallel-reason>
+    <deps>120</deps>
+    <tags>bff-api,ai,jobs,bug,separate-pr</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the three notification defects task 120 found and reported, so they aren't parked.</prompt>
+  <role>SPAARKE senior backend engineer.</role>
+  <goal>Every notification playbook runs on the schedule and over the time window its definition declares. Duplicate notifications are prevented by real code, or the dead config is removed. A Playbook Designer save can no longer silently replace the runtime configuration of the seven notification nodes.</goal>
+
+  <context>
+    <background>Task 120 (PR #1461, notes/task-120-iss018-fix.md) found:
+(1) PlaybookSchedulerJob ignores each playbook's dueWithinDays / timeWindow parameters and its cronExpression schedules. Matter Activity and Work Assignments say "every 2 hours" but run daily.
+(2) The `deduplication` blocks in the seven repo playbook JSONs are never read.
+(3) A Playbook Designer save can overwrite a node's runtime config with a canvas stub. On 2026-06-30 this replaced the Due Soon nodes with empty stubs (the ISS-018 investigation).
+Deploy lint C (task 120) now refuses canvas stubs at deploy time, but nothing protects live rows.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read the investigation report, the task 120 note, docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md and the scheduler code before you design anything. Use ADR-036 for scheduled work. For (1), decide with evidence whether each playbook's declared cadence is the intended product behaviour. Where it isn't clear, STOP and report the options so the main session can ask the owner. For (2), implement dedup only if notifications can really duplicate (prove it with a test); otherwise remove the dead blocks and document why. For (3), find the Designer save path, make it refuse to replace a non-canvas runtime config (or preserve the runtime fields), and test it.</constraint>
+    <constraint source="project">Code goes in a NEW worktree off origin/master after #1461 merges, with its own PR to master. Do not merge it. Follow BFF hygiene per root CLAUDE.md section 10. Any live change to node configs in dev needs owner approval: STOP and report first. Never use --no-verify or bare git stash. You cannot write to .claude/. No parking.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the inputs.</step>
+    <step order="1">Prove each defect with a failing test.</step>
+    <step order="2">Fix (1) to (3); write tests that fail on the old code.</step>
+    <step order="3">Run the full BFF suite, build ArchTests explicitly, measure publish size; open the PR; get CI green; report.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A playbook declaring an N-hour cadence runs at that cadence, and one declaring a due-within or time window queries that window (tests that fail on the old scheduler).</criterion>
+    <criterion testable="true">Dedup is either enforced (a test proves no duplicate notification for the same item and user in a window) or the dead blocks are removed with a documented reason.</criterion>
+    <criterion testable="true">A Designer save that would replace a runtime config with a canvas stub is refused or preserves the runtime fields (test).</criterion>
+    <criterion testable="true">Negative: no change to the seven playbooks' membership scope or list form (task 120's), and no live change without owner approval.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the main session from task 120's reported findings (no-parking rule, D-81).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

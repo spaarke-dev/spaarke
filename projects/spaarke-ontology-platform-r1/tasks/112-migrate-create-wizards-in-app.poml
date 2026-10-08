@@ -4,7 +4,7 @@
     <title>Migrate the Create wizards off navigateTo: in-app wizard host for SpaarkeAi and LegalWorkspace launchers</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>056 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes how every Create wizard opens from the Console and the Legal Workspace.</rigor-reason>
     <model-tier>opus</model-tier>
