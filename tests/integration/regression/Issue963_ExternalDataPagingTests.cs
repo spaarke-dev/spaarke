@@ -305,6 +305,33 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         _dataverse.RequestsTo("sprk_projects").Should().HaveCount(3);
     }
 
+    // ── Found in passing (task 105): the record-type lookup named a column that does not exist ─────────────────
+
+    /// <summary>
+    /// The external to-do create binds <c>sprk_RegardingRecordType</c> — the fourth ADR-024 resolver field. Its lookup
+    /// filtered on <c>sprk_recordentitylogicalname</c>, which <c>sprk_recordtype_ref</c> does not have (live: 400), so
+    /// the bind was never written. The fake answers only the live column, <c>sprk_recordlogicalname</c>.
+    /// </summary>
+    [Fact]
+    public async Task AnExternalTodoCreate_BindsTheRecordTypeRef_FoundThroughItsLiveColumn()
+    {
+        var typeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+        _dataverse.Add("sprk_recordtype_refs", new JsonObject
+        {
+            ["sprk_recordtype_refid"] = typeRef.ToString(), ["sprk_recorddisplayname"] = "Project",
+            ["sprk_recordlogicalname"] = "sprk_project",
+        });
+
+        await _sut.CreateTodoAsync(
+            ExternalDataService.TodoRootKind.Project, Root,
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+
+        var body = _dataverse.Posted("sprk_todos").Should().ContainSingle().Subject;
+        body["sprk_RegardingRecordType@odata.bind"]!.GetValue<string>()
+            .Should().Be($"/sprk_recordtype_refs({typeRef})", "all four ADR-024 resolver fields are written");
+    }
+
     // =========================================================================================================
     // The fake Dataverse Web API
     // =========================================================================================================
@@ -337,7 +364,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
 
         public FakeDataverse()
         {
-            _server.Given(WireMock.RequestBuilders.Request.Create().UsingGet()).RespondWith(Response.Create().WithCallback(Respond));
+            _server.Given(WireMock.RequestBuilders.Request.Create().UsingAnyMethod()).RespondWith(Response.Create().WithCallback(Respond));
         }
 
         public string ServiceUrl => _server.Urls[0];
@@ -361,12 +388,40 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
 
         public void FailRequest(string set, int requestNumber) => _failRequests.Add((set, requestNumber));
 
+        /// <summary>The JSON bodies POSTed to <paramref name="set"/>, in order.</summary>
+        public IReadOnlyList<JsonObject> Posted(string set) { lock (_gate) return _posts.Where(p => p.Set == set).Select(p => p.Body).ToList(); }
+
+        private readonly List<(string Set, JsonObject Body)> _posts = new();
+        private static readonly Regex StringClause = new(@"(\w+) eq '([^']*)'", RegexOptions.Compiled);
+
         private ResponseMessage Respond(IRequestMessage request)
         {
             var set = request.Path.StartsWith(ApiPath, StringComparison.Ordinal) ? request.Path[ApiPath.Length..] : request.Path;
             var rawQuery = request.RawQuery ?? string.Empty;
             var query = QueryHelpers.ParseQuery(rawQuery);
             var prefer = request.Headers is not null && request.Headers.TryGetValue("Prefer", out var p) ? p.FirstOrDefault() : null;
+
+            if (request.Method == "POST")
+            {
+                var posted = JsonNode.Parse(request.Body ?? "{}")!.AsObject();
+                lock (_gate) _posts.Add((set, posted));
+                return Json(201, new JsonObject { ["sprk_todoid"] = Guid.NewGuid().ToString(), ["sprk_name"] = "created" });
+            }
+
+            // A single record by key, e.g. sprk_projects(<id>) — the root display-name read of a to-do create.
+            if (set.EndsWith(')'))
+                return Json(200, new JsonObject { ["sprk_projectname"] = "Project 105" });
+
+            // sprk_recordtype_ref: only the LIVE column filters (metadata, spaarkedev1 2026-10-08); any other property is
+            // the 400 0x80060888 Dataverse answers — never a double that agrees with the code's own column name (G-13).
+            if (set == "sprk_recordtype_refs")
+            {
+                var clause = StringClause.Match(query.TryGetValue("$filter", out var f) ? f.ToString() : string.Empty);
+                if (!clause.Success || clause.Groups[1].Value != "sprk_recordlogicalname")
+                    return Json(400, new JsonObject { ["error"] = new JsonObject { ["code"] = "0x80060888" } });
+                var match = Rows(set).Where(r => r["sprk_recordlogicalname"]!.GetValue<string>() == clause.Groups[2].Value);
+                return Json(200, new JsonObject { ["value"] = ToArray(match) });
+            }
 
             int requestNumber;
             lock (_gate)

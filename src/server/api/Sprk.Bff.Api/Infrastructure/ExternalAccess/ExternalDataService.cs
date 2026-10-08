@@ -1229,7 +1229,10 @@ public class ExternalDataService
             if (_recordTypeRefCache.TryGetValue(entityLogicalName, out cached))
                 return cached;
 
-            var filter = Uri.EscapeDataString($"sprk_recordentitylogicalname eq '{entityLogicalName}'");
+            // Task 105 (found in passing): the column is sprk_recordlogicalname. The former `sprk_recordentitylogicalname`
+            // does not exist (live 2026-10-08: 400 0x80060888), so every external to-do create logged "not found" and
+            // left sprk_RegardingRecordType unset — three of ADR-024's four resolver fields, not four.
+            var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}'");
             // Task 105: no $top=1 — GetCollectionAsync refuses $top (it suppresses @odata.nextLink). The filter names one
             // entity, so this is one row on one page; the first is taken, as before.
             var url = $"{GetApiUrl()}/sprk_recordtype_refs?$filter={filter}" +
@@ -1313,6 +1316,9 @@ public class ExternalDataService
         string entitySet, string idColumn, IReadOnlyList<string> ids, string select, string orderBy, CancellationToken ct)
     {
         var rows = new List<TRow>();
+        if (ids.Count == 0)
+            return new CollectionRead<TRow>(rows, CollectionReadOutcome.Complete);
+
         var truncated = false;
         var failedChunks = 0;
         var chunks = ids.Chunk(IdFilterChunkSize).ToList();
