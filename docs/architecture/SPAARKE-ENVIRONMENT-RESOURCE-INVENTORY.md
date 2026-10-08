@@ -116,9 +116,8 @@ into the customer's own subscription (`targetScope = 'subscription'`), unless an
 ✅ **T225a (2026-10-01) — the `model1-*` Bicep surfaces are deleted**; H2a failed closed for Model 1 until **T228
 (2026-10-06)** made every run carry the customer's own subscription — since then Model 1 deploys `customer.bicep`. ✅ **T225b (2026-10-02)** converged the
 rest of the Model 1 code path (H2b, H13's I2 probe and H12c use the stamp's own AI Search / OpenAI; the shared-platform
-options, Worker settings and seed entry are gone). 🔲 **T228** gives every Model 1 run its own subscription and points
-H2a's Model 1 arm at `customer`. Every ✅ below means "`customer.bicep` does this", which becomes true for Model 1 once
-T228 lands.
+options, Worker settings and seed entry are gone). ✅ **T228** gave every Model 1 run its own subscription and pointed
+H2a's Model 1 arm at `customer`. Every ✅ below means "`customer.bicep` does this", for both models.
 
 | Area | Resource | Deployment | Naming (`{env}` = `prod`) | Created by | Status vs target |
 |---|---|---|---|---|---|
@@ -141,7 +140,7 @@ T228 lands.
 | Compute | BFF App Service + `staging` slot (.NET 10, UAMI-only, `/health`) | Dedicated | `sprk-{customerId}-prod-api` (`:547`) | H2a; H4 PATCHes `keyVaultReferenceIdentity` on both slots (T1); **H9** zip-deploys | ✅ |
 | Optional | SignalR (flag-gated `signalrEnabled`, default off) | Dedicated | `sprk-{customerId}-prod-signalr` (`:165`) | H2a | ✅ |
 | Optional | ACS messaging + Event Grid (flag-gated `deployAcsMessaging`) — the subscription dead-letters to Storage **as the system topic's managed identity** (Storage Blob Data Contributor on the dead-letter container; T244, owner 2026-10-06) | Dedicated | `sprk-{customerId}-prod-acs` (`:156`) | H2a | ✅ |
-| RBAC | Customer UAMI: Service Bus Data Sender + Receiver; AI Search Index Data Contributor + Service Contributor | Dedicated | On the customer's own SB + Search | H2a → `modules/bff-runtime-rbac.bicep` (`:657`) | ✅ for `customer.bicep`; 🔲 **T225a** removes the module's shared-UAMI branch |
+| RBAC | Customer UAMI: Service Bus Data Sender + Receiver; AI Search Index Data Contributor + Service Contributor | Dedicated | On the customer's own SB + Search | H2a → `modules/bff-runtime-rbac.bicep` (`:657`) | ✅ for `customer.bicep`; ✅ **T225a** — the module grants only the stamp UAMI (its shared-UAMI caller was deleted) |
 | RBAC | L2 UAMI: Website Contributor on the customer BFF (H4b log fetch, H9 deploy); Search Service Contributor (H2b index create/verify) + Search Index Data Reader (H13 tenant-filter query) on the customer AI Search (T244, G16) | Dedicated — **Model 1 only** (T249: a Model 2 stamp is in the customer's tenant and is reached through Lighthouse) | On the customer App Service | H2a → `modules/customer-l2-bff-rbac.bicep` | ✅ |
 
 ## Key Vault secrets and BFF app settings
@@ -169,7 +168,7 @@ T228 lands.
 | L2 Cosmos (`spaarke-provisioning` / `runs`, partition `/customerId`) | Shared | per `cosmos-provisioning.bicep` | `platform-controlplane.bicep` | ✅ |
 | Platform Key Vault | Shared | `sprk-controlplane-{env}-kv` (dev) / `sprk-platform-prod-kv` (prod) | `platform-controlplane.bicep` | ✅ — `Seed-PlatformKeyVault.ps1` seeds 5 secrets; T225b retired the `AzureOpenAI-Endpoint` entry (a copy already in a vault is left alone) |
 | Provisioning job queue `sprk-provisioning-jobs` (sessions keyed by `customerId`) | Shared | on `spaarke-servicebus-{env}` | `platform-controlplane.bicep` | ✅ |
-| L2 fleet UAMI | Shared | `sprk-controlplane-{env}-uami` | `platform-controlplane.bicep` | ✅ — its role assignments on each **customer subscription** are a manual prerequisite (🔲 T228) |
+| L2 fleet UAMI | Shared | `sprk-controlplane-{env}-uami` | `platform-controlplane.bicep` | ✅ — its role assignments on each **customer subscription** are a manual prerequisite (✅ T228 — PRQ-S-04) |
 | BFF build artifacts + container registry | Shared | `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr` | `platform-controlplane.bicep` | ✅ |
 | Admin Dataverse environment (registry) | Shared | see Dataverse → Registry | once per platform | ✅ |
 | ~~`customer.bicep` `platformKeyVaultName` parameter~~ | — | — | — | ✅ **Removed by T249** (2026-10-02, D19) — no consumer read the output; `Provision-Customer.ps1` stopped passing it |

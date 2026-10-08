@@ -19,7 +19,8 @@
 //     TASK 222 REWRITE for the D-13 mechanism.
 //   - NEW Model 2 FIC fields (auth-v4 §3.1 recipe) — federated identity
 //     credential trusting the shared BFF UAMI, per spec.md FR-39 / design.md
-//     §4.1 H3 row v3.5 split.
+//     §4.1 H3 row v3.5 split. (Superseded by D-12/D-13: the FIC trusts the
+//     stamp's own BFF UAMI, in both models — there is no shared BFF UAMI.)
 //   - T240a (2026-10-07): PreAuthorizedClientAppIds (shared M365 clients H3
 //     pre-authorizes on each customer BFF app). The three shell-out-era fields
 //     (PwshExecutable / RegisterEntraAppRegistrationsScriptPath / ProvisionTimeout)

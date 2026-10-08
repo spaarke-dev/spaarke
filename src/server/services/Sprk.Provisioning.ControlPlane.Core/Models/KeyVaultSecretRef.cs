@@ -34,8 +34,8 @@ namespace Sprk.Provisioning.ControlPlane.Models;
 /// at the moment of handler use.
 /// </summary>
 /// <param name="VaultName">
-/// Key Vault name (e.g. <c>sprk-prod-kv</c> for Model 1 shared, or
-/// <c>sprk-{customerId}-{env}-kv</c> for Model 2 dedicated per design.md §7.1).
+/// Key Vault name (e.g. <c>sprk-{customerId}-{env}-kv</c> — the stamp's own vault in both models since D-12,
+/// per <c>customer.bicep</c>; the former Model 1 shared vault is retired).
 /// </param>
 /// <param name="SecretName">
 /// Secret name inside the vault (e.g. <c>customer-{customerId}-bff-client-secret</c>

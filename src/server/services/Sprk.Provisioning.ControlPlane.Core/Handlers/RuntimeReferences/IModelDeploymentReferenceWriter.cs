@@ -42,8 +42,8 @@ public interface IModelDeploymentReferenceWriter
 /// <param name="ModelId">The model the deployment runs, written to <c>sprk_modelid</c> (task 247: deployment
 /// <c>gpt-4o-mini</c> runs <c>gpt-4.1-mini</c>, so the two differ).</param>
 /// <param name="Capability">Written to <c>sprk_capability</c>.</param>
-/// <param name="EndpointUri">Written to <c>sprk_endpoint</c> — the Azure OpenAI resource endpoint (customer-dedicated for Model 2, shared-platform for Model 1).</param>
-/// <param name="Description">Optional human-readable note written to <c>sprk_description</c> (e.g. Model 1's metering-attribution note — see H12cRuntimeReferencesHandler.cs "Model 1 metering attribution" remark).</param>
+/// <param name="EndpointUri">Written to <c>sprk_endpoint</c> — the Azure OpenAI resource endpoint — the stamp's own dedicated resource in both models (D-12; the Model 1 shared-platform endpoint is retired).</param>
+/// <param name="Description">Optional human-readable note written to <c>sprk_description</c> (H12c writes "Customer-dedicated Azure OpenAI deployment ({tenancyModel} tenancy)."; the Model 1 per-tenant metering note is retired with D-12).</param>
 public sealed record ModelDeploymentReference(
     string Name,
     string ModelId,
