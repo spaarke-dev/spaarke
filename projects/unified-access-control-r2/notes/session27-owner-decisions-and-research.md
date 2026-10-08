@@ -1204,6 +1204,22 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Already consistent:** the share-time guard (`SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`) checks parents for such a record.
 - **Relationship to Q4:** Q4 ("No Access applies to internal users on SECURE records") is read with "secure" meaning the record or any filing ancestor.
 
+## Round 83 (2026-10-08): BINDING. OWNER decisions on the open list ("follow recommendation" unless noted)
+
+1. **No Access record picker:** follow-up task: RegardingResolver in a "link only" mode (no core-ancestor stamp) plus `sprk_objectrecordname`.
+2. **Task 101 views:** keep overdue shares in "External Shares Expiring in 30 Days"; add Granted By beside Created By.
+3. **Task 105:** seed 250 test documents on dev for the paging live gate; delete them afterwards.
+4. **#1396:** add the secure-ownership layer for grant rows (`sprk_externalrecordaccess` on secure records owned like the record), as a small task.
+5. **Task 064:** the No Access Reason stays hidden from Write holders (as built).
+6. **#1350:** replace the share-link with an open-record link (SharePoint refuses sharing links on CSP container sites).
+7. **Hook cap:** raise `.claude/hooks/reinject-project-state.ps1`'s 15,000-character cap to about 20,000 (repo-wide).
+8. **"My events":** moot. Master already shows events the caller created or is assigned to (task 097, owner decision B; `EventEndpoints.cs:518-520`). Batch-4 O-1 is closed.
+9. **Copilot agent in dev:** "yes I think so". Task 164 (j) checks it live and records "not available" if it is not.
+10. **#1425:** round 82 applies to external contacts too: a contact walled on a secure parent is denied the records filed under it, at read time and at grant time.
+11. **Task 153 O1:** BOTH: a non-clickable red form banner plus a clickable TrackingFieldTrio indicator that opens Manage Access.
+- **TrackingFieldTrio 1.0.39:** dark mode PASS (owner). Lookup-pane placement accepted as the SprkModal standard; no further check.
+- **Hands-on checks** for 171/114/batch 4 will be done by the owner in the SPA and the apps (owner, 2026-10-08).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
