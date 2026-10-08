@@ -39,7 +39,7 @@
 | a0c39a85690aeed2a | Stream C author (036/026) — round 3 | running |
 | ab5429413019d8fb9 | Stream D author (072) — merged | idle |
 | a1bcb0bae3c363ca9 | Stream D: 074 recall exit gate | running |
-| af2686291a99e5351 | Stream D2: 073 memo as source #2 | running |
+| af2686291a99e5351 | Stream D2: 073 — BLOCKED until 037 + 039 + 031 (writer accepts only matter/communication; needs sprk_regardingmemo lookup — owner approval at resume) | idle |
 | a18a719c189250af3 | Stream B author of 057 (PR #1382) — round 2 (Decision Record state resolver R-4, tones, NaN/unknown tier) | running |
 | a17154f00e69eeced | Stream E author of 060 (PR #1384) — round 2 (stale comments, High Priority IsOpenWork, test); conflicts with #1359 header comment; then 068 after #1359 merges | running |
 

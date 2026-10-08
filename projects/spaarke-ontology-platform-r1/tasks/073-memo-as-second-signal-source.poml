@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>G</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>030,072</deps>
+    <deps>030,072,037,039,031</deps>
     <tags>bff-api,ai,classifier,signals</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -94,6 +94,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-39 and success criterion 6. design.md D-4.</notes>
+
+  <notes-2026-10-07>Blocked at start (stream D2, 2026-10-07): SignalWriter accepts only sprk_matter / sprk_communication subjects; no sprk_regardingmemo lookup on sprk_signal (schema change, needs owner approval); the core-record writer path is task 037, secure-child Signals task 039; nothing consumes Signals until 031. Resume after 037 + 039 + 031 land. Schema needed then: sprk_signal.sprk_regardingmemo lookup, and possibly a triage-category lookup on sprk_memo (verify live first). The Action + Binding rows follow infra/dataverse/actions/triage-email.action.json via ConsumerTypes / ICommunicationTriageAi.</notes-2026-10-07>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

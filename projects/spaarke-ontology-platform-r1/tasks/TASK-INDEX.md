@@ -75,7 +75,7 @@ Streams do not share files, with one exception noted: every new BFF route edits 
 | | 043 | 040, 036, 044, 046, 070 | no | 040, 044, 046, 070 | branch |
 | | 049 | 043, 055 | no | 055 deploy | branch (role edit) |
 | **4 Classifier + recall gate** (`Services/Ai`, triage category) | 072 | 004 | **yes** | — | branch |
-| | 073 | 030, 072 | no | 072 | branch |
+| | 073 | 030, 072, 037, 039, 031 | no | 037 + 039 + 031 (blocked 2026-10-07: writer subjects, sprk_regardingmemo schema) | branch |
 | | 074 | 072 | no | 072 (+ email-project conflict-check for D-49) | branch |
 | | 071 | 070 | no | 070 | branch |
 | **5 Cleanups** (other domains, own worktrees) | 060 | — | **yes** | — | branch (data fix) |
@@ -253,7 +253,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 070 | [The Inquiry: Action + Binding, an executor the commit route calls](070-inquiry-action-and-binding.poml) | FULL | sonnet/high | 001, 036 | — | The Action **row**, not the Action **Engine**. **Amended**: SLA deferred (**D-20**); record written by 043 (D-17); **no response-due date (D-56)**; no chat session (D-52) |
 | 🔲 [open] 071 | [Disposition accrual](071-disposition-accrual.poml) | FULL | sonnet/high | 070 | **G** | Do-rule action rate reads `sprk_resolutiontype` |
 | ✅ [done] 072 | [Guidance injection](072-classifier-guidance-injection.poml) | FULL | sonnet/high | 004 | **G** | Prompt changes; the schema `enum` does NOT |
-| 🔲 [open] 073 | [`sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072 | **G** | The consumer diff must be **empty** |
+| 🔲 [open] 073 | [`sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072, 037, 039, 031 | **G** | The consumer diff must be **empty** |
 | 🔲 [open] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
 
 ### Phase 8 — Remaining cleanup and repairs
