@@ -53,6 +53,7 @@ import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/compone
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
 import { getDocuments, ODataDocument } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { bffApiCall, bffApiBlob } from '../auth/bff-client';
 import { AccessLevel, ApiError } from '../types';
 
@@ -568,6 +569,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
   // ---------------------------------------------------------------------------
 
   const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState<boolean>(false);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
@@ -588,7 +591,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
 
     try {
       const data = await getDocuments(projectId);
-      setDocuments(data);
+      setDocuments(data.items);
+      setTruncated(data.truncated);
     } catch (err) {
       console.error('[DocumentLibrary] Failed to load documents:', err);
       setError('Failed to load documents. Please try refreshing the page.');
@@ -806,6 +810,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
   if (documents.length === 0) {
     return (
       <div className={styles.root}>
+        <TruncatedListNotice truncated={truncated} shown={0} noun="documents" />
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
         {canActOnDocuments && (
           <div className={styles.toolbar}>
@@ -851,6 +856,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
 
   return (
     <div className={styles.root}>
+      <TruncatedListNotice truncated={truncated} shown={documents.length} noun="documents" />
+
       {/* Toolbar */}
       <div className={styles.toolbar}>
         <div className={styles.toolbarLeft}>

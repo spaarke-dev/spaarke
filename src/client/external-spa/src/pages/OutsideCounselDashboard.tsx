@@ -619,13 +619,16 @@ const MyMattersSection: React.FC = () => (
 
 const MyDocumentsSection: React.FC<{
   docs: TaggedDocument[];
+  /** Task 105: some project's document list was cut short, so the count is a lower bound. */
+  truncated: boolean;
   isLoading: boolean;
   onItemClick: (projectId: string) => void;
-}> = ({ docs, isLoading, onItemClick }) => {
+}> = ({ docs, truncated, isLoading, onItemClick }) => {
   const styles = useStyles();
+  const total = truncated ? `${docs.length}+` : `${docs.length}`;
 
   return (
-    <SectionCard title={`My Documents${docs.length > 0 ? ` (${docs.length})` : ''}`}>
+    <SectionCard title={`My Documents${docs.length > 0 ? ` (${total})` : ''}`}>
       {isLoading ? (
         <SectionSpinner label="Loading documents..." />
       ) : docs.length === 0 ? (
@@ -657,12 +660,12 @@ const MyDocumentsSection: React.FC<{
               </div>
             </div>
           ))}
-          {docs.length > 10 && (
+          {(docs.length > 10 || truncated) && (
             <Text
               size={200}
               style={{ color: tokens.colorNeutralForeground3, paddingTop: tokens.spacingVerticalS, display: 'block' }}
             >
-              Showing 10 of {docs.length} documents
+              Showing {Math.min(10, docs.length)} of {truncated ? `more than ${docs.length}` : docs.length} documents
             </Text>
           )}
         </div>
@@ -688,6 +691,7 @@ export const OutsideCounselDashboard: React.FC = () => {
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [allDocs, setAllDocs] = useState<TaggedDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docsTruncated, setDocsTruncated] = useState(false);
 
   // Notifications — placeholder (future: query sprk_communication)
   const [notifications] = useState<NotificationItem[]>([]);
@@ -702,7 +706,7 @@ export const OutsideCounselDashboard: React.FC = () => {
     setProjectsLoading(true);
     getProjects({ $select: 'sprk_projectid,sprk_name,sprk_referencenumber,modifiedon', $orderby: 'sprk_name asc' })
       .then(projects => {
-        if (!cancelled) setProjectDetails(projects);
+        if (!cancelled) setProjectDetails(projects.items);
       })
       .catch(() => {
         if (!cancelled) setProjectDetails([]);
@@ -749,7 +753,7 @@ export const OutsideCounselDashboard: React.FC = () => {
               $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_regardingproject_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
-            }).then(evts => evts.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })))
+            }).then(evts => evts.items.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })))
           )
         );
         if (cancelled) return;
@@ -827,13 +831,18 @@ export const OutsideCounselDashboard: React.FC = () => {
           $select: 'sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon',
           $orderby: 'createdon desc',
           $top: 20,
-        }).then(docs => docs.map(d => ({ ...d, _resolvedProjectId: p.projectId })))
+        }).then(docs => ({
+          truncated: docs.truncated,
+          items: docs.items.map(d => ({ ...d, _resolvedProjectId: p.projectId })),
+        }))
       )
     )
       .then(nested => {
         if (!cancelled) {
+          // Task 105: a project's list the BFF cut short makes the total a lower bound, said as such.
+          setDocsTruncated(nested.some(n => n.truncated));
           const flat = nested
-            .flat()
+            .flatMap(n => n.items)
             .sort(
               (a, b) =>
                 (b.createdon ? new Date(b.createdon).getTime() : 0) -
@@ -913,7 +922,12 @@ export const OutsideCounselDashboard: React.FC = () => {
       <MyMattersSection />
 
       {/* Row 4: My Documents */}
-      <MyDocumentsSection docs={allDocs} isLoading={docsLoading} onItemClick={handleProjectClick} />
+      <MyDocumentsSection
+        docs={allDocs}
+        truncated={docsTruncated}
+        isLoading={docsLoading}
+        onItemClick={handleProjectClick}
+      />
     </PageContainer>
   );
 };

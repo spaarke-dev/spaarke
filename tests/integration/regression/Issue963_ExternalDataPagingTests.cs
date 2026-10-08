@@ -233,11 +233,13 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
     public async Task ANextLinkOffTheDataverseHost_IsNotFollowed_AndTheListIsFlaggedTruncated()
     {
         Seed("documents", 250);
-        _dataverse.NextLinkHost = "http://elsewhere.invalid";
+        using var elsewhere = new FakeDataverse(); // a second loopback host that would answer, and records any request
+        _dataverse.NextLinkHost = elsewhere.ServiceUrl;
 
         var (ids, truncated) = await ReadAsync("documents");
 
-        truncated.Should().BeTrue();
+        elsewhere.Requests.Should().BeEmpty("the token is never sent to a host outside the Dataverse Web API base");
+        truncated.Should().BeTrue("the next page was not read, so the list is cut short");
         ids.Should().HaveCount(ExternalDataService.CollectionPageSize);
         _dataverse.RequestsTo("sprk_documents").Should().HaveCount(1);
     }

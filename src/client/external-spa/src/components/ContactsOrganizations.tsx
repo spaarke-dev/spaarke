@@ -20,6 +20,7 @@ import {
 } from '@fluentui/react-components';
 import { PeopleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { getContacts, getOrganizations, ODataContact, ODataOrganization } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
@@ -377,6 +378,8 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
   const [contacts, setContacts] = React.useState<ODataContact[]>([]);
   const [loadingContacts, setLoadingContacts] = React.useState<boolean>(true);
   const [contactsError, setContactsError] = React.useState<string | null>(null);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [contactsTruncated, setContactsTruncated] = React.useState<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // Organizations state
@@ -385,6 +388,7 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
   const [organizations, setOrganizations] = React.useState<ODataOrganizationWithCount[]>([]);
   const [loadingOrganizations, setLoadingOrganizations] = React.useState<boolean>(true);
   const [organizationsError, setOrganizationsError] = React.useState<string | null>(null);
+  const [organizationsTruncated, setOrganizationsTruncated] = React.useState<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // Fetch contacts
@@ -402,7 +406,8 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
       try {
         const data = await getContacts(projectId);
         if (!cancelled) {
-          setContacts(data);
+          setContacts(data.items);
+          setContactsTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -441,11 +446,12 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
         if (!cancelled) {
           // Compute contact count per organisation from the already-fetched contacts list.
           // This avoids a second round-trip for count data.
-          const withCounts: ODataOrganizationWithCount[] = data.map(org => ({
+          const withCounts: ODataOrganizationWithCount[] = data.items.map(org => ({
             ...org,
             _contactCount: contacts.filter(c => c._parentcustomerid_value === org.accountid).length,
           }));
           setOrganizations(withCounts);
+          setOrganizationsTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -479,11 +485,17 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     <div className={styles.root}>
       {/* Contacts section */}
       <SectionCard title="Contacts">
+        {!loadingContacts && (
+          <TruncatedListNotice truncated={contactsTruncated} shown={contacts.length} noun="contacts" />
+        )}
         <ContactsGrid contacts={contacts} loading={loadingContacts} error={contactsError} />
       </SectionCard>
 
       {/* Organisations section */}
       <SectionCard title="Organisations">
+        {!loadingOrganizations && (
+          <TruncatedListNotice truncated={organizationsTruncated} shown={organizations.length} noun="organisations" />
+        )}
         <OrganizationsGrid organizations={organizations} loading={loadingOrganizations} error={organizationsError} />
       </SectionCard>
     </div>

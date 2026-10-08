@@ -41,6 +41,7 @@ import {
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
 import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -518,6 +519,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   const [loading, setLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState<boolean>(false);
 
   // -------------------------------------------------------------------------
   // Access level check
@@ -539,14 +542,14 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       setLoadError(null);
 
       try {
+        // The BFF returns every event up to its row cap and says `truncated` when it stops short (task 105).
         const data = await getEvents(projectId, {
-          // Upcoming: order by due date ascending, exclude completed and cancelled
           $orderby: 'sprk_duedate asc',
-          $top: 50,
         });
 
         if (!cancelled) {
-          setEvents(data);
+          setEvents(data.items);
+          setTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -632,6 +635,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
           </Button>
         )}
       </div>
+
+      <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
 
       {/* Event list or empty state */}
       {events.length === 0 ? (

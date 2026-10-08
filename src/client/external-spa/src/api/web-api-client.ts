@@ -219,6 +219,22 @@ interface ODataCollectionResponse<T> {
   '@odata.context'?: string;
   value: T[];
   '@odata.nextLink'?: string;
+  /**
+   * `true` when the BFF cut the list short — it reached its row cap, or a later page failed (unified-access-control-r2
+   * task 105). Omitted for a complete list.
+   */
+  truncated?: boolean;
+}
+
+/**
+ * A list read from the BFF: the rows, and whether they are the WHOLE list.
+ *
+ * `truncated` is `true` when the BFF stopped at its row cap or lost a later page, so `items` is a prefix of the list.
+ * A view MUST say so (`TruncatedListNotice`) and never present a truncated list as complete (NFR-03).
+ */
+export interface ListResult<T> {
+  items: T[];
+  truncated: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +267,8 @@ export interface ODataQueryOptions {
    */
   $orderby?: string;
   /**
-   * Maximum number of records to return (server-side page size).
+   * Not applied: the BFF ignores client query options and returns the whole list up to its own row cap, saying
+   * `truncated` when it stops short (task 105). Kept only so existing call sites type-check.
    */
   $top?: number;
 }
@@ -289,15 +306,15 @@ function buildQueryString(options: ODataQueryOptions): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Make a GET request to the BFF API and return the collection value.
- * Handles the standard `{ value: T[] }` envelope automatically.
+ * Make a GET request to the BFF API and return the collection and whether it is complete.
+ * Handles the standard `{ value: T[], truncated?: boolean }` envelope automatically.
  *
  * @param bffPath  BFF API path (e.g. "/api/v1/external/projects")
  * @param _options OData query options — reserved for future BFF support
  */
-async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<T[]> {
+async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<ListResult<T>> {
   const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
-  return response.value ?? [];
+  return { items: response.value ?? [], truncated: response.truncated === true };
 }
 
 /**
@@ -352,12 +369,11 @@ async function updateRecord<TBody>(bffPath: string, id: string, body: Partial<TB
  *
  * @param options  Optional OData query overrides ($filter, $top, etc.)
  */
-export async function getProjects(options: ODataQueryOptions = {}): Promise<ODataProject[]> {
+export async function getProjects(options: ODataQueryOptions = {}): Promise<ListResult<ODataProject>> {
   const defaults: ODataQueryOptions = {
     $select:
       'sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon',
     $orderby: 'sprk_name asc',
-    $top: 100,
   };
 
   return getCollection<ODataProject>('/api/v1/external/projects', { ...defaults, ...options });
@@ -391,12 +407,11 @@ export async function getProjectById(projectId: string, options: ODataQueryOptio
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getDocuments(projectId: string, options: ODataQueryOptions = {}): Promise<ODataDocument[]> {
+export async function getDocuments(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataDocument>> {
   const defaults: ODataQueryOptions = {
     $select: 'sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
     $orderby: 'createdon desc',
-    $top: 200,
   };
 
   // Merge options — allow caller to override $filter / $orderby etc., but not silently lose defaults
@@ -430,12 +445,11 @@ export async function getDocuments(projectId: string, options: ODataQueryOptions
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides (currently ignored downstream)
  */
-export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ODataEvent[]> {
+export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataEvent>> {
   const defaults: ODataQueryOptions = {
     $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_regardingproject_value,createdon',
     $filter: `_sprk_regardingproject_value eq '${projectId}'`,
     $orderby: 'sprk_duedate asc',
-    $top: 200,
   };
 
   const merged: ODataQueryOptions = { ...defaults, ...options };
@@ -465,10 +479,9 @@ export async function getEvents(projectId: string, options: ODataQueryOptions = 
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getProjectTodos(projectId: string, options: ODataQueryOptions = {}): Promise<ODataTodo[]> {
+export async function getProjectTodos(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataTodo>> {
   const defaults: ODataQueryOptions = {
     $orderby: 'sprk_duedate asc',
-    $top: 200,
   };
 
   const merged: ODataQueryOptions = { ...defaults, ...options };
@@ -493,7 +506,7 @@ export async function getProjectTodos(projectId: string, options: ODataQueryOpti
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getContacts(projectId: string, options: ODataQueryOptions = {}): Promise<ODataContact[]> {
+export async function getContacts(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataContact>> {
   const defaults: ODataQueryOptions = {
     $select: 'contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value',
     // Filter contacts that have an active access record for this project.
@@ -501,7 +514,6 @@ export async function getContacts(projectId: string, options: ODataQueryOptions 
     // We filter via the related entity navigation property.
     $filter: `sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0)`,
     $orderby: 'fullname asc',
-    $top: 100,
   };
 
   const merged: ODataQueryOptions = { ...defaults, ...options };
@@ -529,13 +541,12 @@ export async function getContacts(projectId: string, options: ODataQueryOptions 
 export async function getOrganizations(
   projectId: string,
   options: ODataQueryOptions = {}
-): Promise<ODataOrganization[]> {
+): Promise<ListResult<ODataOrganization>> {
   const defaults: ODataQueryOptions = {
     $select: 'accountid,name,websiteurl,telephone1,address1_city,address1_country',
     // Filter accounts that have contacts with access to this project.
     $filter: `contact_customer_accounts/any(c:c/sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0))`,
     $orderby: 'name asc',
-    $top: 100,
   };
 
   const merged: ODataQueryOptions = { ...defaults, ...options };
