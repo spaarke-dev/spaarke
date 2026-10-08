@@ -634,9 +634,17 @@ public class ScopeResolverService : IScopeResolverService
     #region Lookup Queries
 
     /// <inheritdoc />
+    public Task<string[]> QueryLookupValuesAsync(
+        string entitySetName,
+        string fieldName,
+        CancellationToken cancellationToken) =>
+        QueryLookupValuesAsync(entitySetName, fieldName, null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<string[]> QueryLookupValuesAsync(
         string entitySetName,
         string fieldName,
+        string? additionalFilter,
         CancellationToken cancellationToken)
     {
         await EnsureAuthenticatedAsync(cancellationToken);
@@ -644,7 +652,7 @@ public class ScopeResolverService : IScopeResolverService
         var safeEntitySet = entitySetName.Replace("'", "").Replace("/", "");
         var safeField = fieldName.Replace("'", "").Replace("/", "");
 
-        var url = $"{safeEntitySet}?$select={safeField}&$orderby={safeField} asc&$top=200&$filter=statecode eq 0";
+        var url = BuildLookupValuesUrl(safeEntitySet, safeField, additionalFilter);
 
         _logger.LogDebug(
             "[LOOKUP CHOICES] Querying {EntitySet}.{Field}",
@@ -693,18 +701,34 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <summary>
-    /// The relative Web API URL for the guidance read. Same filter + cap as <see cref="QueryLookupValuesAsync"/>
-    /// so the guidance covers exactly the rows behind the enum. Public so the live-schema test runs the very
-    /// string production sends.
+    /// The single place the lookup row filter is written: active rows, plus an optional per-taxonomy predicate.
     /// </summary>
-    public static string BuildLookupGuidanceUrl(string entitySet, string nameField, string guidanceField) =>
-        $"{entitySet}?$select={nameField},{guidanceField}&$orderby={nameField} asc&$top=200&$filter=statecode eq 0";
+    private static string LookupFilter(string? additionalFilter) =>
+        string.IsNullOrWhiteSpace(additionalFilter)
+            ? "statecode eq 0"
+            : $"statecode eq 0 and ({additionalFilter})";
+
+    /// <summary>
+    /// The relative Web API URL for the names read (the enum source). Public so the live-schema test runs the
+    /// very string production sends.
+    /// </summary>
+    public static string BuildLookupValuesUrl(string entitySet, string field, string? additionalFilter = null) =>
+        $"{entitySet}?$select={field}&$orderby={field} asc&$top=200&$filter={LookupFilter(additionalFilter)}";
+
+    /// <summary>
+    /// The relative Web API URL for the guidance read. Same filter + cap as <see cref="BuildLookupValuesUrl"/>
+    /// so the guidance covers exactly the rows behind the enum.
+    /// </summary>
+    public static string BuildLookupGuidanceUrl(
+        string entitySet, string nameField, string guidanceField, string? additionalFilter = null) =>
+        $"{entitySet}?$select={nameField},{guidanceField}&$orderby={nameField} asc&$top=200&$filter={LookupFilter(additionalFilter)}";
 
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<string, string>> QueryLookupGuidanceAsync(
         string entitySetName,
         string nameField,
         string guidanceField,
+        string? additionalFilter,
         CancellationToken cancellationToken)
     {
         await EnsureAuthenticatedAsync(cancellationToken);
@@ -713,7 +737,7 @@ public class ScopeResolverService : IScopeResolverService
         var safeName = nameField.Replace("'", "").Replace("/", "");
         var safeGuidance = guidanceField.Replace("'", "").Replace("/", "");
 
-        var url = BuildLookupGuidanceUrl(safeEntitySet, safeName, safeGuidance);
+        var url = BuildLookupGuidanceUrl(safeEntitySet, safeName, safeGuidance, additionalFilter);
 
         // No catch: a failed read must reach the caller (LookupChoicesResolver), which emits it to telemetry.
         var response = await _httpClient.GetAsync(url, cancellationToken);

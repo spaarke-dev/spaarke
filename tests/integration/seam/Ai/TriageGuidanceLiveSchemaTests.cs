@@ -37,10 +37,13 @@ public sealed class TriageGuidanceLiveSchemaTests
         using var http = new HttpClient { BaseAddress = new Uri($"{authority}/api/data/v9.2/") };
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
-        // Names exactly as LookupChoicesResolver builds them for lookup:sprk_triagecategory.sprk_name.
-        var namesUrl = $"sprk_triagecategories?$select=sprk_name&$orderby=sprk_name asc&$top=200&$filter=statecode eq 0";
+        // The very URLs production sends: the shared builders plus the resolver's per-taxonomy filter, so this
+        // exercises the real sprk_enabled predicate (a missing column or option would be a 400 here).
+        var filter = LookupChoicesResolver.AdditionalFilterFor("sprk_triagecategory");
+        filter.Should().Be("sprk_enabled eq true");
+        var namesUrl = ScopeResolverService.BuildLookupValuesUrl("sprk_triagecategories", "sprk_name", filter);
         var guidanceUrl = ScopeResolverService.BuildLookupGuidanceUrl(
-            "sprk_triagecategories", "sprk_name", "sprk_classifierguidance");
+            "sprk_triagecategories", "sprk_name", "sprk_classifierguidance", filter);
 
         var names = await RowsAsync(http, namesUrl, "sprk_name");
         var guidance = await RowsAsync(http, guidanceUrl, "sprk_name", "sprk_classifierguidance");

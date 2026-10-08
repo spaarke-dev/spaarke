@@ -75,7 +75,7 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
         // Both fixes locked together: the resolver queried the correctly-pluralized OData entity set
         // (y→ies), not the 404-ing naive `sprk_triagecategorys`.
         h.Scope.Verify(
-            s => s.QueryLookupValuesAsync("sprk_triagecategories", "sprk_name", It.IsAny<CancellationToken>()),
+            s => s.QueryLookupValuesAsync("sprk_triagecategories", "sprk_name", "sprk_enabled eq true", It.IsAny<CancellationToken>()),
             Times.Once,
             "the lookup must query the platform-pluralized entity set `sprk_triagecategories`");
     }
@@ -93,7 +93,7 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
         h.CategoryEnumValues().Should().BeNull(
             "without $choices resolution the category property stays a free string — the shipped bug");
         h.Scope.Verify(
-            s => s.QueryLookupValuesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.QueryLookupValuesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "with no scope factory there is no resolver to query Dataverse");
     }
@@ -106,7 +106,7 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
         var h = new Harness();
         h.Scope
             .Setup(s => s.QueryLookupGuidanceAsync(
-                "sprk_triagecategories", "sprk_name", "sprk_classifierguidance", It.IsAny<CancellationToken>()))
+                "sprk_triagecategories", "sprk_name", "sprk_classifierguidance", "sprk_enabled eq true", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<string, string>
             {
                 ["Invoice / Billing"] = "Bills and payment requests for work already done.",
@@ -130,17 +130,25 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
     }
 
     [Fact]
-    public async Task RunAsync_GuidanceReadFails_DegradesToBareNames_EnumStillEnforced()
+    public async Task RunAsync_GuidanceReadFails_PromptListsBareNames_EnumStillEnforced()
     {
         var h = new Harness();
         h.Scope
             .Setup(s => s.QueryLookupGuidanceAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("dataverse down"));
 
         await h.RunTriageActionAsync(withScopeFactory: true);
 
-        h.CapturedPrompt.Should().NotContain("## Allowed values for 'category'");
+        // The structured-output prompt otherwise lists no categories at all, so a guidance failure falls back to
+        // the bare names rather than to nothing.
+        h.CapturedPrompt.Should().Contain("## Allowed values for 'category'");
+        foreach (var name in TaxonomyNames)
+        {
+            h.CapturedPrompt.Should().Contain("- " + name);
+        }
+
+        h.CapturedPrompt.Should().NotContain(" — ");
         h.CategoryEnumValues().Should().BeEquivalentTo(TaxonomyNames,
             "a guidance failure must not weaken the enum: categories still resolve exactly as before");
     }
@@ -154,7 +162,7 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
         public Harness()
         {
             Scope
-                .Setup(s => s.QueryLookupValuesAsync("sprk_triagecategories", "sprk_name", It.IsAny<CancellationToken>()))
+                .Setup(s => s.QueryLookupValuesAsync("sprk_triagecategories", "sprk_name", "sprk_enabled eq true", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TaxonomyNames);
         }
 
