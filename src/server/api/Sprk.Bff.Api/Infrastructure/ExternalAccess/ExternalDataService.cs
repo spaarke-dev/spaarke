@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Azure.Core;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -54,6 +55,71 @@ public class ExternalDataService
     {
         [JsonPropertyName("value")]
         public List<T>? Value { get; set; }
+
+        [JsonPropertyName("@odata.nextLink")]
+        public string? NextLink { get; set; }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Collection paging (unified-access-control-r2 task 105, ISS-002 / #963, NFR-03)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The page size every collection read asks for, through <c>Prefer: odata.maxpagesize</c>.
+    /// </summary>
+    /// <remarks>
+    /// Dataverse returns <c>@odata.nextLink</c> ONLY under server-driven paging. A <c>$top</c> query returns no
+    /// <c>nextLink</c> at all (Microsoft Learn, "Use OData to query data — Limit the number of rows": "Don't use
+    /// <c>$top</c> when you request pages of data"), and <c>$top</c> combined with <c>maxpagesize</c> silently returns
+    /// the SMALLER of the two with no <c>nextLink</c> (live, spaarkedev1, 2026-10-08: <c>$top=3</c> +
+    /// <c>maxpagesize=2</c> → 2 rows, no <c>nextLink</c>). So no collection read here carries <c>$top</c>;
+    /// <see cref="GetCollectionAsync{TRow}"/> refuses one.
+    /// </remarks>
+    internal const int CollectionPageSize = 200;
+
+    /// <summary>
+    /// How many pages one collection read follows before it stops and reports itself TRUNCATED — a row cap of
+    /// <see cref="MaxCollectionRows"/>, the same 5,000 as the evaluator's NFR-03 ceiling. A detector, not a target:
+    /// hitting it with a <c>nextLink</c> still present is reported, never returned as a complete list.
+    /// </summary>
+    internal const int MaxCollectionPages = 25;
+
+    /// <summary>The row cap <see cref="MaxCollectionPages"/> × <see cref="CollectionPageSize"/> produces.</summary>
+    internal const int MaxCollectionRows = CollectionPageSize * MaxCollectionPages;
+
+    /// <summary>
+    /// How many ids one <c>id eq … or id eq …</c> filter carries. A GET URL is limited to 32,768 characters (Microsoft
+    /// Learn, "URL length limitations"); one escaped clause is ~60, so 100 ids is ~6 KB. Without chunking, the contact
+    /// list's detail read would fail (400 → empty list) once a project had a few hundred participants.
+    /// </summary>
+    internal const int IdFilterChunkSize = 100;
+
+    /// <summary>How a collection read ended.</summary>
+    internal enum CollectionReadOutcome
+    {
+        /// <summary>Followed to the last page — the rows are the whole set.</summary>
+        Complete = 0,
+
+        /// <summary>Stopped at <see cref="MaxCollectionPages"/> with more rows remaining — TRUNCATED.</summary>
+        CapReached = 1,
+
+        /// <summary>A page after the first failed; the rows are a prefix of the set — TRUNCATED.</summary>
+        LaterPageFailed = 2,
+
+        /// <summary>
+        /// The first page failed: NOTHING was read — TRUNCATED, never "an empty list". Before task 105 this came back as
+        /// an empty, unflagged list, so a Dataverse fault showed the user "no documents" (round of 2026-10-08: fixed in
+        /// the same PR, the same honesty class). A create-payload reader must fail its request instead
+        /// (<see cref="ResolveRecordTypeRefAsync"/>).
+        /// </summary>
+        FirstPageFailed = 3,
+    }
+
+    /// <summary>The rows a collection read returned and how it ended.</summary>
+    internal sealed record CollectionRead<TRow>(IReadOnlyList<TRow> Rows, CollectionReadOutcome Outcome)
+    {
+        /// <summary>The rows are known to be INCOMPLETE (possibly empty) — never to be shown as a complete list.</summary>
+        public bool Truncated => Outcome != CollectionReadOutcome.Complete;
     }
 
     /// <summary>The project columns the external SPA reads (internal so <see cref="MapProject"/> is testable).</summary>
@@ -190,24 +256,36 @@ public class ExternalDataService
     /// Retrieves multiple projects by their IDs.
     /// Used by the workspace home page to list the user's accessible projects.
     /// </summary>
-    public virtual async Task<IReadOnlyList<ExternalProjectDto>> GetProjectsAsync(
+    /// <remarks>
+    /// Task 105: the ids are read in chunks of <see cref="IdFilterChunkSize"/> (one OR-filter for every id overran the
+    /// 32 KB URL limit past a few hundred projects, and the 400 came back as "no projects"), and the response says
+    /// <see cref="ExternalCollectionResponse{T}.Truncated"/> when a chunk or page was lost.
+    /// </remarks>
+    public virtual async Task<ExternalCollectionResponse<ExternalProjectDto>> GetProjectsAsync(
         IEnumerable<Guid> projectIds, CancellationToken ct = default)
     {
-        var ids = projectIds.ToList();
-        if (ids.Count == 0) return [];
+        var ids = projectIds.Select(id => id.ToString("D")).Distinct().ToList();
+        if (ids.Count == 0) return new ExternalCollectionResponse<ExternalProjectDto>();
 
         var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
-        var idFilter = string.Join(" or ", ids.Select(id => $"sprk_projectid eq {id}"));
         // H5 (task 022, 2026-08-24): $orderby said `sprk_name`, which does NOT exist on sprk_project
         // (live metadata: the display name is sprk_projectname — the $select above already had it right).
         // Dataverse answered 400, GetCollectionAsync caught it and returned an empty list, so the
         // external SPA rendered "you have no grants" for every caller WITH grants. Sixth instance of the
         // stale-column class in this project; the select/orderby split is why it survived review.
-        var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_projectname asc";
+        var read = await GetByIdsAsync<ProjectRow>(
+            "sprk_projects", "sprk_projectid", ids, select, "sprk_projectname asc,sprk_projectid asc", ct);
 
-        var rows = await GetCollectionAsync<ProjectRow>(url, ct);
+        var rows = read.Rows;
+        if (ids.Count > IdFilterChunkSize)
+            rows = rows.OrderBy(r => r.SprkName, StringComparer.CurrentCultureIgnoreCase).ToList();
+
         WarnOnEmptySecureFlag(rows);
-        return rows.Select(MapProject).ToList();
+        return new ExternalCollectionResponse<ExternalProjectDto>
+        {
+            Value = rows.Select(MapProject).ToList(),
+            Truncated = read.Truncated,
+        };
     }
 
     /// <summary>Retrieves a single project by ID.</summary>
@@ -227,14 +305,24 @@ public class ExternalDataService
     // ---------------------------------------------------------------------------
 
     /// <summary>Retrieves all documents belonging to the specified project.</summary>
-    public virtual async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
+    /// <remarks>
+    /// Task 105: followed page by page up to <see cref="MaxCollectionRows"/> (it was a single <c>$top=200</c> read, so
+    /// a project's 201st document was silently missing); a cut-short list says
+    /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. The primary key breaks <c>createdon</c> ties so pages
+    /// never overlap.
+    /// </remarks>
+    public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
         var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc&$top=200";
+        var url = $"{GetApiUrl()}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
 
-        var rows = await GetCollectionAsync<DocumentRow>(url, ct);
-        return rows.Select(MapDocument).ToList();
+        var read = await GetCollectionAsync<DocumentRow>(url, ct);
+        return new ExternalCollectionResponse<ExternalDocumentDto>
+        {
+            Value = read.Rows.Select(MapDocument).ToList(),
+            Truncated = read.Truncated,
+        };
     }
 
     /// <summary>
@@ -565,13 +653,18 @@ public class ExternalDataService
     /// all. ⚠️ Substituting this method hides the <c>$filter</c> it would have built, which is the
     /// task-017 trap; <see cref="BuildTodoListUrl"/> is tested directly for exactly that reason.
     /// </remarks>
-    public virtual async Task<IReadOnlyList<ExternalTodoDto>> GetTodosAsync(
+    public virtual async Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
         TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
     {
         var url = BuildTodoListUrl(GetApiUrl(), rootKind, rootId);
 
-        var rows = await GetCollectionAsync<TodoRow>(url, ct);
-        return rows.Select(MapTodo).ToList();
+        // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
+        var read = await GetCollectionAsync<TodoRow>(url, ct);
+        return new ExternalCollectionResponse<ExternalTodoDto>
+        {
+            Value = read.Rows.Select(MapTodo).ToList(),
+            Truncated = read.Truncated,
+        };
     }
 
     /// <summary>
@@ -602,7 +695,8 @@ public class ExternalDataService
                      "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl";
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
-        return $"{apiUrl}/sprk_todos?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
+        return $"{apiUrl}/sprk_todos?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_todoid asc";
     }
 
     /// <summary>
@@ -617,12 +711,17 @@ public class ExternalDataService
     /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
     /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
     /// </remarks>
-    public virtual async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
         var url = $"{GetApiUrl()}/{BuildEventsQuery(projectId)}";
 
-        var rows = await GetCollectionAsync<EventRow>(url, ct);
-        return rows.Select(MapEvent).ToList();
+        // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
+        var read = await GetCollectionAsync<EventRow>(url, ct);
+        return new ExternalCollectionResponse<ExternalEventDto>
+        {
+            Value = read.Rows.Select(MapEvent).ToList(),
+            Truncated = read.Truncated,
+        };
     }
 
     /// <summary>
@@ -679,7 +778,8 @@ public class ExternalDataService
     {
         var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value";
         var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
-        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
+        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
     }
 
     /// <summary>
@@ -1018,55 +1118,84 @@ public class ExternalDataService
     /// Retrieves contacts with active access to the specified project.
     /// Queries sprk_externalrecordaccess to find contact IDs, then fetches contact details.
     /// </summary>
-    public virtual async Task<IReadOnlyList<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
+    /// <remarks>
+    /// Task 105: both reads are complete or flagged. The grant-row read is paged to the cap (it was <c>$top=200</c>, so
+    /// the 201st participant silently vanished), and the detail read is chunked (see <see cref="IdFilterChunkSize"/>).
+    /// The list is <see cref="ExternalCollectionResponse{T}.Truncated"/> when either was cut short.
+    /// </remarks>
+    public virtual async Task<ExternalCollectionResponse<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contact IDs from the access junction table
-        var contactIds = await GetProjectContactIdsAsync(projectId, ct);
-        if (contactIds.Count == 0) return [];
+        var (contactIds, idsTruncated) = await GetProjectContactIdsAsync(projectId, ct);
+        if (contactIds.Count == 0)
+            return new ExternalCollectionResponse<ExternalContactDto> { Truncated = idsTruncated };
 
         // Step 2: Fetch contact details for those IDs
         var select = "contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value";
-        var idFilter = string.Join(" or ", contactIds.Select(id => $"contactid eq {id}"));
-        var url = $"{GetApiUrl()}/contacts?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=fullname asc";
+        var read = await GetByIdsAsync<ContactRow>(
+            "contacts", "contactid", contactIds, select, "fullname asc,contactid asc", ct);
 
-        var rows = await GetCollectionAsync<ContactRow>(url, ct);
-        return rows.Select(MapContact).ToList();
+        var rows = read.Rows;
+        if (contactIds.Count > IdFilterChunkSize)
+            rows = rows.OrderBy(r => r.Fullname, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+        return new ExternalCollectionResponse<ExternalContactDto>
+        {
+            Value = rows.Select(MapContact).ToList(),
+            Truncated = idsTruncated || read.Truncated,
+        };
     }
 
     /// <summary>
     /// Retrieves organizations (accounts) linked to the project via project contacts.
     /// </summary>
-    public virtual async Task<IReadOnlyList<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
+    /// <remarks>
+    /// Task 105: derived from <see cref="GetContactsAsync"/>, so an incomplete contact list makes this list incomplete
+    /// too, and says so; the account read is chunked like the contact read.
+    /// </remarks>
+    public virtual async Task<ExternalCollectionResponse<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contacts for the project
         var contacts = await GetContactsAsync(projectId, ct);
 
         // Step 2: Collect unique account IDs from contacts
-        var accountIds = contacts
+        var accountIds = contacts.Value
             .Where(c => !string.IsNullOrEmpty(c.ParentcustomeridValue))
             .Select(c => c.ParentcustomeridValue!)
             .Distinct()
             .ToList();
 
-        if (accountIds.Count == 0) return [];
+        if (accountIds.Count == 0)
+            return new ExternalCollectionResponse<ExternalOrganizationDto> { Truncated = contacts.Truncated };
 
         // Step 3: Fetch account details
         var select = "accountid,name,websiteurl,telephone1,address1_city,address1_country";
-        var idFilter = string.Join(" or ", accountIds.Select(id => $"accountid eq {id}"));
-        var url = $"{GetApiUrl()}/accounts?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=name asc";
+        var read = await GetByIdsAsync<AccountRow>("accounts", "accountid", accountIds, select, "name asc,accountid asc", ct);
 
-        var rows = await GetCollectionAsync<AccountRow>(url, ct);
-        return rows.Select(MapOrganization).ToList();
+        var rows = read.Rows;
+        if (accountIds.Count > IdFilterChunkSize)
+            rows = rows.OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+        return new ExternalCollectionResponse<ExternalOrganizationDto>
+        {
+            Value = rows.Select(MapOrganization).ToList(),
+            Truncated = contacts.Truncated || read.Truncated,
+        };
     }
 
     // ---------------------------------------------------------------------------
     // ADR-024 Resolver-field application (Web API path)
     //
     // Mirrors Sprk.Bff.Api.Services.Workspace.TodoRegardingBuilder.ApplyResolverFieldsAsync
-    // but operates over the Dataverse Web API (no ServiceClient eager connect). When
-    // sprk_recordtype_ref cannot be resolved, the type field is left unset and a warning
-    // is logged — non-fatal, mirroring the SDK-path behaviour (correctness intact; only
-    // the cross-entity-view icon is lost).
+    // but operates over the Dataverse Web API (no ServiceClient eager connect). The type
+    // field (sprk_regardingrecordtype) has two different "no answer" cases (task 105):
+    //   - ABSENT: a complete read found no active sprk_recordtype_ref row for the entity.
+    //     The to-do is created without the type field and a warning is logged.
+    //   - UNREADABLE: the read failed. The create is refused with a 503 problem
+    //     (todo_record_type_unreadable) and nothing is written; the failure is not cached.
+    // The field is not cosmetic: SecureRootInheritance reads the polymorphic pair
+    // (sprk_regardingrecordid + sprk_regardingrecordtype, its PairTypeColumn) to find a
+    // record's root, so a to-do written without it loses that path.
     // ---------------------------------------------------------------------------
 
     /// <summary>
@@ -1095,6 +1224,15 @@ public class ExternalDataService
     /// Resolve the <c>sprk_recordtype_ref</c> GUID + display name for an entity logical name.
     /// Cached per service instance.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Absent and unreadable are different answers (task 105).</b> A COMPLETE read with no ACTIVE row means the
+    /// type is not configured: <c>null</c>, cached, and the create proceeds without the type bind (the caller logs it — the
+    /// pre-existing, non-fatal design). A read that FAILED proves nothing, so it is never cached and never treated as
+    /// absent: the create is refused with a 503 problem, because writing it would silently drop the fourth ADR-024
+    /// resolver field. Before task 105 a failure (and any exception) was cached as "absent" for the instance's life.</para>
+    /// </remarks>
+    /// <exception cref="SdapProblemException">503 <c>todo_record_type_unreadable</c> — the lookup failed; nothing was
+    /// created.</exception>
     private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
         string entityLogicalName, CancellationToken ct)
     {
@@ -1108,12 +1246,32 @@ public class ExternalDataService
             if (_recordTypeRefCache.TryGetValue(entityLogicalName, out cached))
                 return cached;
 
-            var filter = Uri.EscapeDataString($"sprk_recordentitylogicalname eq '{entityLogicalName}'");
+            // Task 105 (found in passing): the column is sprk_recordlogicalname. The former `sprk_recordentitylogicalname`
+            // does not exist (live 2026-10-08: 400 0x80060888), so every external to-do create logged "not found" and
+            // left sprk_RegardingRecordType unset — three of ADR-024's four resolver fields, not four.
+            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts, FieldMappingHandler.ts):
+            // a deactivated type row is not a type to bind.
+            var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}' and statecode eq 0");
+            // Task 105: no $top=1 — GetCollectionAsync refuses $top (it suppresses @odata.nextLink). The filter names one
+            // entity, so this is one row on one page; the first is taken, as before.
             var url = $"{GetApiUrl()}/sprk_recordtype_refs?$filter={filter}" +
-                      "&$select=sprk_recordtype_refid,sprk_recorddisplayname&$top=1";
+                      "&$select=sprk_recordtype_refid,sprk_recorddisplayname&$orderby=sprk_recordtype_refid asc";
 
-            var rows = await GetCollectionAsync<RecordTypeRefRow>(url, ct);
-            var row = rows.FirstOrDefault();
+            var read = await GetCollectionAsync<RecordTypeRefRow>(url, ct);
+            if (read.Outcome != CollectionReadOutcome.Complete)
+            {
+                _logger.LogError(
+                    "[EXT-DATA] sprk_recordtype_ref for '{Entity}' could not be read ({Outcome}); the to-do create is "
+                    + "refused rather than written without its record-type bind. Not cached.",
+                    entityLogicalName, read.Outcome);
+                throw new SdapProblemException(
+                    "todo_record_type_unreadable",
+                    "The to-do could not be created",
+                    "Its record type could not be read just now, so nothing was created. Please try again.",
+                    StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var row = read.Rows.FirstOrDefault();
             if (row?.Id is not null && Guid.TryParse(row.Id, out var refId))
             {
                 var entry = (
@@ -1124,14 +1282,7 @@ public class ExternalDataService
                 return entry;
             }
 
-            _recordTypeRefCache[entityLogicalName] = null;
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[EXT-DATA] Failed to query sprk_recordtype_ref for '{Entity}'. Caching negative result.",
-                entityLogicalName);
+            // A complete read with no row: the type is not configured — the one answer worth caching as absent.
             _recordTypeRefCache[entityLogicalName] = null;
             return null;
         }
@@ -1157,23 +1308,157 @@ public class ExternalDataService
     /// anyway because the method's contract says "active access": listing someone whose grant lapsed
     /// last month tells an operator they still have access when they do not, which is how a revocation
     /// gets skipped. A participant list that disagrees with the enforcement path is its own hazard.</para>
+    /// <para><b>Task 105:</b> paged to the cap (it was <c>$top=200</c>); the flag says the id list is incomplete.</para>
     /// </remarks>
-    private async Task<IReadOnlyList<string>> GetProjectContactIdsAsync(Guid projectId, CancellationToken ct)
+    private async Task<(IReadOnlyList<string> ContactIds, bool Truncated)> GetProjectContactIdsAsync(
+        Guid projectId, CancellationToken ct)
     {
         var expiry = ExternalParticipationService.ExpiryPredicate(DateOnly.FromDateTime(DateTime.UtcNow));
         var filter = Uri.EscapeDataString(
             $"_sprk_project_value eq {projectId} and statecode eq 0 and {expiry}");
-        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contact_value&$top=200";
+        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contact_value" +
+                  "&$orderby=sprk_externalrecordaccessid asc";
 
-        var rows = await GetCollectionAsync<AccessLinkRow>(url, ct);
-        return rows
+        var read = await GetCollectionAsync<AccessLinkRow>(url, ct);
+        var ids = read.Rows
             .Where(r => !string.IsNullOrEmpty(r.ContactId))
             .Select(r => r.ContactId!)
             .Distinct()
             .ToList();
+        return (ids, read.Truncated);
     }
 
-    private async Task<IReadOnlyList<TRow>> GetCollectionAsync<TRow>(string url, CancellationToken ct)
+    /// <summary>
+    /// Reads the rows whose <paramref name="idColumn"/> is one of <paramref name="ids"/>, in chunks of
+    /// <see cref="IdFilterChunkSize"/> ids per request (task 105 — one OR-filter over every id overruns the URL limit).
+    /// </summary>
+    /// <remarks>
+    /// Rows come back in chunk order; a caller with more than one chunk re-sorts. Truncated when any chunk was
+    /// truncated or failed (a failed chunk is a first-page failure, which is itself truncated); when EVERY chunk fails
+    /// the outcome is <see cref="CollectionReadOutcome.FirstPageFailed"/> — nothing was read.
+    /// </remarks>
+    private async Task<CollectionRead<TRow>> GetByIdsAsync<TRow>(
+        string entitySet, string idColumn, IReadOnlyList<string> ids, string select, string orderBy, CancellationToken ct)
+    {
+        var rows = new List<TRow>();
+        if (ids.Count == 0)
+            return new CollectionRead<TRow>(rows, CollectionReadOutcome.Complete);
+
+        var truncated = false;
+        var failedChunks = 0;
+        var chunks = ids.Chunk(IdFilterChunkSize).ToList();
+
+        foreach (var chunk in chunks)
+        {
+            var idFilter = string.Join(" or ", chunk.Select(id => $"{idColumn} eq {id}"));
+            var url = $"{GetApiUrl()}/{entitySet}?$filter={Uri.EscapeDataString(idFilter)}&$select={select}" +
+                      $"&$orderby={orderBy}";
+
+            var read = await GetCollectionAsync<TRow>(url, ct);
+            rows.AddRange(read.Rows);
+            truncated |= read.Truncated;
+            if (read.Outcome == CollectionReadOutcome.FirstPageFailed) failedChunks++;
+        }
+
+        if (failedChunks == chunks.Count)
+            return new CollectionRead<TRow>(rows, CollectionReadOutcome.FirstPageFailed);
+
+        if (failedChunks > 0)
+        {
+            _logger.LogWarning(
+                "[EXT-DATA] collection_truncated: {Failed} of {Chunks} id chunks of {EntitySet} failed; returning {Count} "
+                + "rows for {Ids} ids flagged truncated.",
+                failedChunks, chunks.Count, entitySet, rows.Count, ids.Count);
+        }
+
+        return new CollectionRead<TRow>(
+            rows, truncated ? CollectionReadOutcome.LaterPageFailed : CollectionReadOutcome.Complete);
+    }
+
+    /// <summary>
+    /// Reads a Dataverse collection, FOLLOWING <c>@odata.nextLink</c> up to <see cref="MaxCollectionPages"/> pages, and
+    /// says how the read ended (task 105, ISS-002 / #963).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The defect this replaces.</b> One request, <c>@odata.nextLink</c> never read, and four callers pinned to
+    /// <c>$top=200</c> — which suppresses the <c>nextLink</c> outright. A root with 250 children returned exactly 200,
+    /// indistinguishable from a complete list (NFR-03: a cap is never silent).</para>
+    /// <para><b>The honesty rule</b> (task 024, <c>SpeContainerMembershipService.ReadPermissionsAsync</c>): rows already
+    /// read when the cap is hit, or when a later page fails, are returned as <see cref="CollectionRead{TRow}.Truncated"/>
+    /// — never as a complete list — and the cut is logged with the url and the row count. A plain loop, deliberately not
+    /// the iterator shape of <c>PrivilegeGroupResolver</c> that double-counts page 1 (ISS-001 / #962): each response's
+    /// rows are added exactly once.</para>
+    /// <para><b>A first-page failure</b> is truncated too: logged, and returned EMPTY AND FLAGGED, never as an empty list
+    /// (before task 105 it was an unflagged empty list, so a Dataverse fault read as "nothing here"). The display lists
+    /// surface the flag; the one create-payload reader (<see cref="ResolveRecordTypeRefAsync"/>) fails its request on
+    /// it. No reader makes an access decision from this method.</para>
+    /// <para><b>A <c>nextLink</c> is used unchanged</b> and with the same <c>Prefer</c> value (Microsoft Learn, "Page
+    /// results"), and only when it points at this service's own Web API base: the bearer token is never sent to another
+    /// host. One that does not is treated as a failed later page.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">The url carries <c>$top</c> — a programming error (see <see cref="CollectionPageSize"/>).</exception>
+    private async Task<CollectionRead<TRow>> GetCollectionAsync<TRow>(string url, CancellationToken ct)
+    {
+        if (url.Contains("$top=", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                "A paged collection read must not carry $top: Dataverse then returns no @odata.nextLink, and $top with "
+                + "odata.maxpagesize silently returns the smaller of the two (task 105).", nameof(url));
+
+        var apiBase = GetApiUrl() + "/";
+        var rows = new List<TRow>();
+        var pageUrl = url;
+
+        for (var page = 1; ; page++)
+        {
+            var result = await GetCollectionPageAsync<TRow>(pageUrl, ct);
+            if (result is null)
+            {
+                if (page == 1)
+                {
+                    _logger.LogError(
+                        "[EXT-DATA] collection_truncated: page 1 failed; nothing was read — {Url}. Returned empty and "
+                        + "flagged truncated, never as an empty list.",
+                        url);
+                    return new CollectionRead<TRow>(rows, CollectionReadOutcome.FirstPageFailed);
+                }
+
+                _logger.LogError(
+                    "[EXT-DATA] collection_truncated: page {Page} failed after {Count} rows were read — {Url}. The list "
+                    + "is INCOMPLETE and is returned flagged truncated, never as a complete list.",
+                    page, rows.Count, url);
+                return new CollectionRead<TRow>(rows, CollectionReadOutcome.LaterPageFailed);
+            }
+
+            if (result.Value is { } pageRows)
+                rows.AddRange(pageRows);
+
+            if (string.IsNullOrEmpty(result.NextLink))
+                return new CollectionRead<TRow>(rows, CollectionReadOutcome.Complete);
+
+            if (page >= MaxCollectionPages)
+            {
+                _logger.LogWarning(
+                    "[EXT-DATA] collection_truncated: the {Cap}-row cap ({Pages} pages) was reached with more rows "
+                    + "remaining — {Url}. Returning {Count} rows flagged truncated.",
+                    MaxCollectionRows, MaxCollectionPages, url, rows.Count);
+                return new CollectionRead<TRow>(rows, CollectionReadOutcome.CapReached);
+            }
+
+            if (!result.NextLink.StartsWith(apiBase, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError(
+                    "[EXT-DATA] collection_truncated: page {Page} returned a nextLink outside the Dataverse Web API base; "
+                    + "not followed (the token is never sent elsewhere). {Count} rows read — {Url}. Flagged truncated.",
+                    page, rows.Count, url);
+                return new CollectionRead<TRow>(rows, CollectionReadOutcome.LaterPageFailed);
+            }
+
+            pageUrl = result.NextLink;
+        }
+    }
+
+    /// <summary>One page of a collection read, or <c>null</c> when it failed (logged). Cancellation by the caller is rethrown.</summary>
+    private async Task<ODataResult<TRow>?> GetCollectionPageAsync<TRow>(string url, CancellationToken ct)
     {
         try
         {
@@ -1182,22 +1467,29 @@ public class ExternalDataService
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Add("OData-MaxVersion", "4.0");
             request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Add("Prefer", $"odata.maxpagesize={CollectionPageSize}");
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var response = await _httpClient.SendAsync(request, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("[EXT-DATA] GET collection failed: {Status} — {Url}", response.StatusCode, url);
-                return [];
+                return null;
             }
 
-            var result = await response.Content.ReadFromJsonAsync<ODataResult<TRow>>(ct);
-            return result?.Value ?? [];
+            return await response.Content.ReadFromJsonAsync<ODataResult<TRow>>(ct)
+                ?? throw new InvalidOperationException("Dataverse returned an empty collection body.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller went away. That is not a failed page and nothing is reported as truncated to anyone. Rethrown, so
+            // an aborted chunked read stops at once instead of logging an error for every remaining chunk.
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[EXT-DATA] Error fetching collection: {Url}", url);
-            return [];
+            return null;
         }
     }
 

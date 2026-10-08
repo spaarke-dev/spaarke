@@ -14,6 +14,16 @@ public sealed class ExternalCollectionResponse<T>
 {
     [JsonPropertyName("value")]
     public IReadOnlyList<T> Value { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> when <see cref="Value"/> is known to be INCOMPLETE: the read stopped at its row cap with more rows
+    /// remaining, or a later page failed after earlier pages were read (unified-access-control-r2 task 105, NFR-03 —
+    /// a cap is never silent). Omitted from the JSON when <c>false</c>, so a complete list is byte-for-byte what it was
+    /// before the field existed; clients read a missing field as <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("truncated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Truncated { get; init; }
 }
 
 // ---------------------------------------------------------------------------
