@@ -60,6 +60,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Solution membership is decided by the shared helper, never by an own solutioncomponents read
+# (SchemaScriptSolutionMembershipGuardTests).
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
 $BaseUrl = $EnvironmentUrl.TrimEnd('/')
 $Api = "$BaseUrl/api/data/v9.2"
@@ -145,6 +148,14 @@ Show-Holders 'BEFORE: roles holding a sprk_noaccessentry privilege' $before
 $core = Get-RootRole $CoreRoleName
 if (-not $core) { Stop-Refused "no role '$CoreRoleName' in the root business unit." }
 $admin = Get-RootRole $AdminRoleName
+
+# ── The access-administrator role belongs to the SpaarkeCore solution (component type 20, Role) ────────────────
+$solutionName = $SolutionUniqueName -replace "'", "''"
+$solution = @((Invoke-DvGet "solutions?`$select=solutionid,ismanaged&`$filter=uniquename eq '$solutionName'").value)
+if ($solution.Count -ne 1 -or $solution[0].ismanaged) { throw "Solution '$SolutionUniqueName' is missing or managed. Nothing was written." }
+$membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution[0].solutionid
+$adminInSolution = if ($admin) { [bool](Test-DvInSolution -Membership $membership -ComponentId $admin.roleid) } else { $false }
+Write-Host ("Solution    : {0} ({1})" -f $SolutionUniqueName, $(if (-not $admin) { 'role not created yet' } elseif ($adminInSolution) { "$AdminRoleName is in it" } else { "$AdminRoleName is NOT in it" }))
 $others = @($before | Where-Object { $_.Name -notin $AdministratorRoles -and $_.Name -ne $CoreRoleName -and $_.Name -ne $AdminRoleName })
 
 # ── The BFF's app users keep their reads ────────────────────────────────────────────────────────────────────
@@ -169,6 +180,7 @@ if ($coreHeld.Count -gt 0) { $gaps += "$CoreRoleName still holds: $(($coreHeld |
 if (-not $admin) { $gaps += "role '$AdminRoleName' does not exist" }
 foreach ($m in $adminMissing) { $gaps += "$AdminRoleName lacks $($m.Name) at Global" }
 if ($adminDelete) { $gaps += "$AdminRoleName holds $($deletePrivilege.Name) (deactivation lifts a wall; no Delete)" }
+if ($admin -and -not $adminInSolution) { $gaps += "$AdminRoleName is not in solution $SolutionUniqueName" }
 $gaps += $bffGaps
 
 if ($others.Count -gt 0) {
@@ -196,6 +208,7 @@ if ($Verify) {
 Write-Host "`nPLAN"
 if ($coreHeld.Count -gt 0) { Write-Host "  remove from ${CoreRoleName}: $(($coreHeld | ForEach-Object PrivilegeName) -join ', ')" -ForegroundColor Yellow }
 if (-not $admin) { Write-Host "  create role '$AdminRoleName' in the root business unit ($SolutionUniqueName)" -ForegroundColor Yellow }
+elseif (-not $adminInSolution) { Write-Host "  add role '$AdminRoleName' to solution $SolutionUniqueName (component type 20)" -ForegroundColor Yellow }
 foreach ($m in $adminMissing) { Write-Host "  add to ${AdminRoleName}: $($m.Name) at Global" -ForegroundColor Yellow }
 if ($adminDelete) { Write-Host "  remove from ${AdminRoleName}: $($deletePrivilege.Name)" -ForegroundColor Yellow }
 foreach ($upn in $AssignToUserPrincipalName) { Write-Host "  assign '$AdminRoleName' to $upn (in that user's own business unit)" -ForegroundColor Yellow }
@@ -208,6 +221,7 @@ if ($others.Count -gt 0 -and -not $AcceptOtherRoles) {
 }
 
 # ── Apply ───────────────────────────────────────────────────────────────────────────────────────────────────
+$created = $null
 if (-not $admin) {
     $created = Invoke-DvPost 'roles' @{ name = $AdminRoleName; 'businessunitid@odata.bind' = "/businessunits($rootBuId)" } @{
         Prefer = 'return=representation'; 'MSCRM.SolutionUniqueName' = $SolutionUniqueName
@@ -223,6 +237,13 @@ if ($adminMissing.Count -gt 0) {
             })
     } | Out-Null
     Write-Host "  added to ${AdminRoleName}: $(($adminMissing | ForEach-Object Name) -join ', ')" -ForegroundColor Green
+}
+if (-not $adminInSolution -and -not $created) {
+    # An existing role that is not in the solution (a role created here carries the solution header and is in it).
+    Invoke-DvPost 'AddSolutionComponent' @{
+        ComponentId = $admin.roleid; ComponentType = 20; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false
+    } | Out-Null
+    Write-Host "  added '$AdminRoleName' to $SolutionUniqueName" -ForegroundColor Green
 }
 if ($adminDelete) {
     Invoke-DvPost "roles($($admin.roleid))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ PrivilegeId = $deletePrivilege.Id } | Out-Null
