@@ -27,11 +27,16 @@
  *   notification. Nothing anywhere says "not secure" or "not restricted".
  * - Unlike sprk_kpiassessment_quickcreate.js, a missing helper or token is NOT skipped silently.
  *
- * A re-evaluation of the record already shown on THIS form (after a save or a data refresh) keeps the current
- * notifications until its answer replaces them, so a save never opens a "no restriction" gap; a different record, or
- * none, clears them first. A late answer for a record the form has left, or older than a newer evaluation on the same
- * form, is dropped. A request that does not answer within Config.timeoutMs is "unavailable". A create form (no record
- * id) makes no call. Never throws: the form always loads and saves.
+ * Ordering and "keep until replaced" are keyed on the RECORD, never on the form-context object (Unified Interface does
+ * not promise the same wrapper for OnLoad, OnPostSave and data OnLoad):
+ * - each evaluation of a record takes the next number of a per-record sequence; only the newest evaluation's answer is
+ *   rendered, and it is rendered into EVERY form that asked about that record and still shows it (so an older
+ *   evaluation's form is updated by the newer answer, never left blank or stale);
+ * - while a record is re-evaluated (a save, a data refresh), the form first shows that record's last rendered state
+ *   again (replaced in place: no gap, so a save never opens a "no restriction" moment); a record never rendered yet,
+ *   or no record, clears the three ids first, so one record's banner is never shown on another.
+ * A late answer for a record a form has left is not rendered there. A request that does not answer within
+ * Config.timeoutMs is "unavailable". A create form (no record id) makes no call. Never throws.
  *
  * Task 174 (owner rounds 82/84): for a filed work assignment or project the Secure signal should be the parent-derived
  * value. 064's `secure` is the record's own flag until 174 exposes the effective one; `signalsOf` is the ONE place
@@ -59,7 +64,7 @@ Spaarke.AccessStatus.Tables = {
     sprk_workassignment: true
 };
 
-/** The notification ids this script owns (fixed; cleared on every evaluation). */
+/** The notification ids this script owns (fixed). render() sets the ones it shows and clears the others. */
 Spaarke.AccessStatus.Ids = {
     secure: "sprk_access_secure",
     noAccess: "sprk_access_noaccess",
@@ -85,30 +90,26 @@ Spaarke.AccessStatus.Text = {
 Spaarke.AccessStatus._cachedApiBaseUrl = null;
 
 /**
- * Per-FORM evaluation state, keyed by the form context: { seq, lastKey }. `seq` numbers the form's evaluations (an older
- * answer is dropped); `lastKey` is the record ("table:id") whose answer the form shows now. Per form, not per library or
- * per record: two forms can host this library at once (a record opened in a dialog over another form, possibly the
- * same record), and one form's evaluation must never drop or overwrite the other's. Kept if the library loads again.
+ * Per-RECORD state ("table:id"), module-level and kept if the library loads again. Nothing is keyed on the form-context
+ * object (verifier pass 2, K2-a).
+ * - _seqByRecord: the number of the newest evaluation of the record; an older evaluation's answer is never rendered.
+ * - _lastByRecord: the signals last rendered for the record (null = "unavailable"), shown again while it is
+ *   re-evaluated so the banner never disappears during a save or a refresh.
+ * - _waitingByRecord: the form contexts that asked about the record since its last rendered answer; the newest answer
+ *   is rendered into each one that still shows the record.
  */
-Spaarke.AccessStatus._forms = Spaarke.AccessStatus._forms || (typeof WeakMap === "function" ? new WeakMap() : null);
-
-/** Fallback when no per-form state is available (no WeakMap, or no object form context): a counter per record. */
 Spaarke.AccessStatus._seqByRecord = Spaarke.AccessStatus._seqByRecord || {};
+Spaarke.AccessStatus._lastByRecord = Spaarke.AccessStatus._lastByRecord || {};
+Spaarke.AccessStatus._waitingByRecord = Spaarke.AccessStatus._waitingByRecord || {};
 
-/** The form's evaluation state, or null when it cannot be kept (the caller then clears up front, as before). */
-Spaarke.AccessStatus._stateOf = function (formContext) {
-    var forms = Spaarke.AccessStatus._forms;
-    if (!forms || !formContext || typeof formContext !== "object") {
+/** The "table:id" key of the record a form shows now, or null. Never throws (a closed form's context may). */
+Spaarke.AccessStatus._keyOf = function (formContext) {
+    try {
+        var record = Spaarke.AccessStatus.recordOf(formContext);
+        return record ? record.table + ":" + record.recordId : null;
+    } catch (error) {
         return null;
     }
-
-    var state = forms.get(formContext);
-    if (!state) {
-        state = { seq: 0, lastKey: null };
-        forms.set(formContext, state);
-    }
-
-    return state;
 };
 
 /** Resolves with the promise's value, or with `fallback` after `ms` (never rejects on the timer). */
@@ -265,7 +266,10 @@ Spaarke.AccessStatus._fetchSignals = async function (record, signal) {
 
         return Spaarke.AccessStatus.signalsOf(body, record.recordId);
     } catch (error) {
-        console.error("[Access Status] The access status could not be read.", error);
+        // An abort is the timeout firing: fetchSignals has already warned once (verifier pass 2, K1-b).
+        if (!(error && error.name === "AbortError")) {
+            console.error("[Access Status] The access status could not be read.", error);
+        }
         return null;
     }
 };
@@ -329,47 +333,42 @@ Spaarke.AccessStatus.render = function (formContext, signals) {
 Spaarke.AccessStatus.evaluate = async function (formContext) {
     try {
         var record = Spaarke.AccessStatus.recordOf(formContext);
-        var key = record ? record.table + ":" + record.recordId : null;
-        var state = Spaarke.AccessStatus._stateOf(formContext);
-
-        // Keep what the form shows only while re-evaluating the SAME record on THIS form (a save, a data refresh), so a
-        // save never opens a "no restriction" gap. Anything else - no record, another record, no per-form state - clears
-        // first, so one record's banner is never shown on another.
-        if (!record || !state || state.lastKey !== key) {
-            Spaarke.AccessStatus._clear(formContext);
-            if (state) {
-                state.lastKey = null;
-            }
-        }
-
         if (!record) {
+            Spaarke.AccessStatus._clear(formContext);
             return; // a create form or an unsaved record: nothing to ask about
         }
 
-        var seq;
-        if (state) {
-            seq = ++state.seq;
+        var key = record.table + ":" + record.recordId;
+        var last = Spaarke.AccessStatus._lastByRecord;
+
+        // While this record is re-evaluated, show its last rendered state (in place: no gap). A record never rendered
+        // yet clears first, so another record's banner is never left on this form.
+        if (Object.prototype.hasOwnProperty.call(last, key)) {
+            Spaarke.AccessStatus.render(formContext, last[key]);
         } else {
-            seq = (Spaarke.AccessStatus._seqByRecord[key] || 0) + 1;
-            Spaarke.AccessStatus._seqByRecord[key] = seq;
+            Spaarke.AccessStatus._clear(formContext);
         }
+
+        var seq = (Spaarke.AccessStatus._seqByRecord[key] || 0) + 1;
+        Spaarke.AccessStatus._seqByRecord[key] = seq;
+        (Spaarke.AccessStatus._waitingByRecord[key] = Spaarke.AccessStatus._waitingByRecord[key] || []).push(formContext);
 
         var signals = await Spaarke.AccessStatus.fetchSignals(record);
 
-        // Drop an answer older than a newer evaluation on this form, or for a record the form has left.
-        if (state ? seq !== state.seq : seq !== Spaarke.AccessStatus._seqByRecord[key]) {
+        // Only the newest evaluation of this record renders; it also renders into the forms of the older ones.
+        if (seq !== Spaarke.AccessStatus._seqByRecord[key]) {
             return;
         }
 
-        var now = Spaarke.AccessStatus.recordOf(formContext);
-        if (!now || now.table !== record.table || now.recordId !== record.recordId) {
-            return;
-        }
-
-        Spaarke.AccessStatus.render(formContext, signals);
-        if (state) {
-            state.lastKey = key;
-        }
+        last[key] = signals;
+        var waiting = Spaarke.AccessStatus._waitingByRecord[key] || [];
+        delete Spaarke.AccessStatus._waitingByRecord[key];
+        waiting.forEach(function (form) {
+            // Not rendered on a form that has since left the record.
+            if (Spaarke.AccessStatus._keyOf(form) === key) {
+                Spaarke.AccessStatus.render(form, signals);
+            }
+        });
     } catch (error) {
         console.error("[Access Status] Error while evaluating:", error);
     }

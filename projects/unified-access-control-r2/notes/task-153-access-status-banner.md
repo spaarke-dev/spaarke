@@ -47,8 +47,12 @@ Live, read-only (spaarkedev1, 2026-10-08):
    v1.0.0). OnLoad registers data OnLoad + OnPostSave once (remove-then-add) and evaluates. Closed copy and ids from the
    POML (`sprk_access_secure`, `sprk_access_noaccess` ERROR; `sprk_access_unavailable` INFO). Fail closed: any `unknown`,
    missing/unrecognised signal, non-200, unparseable body, another record's answer, missing `Spaarke.BffAuth`, no BFF
-   URL, null token/Response, or a throw → ONLY the unavailable notice. Each evaluation clears its three ids first; a
-   superseded answer (per record) or one for a record the form has left is dropped. Create form: no call.
+   URL, null token/Response, a throw or a 20 s timeout → ONLY the unavailable notice. Ordering and "keep until
+   replaced" are keyed on the RECORD, never on the form-context object (verifier pass 2): a per-record sequence renders
+   only the newest evaluation's answer, into every form that asked about the record and still shows it; while a record
+   is re-evaluated the form first shows that record's last rendered state again (in place, no gap); a record never
+   rendered yet, or no record, clears the three ids first. `render()` sets the ids it shows and clears the others.
+   Create form: no call.
 2. **TrackingFieldTrio indicator** (shared core): one opt-in prop `accessStatus` (the two signals). Red "Secure" /
    "No Access" / "Secure · No Access"; neutral "Access status unavailable" on any unknown; nothing when both
    `doesNotApply`; nothing when the prop is omitted (email reading pane unchanged). Clickable only with
@@ -92,7 +96,7 @@ No endpoint, column, package or DI registration.
 
 | Suite | Tests |
 |---|---|
-| `src/__tests__/accessStatusBanner.test.ts` (the real script in jsdom) | 34 (28 + 6 in verifier pass 1) |
+| `src/__tests__/accessStatusBanner.test.ts` (the real script in jsdom) | 38 (28 + 6 in pass 1 + 4 net in pass 2) |
 | `TrackingFieldTrio/__tests__/TrackingFieldTrio.accessStatus.test.tsx` | 51 (43 + 8 in verifier pass 1) |
 | `AccessGrantModal/__tests__/AccessGrantModal.initialSection.test.tsx` | 4 |
 | Existing TrackingFieldTrio + AccessGrantModal suites | unchanged, green |
@@ -111,6 +115,8 @@ first pass; 1,017,260 at 1.0.40, +7.1 KB);
   already parent-aware (064 counts entries through a secure parent). One read point per client
   (`signalsOf` in the banner, `parseAccessStatusResponse` in the shared core); if 174 makes `secure` the effective value
   nothing here changes, and if it adds a separate field only those two functions change.
+- **K2** Two forms showing the same record share its state (verifier pass 2): both show the newest answer, which is
+  the correct state of that one record.
 - **K2** While the PCF's status request is in flight (at most `ACCESS_STATUS_TIMEOUT_MS`, 20 s) the indicator is not
   drawn; after that it shows "Access status unavailable".
 
@@ -118,7 +124,7 @@ first pass; 1,017,260 at 1.0.40, +7.1 KB);
 
 Pass 1 found nothing for security, leakage or fail-open. Fixed:
 
-- **F4-1, the banner vanished on every save.** `evaluate()` cleared the notifications before the request, so after a
+- **F4-1, the banner vanished on every save.** (The per-form `WeakMap` below was replaced in pass 2 by record-keyed state.) `evaluate()` cleared the notifications before the request, so after a
   save or a data refresh the SECURE / NO ACCESS banner disappeared for the round trip (a false "no restriction"
   moment). Now a per-FORM state (`WeakMap` keyed by the form context: evaluation number + the record last rendered)
   keeps the current notifications while the SAME record is re-evaluated on that form; no record, another record, or no
@@ -138,6 +144,33 @@ Pass 1 found nothing for security, leakage or fail-open. Fixed:
   `sprk_accessstatus_banner.js`; both closed-copy strings use it).
 - (b) indicator shows only No Access: `INDICATOR_SHOWS_SECURE` (one line in `TrackingFieldTrio/accessStatus.ts`; tests
   for the `false` behaviour already pass through `resolveAccessIndicator(status, false)`).
+
+## Verifier pass 2 fixes (2026-10-08)
+
+Pass 2 (full) confirmed the pass-1 fixes and the timeout. Fixed:
+
+- **K2-a (treated as must-fix): ordering depended on the form-context wrapper's identity.** Pass 1 keyed the keep logic
+  and the sequence on the `getFormContext()` object through a `WeakMap`. Unified Interface does not promise the same
+  object for OnLoad, OnPostSave and data OnLoad; with a fresh wrapper per event an older OnLoad answer ("not secure")
+  landing after a newer Make Secure refresh answer cleared the SECURE banner (verifier T7/T8). Now everything is keyed
+  on the record ("table:id"), module-level: `_seqByRecord` (newest evaluation wins), `_lastByRecord` (re-shown while
+  the record is re-evaluated) and `_waitingByRecord` (every form that asked gets the newest answer if it still shows the
+  record, so a form whose older evaluation was dropped is not left blank or stale). The `WeakMap` is removed. Two forms
+  on the same record share state and both show the newest answer. Tests: T7 and T8 with a fresh wrapper per event; a
+  dropped older evaluation's form updated by the newer answer; a form switching to a record rendered before shows that
+  record's state, never the previous record's. The pass-1 code fails T7 and T8; seeded mutations (no sequence check, no
+  re-show, render only into the asking form, abort logged as an error) each fail.
+- **K1-b: an aborted request logged an error.** After a timeout the aborted fetch's `AbortError` is no longer logged;
+  the timeout's single warning stands. Test: one warning, no error.
+- **F4-a: docs** (this file, "What was built" item 1, and the ids comment in the script) now match the code.
+
+**Cost of flipping each owner change point** (measured by flipping it and running the suites):
+- (a) `Spaarke.AccessStatus.ManageAccessFrom` re-pins **3 tests** (the `TEXT` constant in
+  `accessStatusBanner.test.ts` holds the closed copy verbatim; the secure-only, no-access-only and both cases).
+- (b) `INDICATOR_SHOWS_SECURE = false` re-pins **9 tests** (the Secure and both cases of the indicator suite).
+- **They are coupled.** If (b) flips, the indicator draws nothing for a Secure-only record, so (a)'s SECURE wording must
+  not send the reader to a marker that is no longer drawn (keep "the person icon", or say "the person icon, or the red
+  No Access marker when there is one").
 
 ## Filed (out of scope)
 

@@ -351,36 +351,130 @@ describe('sprk_accessstatus_banner.js (task 153)', () => {
       expect(ids(form)).toEqual([]);
     });
 
-    it('the same record in two forms, with overlapping evaluations, leaves both forms correct', async () => {
+    it('the same record in two forms, with overlapping evaluations: both forms show the NEWEST answer', async () => {
       const pending: Array<(v: unknown) => void> = [];
       fetchMock.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
       const formA = makeForm('sprk_matter', RECORD_ID);
       const formB = makeForm('sprk_matter', RECORD_ID);
-      win.Spaarke.AccessStatus.onLoad(ctxOf(formA)); // A, evaluation 1
+      win.Spaarke.AccessStatus.onLoad(ctxOf(formA)); // evaluation 1 (A)
       await flush();
-      win.Spaarke.AccessStatus.onLoad(ctxOf(formB)); // B, evaluation 1
+      win.Spaarke.AccessStatus.onLoad(ctxOf(formB)); // evaluation 2 (B)
       await flush();
-      formA.postSave.forEach(h => h(ctxOf(formA))); // A, evaluation 2
+      formA.postSave.forEach(h => h(ctxOf(formA))); // evaluation 3 (A), the newest
       await flush();
       expect(pending).toHaveLength(3);
 
-      pending[1](jsonResponse(statusBody('applies', 'doesNotApply'))); // B's answer
-      pending[2](jsonResponse(statusBody('doesNotApply', 'applies'))); // A's newer answer
+      pending[1](jsonResponse(statusBody('applies', 'doesNotApply'))); // B's older answer: not rendered
       await flush();
-      pending[0](jsonResponse(statusBody('applies', 'applies'))); // A's older answer arrives last
+      pending[2](jsonResponse(statusBody('doesNotApply', 'applies'))); // the newest answer: rendered on A AND B
+      await flush();
+      pending[0](jsonResponse(statusBody('applies', 'applies'))); // the oldest answer arrives last: not rendered
       await flush();
       expect(ids(formA)).toEqual(['sprk_access_noaccess']);
-      expect(ids(formB)).toEqual(['sprk_access_secure']);
+      expect(ids(formB)).toEqual(['sprk_access_noaccess']);
     });
 
-    it('without per-form state (no WeakMap), it falls back to clearing up front', async () => {
-      win.Spaarke.AccessStatus._forms = null;
-      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
-      const form = await load();
+    it("a form switching to a record rendered before shows THAT record's last state while it re-checks, never the previous record's", async () => {
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('doesNotApply', 'applies', OTHER_ID)));
+      const other = makeForm('sprk_matter', OTHER_ID);
+      await load(other); // OTHER_ID rendered once: No Access
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'doesNotApply')));
+      const form = await load(); // RECORD_ID: Secure
+      expect(ids(form)).toEqual(['sprk_access_secure']);
+
       fetchMock.mockImplementationOnce(() => new Promise(() => {}));
-      form.postSave.forEach(h => h(ctxOf(form)));
+      form.id = OTHER_ID;
+      win.Spaarke.AccessStatus.onLoad(ctxOf(form));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_noaccess']);
+    });
+  });
+
+  describe('verifier pass 2 (K2-a): correct even when every event hands out a FRESH form-context wrapper', () => {
+    // Unified Interface does not promise the same getFormContext() object for OnLoad, OnPostSave and data OnLoad.
+    const freshCtx = (form: ReturnType<typeof makeForm>) => ({
+      getFormContext: () => ({ ui: form.ui, data: form.data }),
+    });
+
+    it('T7: an older OnLoad answer ("not secure") landing after a newer Make Secure refresh answer does not clear SECURE', async () => {
+      const pending: Array<(v: unknown) => void> = [];
+      fetchMock.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+      const form = makeForm();
+      win.Spaarke.AccessStatus.onLoad(freshCtx(form)); // the OnLoad evaluation
+      await flush();
+      form.dataOnLoad.forEach(h => h(freshCtx(form))); // Make Secure, then the ribbon's data refresh
+      await flush();
+      expect(pending).toHaveLength(2);
+
+      pending[1](jsonResponse(statusBody('applies', 'doesNotApply'))); // the refresh's answer: Secure
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_secure']);
+      pending[0](jsonResponse(statusBody('doesNotApply', 'doesNotApply'))); // the older OnLoad answer, last
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_secure']);
+    });
+
+    it('T8: a save re-check through a fresh wrapper keeps the red banner until its own answer replaces it', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
+      const form = makeForm();
+      win.Spaarke.AccessStatus.onLoad(freshCtx(form));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_noaccess', 'sprk_access_secure']);
+
+      form.ui.clearFormNotification.mockClear();
+      let resolveSave: (v: unknown) => void = () => {};
+      fetchMock.mockImplementationOnce(() => new Promise(resolve => (resolveSave = resolve)));
+      form.postSave.forEach(h => h(freshCtx(form)));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_noaccess', 'sprk_access_secure']);
+      expect(form.ui.clearFormNotification).not.toHaveBeenCalledWith('sprk_access_secure');
+      expect(form.ui.clearFormNotification).not.toHaveBeenCalledWith('sprk_access_noaccess');
+
+      resolveSave(jsonResponse(statusBody('applies', 'doesNotApply')));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_secure']);
+    });
+
+    it('a newer evaluation through a fresh wrapper also updates a form whose older evaluation was dropped', async () => {
+      const pending: Array<(v: unknown) => void> = [];
+      fetchMock.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+      const form = makeForm();
+      win.Spaarke.AccessStatus.onLoad(freshCtx(form)); // never rendered before: cleared
+      await flush();
+      form.postSave.forEach(h => h(freshCtx(form)));
+      await flush();
+      pending[0](jsonResponse(statusBody('doesNotApply', 'doesNotApply'))); // older: dropped
       await flush();
       expect(ids(form)).toEqual([]);
+      pending[1](jsonResponse(statusBody('doesNotApply', 'applies')));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_noaccess']);
+    });
+  });
+
+  describe('timeout logging (verifier pass 2, K1-b)', () => {
+    it('an aborted request after a timeout warns once and logs no error', async () => {
+      win.Spaarke.AccessStatus.Config.timeoutMs = 50;
+      const errorSpy = console.error as jest.Mock;
+      const warnSpy = console.warn as jest.Mock;
+      errorSpy.mockClear();
+      warnSpy.mockClear();
+      fetchMock.mockImplementation(
+        (_url: string, options: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => {
+              const abort = new Error('The operation was aborted.');
+              abort.name = 'AbortError';
+              reject(abort);
+            });
+          })
+      );
+      const form = await load();
+      await new Promise(r => setTimeout(r, 150));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_unavailable']);
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
     });
   });
 
