@@ -38,7 +38,7 @@
 | **#1413** (068) round 2 `e5f55a418` (D-73 order, D-72 note); review: F1 live node lacks the repo's myMatters condition (068 regression or pre-existing?), F2 card shows "Today" for no-due-date rows | author fixing (`a17154f00e69eeced`) | Re-check → owner merge → 068 ✅ |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
-| **#1424** master compile fix (CS0411, #1418) | CI (background wait) | Owner PRE-APPROVED merge when fully green → verify master compiles → close #1418 |
+| **#1424** master compile fix **MERGED** 7c5f39d0d (owner pre-approval); #1418 closed | — | — |
 
 ### Agent IDs (SendMessage resumes a finished agent with its context)
 
@@ -51,7 +51,7 @@
 | aa669e43432b512f5 | 060 author (done) | idle |
 | aee49df31b5a7dc81 | Reviewer: #1384 + #1413 — done | idle |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
-| aa80f91b9ac7b3b76 | 112 author — #1422 accepted at `96b9d884f`; next: merge master after #1424, then owner merge question | idle |
+| aa80f91b9ac7b3b76 | 112 author — merging master into #1422 for green CI | running |
 | a747ef8af51f83500 | Reviewer: PR #1422 (112) — done (text fixes F2-1/F2-2) | idle |
 | a9b2dd472c21a670c | 111 author — deployed; waits for owner live checks | idle |
 | ad2f766533241683a | Reviewer: PR #1386 (056) — done | idle |
