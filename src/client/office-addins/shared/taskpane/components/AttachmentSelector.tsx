@@ -21,6 +21,7 @@ import {
   CheckmarkCircleRegular,
 } from '@fluentui/react-icons';
 import type { AttachmentInfo } from '@shared/adapters/types';
+import { MAX_ATTACHMENT_BYTES } from '../services/emailContentCapture';
 
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
@@ -152,14 +153,20 @@ const useStyles = makeStyles({
 });
 
 /**
- * Maximum file size per attachment (25MB per spec).
+ * Maximum file size per attachment: what ONE save request can carry (task 116a — 20 MB).
+ *
+ * Was 25 MB per file / 100 MB total "per spec". Those numbers held only while the server fetched attachments from
+ * the mailbox through Graph. Since task 116a the add-in reads the selected attachments and sends them, base64, in
+ * the save request, which the BFF caps at 30,000,000 bytes — a 25 MB file can never fit. The picker now refuses
+ * exactly what the save cannot carry, so the user sees it when ticking the box, not after pressing Save.
  */
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = MAX_ATTACHMENT_BYTES;
 
 /**
- * Maximum total size for all attachments (100MB per spec).
+ * Maximum total size of the selected attachments — the same 20 MB, since they all travel in one save request
+ * (task 116a). The save itself also checks the exact sizes and says which attachments it left out.
  */
-const MAX_TOTAL_SIZE = 100 * 1024 * 1024;
+const MAX_TOTAL_SIZE = MAX_ATTACHMENT_BYTES;
 
 /**
  * Blocked file extensions for security.
@@ -286,7 +293,7 @@ export interface AttachmentSelectorProps {
  * Supports:
  * - Checkbox selection for individual attachments
  * - Select all/none functionality
- * - File size validation (25MB per file, 100MB total)
+ * - File size validation (20 MB per file and in total — what one save can carry, task 116a)
  * - Blocked file type detection
  * - File type icons
  * - Full keyboard navigation
@@ -313,194 +320,188 @@ export interface AttachmentSelectorProps {
 // types (see notes/typecheck-fix-patterns.md). Converted to a plain function component: zero
 // behavior change for any existing caller, and removes an already-broken, unused capability.
 export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
-    const {
-      attachments,
-      selectedIds,
-      onSelectionChange,
-      disabled = false,
-      isLoading = false,
-      errorMessage,
-      label = 'Attachments',
-      showHeader = true,
-      'aria-label': ariaLabel,
-      className,
-    } = props;
+  const {
+    attachments,
+    selectedIds,
+    onSelectionChange,
+    disabled = false,
+    isLoading = false,
+    errorMessage,
+    label = 'Attachments',
+    showHeader = true,
+    'aria-label': ariaLabel,
+    className,
+  } = props;
 
-    const styles = useStyles();
+  const styles = useStyles();
 
-    // Validate all attachments
-    const validationResults = useMemo(() => {
-      const results = new Map<string, AttachmentValidation>();
-      attachments.forEach(att => {
-        results.set(att.id, validateAttachment(att));
-      });
-      return results;
-    }, [attachments]);
+  // Validate all attachments
+  const validationResults = useMemo(() => {
+    const results = new Map<string, AttachmentValidation>();
+    attachments.forEach(att => {
+      results.set(att.id, validateAttachment(att));
+    });
+    return results;
+  }, [attachments]);
 
-    // Calculate total selected size
-    const totalSelectedSize = useMemo(() => {
-      return attachments.filter(att => selectedIds.has(att.id)).reduce((sum, att) => sum + att.size, 0);
-    }, [attachments, selectedIds]);
+  // Calculate total selected size
+  const totalSelectedSize = useMemo(() => {
+    return attachments.filter(att => selectedIds.has(att.id)).reduce((sum, att) => sum + att.size, 0);
+  }, [attachments, selectedIds]);
 
-    // Check if total size exceeds limit
-    const isTotalSizeExceeded = totalSelectedSize > MAX_TOTAL_SIZE;
+  // Check if total size exceeds limit
+  const isTotalSizeExceeded = totalSelectedSize > MAX_TOTAL_SIZE;
 
-    // Handle individual attachment toggle
-    const handleToggle = useCallback(
-      (attachmentId: string) => {
-        if (disabled) return;
+  // Handle individual attachment toggle
+  const handleToggle = useCallback(
+    (attachmentId: string) => {
+      if (disabled) return;
 
-        const validation = validationResults.get(attachmentId);
-        if (!validation?.isValid) return;
+      const validation = validationResults.get(attachmentId);
+      if (!validation?.isValid) return;
 
-        const newSelected = new Set(selectedIds);
-        if (newSelected.has(attachmentId)) {
-          newSelected.delete(attachmentId);
-        } else {
-          newSelected.add(attachmentId);
-        }
-        onSelectionChange(newSelected);
-      },
-      [disabled, validationResults, selectedIds, onSelectionChange]
-    );
+      const newSelected = new Set(selectedIds);
+      if (newSelected.has(attachmentId)) {
+        newSelected.delete(attachmentId);
+      } else {
+        newSelected.add(attachmentId);
+      }
+      onSelectionChange(newSelected);
+    },
+    [disabled, validationResults, selectedIds, onSelectionChange]
+  );
 
-    // Handle keyboard navigation
-    const handleKeyDown = useCallback(
-      (event: KeyboardEvent<HTMLDivElement>, attachmentId: string) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          handleToggle(attachmentId);
-        }
-      },
-      [handleToggle]
-    );
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>, attachmentId: string) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleToggle(attachmentId);
+      }
+    },
+    [handleToggle]
+  );
 
-    // Loading state
-    if (isLoading) {
-      return (
-        <Card className={mergeClasses(styles.container, className)}>
-          {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
-          <div className={styles.loadingContainer}>
-            <Spinner size="small" label="Loading attachments..." />
-          </div>
-        </Card>
-      );
-    }
-
-    // Empty state
-    if (attachments.length === 0) {
-      return (
-        <Card className={mergeClasses(styles.container, className)}>
-          {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
-          <div className={styles.emptyState}>
-            <AttachRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
-            <Text>No attachments</Text>
-          </div>
-        </Card>
-      );
-    }
-
+  // Loading state
+  if (isLoading) {
     return (
-      <Card
-        className={mergeClasses(styles.container, className)}
-        role="group"
-        aria-label={ariaLabel || label}
-      >
-        {/* Header with count */}
-        {showHeader && (
-          <CardHeader
-            image={<AttachRegular />}
-            header={
-              <div className={styles.header}>
-                <div className={styles.headerLeft}>
-                  <Text weight="semibold">{label}</Text>
-                </div>
-                <Badge appearance="filled" color="informative" className={styles.attachmentCount}>
-                  {selectedIds.size}/{attachments.length}
-                </Badge>
-              </div>
-            }
-          />
-        )}
-
-        {/* Attachment List */}
-        <div className={styles.attachmentList} role="list" aria-label="Attachment list">
-          {attachments.map(attachment => {
-            const validation = validationResults.get(attachment.id);
-            const isValid = validation?.isValid ?? true;
-            const isSelected = selectedIds.has(attachment.id);
-            const isDisabled = disabled || !isValid;
-
-            return (
-              <div
-                key={attachment.id}
-                className={mergeClasses(
-                  styles.attachmentItem,
-                  isDisabled && styles.attachmentItemDisabled,
-                  !isValid && styles.attachmentItemError
-                )}
-                role="listitem"
-                tabIndex={isDisabled ? -1 : 0}
-                onClick={() => handleToggle(attachment.id)}
-                onKeyDown={e => handleKeyDown(e, attachment.id)}
-                aria-selected={isSelected}
-                aria-disabled={isDisabled}
-              >
-                <Checkbox
-                  checked={isSelected}
-                  disabled={isDisabled}
-                  onChange={() => handleToggle(attachment.id)}
-                  aria-label={`Select ${attachment.name}`}
-                  tabIndex={-1}
-                />
-
-                <div className={styles.attachmentIcon}>
-                  {getAttachmentIcon(attachment.contentType, attachment.name)}
-                </div>
-
-                <div className={styles.attachmentInfo}>
-                  <span className={styles.attachmentName} title={attachment.name}>
-                    {attachment.name}
-                  </span>
-                  <div className={styles.attachmentMeta}>
-                    <span className={styles.attachmentSize}>{formatFileSize(attachment.size)}</span>
-                    {attachment.isInline && (
-                      <Badge appearance="outline" size="small">
-                        Inline
-                      </Badge>
-                    )}
-                  </div>
-                  {!isValid && validation?.errorMessage && (
-                    <span className={styles.attachmentError}>
-                      <ErrorCircleRegular style={{ marginRight: '4px' }} />
-                      {validation.errorMessage}
-                    </span>
-                  )}
-                </div>
-
-                {isSelected && isValid && (
-                  <CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} aria-hidden="true" />
-                )}
-              </div>
-            );
-          })}
+      <Card className={mergeClasses(styles.container, className)}>
+        {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
+        <div className={styles.loadingContainer}>
+          <Spinner size="small" label="Loading attachments..." />
         </div>
-
-        {/* Error Message */}
-        {errorMessage && (
-          <span className={styles.errorMessage} role="alert">
-            {errorMessage}
-          </span>
-        )}
-
-        {/* Total size warning */}
-        {isTotalSizeExceeded && (
-          <span className={styles.errorMessage} role="alert">
-            Total size exceeds {formatFileSize(MAX_TOTAL_SIZE)} limit. Please uncheck some attachments.
-          </span>
-        )}
       </Card>
     );
+  }
+
+  // Empty state
+  if (attachments.length === 0) {
+    return (
+      <Card className={mergeClasses(styles.container, className)}>
+        {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
+        <div className={styles.emptyState}>
+          <AttachRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
+          <Text>No attachments</Text>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className={mergeClasses(styles.container, className)} role="group" aria-label={ariaLabel || label}>
+      {/* Header with count */}
+      {showHeader && (
+        <CardHeader
+          image={<AttachRegular />}
+          header={
+            <div className={styles.header}>
+              <div className={styles.headerLeft}>
+                <Text weight="semibold">{label}</Text>
+              </div>
+              <Badge appearance="filled" color="informative" className={styles.attachmentCount}>
+                {selectedIds.size}/{attachments.length}
+              </Badge>
+            </div>
+          }
+        />
+      )}
+
+      {/* Attachment List */}
+      <div className={styles.attachmentList} role="list" aria-label="Attachment list">
+        {attachments.map(attachment => {
+          const validation = validationResults.get(attachment.id);
+          const isValid = validation?.isValid ?? true;
+          const isSelected = selectedIds.has(attachment.id);
+          const isDisabled = disabled || !isValid;
+
+          return (
+            <div
+              key={attachment.id}
+              className={mergeClasses(
+                styles.attachmentItem,
+                isDisabled && styles.attachmentItemDisabled,
+                !isValid && styles.attachmentItemError
+              )}
+              role="listitem"
+              tabIndex={isDisabled ? -1 : 0}
+              onClick={() => handleToggle(attachment.id)}
+              onKeyDown={e => handleKeyDown(e, attachment.id)}
+              aria-selected={isSelected}
+              aria-disabled={isDisabled}
+            >
+              <Checkbox
+                checked={isSelected}
+                disabled={isDisabled}
+                onChange={() => handleToggle(attachment.id)}
+                aria-label={`Select ${attachment.name}`}
+                tabIndex={-1}
+              />
+
+              <div className={styles.attachmentIcon}>{getAttachmentIcon(attachment.contentType, attachment.name)}</div>
+
+              <div className={styles.attachmentInfo}>
+                <span className={styles.attachmentName} title={attachment.name}>
+                  {attachment.name}
+                </span>
+                <div className={styles.attachmentMeta}>
+                  <span className={styles.attachmentSize}>{formatFileSize(attachment.size)}</span>
+                  {attachment.isInline && (
+                    <Badge appearance="outline" size="small">
+                      Inline
+                    </Badge>
+                  )}
+                </div>
+                {!isValid && validation?.errorMessage && (
+                  <span className={styles.attachmentError}>
+                    <ErrorCircleRegular style={{ marginRight: '4px' }} />
+                    {validation.errorMessage}
+                  </span>
+                )}
+              </div>
+
+              {isSelected && isValid && (
+                <CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} aria-hidden="true" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <span className={styles.errorMessage} role="alert">
+          {errorMessage}
+        </span>
+      )}
+
+      {/* Total size warning */}
+      {isTotalSizeExceeded && (
+        <span className={styles.errorMessage} role="alert">
+          Total size exceeds {formatFileSize(MAX_TOTAL_SIZE)} limit. Please uncheck some attachments.
+        </span>
+      )}
+    </Card>
+  );
 };
 
 export default AttachmentSelector;
