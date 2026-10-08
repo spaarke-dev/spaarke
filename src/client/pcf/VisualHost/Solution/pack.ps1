@@ -5,7 +5,7 @@
 # `scripts/Invoke-PcfBuildProd.ps1` + copy of out/controls/control/bundle.js produced a zip labelled
 # 1.4.39 that carried 1.4.38 code. Packing now fails unless the Solution manifest, solution.xml and
 # bundle.js all carry $version. `-VerifyOnly` runs the guard without creating a zip.
-param([switch]$VerifyOnly)
+param([switch]$VerifyOnly, [string]$BundlePath)
 $version = "1.4.39"
 $solutionName = "VisualHostSolution"
 $controlName = "sprk_Spaarke.Visuals.VisualHost"
@@ -14,7 +14,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $binDir = "$scriptDir/bin"
 
 # Stale-bundle guard
-$bundlePath = "$scriptDir/Controls/$controlName/bundle.js"
+$bundlePath = if ($BundlePath) { $BundlePath } else { "$scriptDir/Controls/$controlName/bundle.js" }
 $manifestPath = "$scriptDir/Controls/$controlName/ControlManifest.xml"
 $solutionXmlPath = "$scriptDir/solution.xml"
 $problems = @()
@@ -24,8 +24,11 @@ if ((Get-Content -LiteralPath $manifestPath -Raw) -notmatch ('<control [^>]*vers
 if ((Get-Content -LiteralPath $solutionXmlPath -Raw) -notmatch ('<Version>' + [regex]::Escape($version) + '</Version>')) {
     $problems += "solution.xml does not declare <Version>$version</Version>"
 }
-if (-not (Select-String -LiteralPath $bundlePath -SimpleMatch $version -Quiet)) {
-    $problems += "bundle.js does not contain $version (stale build). Run scripts/Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/VisualHost and copy out/controls/control/bundle.js to Solution/Controls/$controlName/bundle.js"
+# The version must appear as the control's own version-badge string literal ("v<version> <bullet> <date>",
+# VisualHostRoot.tsx). A bare substring would pass on a comment or a longer number such as 11.4.39.
+$badge = '"v' + [regex]::Escape($version) + ' ' + [char]0x2022
+if (-not (Select-String -LiteralPath $bundlePath -Pattern $badge -Encoding utf8 -Quiet)) {
+    $problems += "bundle.js does not contain the version badge string literal ""v$version <bullet>"" (stale build). Run scripts/Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/VisualHost and copy out/controls/control/bundle.js to Solution/Controls/$controlName/bundle.js"
 }
 if ($problems.Count -gt 0) {
     $problems | ForEach-Object { Write-Host "FAIL  $_" -ForegroundColor Red }
