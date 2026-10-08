@@ -899,6 +899,32 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const currentRecordIdRef = React.useRef(recordId);
   currentRecordIdRef.current = recordId;
   const loadSeqRef = React.useRef(0);
+  // Unmounted: no load in flight may write state any more.
+  React.useEffect(
+    () => () => {
+      loadSeqRef.current += 1;
+    },
+    []
+  );
+  // Verifier F4-c: a write handler runs in the closure of the render where the user clicked. When its request
+  // finishes after the host rebound the modal to another record, its reload and its notice belong to a record that is
+  // no longer shown, and must not reach the screen.
+  const showsThisRecord = React.useCallback(
+    () => cleanGuid(recordId) === cleanGuid(currentRecordIdRef.current),
+    [recordId]
+  );
+  const setNoticeIfCurrent = React.useCallback(
+    (n: { intent: 'success' | 'warning' | 'error'; text: string } | null) => {
+      if (showsThisRecord()) setNotice(n);
+    },
+    [showsThisRecord]
+  );
+  const setDenyIfCurrent = React.useCallback(
+    (deny: { kind: 'delegation' | 'unauthenticated'; message: string }) => {
+      if (showsThisRecord()) setAccessDenyState(deny);
+    },
+    [showsThisRecord]
+  );
 
   /** GETs a relative BFF path via the host `authenticatedFetch` and returns
    * the parsed JSON body. Throws {@link AccessGrantModalApiError} on a non-OK
@@ -991,6 +1017,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // record, and every grant/revoke reloads. Only the LATEST load may write state; an older one that resolves later
     // is dropped whole (grants, shares, candidates and the No Access List alike), and cannot clear `loading` while the
     // newer one runs.
+    // Verifier F4-c: a reload from a stale closure (a write that finished after the host rebound the modal) would read
+    // the OLD record's shares, suggestions and No Access List. It must not even take a load number.
+    if (!showsThisRecord()) return;
     const seq = ++loadSeqRef.current;
     const isCurrent = () => seq === loadSeqRef.current;
     setLoading(true);
@@ -1098,6 +1127,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     fetchAssignedAccess,
     fetchNoAccess,
     fetchContactOrganizationMemberships,
+    showsThisRecord,
   ]);
 
   React.useEffect(() => {
@@ -1328,7 +1358,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // Every selected row must have a level (no default) before it can be granted.
     const missing = selected.filter(it => rowLevels[it.id] === undefined);
     if (missing.length > 0) {
-      setNotice({ intent: 'warning', text: `Pick an access level for: ${missing.map(m => m.name).join(', ')}.` });
+      setNoticeIfCurrent({
+        intent: 'warning',
+        text: `Pick an access level for: ${missing.map(m => m.name).join(', ')}.`,
+      });
       return false;
     }
     setApproving(true);
@@ -1362,7 +1395,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // just fail the same way for every remaining item).
         const deny = classifyAccessFailure(err);
         if (deny) {
-          setAccessDenyState(deny);
+          setDenyIfCurrent(deny);
           denied = true;
           break;
         }
@@ -1388,6 +1421,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
 
     setApproving(false);
+    // Rebound to another record meanwhile: its staged picks, list and notice are not this batch's to touch.
+    if (!showsThisRecord()) return false;
     setSelectedCandidateIds(new Set());
     setRowLevels({});
     setLookedUpContacts([]);
@@ -1395,7 +1430,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLookedUpUsers([]);
     await loadData();
 
-    setNotice(
+    setNoticeIfCurrent(
       buildGrantBatchNotice({
         granted,
         selectedCount: selected.length,
@@ -1414,7 +1449,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // warning is read: it can name related records an administrator must repair. Nothing
     // is staged any more, so the next Save closes it.
     return !denied && failures === 0 && policyRefusals.length === 0 && relatedRecordsPending.length === 0;
-  }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, shareUser, loadData]);
+  }, [
+    availableItems,
+    selectedCandidateIds,
+    rowLevels,
+    grantContact,
+    grantOrganization,
+    shareUser,
+    loadData,
+    showsThisRecord,
+    setNoticeIfCurrent,
+    setDenyIfCurrent,
+  ]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
   // them (respecting the level-required guard), then close on success; otherwise
@@ -1508,20 +1554,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           });
         }
         await loadData();
-        setNotice({ intent: 'success', text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` });
+        setNoticeIfCurrent({
+          intent: 'success',
+          text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`,
+        });
       } catch (err) {
         const deny = classifyAccessFailure(err);
         // Task 149: the share WAS written; only some related records of the secure record are not updated yet.
         const pendingDetail = deny ? null : childrenIncompleteDetail(err);
-        if (deny) setAccessDenyState(deny);
+        if (deny) setDenyIfCurrent(deny);
         else if (pendingDetail) {
           await loadData();
-          setNotice({
+          setNoticeIfCurrent({
             intent: 'warning',
             text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}`,
           });
         } else
-          setNotice({
+          setNoticeIfCurrent({
             intent: 'error',
             text:
               (entry.systemUserId ? userShareRefusalDetail(err, { id: entry.systemUserId, name }) : null) ??
@@ -1533,7 +1582,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setSuggestionBusy(null);
       }
     },
-    [postJson, recordType, recordId, loadData]
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
   );
 
   /** Task 142 (owner A3): "Dismiss" declines the suggestion — the Assigned-To rule will not suggest or grant it again
@@ -1549,15 +1598,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           entryId: entry.entryId,
         });
         await loadData();
-        setNotice({
+        setNoticeIfCurrent({
           intent: 'success',
           text: `Dismissed. ${name} will not be suggested again while they stay in ${entry.sourceFieldLabel}.`,
         });
       } catch (err) {
         const deny = classifyAccessFailure(err);
-        if (deny) setAccessDenyState(deny);
+        if (deny) setDenyIfCurrent(deny);
         else
-          setNotice({
+          setNoticeIfCurrent({
             intent: 'error',
             text:
               err instanceof AccessGrantModalApiError && err.detail
@@ -1568,7 +1617,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setSuggestionBusy(null);
       }
     },
-    [postJson, recordType, recordId, loadData]
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
   );
 
   /** Confirms the pending revoke (task 065 extends this to branch on
@@ -1591,7 +1640,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         const fullName = pendingRevoke.fullName;
         setPendingRevoke(null);
         await loadData();
-        setNotice(buildRevokeNotice(fullName, data));
+        setNoticeIfCurrent(buildRevokeNotice(fullName, data));
       } else {
         // Internal user share (task 063/065): unshare-user, not /revoke.
         await postJson('/api/v1/external-access/unshare-user', {
@@ -1602,12 +1651,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         const fullName = pendingRevoke.fullName;
         setPendingRevoke(null);
         await loadData();
-        setNotice({ intent: 'success', text: `Removed ${fullName}'s share.` });
+        setNoticeIfCurrent({ intent: 'success', text: `Removed ${fullName}'s share.` });
       }
     } catch (err) {
       const deny = classifyAccessFailure(err);
       if (deny) {
-        setAccessDenyState(deny);
+        setDenyIfCurrent(deny);
         setPendingRevoke(null);
       } else if (
         pendingRevoke.kind === 'grant' &&
@@ -1624,7 +1673,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         const fullName = pendingRevoke.fullName;
         setPendingRevoke(null);
         await loadData();
-        setNotice(
+        setNoticeIfCurrent(
           buildRevokeNotice(fullName, {
             speContainerOutcome: err.speContainerOutcome ?? 'Failed',
             deactivatedCount: err.deactivatedCount,
@@ -1638,7 +1687,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 139 (S5): the last person who can open a secure record cannot be
         // removed. The server's sentence says what to do; nothing was removed.
         setPendingRevoke(null);
-        setNotice({ intent: 'warning', text: err.detail });
+        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
       } else if (
         pendingRevoke.kind === 'share' &&
         err instanceof AccessGrantModalApiError &&
@@ -1649,9 +1698,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // server's sentence — never "Failed to revoke", which would claim the share is still there.
         setPendingRevoke(null);
         await loadData();
-        setNotice({ intent: 'warning', text: err.detail });
+        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
       } else {
-        setNotice({
+        setNoticeIfCurrent({
           intent: 'error',
           text: `Failed to revoke access for ${pendingRevoke.fullName}. Please try again.`,
         });
@@ -1659,7 +1708,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } finally {
       setRevoking(false);
     }
-  }, [pendingRevoke, loadData, postJson, recordType, recordId]);
+  }, [pendingRevoke, loadData, postJson, recordType, recordId, setNoticeIfCurrent, setDenyIfCurrent]);
 
   const toggleCandidateSelected = (contactId: string) => {
     setSelectedCandidateIds(prev => {

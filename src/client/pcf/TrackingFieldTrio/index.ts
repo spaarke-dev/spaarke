@@ -1128,13 +1128,21 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     organizationIds: string[]
   ): Promise<IContactOrganizationMembership[]> => {
     if (contactIds.length === 0 || organizationIds.length === 0) return [];
-    const orgClause = organizationIds.map(id => `_sprk_organization_value eq ${cleanGuid(id)}`).join(' or ');
+    // Only canonical GUIDs enter the OData filter. Anything else is refused (the modal then says the rows could not be
+    // checked) rather than dropped, so a bad id can neither alter the query nor silently unmark a row.
+    const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const contacts = contactIds.map(cleanGuid);
+    const organizations = organizationIds.map(cleanGuid);
+    if (![...contacts, ...organizations].every(id => GUID.test(id))) {
+      throw new Error('fetchContactOrganizationMemberships: an id is not a GUID');
+    }
+    const orgClause = organizations.map(id => `_sprk_organization_value eq ${id}`).join(' or ');
     const memberships: IContactOrganizationMembership[] = [];
     const CHUNK = 40;
-    for (let i = 0; i < contactIds.length; i += CHUNK) {
-      const contactClause = contactIds
+    for (let i = 0; i < contacts.length; i += CHUNK) {
+      const contactClause = contacts
         .slice(i, i + CHUNK)
-        .map(id => `_sprk_contact_value eq ${cleanGuid(id)}`)
+        .map(id => `_sprk_contact_value eq ${id}`)
         .join(' or ');
       const result = await this.context.webAPI.retrieveMultipleRecords(
         'sprk_contactorganization',

@@ -745,3 +745,82 @@ describe('AccessGrantModal — overlapping loads never show another record (veri
     expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
   });
 });
+
+describe('AccessGrantModal — a write that finishes after a rebind never shows the old record (verifier F4-c)', () => {
+  const A = 'eeeeeeee-0000-0000-0000-00000000000a';
+  const B = 'eeeeeeee-0000-0000-0000-00000000000b';
+  const grantA: IAccessGrantRecord = {
+    accessRecordId: 'g-a',
+    contactId: 'c-a',
+    fullName: 'Alpha Contact',
+    accessLevel: 100000000,
+  };
+  const grantB: IAccessGrantRecord = {
+    accessRecordId: 'g-b',
+    contactId: 'c-b',
+    fullName: 'Bravo Contact',
+    accessLevel: 100000000,
+  };
+
+  it("a revoke on A answering after the host rebinds to B reloads nothing of A's and shows no notice about A", async () => {
+    let current = A;
+    const revokePost = deferred<Response>();
+    const fetchFn = jest.fn(async (url: string) => {
+      if (url.includes('/revoke')) return revokePost.promise;
+      const rec = url.includes(A) ? 'A' : url.includes(B) ? 'B' : '?';
+      if (url.includes('/user-shares')) {
+        return jsonResponse({
+          shares: [{ systemUserId: `u-${rec}`, fullName: `Share user of ${rec}`, accessLevel: 100000000 }],
+        });
+      }
+      if (url.includes('/assigned-access')) return jsonResponse({ entries: [] });
+      if (url.includes('/no-access')) return jsonResponse(noAccessBody([], 'complete', rec === 'A' ? A : B));
+      return jsonResponse({});
+    });
+    // The real host sequence (TrackingFieldTrio/index.ts): on rebind the Manage Access gate is revoked (false) and
+    // then answered again (true), which re-runs the modal's load effect for B.
+    const props = (recordId: string, canGrantAccess: boolean): IAccessGrantModalProps =>
+      makeProps({
+        overrides: {
+          recordId,
+          canGrantAccess,
+          authenticatedFetch: fetchFn as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          fetchExistingGrants: jest.fn(async () => (current === A ? [grantA] : [grantB])),
+          fetchStandingContacts: undefined,
+        },
+      });
+    const ui = (p: IAccessGrantModalProps) => (
+      <FluentProvider theme={webLightTheme}>
+        <AccessGrantModal {...p} />
+      </FluentProvider>
+    );
+    const view = render(ui(props(A, true)));
+    await screen.findByText('Alpha Contact');
+
+    // Revoke Alpha on A; the POST stays pending.
+    fireEvent.click(within(currentAccessRow('Alpha Contact')).getByRole('button', { name: 'Revoke' }));
+    await screen.findByText('Revoke access?');
+    const confirm = screen.getAllByRole('button', { name: 'Revoke' });
+    fireEvent.click(confirm[confirm.length - 1]);
+    await waitFor(() => expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/revoke'))).toBe(true));
+
+    // The host rebinds to B and the modal loads B.
+    current = B;
+    view.rerender(ui(props(B, false)));
+    view.rerender(ui(props(B, true)));
+    await screen.findByText('Bravo Contact');
+    await screen.findByText('Share user of B');
+
+    // A's revoke answers now: its stale reload must not run, and its notice must not appear on B.
+    const callsBefore = fetchFn.mock.calls.length;
+    revokePost.resolve(jsonResponse({ deactivatedCount: 1 }));
+    await new Promise(r => setTimeout(r, 50));
+    const callsAfter = fetchFn.mock.calls.slice(callsBefore).map(c => String(c[0]));
+    expect(callsAfter.filter(u => u.includes(A))).toEqual([]);
+    expect(screen.queryByText('Share user of A')).not.toBeInTheDocument();
+    expect(screen.queryByText('Alpha Contact')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Revoked access for Alpha Contact/)).not.toBeInTheDocument();
+    expect(screen.getByText('Bravo Contact')).toBeInTheDocument();
+    expect(screen.getByText('Share user of B')).toBeInTheDocument();
+  });
+});

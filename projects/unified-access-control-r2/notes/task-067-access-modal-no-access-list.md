@@ -53,12 +53,12 @@ No new endpoint, column, package or DI registration. No BFF change.
 
 ## Tests
 
-- New `AccessGrantModal.noAccess.test.tsx`: 45 tests (40 at first pass, +5 for the verifier fixes) (route and canonical id; full entry rendering; read-only; truncated;
+- New `AccessGrantModal.noAccess.test.tsx`: 46 tests (40 at first pass, +5 for verifier pass 1, +1 for pass 2) (route and canonical id; full entry rendering; read-only; truncated;
   empty; `notShown` hidden; no request without Write; 10 error shapes; contact / user / organization / org-membership
   veto; not-in-force, undetermined and malformed entries never veto; membership read failure and absence; Restricted,
   Secure, Limited, Standard cancellation; veto beats cancellation and looks different; every level dropdown offers only
   View Only / Collaborate / Full Access; dark theme; helper unit tests).
-- Modal + TrackingFieldTrio suites: 10 suites, 194 tests, all pass.
+- Modal + TrackingFieldTrio suites: 10 suites, 195 tests, all pass.
 - Full `@spaarke/ui-components` jest: 4097 passed, 1 failed (`buildDynamicWorkspaceConfig.test.ts`, pre-existing, #1345).
 - PCF `npm run build:prod` via `scripts/Invoke-PcfBuildProd.ps1`: succeeded; `bundle.js` 1,017,260 bytes (993 KiB),
   was 1,006,789 (+10.5 KB). `pcf-scripts lint` clean.
@@ -90,10 +90,26 @@ No new endpoint, column, package or DI registration. No BFF change.
 - **F4-b, truncated list.** Markers come only from the listed entries, so with more than 100 entries a row walled by
   an unlisted one would read as active. The truncation line is now a warning that says Current Access rows are marked
   from the listed entries only.
-- Found in passing, **K4** (pre-existing): if the host rebinds the record while the modal is OPEN, the modal does not
-  reload (its load effect keys on `open`), so Current Access keeps the earlier record's rows until reopened; the No
-  Access List now shows its error state in that case. The PCF host re-initializes on form navigation, so no realistic
-  trigger is known.
+
+## Verifier pass 2 fix (2026-10-08)
+
+- **F4-c, a write that finishes after a rebind.** Write handlers (grant, revoke, unshare, suggestion grant/dismiss)
+  run in the closure of the render where the user clicked. If the host rebound the modal to record B while the write
+  on A was pending, the write's `await loadData()` took a NEW load number (so it won) but read A's shares, Assigned-To
+  entries and No Access List, and its notice named A's person on B. `loadData` now returns at once unless its closure's
+  record is the record shown now (`currentRecordIdRef`), and every notice and deny banner set after a write goes
+  through the same check (`setNoticeIfCurrent` / `setDenyIfCurrent`); a finished grant batch also leaves B's staged
+  picks alone. An unmount effect retires loads in flight. Test: the verifier's real host sequence (revoke pending on
+  A, gate false then true on B, B loads, A's revoke answers) asserts that no request for A is sent and that neither
+  "Share user of A", A's contact nor the revoke notice appears.
+- **How a rebind reaches the modal.** The real host (`TrackingFieldTrio/index.ts`) revokes the Manage Access gate on
+  rebind and answers it again for the new record, so `canGrantAccess` goes false then true and the modal's load effect
+  re-runs for the new record. That is the path the F4-a and F4-c fixes cover. (Pass 1's note recorded a K4 "the modal
+  does not reload on a rebind while open"; that is wrong for the real host and is withdrawn.) A host that changed
+  `recordId` without touching the gate would get the No Access List's error state (the echo no longer matches) and
+  stale-closure loads are refused, but nothing reloads until the gate or `open` changes; no such host exists.
+- **K1 hardening** in the host: `fetchContactOrganizationMemberships` refuses any id that is not a canonical GUID before
+  it reaches the OData filter (the modal then shows "could not be checked").
 
 ## Live gates (session D, after the 1.0.40 import)
 
