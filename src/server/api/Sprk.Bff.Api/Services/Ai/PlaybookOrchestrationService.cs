@@ -2441,19 +2441,20 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     return;
                 }
 
-                // ISS-018 (#1452, D-77): a template over an EXECUTOR-SCOPED root (`item`, bound by an executor's own
-                // per-item loop — CreateNotification's itemNotification / deduplication.key) cannot render here: the
-                // root is not in the Layer 1 context, so it rendered empty or null BEFORE the loop ran (blank titles,
-                // a null regardingId that defeats dedup). Leave such a string verbatim for the executor. When the root
-                // IS bound (a fan-out overlay whose alias is `item`), render normally.
-                if (ReferencesUnboundExecutorScope(raw, context))
-                {
-                    writer.WriteStringValue(raw);
-                    return;
-                }
-
+                // ISS-018 (#1452, D-77): a template over an EXECUTOR-SCOPED root (`item`, bound only inside
+                // CreateNotification's own per-item loop over itemNotification) cannot render here: the root is not in
+                // the Layer 1 context, so it rendered empty or null BEFORE the loop ran (blank titles, a null
+                // regardingId that defeats dedup). Such a LEAF string is left verbatim for the executor, which renders
+                // it per item with the full context. Checked per leaf string (a nested-JSON wrapper string is rendered
+                // structurally below, so its other leaves still render), and only for the executor that binds the root.
                 if (IsPureTemplate(raw))
                 {
+                    if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                    {
+                        writer.WriteStringValue(raw);
+                        return;
+                    }
+
                     // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
                     // (`{{tldrResult}}`, `{{start.channels}}`, `{{distinct (concat …)}}`).
                     // The engine wraps with the `json` helper so the rendered output is
@@ -2503,6 +2504,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
                 var renderedString = templateEngine.Render(raw, context);
                 writer.WriteStringValue(renderedString);
                 return;
@@ -2519,52 +2526,45 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
-    /// R7 Wave 11 Option D auto-wrap: takes a pure-template string (e.g. <c>"{{tldrResult}}"</c>
-    /// or <c>"{{distinct (concat ...)}}"</c>) and wraps it with the <c>{{json …}}</c> helper
-    /// so the rendered output is always JSON-parseable text — regardless of whether the
-    /// inner expression returns a scalar, object, array, or helper-composed result.
+    /// Template roots that only one executor binds, inside its own per-item loop (ISS-018, #1452): CreateNotification
+    /// binds <c>item</c> while iterating the upstream query's items (<c>itemNotification</c>). For that executor Layer 1
+    /// leaves a leaf string that uses the root verbatim, unless the render context binds it (a fan-out overlay whose
+    /// alias is <c>item</c>) or the string binds it itself (<c>{{#each xs as |item|}}</c>). Other executors render as before.
     /// </summary>
-    /// <remarks>
-    /// Detection: if the inner expression already uses the json helper (e.g.
-    /// <c>"{{json start}}"</c>), returns the original unchanged. Otherwise wraps the inner
-    /// expression: <c>"{{json &lt;inner&gt;}}"</c>. The json helper accepts any value
-    /// (variable, helper-call, scalar) and produces JSON-encoded text.
-    /// </remarks>
-    /// <summary>
-    /// Template roots that only an executor binds, inside its own per-item loop (ISS-018). Layer 1 leaves a string that
-    /// uses one of these verbatim unless the render context binds it.
-    /// </summary>
-    private static readonly string[] ExecutorScopedTemplateRoots = ["item"];
-
-    private static readonly IReadOnlyDictionary<string, System.Text.RegularExpressions.Regex> ExecutorScopedRootPatterns =
-        ExecutorScopedTemplateRoots.ToDictionary(
-            root => root,
-            root => new System.Text.RegularExpressions.Regex(
-                @"(?<![\w.'""@/])" + root + @"(?![\w'""])",
-                System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled));
+    private static readonly IReadOnlyDictionary<ExecutorType, string[]> ExecutorScopedTemplateRoots =
+        new Dictionary<ExecutorType, string[]> { [ExecutorType.CreateNotification] = ["item"] };
 
     private static readonly System.Text.RegularExpressions.Regex MustacheExpression = new(
         @"\{\{(.*?)\}\}",
         System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// True when a Handlebars expression in <paramref name="raw"/> uses an executor-scoped root (as a path root —
-    /// <c>{{item.x}}</c>, <c>{{lookup item 'm.x'}}</c>, <c>{{#if item.y}}</c> — not as text inside quotes or as a
-    /// later path segment like <c>{{q.item}}</c>) that <paramref name="context"/> does not bind.
+    /// True when <paramref name="executorType"/> has executor-scoped roots and a Handlebars expression in
+    /// <paramref name="raw"/> uses one of them as a path root — <c>{{item.x}}</c>, <c>{{lookup item 'm.x'}}</c>,
+    /// <c>{{#if item.y}}</c>; not text inside quotes, not a later path segment like <c>{{q.item}}</c> — that neither
+    /// <paramref name="context"/> nor a block parameter in <paramref name="raw"/> binds.
     /// </summary>
-    internal static bool ReferencesUnboundExecutorScope(string raw, IReadOnlyDictionary<string, object?> context)
+    internal static bool ReferencesUnboundExecutorScope(
+        string raw, IReadOnlyDictionary<string, object?> context, ExecutorType? executorType)
     {
-        foreach (var root in ExecutorScopedTemplateRoots)
+        if (executorType is not { } type || !ExecutorScopedTemplateRoots.TryGetValue(type, out var roots))
         {
-            if (context.ContainsKey(root))
+            return false;
+        }
+
+        foreach (var root in roots)
+        {
+            // Static Regex.IsMatch uses the framework's pattern cache; the root list is tiny and fixed.
+            if (context.ContainsKey(root)
+                || System.Text.RegularExpressions.Regex.IsMatch(raw, @"\bas\s*\|[^|]*\b" + root + @"\b[^|]*\|"))
             {
                 continue;
             }
 
-            var rootPattern = ExecutorScopedRootPatterns[root];
+            var rootPattern = @"(?<![\w.'""@/|])" + root + @"(?![\w'""|])";
             foreach (System.Text.RegularExpressions.Match expression in MustacheExpression.Matches(raw))
             {
-                if (rootPattern.IsMatch(StripQuoted(expression.Groups[1].Value)))
+                if (System.Text.RegularExpressions.Regex.IsMatch(StripQuoted(expression.Groups[1].Value), rootPattern))
                 {
                     return true;
                 }
@@ -2577,6 +2577,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             System.Text.RegularExpressions.Regex.Replace(expression, @"'[^']*'|""[^""]*""", "''");
     }
 
+    /// <summary>
+    /// R7 Wave 11 Option D auto-wrap: takes a pure-template string (e.g. <c>"{{tldrResult}}"</c>
+    /// or <c>"{{distinct (concat ...)}}"</c>) and wraps it with the <c>{{json …}}</c> helper
+    /// so the rendered output is always JSON-parseable text — regardless of whether the
+    /// inner expression returns a scalar, object, array, or helper-composed result.
+    /// </summary>
+    /// <remarks>
+    /// Detection: if the inner expression already uses the json helper (e.g.
+    /// <c>"{{json start}}"</c>), returns the original unchanged. Otherwise wraps the inner
+    /// expression: <c>"{{json &lt;inner&gt;}}"</c>. The json helper accepts any value
+    /// (variable, helper-call, scalar) and produces JSON-encoded text.
+    /// </remarks>
     private static string AutoWrapWithJsonHelper(string pureTemplate)
     {
         var trimmed = pureTemplate.Trim();

@@ -123,6 +123,14 @@ public class FetchXmlShapeValidatorTests
     }
 
     [Fact]
+    public void AuthoredFetchInGuids_UnderNotIn_IsRejected_TheEmptyListWouldMatchEveryRow()
+    {
+        FetchXmlShapeValidator.Validate(
+            Fetch("<condition attribute=\"x\" operator=\"not-in\">{{fetchInGuids myMatters.ids}}</condition>"), authoredTemplate: true)
+            .Should().Contain(p => p.Contains("operator=\"not-in\""));
+    }
+
+    [Fact]
     public void AuthoredEachBlock_InAList_IsRejected_UseTheHelper()
     {
         FetchXmlShapeValidator.Validate(

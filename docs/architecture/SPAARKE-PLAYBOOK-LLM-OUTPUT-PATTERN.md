@@ -75,7 +75,7 @@ The structured `## Input` section design (Layer 2) is the "external function" bo
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Executor-scoped roots are not rendered by Layer 1** (added 2026-10-08, ISS-018 #1452): a configJson string that uses the root `item` — bound only inside an executor's own per-item loop, e.g. `CreateNotification`'s `itemNotification` and `deduplication.key` — is left verbatim by `ApplyConfigJsonTemplates` (unless the render context itself binds `item`, as a fan-out overlay with that alias does), so the executor renders it once per item. Previously Layer 1 rendered those strings against a context with no `item`, producing blank titles and null dedup keys.
+**Executor-scoped roots are not rendered by Layer 1** (added 2026-10-08, ISS-018 #1452): a configJson string that uses the root `item` — bound only inside `CreateNotification`'s own per-item loop over `itemNotification` — is left verbatim (leaf strings of that executor's config only; unless the render context itself binds `item`, as a fan-out overlay with that alias does, or the string binds it as a block parameter), so the executor renders it once per item. Previously Layer 1 rendered those strings against a context with no `item`, producing blank titles and a null `regardingId` (which defeats the executor's dedup).
 
 **Key property**: the Action JPS body (`instruction.role/task/constraints/context`) stays pure instructions. Data lives in `## Input`. The LLM clearly sees the two as distinct.
 

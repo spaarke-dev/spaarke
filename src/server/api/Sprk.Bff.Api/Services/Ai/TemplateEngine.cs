@@ -81,7 +81,8 @@ public sealed class TemplateEngine : ITemplateEngine
         // form). Fails CLOSED, selecting nothing: an empty / null / unresolved list, or ANY element that is not a
         // GUID, emits the single impossible match <value>00000000-0000-0000-0000-000000000000</value>, so the
         // condition stays valid (an `in` with zero values is a Dataverse error) and the other OR branches still
-        // work. Duplicates are removed; output is sorted so the rendered text is deterministic.
+        // work. Duplicates are removed; output is sorted so the rendered text is deterministic. For `in` ONLY: under
+        // `not-in` the impossible match would match every row, so the shape check refuses the helper there.
         _handlebars.RegisterHelper(Nodes.FetchXmlShapeValidator.ListHelperName, (writer, ctx, args) =>
             writer.WriteSafeString(FetchInGuids(args.Length > 0 ? args[0] : null, _logger)));
 

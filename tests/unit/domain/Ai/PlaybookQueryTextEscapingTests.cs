@@ -176,7 +176,7 @@ public class PlaybookQueryTextEscapingTests
         var copy = (Dictionary<string, object?>)escaped["myMatters"]!;
         copy["output"].Should().BeSameAs(copy, "the copy keeps the self-reference instead of recursing without end");
         copy["label"].Should().Be("a&amp;b");
-        Render("{\"fetchXml\":\"value='{{joinIds myMatters.output.ids}}'\"}", context, ExecutorType.QueryDataverse)
+        Render("{\"fetchXml\":\"<condition attribute='x' operator='in'>{{fetchInGuids myMatters.output.ids}}</condition>\"}", context, ExecutorType.QueryDataverse)
             .Should().Contain(((List<object?>)membership["ids"]!)[0]!.ToString());
     }
 

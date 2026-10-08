@@ -43,6 +43,7 @@
     .\Deploy-NotificationPlaybooks.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -DryRun
     .\Deploy-NotificationPlaybooks.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -RecordPath .\iss018-records
 #>
+#Requires -Version 7.5
 [CmdletBinding()]
 param(
     [string]$DataverseUrl = $env:DATAVERSE_URL,
@@ -107,7 +108,8 @@ function ConvertTo-CanonicalJson {
     if ($null -eq $Value) { return '' }
     if ($Value -is [string]) {
         if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
-        $Value = $Value | ConvertFrom-Json -Depth 64
+        # -DateKind String: PowerShell otherwise turns ISO-date strings into DateTime and rewrites them.
+        $Value = $Value | ConvertFrom-Json -Depth 64 -DateKind String
     }
     return ($Value | ConvertTo-Json -Depth 64 -Compress)
 }
@@ -240,7 +242,7 @@ foreach ($file in $playbooks) {
     Write-Host "  $file" -ForegroundColor White
     try {
         if (-not (Test-Path -LiteralPath $path)) { throw 'definition file not found' }
-        $definition = Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json -Depth 64
+        $definition = Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json -Depth 64 -DateKind String
         Assert-PlaybookFetchXmlShape -Definition $definition -Source $file
         $untyped = @($definition.nodes | Where-Object { $null -eq $_.executorType } | ForEach-Object name)
         if ($untyped.Count -gt 0) { throw "nodes without executorType: $($untyped -join ', ')" }
@@ -251,6 +253,11 @@ foreach ($file in $playbooks) {
         if ($existing.Count -gt 1) { throw "more than one notification playbook named '$($definition.playbook.name)'" }
 
         if ($existing.Count -eq 0) {
+            # Deploy-Playbook.ps1 skips (exit 0) when ANY playbook has this name, so a same-named playbook of another
+            # type would read as "deployed" while nothing was written.
+            $sameName = @((Invoke-Dv -Method Get -Path ("sprk_analysisplaybooks?`$select=sprk_analysisplaybookid,sprk_playbooktype&`$filter=" +
+                [uri]::EscapeDataString("sprk_name eq '$name'"))).value)
+            if ($sameName.Count -gt 0) { throw "a playbook named '$($definition.playbook.name)' exists with sprk_playbooktype $($sameName[0].sprk_playbooktype), not $NotificationPlaybookType; nothing written." }
             Write-Host "    playbook absent -> create with Deploy-Playbook.ps1" -ForegroundColor Yellow
             $deployArgs = @{ DefinitionFile = $path; DataverseUrl = $DataverseUrl }
             if ($DryRun) { $deployArgs['DryRun'] = $true }

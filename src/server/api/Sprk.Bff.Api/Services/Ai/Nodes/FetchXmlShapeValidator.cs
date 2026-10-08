@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes
     /// Any leftover <c>{{</c> is a problem (a template that did not render).</para>
     /// <para><b>Authored mode</b> (<c>authoredTemplate: true</c>, the deploy lint and the repo test): the text a maker
     /// stores in <c>sprk_playbooknode.sprk_configjson</c>. Scalar templates (<c>value="{{todayUtc}}"</c>) are allowed.
-    /// A list operator's values must be literal <c>&lt;value&gt;</c> children or exactly one
+    /// A list operator's values must be literal <c>&lt;value&gt;</c> children or, for <c>in</c> only, exactly one
     /// <c>{{fetchInGuids path}}</c> expression; <c>joinIds</c> is never allowed in FetchXML.</para>
     /// </remarks>
     public static class FetchXmlShapeValidator
@@ -52,9 +52,11 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes
                 ["in-or-before-fiscal-period-and-year"] = (2, 2),
             };
 
-        // Operators where a GUID list makes sense, so {{fetchInGuids …}} may stand in for the children.
+        // Where {{fetchInGuids …}} may stand in for the children: `in` ONLY. The helper fails closed by writing the
+        // impossible match (Guid.Empty) for an empty or invalid list — "selects nothing" under `in`, but under `not-in`
+        // the same value matches EVERY row (fail-open), so the helper is refused there.
         private static readonly HashSet<string> GuidListOperators =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "in", "not-in" };
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "in" };
 
         private static readonly Regex ListHelperExpression = new Regex(
             @"^\s*\{\{\s*" + ListHelperName + @"\s+[A-Za-z_][A-Za-z0-9_.]*\s*\}\}\s*$",
@@ -136,7 +138,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes
                     }
 
                     problems.Add(
-                        label + ": list values must be literal <value> children or exactly one {{" + ListHelperName +
+                        label + ": list values must be literal <value> children or, for operator=\"in\" only, exactly one {{" + ListHelperName +
                         " path}} expression; found \"" + Truncate(text.Trim()) + "\".");
                     continue;
                 }

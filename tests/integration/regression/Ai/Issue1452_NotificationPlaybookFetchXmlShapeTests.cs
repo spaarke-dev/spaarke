@@ -242,11 +242,60 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
     }
 
     [Fact]
-    public void Layer1_RendersRunUserId()
+    public void Layer1_RendersRunUserId_OnTheOrchestratorsRunContext()
     {
         // {{run.userId}} rendered null in Layer 1 (the run bag had no userId); CreateNotification's recipientId survived
-        // only through the executor's own fallback.
+        // only through the executor's own fallback. ApplyConfigJsonTemplates builds from the PlaybookRunContext overload.
+        var run = new PlaybookRunContext(Guid.NewGuid(), Guid.NewGuid(), [], "tenant", CancellationToken.None) { UserId = UserId };
+        Engine.Render("{{run.userId}}", PlaybookTemplateContextBuilder.Build(run)).Should().Be(UserId.ToString());
         Engine.Render("{{run.userId}}", Layer1Context(new Dictionary<string, NodeOutput>())).Should().Be(UserId.ToString());
+    }
+
+    [Theory]
+    [InlineData("Overdue: {{item.sprk_eventname}}", ExecutorType.CreateNotification, true)]
+    [InlineData("{{lookup item 'm.sprk_mattername'}}", ExecutorType.CreateNotification, true)]
+    [InlineData("{{#if item.x}}y{{/if}}", ExecutorType.CreateNotification, true)]
+    [InlineData("{{q.item}} and {{items}}", ExecutorType.CreateNotification, false)]
+    [InlineData("{{lookup q 'item'}}", ExecutorType.CreateNotification, false)]
+    [InlineData("{{#each xs as |item|}}{{item.name}}{{/each}}", ExecutorType.CreateNotification, false)]
+    [InlineData("Overdue: {{item.sprk_eventname}}", ExecutorType.UpdateRecord, false)]
+    [InlineData("Overdue: {{item.sprk_eventname}}", null, false)]
+    public void ExecutorScopedItem_IsLeftForTheExecutor_OnlyWhereThatExecutorBindsIt(string raw, ExecutorType? type, bool leftVerbatim)
+    {
+        PlaybookOrchestrationService.ReferencesUnboundExecutorScope(raw, new Dictionary<string, object?>(), type).Should().Be(leftVerbatim);
+        PlaybookOrchestrationService.ReferencesUnboundExecutorScope(raw, new Dictionary<string, object?> { ["item"] = new { } }, type)
+            .Should().BeFalse("a fan-out overlay that binds `item` renders it in Layer 1");
+    }
+
+    [Fact]
+    public void ANestedConfigString_StillRendersItsOtherLeaves_WhenOneLeafUsesItem()
+    {
+        // A Designer wrapper stores the real config as a JSON string; only the leaf that uses `item` is left verbatim.
+        var outputs = new Dictionary<string, NodeOutput> { ["q"] = NodeOutput.Ok(Guid.NewGuid(), "q", new { count = 3 }) };
+        var wrapper = new JsonObject
+        {
+            ["configJson"] = new JsonObject { ["title"] = "{{q.output.count}} items", ["itemNotification"] = new JsonObject { ["title"] = "Item {{item.name}}" } }.ToJsonString(),
+        }.ToJsonString();
+
+        var rendered = PlaybookOrchestrationService.RenderConfigJsonStructurally(wrapper, Layer1Context(outputs), Engine, ExecutorType.CreateNotification);
+
+        var inner = JsonNode.Parse((string)JsonNode.Parse(rendered)!["configJson"]!)!;
+        ((string)inner["title"]!).Should().Be("3 items");
+        ((string)inner["itemNotification"]!["title"]!).Should().Be("Item {{item.name}}");
+    }
+
+    [Fact]
+    public async Task TheConditionNode_TreatsALayer1RenderedNullAsAValue_ExistsIsFalse()
+    {
+        // A missing upstream value renders to JSON null in Layer 1; that must evaluate (exists -> false), not fail the
+        // node as "left operand is required" (found in passing by the ISS-018 review).
+        var executor = new ConditionNodeExecutor(Engine, NullLogger<ConditionNodeExecutor>.Instance);
+        var config = "{\"condition\":{\"operator\":\"exists\",\"left\":null},\"trueBranch\":\"Next\"}";
+
+        var result = await executor.ExecuteAsync(NodeContext("Check", config, ExecutorType.Condition, new Dictionary<string, NodeOutput>()), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.GetData<ConditionResult>()!.Result.Should().BeFalse();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +305,6 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
         var outputs = new Dictionary<string, NodeOutput>
         {
             ["myMatters"] = NodeOutput.Ok(Guid.NewGuid(), "myMatters", new { ids, count = ids.Count }),
-            ["lookup"] = NodeOutput.Ok(Guid.NewGuid(), "lookup", new { name = HostileName }),
         };
         var rendered = PlaybookOrchestrationService.RenderConfigJsonStructurally(
             node["configJson"]!.ToJsonString(), Layer1Context(outputs), Engine, ExecutorType.QueryDataverse);

@@ -509,7 +509,8 @@ public class TemplateEngineTests
     #region JoinIds Helper (FR-1B.2 + FR-3H1.2)
 
     // Covers acceptance criteria for R3 task 002 / FR-1B.2 / FR-3H1.2 / AC-1B.2 / AC-H1.1:
-    // {{joinIds arr}} produces comma-separated list suitable for FetchXML `operator='in'` clauses.
+    // {{joinIds arr}} produces a comma-separated list. NOT for FetchXML (ISS-018, #1452): Dataverse ignores the value
+    // attribute of a list operator; FetchXML uses fetchInGuids (region below).
     // Single implementation shared between FR-1B.2 (LookupUserMembership consumers)
     // and FR-3H1.2 (Workstream H1 template helpers).
 

@@ -203,17 +203,11 @@ public sealed class ConditionNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// True when a comparison's <c>left</c> operand is absent. A rendered number, boolean or string is present: the
-    /// orchestrator's Layer 1 renders <c>"left": "{{q.output.count}}"</c> to the JSON number <c>12</c> (ISS-018b).
+    /// True when a comparison's <c>left</c> operand is absent from the config. Any PRESENT value — a template, a rendered
+    /// number (ISS-018b: Layer 1 renders <c>"left": "{{q.output.count}}"</c> to <c>12</c>), a rendered <c>""</c> or
+    /// <c>null</c> (a missing value, which <c>exists</c> must evaluate to false rather than fail the node) — is valid.
     /// </summary>
-    private static bool IsMissingOperand(object? operand) => operand switch
-    {
-        null => true,
-        string text => string.IsNullOrWhiteSpace(text),
-        JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => true,
-        JsonElement { ValueKind: JsonValueKind.String } element => string.IsNullOrWhiteSpace(element.GetString()),
-        _ => false,
-    };
+    private static bool IsMissingOperand(JsonElement operand) => operand.ValueKind == JsonValueKind.Undefined;
 
     /// <inheritdoc />
     public Task<NodeOutput> ExecuteAsync(
@@ -327,7 +321,7 @@ public sealed class ConditionNodeExecutor : INodeExecutor
         var op = condition.Operator!.ToLowerInvariant();
 
         // Resolve left operand (always a template expression)
-        var leftValue = ResolveOperand(condition.Left!, templateContext);
+        var leftValue = ResolveOperand(condition.Left, templateContext);
 
         // Handle exists operator (checks if value is non-null/non-empty)
         if (op == "exists")
@@ -587,13 +581,13 @@ internal sealed record ConditionExpression
     public string? Operator { get; init; }
 
     /// <summary>
-    /// Left operand: a template expression like "{{node.output.value}}", or the value it already rendered to.
-    /// Required for comparison operators. Typed <c>object?</c> like <see cref="Right"/> (ISS-018b, #1452): the
-    /// orchestrator's Layer 1 renders a pure template to its JSON shape, so a count arrives as a JSON number and a
-    /// <c>string?</c> property failed deserialization for every notification playbook. <c>ResolveOperand</c> handles
-    /// strings, templates and <see cref="JsonElement"/> values alike.
+    /// Left operand: a template expression like "{{node.output.value}}", or the value Layer 1 already rendered it to.
+    /// Required for comparison operators. A <see cref="JsonElement"/> (ISS-018b, #1452): Layer 1 renders a pure template to
+    /// its JSON shape, so a count arrives as a JSON number — a <c>string?</c> property failed deserialization for every
+    /// notification playbook — and a missing value arrives as JSON <c>null</c>, which is a value (<c>exists</c> → false),
+    /// not an absent operand. <see cref="JsonValueKind.Undefined"/> means the property was absent.
     /// </summary>
-    public object? Left { get; init; }
+    public JsonElement Left { get; init; }
 
     /// <summary>
     /// Right operand (literal value or template expression).

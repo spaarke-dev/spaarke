@@ -49,7 +49,7 @@ var totalFailureKql = '''
 traces
 | where severityLevel >= 3
 | where tostring(customDimensions.CategoryName) == "Sprk.Bff.Api.Services.Ai.PlaybookSchedulerJob"
-| where message has "failed for every user"
+| where message contains "failed for every user"
 | summarize failures = count() by playbookId = tostring(customDimensions.PlaybookId), playbook = tostring(customDimensions.Name)
 '''
 
