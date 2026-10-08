@@ -2,7 +2,7 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 43 (task-execute checkpoint) — 218a ✅ ADR-027 amended; 218b ✅ H6 = one SpaarkeMaster, managed by default; 218c ✅ package scope rule + drift + export (read-only runs); next 218e needs the owner's OK for live dev changes.
+> **Last Updated**: 2026-10-08 SESSION 43 (context-handoff before /compact) — 218a ✅ ADR-027 amended; 218b ✅ H6 = one SpaarkeMaster, managed by default; 218c ✅ package scope rule + drift + export; 218e waits for the owner's OK (live dev changes). Tree clean and pushed.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
@@ -12,7 +12,7 @@
 | **Step** | Next: **218e** — content gaps + first source export. Every step writes to spaarkedev1's SpaarkeMaster → **owner OK first** (owner item 9). |
 | **Status** | waiting on the owner's OK for 218e's live dev changes. |
 | **Next Action** | On the owner's OK: `task-execute` 218e — (1) `Test-SolutionCompleteness.ps1 -FailOnDrift:$false -SkipInventory` (read-only) → classify the 53 missing (ship / exclude with reason; the 4 April PCFs by form usage); (2) remove from SpaarkeMaster what is OUTSIDE THE RULE (5 Microsoft tables, 8 env-var values) + the Provisioning Registry role; (3) `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, then without (adds + re-adds the 8 shells, bumps the version); (4) `Export-SpaarkeMasterSource.ps1` (pac auth with access to spaarkedev1) → commit src/dataverse/solutions/SpaarkeMaster; then 218d (CI pack + publish). Without the OK: continue with T235. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean (after this checkpoint). **9+ behind master** (2026-10-08): merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests` (CLAUDE.md §6). PR #1365 open. |
+| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
 | **Order** | 218c → 218e → 218d → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364) → T240c (owner OK for the service) → T240d → T257 → T186. T240b when word-add-in-r1 answers. |
 
 ### T218 facts for 218e/218d (details in 218c's POML notes)
@@ -23,10 +23,8 @@
 ### T240b (blocked)
 Deploying the add-in package in another organization fails at consent (`AADSTS700016`): the add-in apps are single-tenant — dev `c1258e2d…` AND production `1958aec2…` (word-add-in-r1 created it 2026-10-07, master `cbee69b68`). Customer BFFs now pre-authorize `1958aec2` (Worker Bicep, `4d41cb026`). Message `notes/coordination/2026-10-08-to-word-add-in-r1-4.md` (+ addendum for the production app).
 
-### Test organization (owner-created 2026-10-07)
-- Tenant **Dewey Cheatham & Howe PC**, `deweycheatham.onmicrosoft.com`, id `bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b`; Global Admins `admin@` and `ralph@`. Licenses: Business Basic ×2 (web Office only) — desktop Outlook/Word need Business Standard (owner, optional).
-- Guest `ralph@deweycheatham.onmicrosoft.com` in Spaarke's tenant: Accepted, `federated/ExternalAzureAD`; owner added him to dev Dataverse (license, Spaarke Core User + Spaarke Add In User).
-- CLI access to the test tenant: `$env:AZURE_CONFIG_DIR = <scratchpad>\azcfg-testorg` (session scratchpad, private cache — never the shared az context). A new session must sign in again: `az login --tenant deweycheatham.onmicrosoft.com --allow-no-subscriptions --use-device-code` in a fresh private config dir; the owner completes the code in a private browser window.
+### Test organization
+Tenant **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`, `bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b`); guest `ralph@deweycheatham.onmicrosoft.com` (object `bc596ecd-b61c-43f7-8664-0f27a2267a67`) Accepted in Spaarke's tenant and in dev Dataverse. Business Basic only (web Office). CLI: private `AZURE_CONFIG_DIR` + device code (CLAUDE.md §6). Add-in package: `C:\Users\RalphSchroeder\Downloads\spaarke-addin-package\spaarke-addin-1.1.1.zip`.
 
 ## Owner items
 
@@ -51,7 +49,7 @@ Deploying the add-in package in another organization fails at consent (`AADSTS70
 
 - Prod client sites (Standard SWAs, `rg-spaarke-shared-prod`, subscription `cd95fcec-6b89-49ea-8339-c2b579b12587`): `swa-spaarke-office-addins-prod` → `https://addins.spaarke.com`; `swa-spaarke-external-spa-prod` → `https://external.spaarke.com`. Both Ready, managed certs, empty.
 - Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master ≥ `c8b93b294`. T227d not on dev yet (OwnedContainerIds is set). Dev BFF MI holds application `full` on the Model 1 container type (owner option A).
-- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005, Deploy-Release Phase 3 — 2026-10-07).
+- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005).
 
 ## Open items (no task yet)
 
@@ -73,5 +71,4 @@ Deploying the add-in package in another organization fails at consent (`AADSTS70
 - T250 likely superseded by master `bb8ba7251` (SPE Admin as the BFF MI) — raise with the owner when reached.
 - T242c re-scope per D27 (demo = next env; `rg-spaarke-demo` has no AI Search; demo lacks `AiSafety__ContentSafety__Endpoint`).
 - T241 lists the shared tier's non-Azure leftovers; owner decision first on `spaarke-model1-prod` references. Legacy app `spaarke-bff-api-prod` (no owner, 1 client secret) — H3 now refuses to adopt it.
-- Tasks without a POML: create from `notes/model1-dedicated-remediation-plan.md` §7 (copy `tasks/228-…poml`), add TASK-INDEX rows (7 columns).
 - Parked: T246 a–f, T247 (a)–(c) (pin refresh before ~2027-01-14), T244, G34, T252.
