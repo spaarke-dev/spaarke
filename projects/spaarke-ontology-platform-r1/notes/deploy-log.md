@@ -113,3 +113,8 @@ Owner browser checks (dev external SPA, test data prefixed zz-122-):
 4. Manage Access dialog shows the No Access list without error.
 5. Sign-in works (a CIAM authority/client/audience error means stop and report).
 6. Delete zz-122- To Dos; confirm none remain.
+
+### Task 129 - applied under D-85 / D-86 (2026-10-08)
+- Edited 2 views + 2 chart rows (before/after in notes/129-finalduedate-definitions.md); one PublishXml (entity sprk_event). Matter Tasks cardDescription fixed to `{overdue} overdue`.
+- VisualHost: `pac solution import` without --publish-changes succeeded; served bundle only flipped after PublishXml of the two cc_Spaarke.Visuals.VisualHost web resources (bundle.js now 783,088 B, has 1.4.39). `customcontrols.version` still 1.4.38 (no scoped publish element for custom controls). No PublishAllXml.
+- Stale-bundle guard: PR #1463 (f173e1b8f), not merged. C:\wt129 removal started.

@@ -1,6 +1,6 @@
 # Task 129 - sprk_finalduedate in Dataverse definitions (spaarkedev1)
 
-> Inventory run 2026-10-08, read-only, via Dataverse MCP read_query. Status: AWAITING OWNER APPROVAL (no definition edited, no import run).
+> Inventory run 2026-10-08, read-only, via Dataverse MCP read_query. Status: APPLIED 2026-10-08 under owner approval D-85 (definitions) and D-86 (import). Live browser checks outstanding.
 
 ## Queries used (the "query used to find them")
 - `savedquery`: `fetchxml LIKE '%sprk_finalduedate%'` (4 rows); `layoutxml LIKE '%sprk_finalduedate%' AND returnedtypecode = 10544` (same 4).
@@ -44,5 +44,25 @@ Not in scope and not touched: sprk_playbooknode (tasks 068/120), personal views 
 - `pwsh scripts/Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/VisualHost` -> `PASS VisualHost: [build] Succeeded` (webpack 5.104.1, 3 size warnings only).
 - `out/controls/control/bundle.js`: 783,088 B (764 KiB), contains `1.4.39`; `sprk_finalduedate` occurrences 0 (1.4.38 bundle: 3). Copied into Solution/Controls and packed with pack.ps1: `C:\wt129\src\client\pcf\VisualHost\Solution\bin\VisualHostSolution_v1.4.39.zip` (250,670 B).
 
-## Per-environment steps recorded
-(pending approval; to be filled after steps 4 and 5)
+## Per-environment steps recorded (spaarkedev1 only, 2026-10-08, as ralph.schroeder@spaarke.com via az token + Web API)
+
+Backups of every "before" body: scratchpad `before-view-<id>.xml`, `before-chart3.xml`, `before-chart4.xml`, `before-chart4-options.json` (full text is the "Current" column above and the FetchXML printed in the task transcript).
+
+### Definition edits (D-85)
+| # | Row | Call | Before | After (read back) |
+|---|---|---|---|---|
+| 1 | View `491e5733-...` All Tasks Open 7 Days | PATCH savedqueries(id) fetchxml | `or( duedate next-seven-days, or( finalduedate next-seven-days, finalduedate olderthan-x-days 1 ) )` | `or( duedate next-seven-days, duedate olderthan-x-days 1 )`; 0 finalduedate conditions; select attribute kept |
+| 2 | View `1e26ed14-...` Matter All Tasks Open 7 Days | same | same as 1 | same as 1 |
+| 3 | Chart `154bd4a4-...` TASKS & EVENTS | PATCH sprk_chartdefinitions(id) sprk_fetchxmlquery | `or(duedate next-x-days 5, finalduedate next-x-days 5)`; orders `finalduedate asc`, `duedate asc` | `duedate next-x-days 5` in the existing and-filter; order `duedate asc` only; `<attribute sprk_finalduedate/>` kept |
+| 4 | Chart `c4feb098-...` Matter Tasks | PATCH sprk_chartdefinitions(id) sprk_fetchxmlquery + sprk_optionsjson | `sprk_finalduedate lt {currentDate}`; cardDescription `{upcoming} upcoming this month` | `sprk_duedate lt {currentDate}`; cardDescription `{overdue} overdue` (alias the FetchXML defines) |
+
+Gotcha: a PATCH to `savedquery` is NOT visible to a plain GET until published (the first read-back after the PATCH still showed the old FetchXML). `RetrieveUnpublished` as a function URL is not available in this endpoint. Chart rows are plain data and read back immediately.
+
+Publish calls for the definitions (exactly one):
+`POST /api/data/v9.2/PublishXml` with `<importexportxml><entities><entity>sprk_event</entity></entities></importexportxml>` -> success. Entity-scoped; PublishXml has no per-view element, so this also publishes any other pending sprk_event customization. No PublishAllXml. Chart rows needed no publish. After it both views read back as in the table.
+
+### VisualHost import (D-86)
+1. `pac solution import --environment https://spaarkedev1.crm.dynamics.com --path VisualHostSolution_v1.4.39.zip --force-overwrite` (no `--publish-changes`) -> "Solution Imported successfully." Solution VisualHostSolution (unmanaged) now version 1.4.39; its only component is the custom control (type 66) `14c0701e-242e-417a-8999-62694c3cdcac`.
+2. Read back immediately after import (no publish): `customcontrols` version still 1.4.38 (modifiedon 2026-08-03); web resource `cc_Spaarke.Visuals.VisualHost/bundle.js` (id 299fd560-6378-443d-97f5-2dd78ebb590e) had been rewritten (modifiedon 19:43:39Z) but its PUBLISHED content was still the old 781,488 B bundle without 1.4.39. So the import alone does not serve 1.4.39.
+3. `POST PublishXml` with `<importexportxml><webresources><webresource>{299fd560-6378-443d-97f5-2dd78ebb590e}</webresource><webresource>{272ce1fb-b711-441c-bd43-1dc0ffe58f24}</webresource></webresources></importexportxml>` (the control's bundle.js and styles.css web resources) -> success. Published bundle.js is now 783,088 B and contains 1.4.39.
+4. After step 3 the `customcontrol.version` column still reads 1.4.38 (and its manifest attribute 1.4.38). PublishXml has no element for custom controls, so that metadata row did not flip without a publish-all, which was NOT run. The served code (web resource) is 1.4.39; whether the form/runtime reads the control version from the customcontrol row is for the owner's browser check to settle.
