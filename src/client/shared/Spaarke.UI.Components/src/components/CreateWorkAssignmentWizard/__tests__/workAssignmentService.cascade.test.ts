@@ -15,7 +15,8 @@
  *
  * Notes
  *   - We mock `window.Xrm.Utility.getGlobalContext()` to provide the current user ID.
- *   - We mock `IDataService` to capture the entity payload passed to `createRecord`.
+ *   - Ontology task 046: the create payload is POSTed to the BFF work-assignment route, so we capture it from the
+ *     injected `authenticatedFetch` (`makeBffFetch`) — and assert it is never sent through `IDataService.createRecord`.
  *   - We mock global `fetch` (used by `_discoverNavProps`) to keep tests offline.
  *   - We treat ` _entityService` upload paths as no-ops (no files in these tests).
  *
@@ -24,7 +25,7 @@
  */
 
 import type { IDataService } from '../../../types/serviceInterfaces';
-import { WorkAssignmentService } from '../workAssignmentService';
+import { WorkAssignmentService, WORK_ASSIGNMENT_CREATE_ROUTE } from '../workAssignmentService';
 import type { ICreateWorkAssignmentFormState } from '../formTypes';
 
 // ---------------------------------------------------------------------------
@@ -73,8 +74,30 @@ function makeDataService(
   return svc;
 }
 
-/** Stub global Xrm so `_getCurrentUserId()` returns USER_GUID. */
-function stubXrmUser(userId: string | null) {
+/**
+ * The injected `authenticatedFetch`: records every POST to the work-assignment create route (ontology task 046) and
+ * answers with `reply` (default: 201 with the new id). `posts` holds the parsed payloads in call order.
+ */
+function makeBffFetch(reply?: { ok: boolean; status: number; body: unknown }) {
+  const posts: Record<string, unknown>[] = [];
+  const urls: string[] = [];
+  const fn = jest.fn(async (url: string, init?: RequestInit) => {
+    urls.push(url);
+    if (init?.method === 'POST' && url.endsWith(WORK_ASSIGNMENT_CREATE_ROUTE)) {
+      posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+    }
+    const r = reply ?? { ok: true, status: 201, body: { id: NEW_WA_GUID, isolated: false, warnings: [] } };
+    return {
+      ok: r.ok,
+      status: r.status,
+      json: async () => r.body,
+      text: async () => JSON.stringify(r.body),
+    } as Response;
+  });
+  return Object.assign(fn, { posts, urls });
+}
+
+/** Stub global Xrm so `_getCurrentUserId()` returns USER_GUID. */function stubXrmUser(userId: string | null) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = {
     // `WebApi` is required by the shared `getXrm()` walker (task 081 / C-8).
@@ -143,9 +166,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new WorkAssignmentService(
-      dataService,
-      jest.fn(),
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff,
       'https://bff.example/api',
       // No constructor _containerId — simulates host that could not resolve one.
       undefined
@@ -154,7 +176,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
@@ -168,9 +191,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new WorkAssignmentService(
-      dataService,
-      jest.fn(),
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff,
       'https://bff.example/api',
       'host-explicit-container-xyz' // host already resolved a container (record-level / matter-level)
     );
@@ -178,7 +200,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     // Task 076: the host container never reaches the row — the server derives it from the WA.
     expect(payload!).not.toHaveProperty('sprk_containerid');
@@ -193,12 +216,14 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
       sprk_searchindexname: null, // BU exists but index not yet configured (Phase A.5)
     });
 
-    const service = new WorkAssignmentService(dataService, jest.fn(), 'https://bff.example/api', undefined);
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api', undefined);
 
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     // BFF tenant-default chain takes over server-side; payload field left unset
@@ -214,9 +239,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new WorkAssignmentService(
-      dataService,
-      jest.fn(),
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -224,7 +248,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     // No container written (task 076); BU cascade was a no-op (no userId), so searchindexname unset.
     expect(payload!).not.toHaveProperty('sprk_containerid');
@@ -248,9 +273,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new WorkAssignmentService(
-      dataService,
-      jest.fn(),
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -258,7 +282,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
@@ -272,9 +297,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
       { userHasBu: false }
     );
 
-    const service = new WorkAssignmentService(
-      dataService,
-      jest.fn(),
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -282,9 +306,71 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.posts[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
+  });
+});
+
+describe('WorkAssignmentService — server-side create (ontology task 046, D-21/D-59)', () => {
+  beforeEach(() => {
+    stubFetchEmptyNavProps();
+    stubXrmUser(USER_GUID);
+  });
+
+  afterEach(() => {
+    clearXrm();
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the create payload to the BFF work-assignment route and returns the id it answers with', async () => {
+    const dataService = makeDataService({ sprk_searchindexname: 'idx' });
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api/', undefined);
+
+    const result = await service.createWorkAssignment(makeForm({ name: '  WA-Server  ' }), [], []);
+
+    expect(result.status).toBe('success');
+    expect(result.workAssignmentId).toBe(NEW_WA_GUID);
+    expect(bff.urls).toContain(`https://bff.example/api${WORK_ASSIGNMENT_CREATE_ROUTE}`);
+    expect(bff.posts).toHaveLength(1);
+    expect(bff.posts[0]['sprk_name']).toBe('WA-Server');
+    // Never written through Xrm.WebApi (WP-3): the record would be owned by the user.
+    expect(dataService.createRecord).not.toHaveBeenCalledWith('sprk_workassignment', expect.anything());
+  });
+
+  it('a refusal shows the server message and creates nothing', async () => {
+    const dataService = makeDataService({});
+    const bff = makeBffFetch({
+      ok: false,
+      status: 404,
+      body: { detail: 'A record this work assignment is filed under or names was not found.', reasonCode: 'work_assignment.not_found' },
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api', undefined);
+
+    const result = await service.createWorkAssignment(makeForm(), [], []);
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toContain('A record this work assignment is filed under or names was not found.');
+    expect(dataService.createRecord).not.toHaveBeenCalledWith('sprk_workassignment', expect.anything());
+  });
+
+  it("carries the server's warnings (e.g. a secure create still completing) into a partial result", async () => {
+    const dataService = makeDataService({});
+    const bff = makeBffFetch({
+      ok: true,
+      status: 201,
+      body: { id: NEW_WA_GUID, isolated: true, warnings: ['securing it could not be finished yet'] },
+    });
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api', undefined);
+
+    const result = await service.createWorkAssignment(makeForm(), [], []);
+
+    expect(result.status).toBe('partial');
+    expect(result.workAssignmentId).toBe(NEW_WA_GUID);
+    expect(result.warnings).toContain('securing it could not be finished yet');
   });
 });

@@ -145,7 +145,11 @@ function joinUrl(bffBaseUrl: string, path: string): string {
   return `${(bffBaseUrl ?? '').replace(/\/+$/, '')}${path}`;
 }
 
-async function failureOf(response: Response, fallback: string): Promise<ChildRecordWriteError> {
+/**
+ * Reads a refused BFF write's ProblemDetails into a {@link ChildRecordWriteError} (the server's `detail`/`title` and
+ * `reasonCode`). Exported for the work-assignment create (ontology task 046), which posts to its own root route.
+ */
+export async function failureOf(response: Response, fallback: string): Promise<ChildRecordWriteError> {
   let detail: string | undefined;
   let reasonCode: string | undefined;
   try {

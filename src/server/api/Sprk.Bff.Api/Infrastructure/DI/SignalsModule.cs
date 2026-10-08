@@ -54,6 +54,13 @@ public static class SignalsModule
         // accident.
         services.AddSingleton<SignalWriter>();
 
+        // WorkAssignmentCreateService (task 046, D-21/D-59): the server-side work-assignment create — the wizard's route
+        // (WorkAssignmentEndpoints) and, in-process, the decision commit route's Assign Work follow-on (task 043). SCOPED:
+        // it holds the request's IDataverseUserClient (the caller's token). Unconditional, like the route that maps it
+        // (bff-extensions.md §F.1); every dependency it takes is registered unconditionally (SpaarkeCore, GraphModule,
+        // AddCoreAncestorResolver).
+        services.AddScoped<Sprk.Bff.Api.Services.WorkAssignments.WorkAssignmentCreateService>();
+
         return services;
     }
 }

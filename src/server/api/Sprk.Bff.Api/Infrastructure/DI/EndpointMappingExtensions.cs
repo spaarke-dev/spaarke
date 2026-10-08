@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.SpeAdmin;
+using Sprk.Bff.Api.Api.WorkAssignments;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
 using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
@@ -239,6 +240,10 @@ public static class EndpointMappingExtensions
         // re-filed in the browser (G5). UNCONDITIONAL (bff-extensions.md §F.1): IDataverseUserClient, IRecordOwnershipResolver,
         // IFieldMappingDataverseService and CoreAncestorRestamper are all registered unconditionally.
         app.MapChildRecordEndpoints();
+        // spaarke-ontology-platform-r1 task 046 (D-21/D-59): the server-side work-assignment create (WP-3) on the same G5
+        // core, with the secure-create plan (I-13 L1). A NEW path — the retired POST /api/v1/work-assignments stays absent.
+        // UNCONDITIONAL (§F.1): WorkAssignmentCreateService and its dependencies are registered unconditionally.
+        app.MapWorkAssignmentCreateEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

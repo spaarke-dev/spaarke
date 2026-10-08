@@ -13,7 +13,7 @@
  *   - searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup
  */
 
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { withBffChildWrites, failureOf, ChildRecordWriteError } from '../../utils/adapters/bffChildWriteAdapter';
 import type {
   ICreateWorkAssignmentFormState,
   IAssignWorkState,
@@ -35,7 +35,12 @@ import {
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { getXrmUserId } from '../../utils/xrmUserId';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
+
+/**
+ * The BFF route that creates a work assignment (ontology task 046). PROVISIONAL name, pending unified-access-control-r2
+ * (issue #1355) — kept in one constant so the rename is one line.
+ */
+export const WORK_ASSIGNMENT_CREATE_ROUTE = '/api/v1/record-creation/workassignment';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -136,6 +141,35 @@ export class WorkAssignmentService {
       },
     };
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
+  }
+
+  /**
+   * Creates the work assignment through the BFF (ontology task 046): POSTs the Web API payload, resolves to the new id
+   * and appends any server warning (e.g. a secure create not yet completed) to `warnings`. Rejects with a
+   * {@link ChildRecordWriteError} carrying the server's message — nothing was created. Never falls back to
+   * `Xrm.WebApi`: that would create the record owned by the user, the exposure the server path closes.
+   */
+  private async _createViaBff(entity: Record<string, unknown>, warnings: string[]): Promise<string> {
+    const url = `${(this._bffBaseUrl ?? '').replace(/\/+$/, '')}${WORK_ASSIGNMENT_CREATE_ROUTE}`;
+    const response = await this._authenticatedFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entity),
+    });
+    if (!response.ok) {
+      throw await failureOf(response, 'The work assignment could not be created');
+    }
+
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const id = body['id'];
+    if (typeof id !== 'string' || !id) {
+      throw new ChildRecordWriteError('The BFF did not return the new work assignment id.', response.status);
+    }
+    const serverWarnings = body['warnings'];
+    if (Array.isArray(serverWarnings)) {
+      warnings.push(...serverWarnings.filter((w): w is string => typeof w === 'string' && w.length > 0));
+    }
+    return cleanGuid(id);
   }
 
   // -- Record Search (Step 1) ------------------------------------------------
@@ -497,10 +531,14 @@ export class WorkAssignmentService {
     }
 
     try {
-      console.info('[WorkAssignmentService] createRecord payload:', JSON.stringify(entity, null, 2));
-      // IDataService.createRecord returns Promise<string> (just the id)
-      workAssignmentId = await this._dataService.createRecord('sprk_workassignment', entity);
-      console.info('[WorkAssignmentService] createRecord success, workAssignmentId:', workAssignmentId);
+      console.info('[WorkAssignmentService] create payload:', JSON.stringify(entity, null, 2));
+      // Ontology task 046 (D-21/D-59): the SAME payload goes to the BFF's work-assignment create instead of
+      // Xrm.WebApi — checked as the user there (Create/Append, AppendTo on every bound record), created by the
+      // server owned by the business-unit team with the user as its creator person, and created secure when it is
+      // filed under a secure matter or project. The server also gives the "Assigned *" contacts their access, so
+      // the client's syncAssignedAccess call (task 142) is no longer made for this create.
+      workAssignmentId = await this._createViaBff(entity, warnings);
+      console.info('[WorkAssignmentService] create success, workAssignmentId:', workAssignmentId);
     } catch (err) {
       console.error('[WorkAssignmentService] createRecord error:', err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -512,10 +550,6 @@ export class WorkAssignmentService {
         warnings: [],
       };
     }
-
-    // -- Step 1b (task 142, owner Q5 + R3): the work assignment's "Assigned *" people get their access NOW --
-    // The client create's L1 trigger (see syncAssignedAccess). Never throws, never fails the wizard.
-    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'workassignment', workAssignmentId);
 
     // -- Step 2: Upload files to SPE -----------------------------------------
     //

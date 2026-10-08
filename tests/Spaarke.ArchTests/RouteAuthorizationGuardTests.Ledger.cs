@@ -293,6 +293,14 @@ public partial class RouteAuthorizationGuardTests
             + "on EVERY bound record (an unappendable and a missing record answer the same 404), no field-secured or "
             + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record."),
 
+        // ---- work-assignment create: added by spaarke-ontology-platform-r1 task 046 (D-21/D-59; uac-r2 review on #1355) ----
+        new GovernedFile("Api/WorkAssignments/WorkAssignmentEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/record-creation/workassignment (route name provisional, uac-r2 to confirm) — the server write path "
+            + "for a work assignment (WP-3). A caller with no Dataverse user is the single 403; every other decision is "
+            + "WorkAssignmentCreateService's, AS THE CALLER (IDataverseUserClient), through OwnedChildWrite.CreateAsync: "
+            + "Create/Append on the table, AppendTo on EVERY bound record incl. the regarding record (uniform 404), no "
+            + "field-secured or server-owned column, then SecureRootFilingGate's plan (I-13 L1)."),
+
         // ---- Office add-in ----
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/* — save (EntityAccessFilter + OfficeVersionSave), jobs (JobOwnershipFilter), todo and quickcreate "
@@ -656,7 +664,11 @@ public partial class RouteAuthorizationGuardTests
     // EndpointFiles() now selects by the scanner's own registration vocabulary (Map{Verb}, MapMethods, MapHealthChecks — a
     // file registering only MapMethods would have been invisible), and it reads code with comments AND string literals
     // blanked (a log message naming ".MapGet(" no longer counts).
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 118 (2026-10-07, spaarke-ontology-platform-r1 task 046, D-59): Api/WorkAssignments/WorkAssignmentEndpoints.cs
+    // ADDED — POST /api/v1/record-creation/workassignment (route name provisional; uac-r2 review requested on #1355),
+    // GovernedFiles entry RouteLevelGate, one HandlerDecision (IDataverseUserClient via WorkAssignmentCreateService).
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1513,6 +1525,12 @@ public partial class RouteAuthorizationGuardTests
             "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:241-256 → "
             + "UpdateAsync, :271): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
             + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :320)."),
+        new HandlerDecision("POST /api/v1/record-creation/workassignment", "CreateAsync", "IDataverseUserClient",
+            new[] { "WorkAssignmentCreateService.CreateAsync" },
+            "spaarke-ontology-platform-r1 task 046 (D-59): an unresolved caller is the single 403 first (WorkAssignmentEndpoints.cs:68); "
+            + "then the handler calls WorkAssignmentCreateService.CreateAsync (:83), whose IDataverseUserClient maps the payload "
+            + "as the caller (WorkAssignmentCreateService.cs:173) and passes it to OwnedChildWrite.CreateAsync (:181), which "
+            + "checks the table privilege and AppendTo on EVERY bound record before the app-only create."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "
