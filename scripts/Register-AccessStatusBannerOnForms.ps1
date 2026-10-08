@@ -506,6 +506,10 @@ foreach ($p in $planned) {
     Invoke-Dv "systemforms($($p.FormId))" 'PATCH' @{ formxml = $p.After } | Out-Null
     Write-Ok "$($p.Table) '$($p.Name)' written"
 }
+# Publish BEFORE the read-back: a systemforms GET returns the PUBLISHED form XML, so an unpublished write reads back as
+# the old form (seen live on dev 2026-10-08: the read-back failed although all three PATCHes had succeeded).
+Publish-Tables
+Write-Ok 'published sprk_project, sprk_matter, sprk_workassignment'
 # The read-back must show what was written (the snapshot's "after" is what -RestoreFrom compares against).
 foreach ($p in $planned) {
     $back = (Invoke-Dv "systemforms($($p.FormId))?`$select=formxml").formxml
@@ -517,8 +521,6 @@ foreach ($p in $planned) {
             ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapPath -Encoding UTF8
     }
 }
-Publish-Tables
-Write-Ok 'published sprk_project, sprk_matter, sprk_workassignment'
 Write-Host ''
 Write-Host 'APPLIED. Now run this script with -Verify, then the PR #1450 live gates.' -ForegroundColor Green
 exit 0
