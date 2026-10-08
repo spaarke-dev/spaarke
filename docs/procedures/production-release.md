@@ -325,8 +325,10 @@ pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 # Publish all customizations before export
 pac org publish
 
-# Export SpaarkeMaster
-pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+# Export SpaarkeMaster — NOT a raw `pac solution export` (that carries dev env-var VALUES and skips the F12
+# leak guard). Use the runbook's export, which strips values and fails on leaky dependencies:
+./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1     # docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md §3
+# Customer environments never take this zip: they get the CI-packed SpaarkeMaster through H6 (ADR-027 §3-§4).
 ```
 
 ### Verify Export
@@ -430,8 +432,10 @@ Before deploying to any target, export SpaarkeMaster from the dev environment:
 # Ensure PAC CLI is connected to dev
 pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 
-# Export SpaarkeMaster
-pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+# Export SpaarkeMaster — NOT a raw `pac solution export` (that carries dev env-var VALUES and skips the F12
+# leak guard). Use the runbook's export, which strips values and fails on leaky dependencies:
+./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1     # docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md §3
+# Customer environments never take this zip: they get the CI-packed SpaarkeMaster through H6 (ADR-027 §3-§4).
 ```
 
 ### Import to Target

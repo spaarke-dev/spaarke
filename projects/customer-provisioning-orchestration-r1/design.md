@@ -1465,7 +1465,7 @@ Verified against the codebase 2026-06-15 (v2) + refreshed 2026-08-12 (v3) — fu
 |---|---|---|---|
 | `Provision-Customer.ps1` | `scripts/` | **PORT + MAJOR EXTEND** | 13 steps → handler catalog. State-file resume → ProvisioningRun record. **v3.2 (Fable M-2 honesty)**: current step 3 only provisions Storage+KV+ServiceBus. H2a expansion adds SIX new module invocations: **Cosmos DB** (R11), **OpenAI**, **AI Search**, **Document Intelligence**, **App Insights + Log Analytics**, **optional SignalR** — NOT just Cosmos. Header comment already states "per-customer Redis is DEPRECATED (Q-E FR-12)" — v3.2 removes Redis from H2a scope. |
 | `Deploy-RedisCache.ps1` *(v3.2 added)* | `scripts/` | **REUSE (per-env)** | Deploys Redis per environment per Q-E FR-12 (NOT per-customer). Consumed once per env during platform bootstrap; H2a does NOT invoke. |
-| `Build-SpaarkeMaster.ps1` | `scripts/` | **REUSE (authoritative)** | Machine composition of 386-component solution. INVENTORY §0 source of truth. |
+| `Build-SpaarkeMaster.ps1` | `scripts/` | **RETIRED 2026-10-07 (T218c)** — discovery moved to `scripts/solution-authoring/SpaarkePackageScope.psm1`; was: REUSE (authoritative) | Machine composition of 386-component solution. INVENTORY §0 source of truth. |
 | `Deploy-DataverseSolutions.ps1` | `scripts/` | **REUSE + EXTEND** | Called by H6. **v3**: extend to Package Deployer invocation for dependency-ordered import per INVENTORY §1 (~10 managed solutions). |
 | `Deploy-BffApi.ps1` | `scripts/` | **REUSE** | Called by H9. |
 | `Deploy-Release.ps1` | `scripts/` | **REUSE + HARDEN (Gap 2)** | Called by H9. **v3**: Phase 4 must be `customerId`-driven; remove `spaarkedev1` hardcode. |
@@ -1945,7 +1945,7 @@ These items require detailed verification during Phase A (doc consolidation + au
 
 **Load-bearing spine assets** (in-repo):
 - `scripts/Provision-Customer.ps1` — 13-step orchestrator (basis for handler catalog)
-- `scripts/Build-SpaarkeMaster.ps1` — machine composition of 386-component solution (INVENTORY source of truth)
+- `scripts/Build-SpaarkeMaster.ps1` — RETIRED 2026-10-07 (T218c); the package scope rule is `scripts/solution-authoring/SpaarkePackageScope.psm1` + `docs/data-model/package-scope.json`
 - `scripts/Deploy-Release.ps1` + `Deploy-Platform.ps1` + `Deploy-BffApi.ps1` + `Decommission-Customer.ps1` + `Validate-DeployedEnvironment.ps1` — release/platform/BFF/teardown/validate
 - `scripts/seed-data/Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1` + module seeders (H12a/b/c basis)
 - `infrastructure/bicep/**` (26 modules + `platform.bicep` / `customer.bicep` / `model1-shared.bicep` / `model2-full.bicep`)

@@ -2,103 +2,131 @@
 # ---------------------------------------------------------------------------
 # customer-provisioning-orchestration-r1 task 218c: the package scope rule (scripts/solution-authoring/
 # SpaarkePackageScope.psm1). Proves: every sprk_ web resource is in scope whatever solution it sits in (paged
-# results included); intersect tables, managed and non-prefixed components are not; OOB tables contribute only
-# their sprk_ columns; roles come from the root business unit by pattern or name; exclusions need a reason and a
-# date; the comparison reports what is missing from the package, what is excluded but packaged, and stale
-# exclusions; the env-var value guard catches a values file in a folder and in a zip.
+# results included); managed, intersect and non-prefixed components are not; OOB tables contribute only their sprk_
+# columns, unmanaged views and forms; root roles come from ANY business unit (copies skipped) by pattern or name;
+# unmanaged field security profiles are in scope; exclusions need a reason and a date; the comparison reports
+# missing, shell-packaged, excluded-but-packaged, outside-the-rule, stale exclusions and unmatched extra names; the
+# env-var value guard catches a values file in a folder and in a zip.
 #
-# Technique: every module function takes the Dataverse GET as a scriptblock, so a fake serves canned pages.
+# Technique: every module function takes the Dataverse GET as a scriptblock. The fake serves canned pages AND
+# asserts each query's $filter (review F2-1: a fake that ignored the filter let a broken query pass).
 # Pester 3.4 syntax (as Set-AiSpendLimit.Tests.ps1).
 # ---------------------------------------------------------------------------
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
 Import-Module (Join-Path $repoRoot 'scripts/solution-authoring/SpaarkePackageScope.psm1') -Force
 
-$script:RootBu = '00000000-0000-0000-0000-0000000000b0'
-
 function New-FakeGet {
+    # $Pages: endpoint prefix -> @{ Page = <response>; Filter = <substrings the endpoint must contain> }
     param([hashtable]$Pages)
-    # Serves the first page whose key is a prefix of the endpoint.
     return {
         param($endpoint)
-        foreach ($k in $Pages.Keys) { if ($endpoint.StartsWith($k)) { return $Pages[$k] } }
+        foreach ($k in $Pages.Keys) {
+            if ($endpoint.StartsWith($k)) {
+                foreach ($needle in @($Pages[$k].Filter)) {
+                    if ($needle -and -not $endpoint.Contains($needle)) { throw "GET $endpoint lacks the expected filter '$needle'" }
+                }
+                return $Pages[$k].Page
+            }
+        }
         throw "unexpected GET $endpoint"
     }.GetNewClosure()
 }
 
-function New-Scope([object[]]$Exclusions = @()) {
+function New-Scope([object[]]$Exclusions = @(), [string[]]$AlsoIncluded = @('Secure Record Owner')) {
     [PSCustomObject]@{
         prefix                = 'sprk_'
         roleNamePattern       = '(?i)^spaarke '
-        roleNamesAlsoIncluded = @('Secure Record Owner')
+        roleNamesAlsoIncluded = $AlsoIncluded
         exclusions            = $Exclusions
     }
 }
 
+function Page([object[]]$Value, [string]$Next = $null) {
+    $p = [PSCustomObject]@{ value = $Value }
+    if ($Next) { $p | Add-Member -NotePropertyName '@odata.nextLink' -NotePropertyValue $Next }
+    $p
+}
+
+$script:UnmanagedPrefix = @('startswith(', "'sprk_')", 'ismanaged eq false')
+
 function Get-DevPages {
     @{
-        'EntityDefinitions'              = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ LogicalName = 'sprk_matter'; MetadataId = 'E1'; IsManaged = $false; IsIntersect = $false; Attributes = @() }
-                [PSCustomObject]@{ LogicalName = 'sprk_matter_contact'; MetadataId = 'E2'; IsManaged = $false; IsIntersect = $true; Attributes = @() }
-                [PSCustomObject]@{ LogicalName = 'contact'; MetadataId = 'E3'; IsManaged = $true; IsIntersect = $false; Attributes = @(
-                        [PSCustomObject]@{ LogicalName = 'sprk_customerid'; MetadataId = 'A1'; IsCustomAttribute = $true; IsManaged = $false; AttributeOf = $null }
-                        [PSCustomObject]@{ LogicalName = 'sprk_customeridname'; MetadataId = 'A2'; IsCustomAttribute = $true; IsManaged = $false; AttributeOf = 'sprk_customerid' }
-                        [PSCustomObject]@{ LogicalName = 'firstname'; MetadataId = 'A3'; IsCustomAttribute = $false; IsManaged = $true; AttributeOf = $null }
-                    ) }
-            ) }
-        'GlobalOptionSetDefinitions'     = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ Name = 'sprk_status'; MetadataId = 'O1'; IsManaged = $false }
-                [PSCustomObject]@{ Name = 'msdyn_x'; MetadataId = 'O2'; IsManaged = $true }
-            ) }
-        'webresourceset'                 = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ webresourceid = 'W1'; name = 'sprk_spaarkeai' }
-            ); '@odata.nextLink' = 'https://dev/api/data/v9.2/webresourceset?page2' }
-        'https://dev/api/data/v9.2/webresourceset?page2' = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ webresourceid = 'W2'; name = 'sprk_dailyupdate' }
-            ) }
-        'customcontrols'                 = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ customcontrolid = 'C1'; name = 'sprk_Spaarke.Records.MatterHeader' }
-                [PSCustomObject]@{ customcontrolid = 'C2'; name = 'sprk_Spaarke.Controls.DueDatesWidget' }
-            ) }
-        'appmodules'                     = [PSCustomObject]@{ value = @([PSCustomObject]@{ appmoduleid = 'M1'; uniquename = 'sprk_MatterManagement' }) }
-        'sitemaps'                       = [PSCustomObject]@{ value = @() }
-        'environmentvariabledefinitions' = [PSCustomObject]@{ value = @([PSCustomObject]@{ environmentvariabledefinitionid = 'V1'; schemaname = 'sprk_BffApiBaseUrl' }) }
-        'businessunits'                  = [PSCustomObject]@{ value = @([PSCustomObject]@{ businessunitid = $script:RootBu }) }
-        'roles'                          = [PSCustomObject]@{ value = @(
-                [PSCustomObject]@{ roleid = 'R1'; name = 'Spaarke Core User' }
-                [PSCustomObject]@{ roleid = 'R2'; name = 'Secure Record Owner' }
-                [PSCustomObject]@{ roleid = 'R3'; name = 'System Customizer' }
-            ) }
+        'EntityDefinitions'              = @{ Page = (Page @(
+                    [PSCustomObject]@{ LogicalName = 'sprk_matter'; MetadataId = 'E1'; IsManaged = $false; IsIntersect = $false; Attributes = @() }
+                    [PSCustomObject]@{ LogicalName = 'sprk_matter_contact'; MetadataId = 'E2'; IsManaged = $false; IsIntersect = $true; Attributes = @() }
+                    [PSCustomObject]@{ LogicalName = 'sprk_vendorthing'; MetadataId = 'E4'; IsManaged = $true; IsIntersect = $false; Attributes = @() }
+                    [PSCustomObject]@{ LogicalName = 'contact'; MetadataId = 'E3'; IsManaged = $true; IsIntersect = $false; Attributes = @(
+                            [PSCustomObject]@{ LogicalName = 'sprk_customerid'; MetadataId = 'A1'; IsCustomAttribute = $true; IsManaged = $false; AttributeOf = $null }
+                            [PSCustomObject]@{ LogicalName = 'sprk_customeridname'; MetadataId = 'A2'; IsCustomAttribute = $true; IsManaged = $false; AttributeOf = 'sprk_customerid' }
+                            [PSCustomObject]@{ LogicalName = 'firstname'; MetadataId = 'A3'; IsCustomAttribute = $false; IsManaged = $true; AttributeOf = $null }
+                            [PSCustomObject]@{ LogicalName = 'sprk_vendorcol'; MetadataId = 'A4'; IsCustomAttribute = $true; IsManaged = $true; AttributeOf = $null }
+                        ) }
+                )) }
+        'GlobalOptionSetDefinitions'     = @{ Page = (Page @(
+                    [PSCustomObject]@{ Name = 'sprk_status'; MetadataId = 'O1'; IsManaged = $false }
+                    [PSCustomObject]@{ Name = 'msdyn_x'; MetadataId = 'O2'; IsManaged = $true }
+                )) }
+        'webresourceset'                 = @{ Filter = $script:UnmanagedPrefix; Page = (Page @([PSCustomObject]@{ webresourceid = 'W1'; name = 'sprk_spaarkeai' }) 'https://dev/api/data/v9.2/webresourceset?page2') }
+        'https://dev/api/data/v9.2/webresourceset?page2' = @{ Page = (Page @([PSCustomObject]@{ webresourceid = 'W2'; name = 'sprk_dailyupdate' })) }
+        'customcontrols'                 = @{ Filter = $script:UnmanagedPrefix; Page = (Page @(
+                    [PSCustomObject]@{ customcontrolid = 'C1'; name = 'sprk_Spaarke.Records.MatterHeader' }
+                    [PSCustomObject]@{ customcontrolid = 'C2'; name = 'sprk_Spaarke.Controls.DueDatesWidget' }
+                )) }
+        'appmodules'                     = @{ Filter = $script:UnmanagedPrefix; Page = (Page @([PSCustomObject]@{ appmoduleid = 'M1'; uniquename = 'sprk_MatterManagement' })) }
+        'sitemaps'                       = @{ Filter = $script:UnmanagedPrefix; Page = (Page @()) }
+        'environmentvariabledefinitions' = @{ Filter = $script:UnmanagedPrefix; Page = (Page @([PSCustomObject]@{ environmentvariabledefinitionid = 'V1'; schemaname = 'sprk_BffApiBaseUrl' })) }
+        'savedqueries'                   = @{ Filter = 'ismanaged eq false'; Page = (Page @(
+                    [PSCustomObject]@{ savedqueryid = 'Q1'; name = 'Contacts with Identity Collisions'; returnedtypecode = 'contact' }
+                    [PSCustomObject]@{ savedqueryid = 'Q2'; name = 'Active Matters'; returnedtypecode = 'sprk_matter' }
+                )) }
+        'systemforms'                    = @{ Filter = 'ismanaged eq false'; Page = (Page @()) }
+        'fieldsecurityprofiles'          = @{ Filter = 'ismanaged eq false'; Page = (Page @([PSCustomObject]@{ fieldsecurityprofileid = 'P1'; name = 'Identity Link Readers' })) }
+        'roles'                          = @{ Filter = 'ismanaged eq false'; Page = (Page @(
+                    [PSCustomObject]@{ roleid = 'R1'; name = 'Spaarke Core User'; _parentrootroleid_value = 'R1' }
+                    [PSCustomObject]@{ roleid = 'R1b'; name = 'Spaarke Core User'; _parentrootroleid_value = 'R1' }
+                    [PSCustomObject]@{ roleid = 'R2'; name = 'Secure Record Owner'; _parentrootroleid_value = 'R2' }
+                    [PSCustomObject]@{ roleid = 'R3'; name = 'System Customizer'; _parentrootroleid_value = 'R3' }
+                )) }
     }
 }
 
 Describe 'Get-PackageRuleComponents (T218c)' {
-    $rule = Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope (New-Scope)
+    $rule = @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope (New-Scope))
     $names = @($rule | ForEach-Object Name)
 
-    It 'puts every sprk_ web resource in scope, across pages — including code pages in no Spaarke solution' {
+    It 'puts every sprk_ web resource in scope, across pages' {
         ($names -contains 'sprk_spaarkeai') | Should Be $true
         ($names -contains 'sprk_dailyupdate') | Should Be $true
     }
 
-    It 'takes custom tables whole, skips intersect tables, and takes only the sprk_ columns of OOB tables' {
+    It 'takes unmanaged custom tables whole; skips intersect and managed tables; OOB tables give only unmanaged sprk_ columns' {
         ($names -contains 'sprk_matter') | Should Be $true
         ($names -contains 'sprk_matter_contact') | Should Be $false
+        ($names -contains 'sprk_vendorthing') | Should Be $false
         ($names -contains 'contact.sprk_customerid') | Should Be $true
         ($names -contains 'contact.sprk_customeridname') | Should Be $false
         ($names -contains 'contact.firstname') | Should Be $false
+        ($names -contains 'contact.sprk_vendorcol') | Should Be $false
         ($rule | Where-Object Name -eq 'contact.sprk_customerid').ParentEntityId | Should Be 'e3'
     }
 
-    It 'skips managed and non-prefixed components' {
+    It 'skips managed and non-prefixed option sets' {
         ($names -contains 'msdyn_x') | Should Be $false
         ($names -contains 'sprk_status') | Should Be $true
     }
 
-    It 'takes root-unit roles by pattern or by name, nothing else' {
-        ($names -contains 'Spaarke Core User') | Should Be $true
-        ($names -contains 'Secure Record Owner') | Should Be $true
-        ($names -contains 'System Customizer') | Should Be $false
+    It 'takes unmanaged views on OOB tables, not those on sprk_ tables (they ship with the table)' {
+        ($names -contains 'contact: Contacts with Identity Collisions') | Should Be $true
+        ($names -contains 'sprk_matter: Active Matters') | Should Be $false
+    }
+
+    It 'takes unmanaged field security profiles' {
+        ($names -contains 'Identity Link Readers') | Should Be $true
+    }
+
+    It 'takes ROOT roles from any business unit by pattern or name - never a copy, never another role' {
+        @($rule | Where-Object { $_.TypeName -eq 'Role' } | ForEach-Object ObjectId) | Should Be @('r1', 'r2')
     }
 
     It 'adds nothing for a type with no components (empty page)' {
@@ -110,12 +138,18 @@ Describe 'Get-PackageRuleComponents (T218c)' {
         $wr.ObjectId | Should Be 'w1'
         $wr.ComponentType | Should Be 61
     }
+
+    It 'fails when a query loses its unmanaged/prefix filter (the fake checks the filter text)' {
+        $pages = Get-DevPages
+        $pages['customcontrols'].Filter = @('ismanaged eq true')
+        { Get-PackageRuleComponents -Get (New-FakeGet $pages) -Scope (New-Scope) } | Should Throw 'lacks the expected filter'
+    }
 }
 
 Describe 'Read-PackageScope + exclusions (T218c)' {
     It 'marks an excluded component with its reason' {
         $scope = New-Scope @([PSCustomObject]@{ type = 'CustomControl'; name = 'sprk_Spaarke.Controls.DueDatesWidget'; reason = 'not on a form'; date = '2026-08-21' })
-        $rule = Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope
+        $rule = @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope)
         $hit = $rule | Where-Object Name -eq 'sprk_Spaarke.Controls.DueDatesWidget'
         $hit.Excluded | Should Be $true
         $hit.Reason | Should Be 'not on a form'
@@ -143,25 +177,60 @@ Describe 'Read-PackageScope + exclusions (T218c)' {
 }
 
 Describe 'Compare-PackageScope (T218c)' {
-    $scope = New-Scope @(
+    $scope = New-Scope -Exclusions @(
         [PSCustomObject]@{ type = 'CustomControl'; name = 'sprk_Spaarke.Controls.DueDatesWidget'; reason = 'r'; date = '2026-08-21' }
         [PSCustomObject]@{ type = 'Role'; name = 'Gone Role'; reason = 'r'; date = '2026-08-21' }
-    )
-    $rule = Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope
-    $membership = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($k in '1|e1', '2|a1', '9|o1', '61|w2', '66|c1', '66|c2', '80|m1', '380|v1', '20|r1', '20|r2') { [void]$membership.Add($k) }
+    ) -AlsoIncluded @('Secure Record Owner', 'No Such Role')
+    $rule = @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope)
+    $membership = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($k in '2|a1', '9|o1', '61|w2', '66|c1', '66|c2', '80|m1', '380|v1', '20|r1', '20|r2', '26|q1', '70|p1') { $membership[$k] = 0 }
+    $membership['1|e1'] = 2
+    $membership['1|e3'] = 1
+    $membership['1|ms99'] = 0
+    $membership['381|val1'] = 0
+    $membership['10075|x'] = 0
     $result = Compare-PackageScope -RuleComponents $rule -MembershipKeys $membership -Scope $scope
 
     It 'reports the code page missing from the package' {
         @($result.MissingFromPackage | ForEach-Object Name) | Should Be @('sprk_spaarkeai')
     }
 
+    It 'reports an in-scope table packaged as a shell' {
+        @($result.PackagedAsShell | ForEach-Object Name) | Should Be @('sprk_matter')
+    }
+
     It 'reports an excluded component that is packaged anyway' {
         @($result.ExcludedButInPackage | ForEach-Object Name) | Should Be @('sprk_Spaarke.Controls.DueDatesWidget')
     }
 
-    It 'reports an exclusion that matches nothing (stale)' {
+    It 'reports packaged components the rule does not explain (dragged-in tables, env-var values), not OOB parents' {
+        @($result.OutsideRule | ForEach-Object { "$($_.ComponentType)|$($_.ObjectId)" }) | Should Be @('1|ms99', '381|val1')
+    }
+
+    It 'reports a stale exclusion and an unmatched extra role name' {
         @($result.UnmatchedExclusions | ForEach-Object name) | Should Be @('Gone Role')
+        @($result.UnmatchedAlsoIncluded) | Should Be @('No Such Role')
+    }
+}
+
+Describe 'Find-LeakyDependencies (T218c F12 guard)' {
+    It 'reports a missing dependency on solution=Active and ignores first-party ones' {
+        $path = Join-Path $TestDrive 'Solution.xml'
+        @'
+<ImportExportXml><SolutionManifest><MissingDependencies>
+  <MissingDependency><Required type="61" schemaName="sprk_/scripts/x.js" solution="Active" /><Dependent type="60" schemaName="sprk_matter main" /></MissingDependency>
+  <MissingDependency><Required type="1" schemaName="msdyn_x" solution="msdynce_AppCommon (9.0)" /><Dependent type="1" schemaName="sprk_matter" /></MissingDependency>
+</MissingDependencies></SolutionManifest></ImportExportXml>
+'@ | Set-Content $path
+        $leaks = @(Find-LeakyDependencies -SolutionXmlPath $path)
+        $leaks.Count | Should Be 1
+        $leaks[0] | Should Match 'sprk_/scripts/x.js'
+    }
+
+    It 'passes a manifest without leaks' {
+        $path = Join-Path $TestDrive 'Clean.xml'
+        '<ImportExportXml><SolutionManifest><MissingDependencies /></SolutionManifest></ImportExportXml>' | Set-Content $path
+        @(Find-LeakyDependencies -SolutionXmlPath $path).Count | Should Be 0
     }
 }
 

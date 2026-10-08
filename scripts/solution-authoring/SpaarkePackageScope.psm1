@@ -9,8 +9,9 @@
       publisher prefix (sprk_):
         Entity (not N:N intersect tables — they ship with their relationship), global OptionSet, WebResource
         (incl. every code page), CustomControl (PCF), AppModule, SiteMap, EnvironmentVariableDefinition;
-      + sprk_ custom columns on non-sprk (OOB) tables;
-      + root-business-unit security roles whose name matches the scope's role pattern, plus the named extras;
+      + sprk_ custom columns on non-sprk (OOB) tables, and unmanaged system views / forms on OOB tables;
+      + root security roles (any business unit) whose name matches the scope's role pattern, plus the named extras;
+      + every unmanaged field security profile (they secure sprk_ columns; no other publisher authors in dev);
       − the committed exclusions in docs/data-model/package-scope.json (each with a reason and a date).
     Environment-variable VALUES are never in scope (H7 writes them per customer).
 
@@ -34,7 +35,13 @@ $script:TypeCodes = [ordered]@{
     CustomControl                 = 66
     AppModule                     = 80
     EnvironmentVariableDefinition = 380
+    SavedQuery                    = 26
+    SystemForm                    = 60
+    FieldSecurityProfile          = 70
 }
+
+# Types the "packaged but outside the rule" check covers (membership of these types must be explained by the rule).
+$script:AccountedTypes = @(1, 9, 20, 26, 60, 61, 62, 66, 70, 80, 380, 381)
 
 function Get-PackageComponentTypeCode {
     param([Parameter(Mandatory)][string]$TypeName)
@@ -149,10 +156,27 @@ function Get-PackageRuleComponents {
         $items.Add((New-ScopeItem EnvironmentVariableDefinition $v.environmentvariabledefinitionid $v.schemaname))
     }
 
-    # Roles: root business unit only (a role's copies in child units share its root id).
-    $rootBu = @(Get-AllPages $Get "businessunits?`$select=businessunitid&`$filter=_parentbusinessunitid_value eq null")[0]
+    # Views and forms on OOB tables (those on sprk_ tables ship with their table).
+    foreach ($q in @(Get-AllPages $Get "savedqueries?`$select=savedqueryid,name,returnedtypecode&`$filter=ismanaged eq false")) {
+        if ($q.returnedtypecode -and -not ([string]$q.returnedtypecode).StartsWith($prefix)) {
+            $items.Add((New-ScopeItem SavedQuery $q.savedqueryid "$($q.returnedtypecode): $($q.name)"))
+        }
+    }
+    foreach ($f in @(Get-AllPages $Get "systemforms?`$select=formid,name,objecttypecode&`$filter=ismanaged eq false")) {
+        if ($f.objecttypecode -and -not ([string]$f.objecttypecode).StartsWith($prefix)) {
+            $items.Add((New-ScopeItem SystemForm $f.formid "$($f.objecttypecode): $($f.name)"))
+        }
+    }
+
+    foreach ($p in @(Get-AllPages $Get "fieldsecurityprofiles?`$select=fieldsecurityprofileid,name&`$filter=ismanaged eq false")) {
+        $items.Add((New-ScopeItem FieldSecurityProfile $p.fieldsecurityprofileid $p.name))
+    }
+
+    # Roles: ROOT roles (roleid = parentrootroleid) in ANY business unit — a role's copies in descendant units
+    # share its root id; a role authored in a child unit (e.g. Secure Record Owner) is its own root.
     $alsoIncluded = @($Scope.roleNamesAlsoIncluded)
-    foreach ($r in @(Get-AllPages $Get "roles?`$select=roleid,name&`$filter=_businessunitid_value eq $($rootBu.businessunitid) and ismanaged eq false")) {
+    foreach ($r in @(Get-AllPages $Get "roles?`$select=roleid,name,_parentrootroleid_value&`$filter=ismanaged eq false")) {
+        if ([string]$r.roleid -ne [string]$r._parentrootroleid_value) { continue }
         if ($r.name -match $Scope.roleNamePattern -or $alsoIncluded -contains $r.name) {
             $items.Add((New-ScopeItem Role $r.roleid $r.name))
         }
@@ -167,35 +191,85 @@ function Get-PackageRuleComponents {
 }
 
 function Get-SolutionMembershipKeys {
-    <# .SYNOPSIS "componenttype|objectid" keys of a solution's components (lowercase ids). #>
+    <#
+    .SYNOPSIS "componenttype|objectid" → rootcomponentbehavior (0 = with all subcomponents, 1 = no subcomponents,
+              2 = shell) for every component of a solution (lowercase ids).
+    #>
     param([Parameter(Mandatory)][scriptblock]$Get, [Parameter(Mandatory)][string]$SolutionUniqueName)
     $sol = @(Get-AllPages $Get "solutions?`$select=solutionid&`$filter=uniquename eq '$SolutionUniqueName'")
     if ($sol.Count -eq 0) { throw "Solution '$SolutionUniqueName' not found." }
-    $keys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($c in @(Get-AllPages $Get "solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($sol[0].solutionid)")) {
-        [void]$keys.Add("$($c.componenttype)|$(([string]$c.objectid).ToLowerInvariant())")
+    $keys = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($c in @(Get-AllPages $Get "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=_solutionid_value eq $($sol[0].solutionid)")) {
+        $behavior = if ($null -ne $c.rootcomponentbehavior) { [int]$c.rootcomponentbehavior } else { 0 }
+        $keys["$($c.componenttype)|$(([string]$c.objectid).ToLowerInvariant())"] = $behavior
     }
     return , $keys
 }
 
 function Compare-PackageScope {
     <#
-    .SYNOPSIS Two-way comparison of the rule against a solution's membership.
-    .OUTPUTS MissingFromPackage (in scope, not excluded, not in the solution) · ExcludedButInPackage ·
-             UnmatchedExclusions (exclusions that match nothing in the environment — stale entries).
+    .SYNOPSIS Two-way comparison of the rule against a solution's membership (from Get-SolutionMembershipKeys).
+    .OUTPUTS
+      MissingFromPackage   — in scope, not excluded, not in the solution.
+      PackagedAsShell      — an in-scope sprk_ table packaged without its subcomponents (behavior ≠ 0): it would
+                             ship without its columns, forms and views.
+      ExcludedButInPackage — excluded, yet packaged.
+      OutsideRule          — packaged components of the accounted types the rule does not explain (e.g. Microsoft
+                             tables dragged in as dependencies, env-var VALUES); OOB parent tables of in-scope
+                             columns / views / forms are explained.
+      UnmatchedExclusions  — exclusions that match nothing (stale).
+      UnmatchedAlsoIncluded— roleNamesAlsoIncluded names that match no root role.
     #>
-    param([Parameter(Mandatory)]$RuleComponents, [Parameter(Mandatory)]$MembershipKeys, [Parameter(Mandatory)]$Scope)
-    $missing = @($RuleComponents | Where-Object { -not $_.Excluded -and -not $MembershipKeys.Contains("$($_.ComponentType)|$($_.ObjectId)") })
-    $excludedIn = @($RuleComponents | Where-Object { $_.Excluded -and $MembershipKeys.Contains("$($_.ComponentType)|$($_.ObjectId)") })
+    param(
+        [Parameter(Mandatory)]$RuleComponents,
+        [Parameter(Mandatory)]$MembershipKeys,
+        [Parameter(Mandatory)]$Scope,
+        [string[]]$ExplainedEntityIds = @()
+    )
+    $rule = @($RuleComponents)
+    $key = { param($c) "$($c.ComponentType)|$($c.ObjectId)" }
+    $missing = @($rule | Where-Object { -not $_.Excluded -and -not $MembershipKeys.ContainsKey((& $key $_)) })
+    $shell = @($rule | Where-Object {
+            -not $_.Excluded -and $_.TypeName -eq 'Entity' -and $MembershipKeys.ContainsKey((& $key $_)) -and
+            $MembershipKeys[(& $key $_)] -ne 0
+        })
+    $excludedIn = @($rule | Where-Object { $_.Excluded -and $MembershipKeys.ContainsKey((& $key $_)) })
+
+    $explained = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($c in $rule) { [void]$explained.Add((& $key $c)); if ($c.ParentEntityId) { [void]$explained.Add("1|$($c.ParentEntityId)") } }
+    foreach ($id in $ExplainedEntityIds) { [void]$explained.Add("1|$($id.ToLowerInvariant())") }
+    $outside = @($MembershipKeys.Keys | Where-Object {
+            $t = [int]($_ -split '\|')[0]
+            $script:AccountedTypes -contains $t -and -not $explained.Contains($_)
+        } | Sort-Object | ForEach-Object {
+            $parts = $_ -split '\|'
+            [PSCustomObject]@{ ComponentType = [int]$parts[0]; ObjectId = $parts[1]; Behavior = $MembershipKeys[$_] }
+        })
+
     $unmatched = @(@($Scope.exclusions) | Where-Object {
             $e = $_
-            -not (@($RuleComponents) | Where-Object { $_.TypeName -eq $e.type -and $_.Name -eq $e.name })
+            -not ($rule | Where-Object { $_.TypeName -eq $e.type -and $_.Name -eq $e.name })
+        })
+    $unmatchedAlso = @(@($Scope.roleNamesAlsoIncluded) | Where-Object {
+            $n = $_
+            -not ($rule | Where-Object { $_.TypeName -eq 'Role' -and $_.Name -eq $n })
         })
     [PSCustomObject]@{
-        MissingFromPackage   = $missing
-        ExcludedButInPackage = $excludedIn
-        UnmatchedExclusions  = $unmatched
+        MissingFromPackage    = $missing
+        PackagedAsShell       = $shell
+        ExcludedButInPackage  = $excludedIn
+        OutsideRule           = $outside
+        UnmatchedExclusions   = $unmatched
+        UnmatchedAlsoIncluded = $unmatchedAlso
     }
+}
+
+function Get-EntityNameMap {
+    <# .SYNOPSIS MetadataId (lowercase) → LogicalName, for naming OutsideRule tables in reports. #>
+    param([Parameter(Mandatory)][scriptblock]$Get)
+    $map = @{}
+    foreach ($e in @(Get-AllPages $Get "EntityDefinitions?`$select=LogicalName,MetadataId")) { $map[([string]$e.MetadataId).ToLowerInvariant()] = $e.LogicalName }
+    return $map
 }
 
 function Find-EnvironmentVariableValues {
@@ -217,5 +291,24 @@ function Find-EnvironmentVariableValues {
     }
 }
 
+function Find-LeakyDependencies {
+    <#
+    .SYNOPSIS F12 guard: the exported solution's Other/Solution.xml must list NO missing dependency on
+              solution="Active" — that is a Spaarke component the package references but does not contain, so the
+              managed import fails in a fresh environment (lessons-learned-model1-prod-standup-2026-08-22.md F12).
+              Returns one line per leaky dependency.
+    #>
+    param([Parameter(Mandatory)][string]$SolutionXmlPath)
+    [xml]$xml = Get-Content $SolutionXmlPath -Raw
+    $leaks = $xml.SelectNodes('//MissingDependency') | Where-Object {
+        $r = $_.SelectSingleNode('Required')
+        $r -and ([string]$r.GetAttribute('solution')).StartsWith('Active')
+    }
+    return $leaks | ForEach-Object {
+        $r = $_.SelectSingleNode('Required'); $d = $_.SelectSingleNode('Dependent')
+        "requires type $($r.GetAttribute('type')) $($r.GetAttribute('schemaName'))$($r.GetAttribute('id')) (solution=Active) <- needed by type $($d.GetAttribute('type')) $($d.GetAttribute('schemaName'))"
+    }
+}
+
 Export-ModuleMember -Function Get-PackageComponentTypeCode, Read-PackageScope, Get-PackageRuleComponents, `
-    Get-SolutionMembershipKeys, Compare-PackageScope, Find-EnvironmentVariableValues
+    Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies

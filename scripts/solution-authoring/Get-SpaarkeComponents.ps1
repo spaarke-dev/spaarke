@@ -11,10 +11,8 @@
     to know what to include in the packaged managed solution, and that Test-SolutionCompleteness.ps1
     compares against for drift detection.
 
-    T218c: the inventory also carries `packageScope` — the components the package scope RULE puts in SpaarkeMaster
-    (scripts/solution-authoring/SpaarkePackageScope.psm1 + docs/data-model/package-scope.json), with exclusions
-    marked. Solution membership (above) is what exists; packageScope is what must ship. Test-SolutionCompleteness.ps1
-    compares the two.
+    T218c: this inventory records what EXISTS in Spaarke solutions. What must SHIP is decided by the package scope
+    rule (SpaarkePackageScope.psm1 + docs/data-model/package-scope.json) and checked by Test-SolutionCompleteness.ps1.
 
     This is a READ-ONLY script - safe to run any time.
 
@@ -47,8 +45,7 @@ param(
     [string]$EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com',
     [string]$PublisherUniqueName = 'Spaarke',
     [string]$OutputPath = "$PSScriptRoot/../../docs/data-model/spaarke-components-inventory.json",
-    [string]$ExcludeSolutionPatterns = 'Test$|Temp|SCRATCH|MasterTest|TestSpaarke',
-    [string]$ScopePath = "$PSScriptRoot/../../docs/data-model/package-scope.json"
+    [string]$ExcludeSolutionPatterns = 'Test$|Temp|SCRATCH|MasterTest|TestSpaarke'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -195,19 +192,6 @@ $distinctComponents = $allComponents | Group-Object ObjectId, ComponentType | Fo
 
 Write-Host "    Distinct components (dedup): $($distinctComponents.Count)" -ForegroundColor Green
 
-# ---- 4b. Package scope rule (T218c) -------------------------------------------
-
-Import-Module (Join-Path $PSScriptRoot 'SpaarkePackageScope.psm1') -Force
-$scope = Read-PackageScope -Path $ScopePath
-$get = {
-    param($endpoint)
-    $uri = if ($endpoint -match '^https://') { $endpoint } else { "$EnvironmentUrl/api/data/v9.2/$endpoint" }
-    Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
-}.GetNewClosure()
-Write-Host "==> Applying the package scope rule" -ForegroundColor Cyan
-$packageScope = @(Get-PackageRuleComponents -Get $get -Scope $scope)
-Write-Host "    In scope: $($packageScope.Count) (excluded: $(@($packageScope | Where-Object Excluded).Count))" -ForegroundColor Green
-
 # ---- 5. Emit inventory JSON -------------------------------------------------
 
 $outputDir = Split-Path $OutputPath -Parent
@@ -251,7 +235,6 @@ $inventory = [PSCustomObject]@{
         }
     })
     distinctComponents = @($distinctComponents | Sort-Object ComponentTypeName, ObjectId)
-    packageScope       = @($packageScope | Sort-Object TypeName, Name | Select-Object TypeName, ComponentType, ObjectId, Name, Excluded, Reason)
 }
 
 $inventoryJson = $inventory | ConvertTo-Json -Depth 10

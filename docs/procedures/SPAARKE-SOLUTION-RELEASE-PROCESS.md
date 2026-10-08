@@ -68,17 +68,22 @@ Manifest schema read by H6:
 
 1. **Dev is release-ready**: the content is finished and tested in `spaarkedev1`.
 2. **Drift report** (read-only): `./scripts/solution-authoring/Test-SolutionCompleteness.ps1`. It fails when a component
-   matches the rule but is not in SpaarkeMaster, an excluded component is packaged, an exclusion is stale, an OOB
-   column is unlisted, or the committed inventory drifted.
+   matches the rule but is not in SpaarkeMaster, an in-scope table is packaged as a shell (without its columns), an
+   excluded component is packaged, something is packaged outside the rule (e.g. Microsoft tables, env-var values), a
+   scope entry matches nothing, an OOB column is unlisted, or the committed inventory drifted.
 3. **Classify each finding**: add to the package, or add to `package-scope.json` with a reason and date. A new `sprk_` column on
    an OOB table also goes into `oob-customizations.yaml`.
 4. **Assemble** (writes to dev — the release owner runs it): `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, review, then
-   without `-WhatIf`. It adds what the rule finds missing with `AddRequiredComponents = true` (F12 — a managed export
-   built without it does not install in a fresh environment); OOB tables go in metadata-only. Bump the version (semver: Major = breaking schema change; Minor = new table/feature; Build =
+   without `-WhatIf`. It adds what the rule finds missing and re-adds tables packaged as shells, each custom table WITH
+   all its subcomponents; it never pulls in dependencies (`AddRequiredComponents = false` — with `true`, the 2026-08-23
+   rebuild dragged five Microsoft tables into SpaarkeMaster); OOB tables go in metadata-only. It bumps the version only
+   when every add succeeded. Anything packaged outside the rule is reported for an owner-approved removal. Bump the version (semver: Major = breaking schema change; Minor = new table/feature; Build =
    additive content; Revision = a fix for one customer stamp).
 5. **Export to source**: `./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1` exports managed + unmanaged,
-   unpacks into `src/dataverse/solutions/SpaarkeMaster/` and strips environment-variable values (`-WhatIf` prints the
-   commands; `pac auth` must already point at spaarkedev1).
+   unpacks into `src/dataverse/solutions/SpaarkeMaster/`, strips environment-variable values, and **fails if
+   `Other/Solution.xml` lists a missing dependency on `solution="Active"`** — the F12 leak: a Spaarke component the
+   package references but does not contain, so the managed import fails in a fresh environment. `-WhatIf` prints the
+   commands; every export names `--environment` (default spaarkedev1).
 6. **PR**: the diff of the unpacked source is the release review. The release note lists **removed components**
    (they are deleted from managed customer environments on upgrade — §5).
 7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml`. CI packs both zips from git, fails if a zip

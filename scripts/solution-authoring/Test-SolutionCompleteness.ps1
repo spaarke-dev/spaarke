@@ -7,11 +7,15 @@
     T218c (ADR-027 §3 amended 2026-10-07). Reports, and fails on:
       1. MISSING FROM PACKAGE  — in scope by rule (docs/data-model/package-scope.json), not excluded, not in
                                  SpaarkeMaster. (First run 2026-10-07: 44, e.g. 11 PCFs and the AI Setup app.)
-      2. EXCLUDED BUT PACKAGED — listed as excluded, yet SpaarkeMaster holds it.
-      3. STALE EXCLUSION       — an exclusion that matches nothing in the environment.
-      4. OOB COLUMN UNLISTED   — a sprk_ column on an OOB table that docs/data-model/oob-customizations.yaml does not
+      2. PACKAGED AS SHELL     — an in-scope sprk_ table in SpaarkeMaster without its subcomponents (it would ship
+                                 without its columns, forms and views).
+      3. EXCLUDED BUT PACKAGED — listed as excluded, yet SpaarkeMaster holds it.
+      4. OUTSIDE THE RULE      — packaged components the rule does not explain (e.g. Microsoft tables dragged in as
+                                 dependencies, env-var VALUES).
+      5. STALE EXCLUSION / UNMATCHED EXTRA ROLE - scope entries that match nothing.
+      6. OOB COLUMN UNLISTED   — a sprk_ column on an OOB table that docs/data-model/oob-customizations.yaml does not
                                  list (governance rule 4: listed in the same PR that adds it).
-      5. INVENTORY DRIFT       — the committed docs/data-model/spaarke-components-inventory.json differs from a fresh
+      7. INVENTORY DRIFT       — the committed docs/data-model/spaarke-components-inventory.json differs from a fresh
                                  Get-SpaarkeComponents.ps1 run (skipped when -SkipInventory).
 
     Exit 0 = clean; 1 = drift (with -FailOnDrift, the default).
@@ -95,13 +99,21 @@ function Write-Section([string]$Title, $Items, [scriptblock]$Format) {
 Write-Host ''
 Write-Host '==> DRIFT REPORT' -ForegroundColor Cyan
 Write-Section 'MISSING FROM PACKAGE (add with Assemble-SpaarkeMasterSolution.ps1, or exclude with a reason)' ($diff.MissingFromPackage | Sort-Object TypeName, Name) { "+ $($args[0].TypeName) $($args[0].Name)" }
-Write-Section 'EXCLUDED BUT PACKAGED' ($diff.ExcludedButInPackage) { "! $($args[0].TypeName) $($args[0].Name) — $($args[0].Reason)" }
-Write-Section 'STALE EXCLUSION (matches nothing — remove it)' ($diff.UnmatchedExclusions) { "~ $($args[0].type) $($args[0].name)" }
+Write-Section 'PACKAGED AS SHELL (re-add with subcomponents: Assemble-SpaarkeMasterSolution.ps1)' ($diff.PackagedAsShell | Sort-Object Name) { "~ $($args[0].Name)" }
+Write-Section 'EXCLUDED BUT PACKAGED' ($diff.ExcludedButInPackage) { "! $($args[0].TypeName) $($args[0].Name) - $($args[0].Reason)" }
+$entityNames = if (@($diff.OutsideRule).Count -gt 0) { Get-EntityNameMap -Get $get } else { @{} }
+Write-Section 'OUTSIDE THE RULE (packaged, not explained by the rule - remove, owner-approved)' ($diff.OutsideRule) {
+    $x = $args[0]
+    if ($x.ComponentType -eq 1 -and $entityNames.ContainsKey($x.ObjectId)) { "- table $($entityNames[$x.ObjectId]) (behavior $($x.Behavior))" } else { "- type $($x.ComponentType) $($x.ObjectId)" }
+}
+Write-Section 'STALE EXCLUSION (matches nothing - remove it)' ($diff.UnmatchedExclusions) { "~ $($args[0].type) $($args[0].name)" }
+Write-Section 'roleNamesAlsoIncluded MATCHES NO ROOT ROLE' ($diff.UnmatchedAlsoIncluded) { "~ $($args[0])" }
 Write-Section 'OOB COLUMN NOT LISTED in oob-customizations.yaml' $oobUnlisted { "? $($args[0].Name)" }
 Write-Section 'INVENTORY: new in dev (refresh with Get-SpaarkeComponents.ps1)' ($invAdded | Group-Object ComponentTypeName) { "+ $($args[0].Name) $($args[0].Count)" }
 Write-Section 'INVENTORY: gone from dev (investigate)' ($invRemoved | Group-Object ComponentTypeName) { "- $($args[0].Name) $($args[0].Count)" }
 
-$hasDrift = (@($diff.MissingFromPackage).Count + @($diff.ExcludedButInPackage).Count + @($diff.UnmatchedExclusions).Count +
+$hasDrift = (@($diff.MissingFromPackage).Count + @($diff.PackagedAsShell).Count + @($diff.ExcludedButInPackage).Count +
+    @($diff.OutsideRule).Count + @($diff.UnmatchedExclusions).Count + @($diff.UnmatchedAlsoIncluded).Count +
     $oobUnlisted.Count + $invAdded.Count + $invRemoved.Count) -gt 0
 if (-not $hasDrift) { Write-Host '    No drift.' -ForegroundColor Green }
 Write-Host ''

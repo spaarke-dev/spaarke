@@ -9,10 +9,14 @@
     tables and the Spaarke root-unit roles, minus committed exclusions. Before T218c this script added only what was
     already inside some Spaarke solution; the first rule run (2026-10-07) found 44 in-scope components missing.
 
-    Components are added with AddRequiredComponents = true (F12, lessons-learned-model1-prod-standup-2026-08-22.md:
-    with false, the managed export referenced its own sub-components as external customizations and would not install
-    in a fresh environment). An OOB table whose sprk_ column is added goes in METADATA-ONLY first
-    (DoNotIncludeSubcomponents), so Spaarke never ships Microsoft's table customizations.
+    Flags (T218c review): every custom table goes in WITH all its subcomponents (DoNotIncludeSubcomponents = false) -
+    the F12 root cause (lessons-learned-model1-prod-standup-2026-08-22.md) was tables added without their columns,
+    forms and ribbons, so the managed export referenced them as external customizations. AddRequiredComponents is
+    FALSE: with true, the 2026-08-23 rebuild dragged five Microsoft tables (environmentvariabledefinition/value,
+    msdyn_aimodelcatalog, msdyn_analysisoverride, msdyn_analysisresultdetail) into SpaarkeMaster whole. Dependencies
+    on Microsoft components are platform dependencies of the import; dependencies on Spaarke components are in scope
+    by rule. An OOB table whose sprk_ column is added goes in METADATA-ONLY first, so Spaarke never ships Microsoft's
+    table customizations. A sprk_ table packaged as a shell (behavior != 0) is re-added with all subcomponents.
 
     Export is a separate step: Export-SpaarkeMasterSource.ps1.
 
@@ -72,13 +76,23 @@ $rule = @(Get-PackageRuleComponents -Get $get -Scope $scope)
 $membership = Get-SolutionMembershipKeys -Get $get -SolutionUniqueName $MasterSolutionUniqueName
 $diff = Compare-PackageScope -RuleComponents $rule -MembershipKeys $membership -Scope $scope
 $toAdd = @($diff.MissingFromPackage)
+$shells = @($diff.PackagedAsShell)
 
 Write-Host "    In scope: $($rule.Count) (excluded: $(@($rule | Where-Object Excluded).Count)) ; already in $MasterSolutionUniqueName : $($rule.Count - $toAdd.Count - @($rule | Where-Object Excluded).Count)"
 foreach ($g in ($toAdd | Group-Object TypeName | Sort-Object Name)) { Write-Host ("    +{0,-32} {1,5}" -f $g.Name, $g.Count) -ForegroundColor Yellow }
-foreach ($x in $diff.ExcludedButInPackage) { Write-Warning "Excluded but packaged: $($x.TypeName) $($x.Name) — remove it from $MasterSolutionUniqueName or drop the exclusion." }
+foreach ($x in $shells) { Write-Host "    ~ shell -> full: $($x.Name)" -ForegroundColor Yellow }
+foreach ($x in $diff.ExcludedButInPackage) { Write-Warning "Excluded but packaged: $($x.TypeName) $($x.Name) - remove it from $MasterSolutionUniqueName (owner-approved) or drop the exclusion." }
+if (@($diff.OutsideRule).Count -gt 0) {
+    $entityNames = Get-EntityNameMap -Get $get
+    foreach ($x in $diff.OutsideRule) {
+        $label = if ($x.ComponentType -eq 1 -and $entityNames.ContainsKey($x.ObjectId)) { "table $($entityNames[$x.ObjectId])" } else { "type $($x.ComponentType) $($x.ObjectId)" }
+        Write-Warning "Packaged outside the rule: $label - remove it from $MasterSolutionUniqueName (owner-approved) unless the rule should cover it."
+    }
+}
 foreach ($x in $diff.UnmatchedExclusions) { Write-Warning "Stale exclusion (matches nothing): $($x.type) $($x.name)" }
+foreach ($x in $diff.UnmatchedAlsoIncluded) { Write-Warning "roleNamesAlsoIncluded matches no root role: $x" }
 
-if ($toAdd.Count -eq 0) { Write-Host "==> Nothing to add. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
+if ($toAdd.Count -eq 0 -and $shells.Count -eq 0) { Write-Host "==> Nothing to add. $MasterSolutionUniqueName is complete." -ForegroundColor Green; exit 0 }
 
 $newVersion = & {
     $parts = @(($master.version -split '\.') + @('0', '0', '0', '0'))[0..3] | ForEach-Object { [int]$_ }
@@ -93,6 +107,7 @@ $newVersion = & {
 
 if ($WhatIfPreference) {
     $toAdd | Sort-Object TypeName, Name | ForEach-Object { Write-Host "    WOULD ADD: $($_.TypeName) $($_.Name)" -ForegroundColor DarkYellow }
+    $shells | ForEach-Object { Write-Host "    WOULD RE-ADD WITH SUBCOMPONENTS: $($_.Name)" -ForegroundColor DarkYellow }
     Write-Host "    WOULD BUMP: $($master.version) -> $newVersion ($VersionBumpKind)" -ForegroundColor DarkYellow
     exit 0
 }
@@ -110,13 +125,13 @@ function Add-Component([string]$Id, [int]$Type, [bool]$Required, [bool]$NoSubcom
 
 $failed = @()
 $addedTables = @{}
-foreach ($item in ($toAdd | Sort-Object ComponentType, Name)) {
+foreach ($item in (@($toAdd) + @($shells) | Sort-Object ComponentType, Name)) {
     try {
-        if ($item.TypeName -eq 'Attribute' -and $item.ParentEntityId -and -not $membership.Contains("1|$($item.ParentEntityId)") -and -not $addedTables.ContainsKey($item.ParentEntityId)) {
+        if ($item.TypeName -eq 'Attribute' -and $item.ParentEntityId -and -not $membership.ContainsKey("1|$($item.ParentEntityId)") -and -not $addedTables.ContainsKey($item.ParentEntityId)) {
             Add-Component $item.ParentEntityId 1 $false $true      # OOB table, metadata-only
             $addedTables[$item.ParentEntityId] = $true
         }
-        Add-Component $item.ObjectId $item.ComponentType $true $false
+        Add-Component $item.ObjectId $item.ComponentType $false $false   # with subcomponents, no dependencies
         Write-Host "    + $($item.TypeName) $($item.Name)" -ForegroundColor Green
     } catch {
         $failed += $item
@@ -124,7 +139,10 @@ foreach ($item in ($toAdd | Sort-Object ComponentType, Name)) {
     }
 }
 
+if ($failed.Count -gt 0) {
+    Write-Error "$($failed.Count) component(s) failed to add - version NOT bumped. Fix and re-run (idempotent), then Test-SolutionCompleteness.ps1."
+    exit 1
+}
 Invoke-DataverseWrite "solutions($($master.solutionid))" 'PATCH' @{ version = $newVersion } | Out-Null
-Write-Host "==> $MasterSolutionUniqueName $($master.version) -> $newVersion ; added $($toAdd.Count - $failed.Count) / $($toAdd.Count)" -ForegroundColor Green
-if ($failed.Count -gt 0) { Write-Error "$($failed.Count) component(s) failed to add — see warnings. Run Test-SolutionCompleteness.ps1 after fixing." }
+Write-Host "==> $MasterSolutionUniqueName $($master.version) -> $newVersion ; added $($toAdd.Count), re-added $($shells.Count) with subcomponents" -ForegroundColor Green
 Write-Host '    Next: Test-SolutionCompleteness.ps1 (must exit 0), then Export-SpaarkeMasterSource.ps1.'

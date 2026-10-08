@@ -10,9 +10,13 @@
          replacing what is there, so the PR diff is the release.
       3. Remove every environmentvariablevalues.json (values are per customer — H7 writes them; a dev value in a
          customer environment is a cross-environment leak) and fail if one survives.
+      4. F12 guard: fail if Other/Solution.xml lists a missing dependency on solution="Active" — a Spaarke component
+         the package references but does not contain (the managed import would fail in a fresh environment). Fix by
+         bringing the component into scope (Assemble) and export again.
 
-    Prerequisite: `pac auth` selected on the authoring environment (pac auth list / pac auth select). The script
-    never creates or changes a pac profile.
+    Prerequisite: a `pac auth` profile with access to the authoring environment. Every export names the environment
+    explicitly (--environment), so the active profile's default organization can never put another environment's
+    solution into git. The script never creates or changes a pac profile.
 
 .PARAMETER WhatIf
     Print the commands and paths; export nothing, write nothing.
@@ -25,6 +29,7 @@
 
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
+    [string]$EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com',
     [string]$SolutionName = 'SpaarkeMaster',
     [string]$OutputFolder = "$PSScriptRoot/../../src/dataverse/solutions/SpaarkeMaster",
     [string]$WorkFolder = (Join-Path ([IO.Path]::GetTempPath()) "spaarkemaster-export-$(Get-Date -Format yyyyMMddHHmmss)")
@@ -37,15 +42,16 @@ $OutputFolder = [IO.Path]::GetFullPath($OutputFolder)
 $unmanagedZip = Join-Path $WorkFolder "$SolutionName.zip"
 $managedZip = Join-Path $WorkFolder "${SolutionName}_managed.zip"   # SolutionPackager pairs X.zip with X_managed.zip
 $commands = @(
-    "pac solution export --name $SolutionName --path `"$unmanagedZip`" --overwrite",
-    "pac solution export --name $SolutionName --path `"$managedZip`" --managed --overwrite",
+    "pac solution export --environment $EnvironmentUrl --name $SolutionName --path `"$unmanagedZip`" --overwrite",
+    "pac solution export --environment $EnvironmentUrl --name $SolutionName --path `"$managedZip`" --managed --overwrite",
     "pac solution unpack --zipfile `"$unmanagedZip`" --folder `"$OutputFolder`" --packagetype Both --allowDelete --allowWrite --clobber"
 )
 
 if ($WhatIfPreference) {
     Write-Host "==> DRY RUN — would run (pac must already be authenticated to the authoring environment):" -ForegroundColor Yellow
     $commands | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
-    Write-Host "    then remove every environmentvariablevalues.json under $OutputFolder and fail if one survives." -ForegroundColor DarkYellow
+    Write-Host "    then remove every environmentvariablevalues.json under $OutputFolder and fail if one survives," -ForegroundColor DarkYellow
+    Write-Host "    and fail if Other/Solution.xml lists a missing dependency on solution=Active (F12)." -ForegroundColor DarkYellow
     exit 0
 }
 
@@ -63,6 +69,12 @@ foreach ($v in $values) {
 }
 $left = @(Find-EnvironmentVariableValues -Path $OutputFolder)
 if ($left.Count -gt 0) { throw "Environment-variable values remain in the source: $($left -join ', ')" }
+
+$leaks = @(Find-LeakyDependencies -SolutionXmlPath (Join-Path $OutputFolder 'Other/Solution.xml'))
+if ($leaks.Count -gt 0) {
+    $leaks | ForEach-Object { Write-Host "    LEAK: $_" -ForegroundColor Red }
+    throw "$($leaks.Count) missing dependenc(ies) on solution=Active (F12): the package references Spaarke components it does not contain. Bring them into scope (Assemble-SpaarkeMasterSolution.ps1) and export again — do not commit this source."
+}
 
 $version = ([xml](Get-Content (Join-Path $OutputFolder 'Other/Solution.xml') -Raw)).ImportExportXml.SolutionManifest.Version
 Write-Host ''
