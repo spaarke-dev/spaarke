@@ -11,6 +11,8 @@ on:
       - 'infrastructure/**'
       - 'src/**'
       - '.github/**'
+      - '.claude/**'
+      - 'projects/**'
 
 permissions:
   contents: read

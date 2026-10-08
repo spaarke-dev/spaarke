@@ -2152,7 +2152,7 @@ If the `sprk_visualtype` choice field on `sprk_chartdefinition` does not yet inc
 4. In the **Options** section, click **Add** to add a new option:
    - **Label**: `ReportCardMetric`
    - **Value**: `100000010`
-5. Save and **Publish All Customizations**
+5. Save and **Publish** the form only
 
 ### How to Add (Solution Import)
 
@@ -2189,7 +2189,7 @@ Follow the same process as adding the ReportCardMetric option above:
 4. In the **Options** section, click **Add** for each new option:
    - **Label**: `Gauge` / **Value**: `100000011`
    - **Label**: `HorizontalStackedBar` / **Value**: `100000012`
-5. Save and **Publish All Customizations**
+5. Save and **Publish** the form only
 
 #### Verification
 
@@ -2246,7 +2246,7 @@ Follow the same process used for the Visual Type field:
    - Add all options from the **Color Source** table above with the specified values
    - **Default Value**: None (100000000)
 6. Save the field
-7. **Publish All Customizations**
+7. **Publish** the form only
 
 #### How to Add (Solution Import)
 
@@ -2287,7 +2287,7 @@ A new choice column must be added to the `sprk_chartdefinition` entity to suppor
    - **Default Value**: *(none — defaults to Horizontal Rectangle behavior in code)*
 4. Save the field
 5. Add the field to the Chart Definition form
-6. **Publish All Customizations**
+6. **Publish** the form only
 
 #### How to Add (Solution Import)
 

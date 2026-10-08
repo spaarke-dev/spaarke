@@ -205,8 +205,8 @@ SpaarkeMaster in dev is assumed to be **production-ready** at the time of releas
 # Verify SpaarkeMaster component count (expected: 386)
 pac solution list  # Should show SpaarkeMaster v1.0.0.0
 
-# Publish all customizations in dev before export
-pac org publish
+# Export takes the PUBLISHED state. If a component you own is still unpublished, publish just that component
+# (PublishXml via scripts/lib/Publish-SolutionComponents.ps1). Never a tenant-wide publish.
 ```
 
 ### Build-SpaarkeMaster.ps1
@@ -321,8 +321,8 @@ Export the production-ready SpaarkeMaster solution from the dev environment. No 
 # Ensure PAC CLI is connected to dev
 pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 
-# Publish all customizations before export
-pac org publish
+# Export takes the PUBLISHED state. Publish only your own pending component first (PublishXml via
+# scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish.
 
 # Export SpaarkeMaster
 pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
@@ -440,7 +440,7 @@ pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --ove
 pac auth select --environment "https://spaarke-demo.crm.dynamics.com"
 
 # Import SpaarkeMaster
-pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./deploy/SpaarkeMaster.zip -SolutionUniqueName <name>
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./deploy/SpaarkeMaster.zip -SolutionUniqueName SpaarkeMaster
 
 # Or via Deploy-Release.ps1 which handles this automatically
 .\scripts\Deploy-Release.ps1 `
@@ -496,12 +496,9 @@ Reference data scripts are idempotent (safe to re-run every release):
     -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
 ```
 
-### 4.2 Publish All Customizations
+### 4.2 Publish (scoped)
 
-```powershell
-# Publish all customizations in the target environment
-pac org publish --async
-```
+The import script in 4.1 already published exactly SpaarkeMaster's components (it refuses to import if a component type is unmapped). There is no separate tenant-wide publish step. To preview what it will publish: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -SolutionUniqueName SpaarkeMaster -PlanOnly`.
 
 ### 4.3 Verify Import
 
@@ -532,7 +529,7 @@ During development, individual web resources can be updated without re-exporting
 
 These are **development iteration tools**, not part of the production release flow. For production releases, all web resources are included in the SpaarkeMaster solution import.
 
-**GATE**: All reference data scripts and `pac org publish` must complete without errors.
+**GATE**: All reference data scripts and the scoped import in 4.1 must complete without errors.
 
 ---
 

@@ -23,6 +23,7 @@ $headers = @{
     "OData-Version" = "4.0"
 }
 $apiUrl = "$orgUrl/api/data/v9.2"
+. (Join-Path $PSScriptRoot "lib" "Publish-SolutionComponents.ps1")
 
 Write-Host "====================================="
 Write-Host "Publishing Theme Web Resources"
@@ -61,19 +62,9 @@ if ($webResourceIds.Count -eq 0) {
 Write-Host ""
 Write-Host "Publishing $($webResourceIds.Count) web resources..."
 
-# Build publish XML
-$webResourcesXml = ""
-foreach ($id in $webResourceIds) {
-    $webResourcesXml += "<webresource>{$id}</webresource>"
-}
-
-$publishXml = "<importexportxml><webresources>$webResourcesXml</webresources></importexportxml>"
-
-$publishUrl = "$apiUrl/PublishXml"
-$publishBody = @{ ParameterXml = $publishXml } | ConvertTo-Json
-
+# Publish exactly these web resources (shared scoped-publish module).
 try {
-    Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post -Body $publishBody | Out-Null
+    Invoke-PublishXml -Context @{ Api = $apiUrl; Headers = $headers } -ParameterXml (New-PublishParameterXml -WebResources $webResourceIds)
     Write-Host "Published successfully!" -ForegroundColor Green
 } catch {
     Write-Host "Error publishing: $_" -ForegroundColor Red

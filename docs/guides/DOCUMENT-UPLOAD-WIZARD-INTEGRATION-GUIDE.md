@@ -361,7 +361,7 @@ Upload two web resources via Power Apps maker portal:
 | `sprk_documentuploadwizard` | Webpage (HTML) | `out/sprk_documentuploadwizard.html` |
 | `sprk_subgrid_commands` | Script (JS) | `out/sprk_subgrid_commands.js` |
 
-Then **Save** and **Publish All**.
+Then **Save** and **Publish** the form only.
 
 ### Verify
 

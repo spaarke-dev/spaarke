@@ -214,7 +214,7 @@ Upload the JS web resource before importing the ribbon solution:
 ```powershell
 pac solution list   # Find solution name
 # Upload JS via Power Apps maker portal or pac tool
-# Publish all customizations
+# Publish only the web resource you uploaded (PublishXml, scripts/lib/Publish-SolutionComponents.ps1)
 ```
 
 ### Step 2: Export Dedicated Ribbon Solution

@@ -5,6 +5,21 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
     . (Join-Path $script:RepoRoot 'scripts' 'lib' 'Publish-SolutionComponents.ps1')
+    # The banned forms. Case-insensitive, PCRE. Every form has a bypass sample below that must match and a benign sample that must not.
+    $script:BannedPatterns = @(
+        'PublishAll'                                  # the all-customizations action, also when split: "PublishAll" + "Xml"
+        'publish[-_]all'
+        'pac(\.exe|\.cmd)?\s+solution\s+publish'      # also with doubled spaces
+        'pac(\.exe|\.cmd)?\s+org\s+publish'
+        '--publish-changes'
+        'solution\s+import\b.*\s-pc\b'                # short flag on the same line
+        '^\s*-pc\s*[`\\]?\s*$'                        # short flag on a continuation line
+        'Publish-CrmAllCustomization'
+        'powerplatform-actions/publish-solution|uses:\s*\S*publish-solution(?!\w)'   # GitHub Action
+        'PowerPlatformPublishCustomizations'          # Azure DevOps task
+        'publish\s+all\s+customi[sz]ations'           # manual steps
+        'save\s*(\+|and)\s*publish\s+all'
+    )
 }
 
 Describe 'New-PublishParameterXml' {
@@ -91,9 +106,52 @@ Describe 'Compare-UnpublishedArtifacts' {
     }
 }
 
+
+Describe 'dot-sourcing the module does not change the caller (review F1)' {
+    It 'leaves strict mode off: reading a missing property returns $null instead of throwing' {
+        $mod = Join-Path $script:RepoRoot 'scripts' 'lib' 'Publish-SolutionComponents.ps1'
+        $out = & pwsh -NoProfile -Command ". '$mod'; `$o = [pscustomobject]@{ value = 1 }; if (`$null -eq `$o.'@odata.nextLink') { 'ok' }" 2>&1
+        ($out -join '') | Should -Be 'ok'
+    }
+}
+
+Describe 'application ribbon (type 50 without an entity)' {
+    It 'is published as an empty ribbon element in a ribbons section' {
+        $lookup = { param($kind, $id) $null }
+        $p = Resolve-PublishPlan -Lookup $lookup -Components @([pscustomobject]@{ componenttype = 50; objectid = 'r' })
+        $p.ApplicationRibbon | Should -BeTrue
+        New-PublishParameterXml -ApplicationRibbon | Should -Be '<importexportxml><ribbons><ribbon /></ribbons></importexportxml>'
+    }
+}
+
+Describe 'component type knowledge' {
+    It 'knows the SpaarkeMaster types (70, 10075, 10139, 10141, 10314) and the mapped ones' {
+        foreach ($t in 1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80, 70, 10075, 10139, 10141, 10314, 153, 154) { Test-ComponentTypeKnown $t | Should -BeTrue }
+    }
+    It 'does not know an arbitrary type' { Test-ComponentTypeKnown 99999 | Should -BeFalse }
+}
+
+Describe 'Get-ZipSolutionInfo' {
+    It 'reads managed flag, root types and root entities from solution.xml' {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zipPath = Join-Path ([IO.Path]::GetTempPath()) ("pscz-" + [guid]::NewGuid() + ".zip")
+        $xml = '<ImportExportXml><SolutionManifest><UniqueName>S1</UniqueName><Managed>1</Managed><RootComponents>' +
+            '<RootComponent type="1" schemaName="Sprk_Event" behavior="0" /><RootComponent type="10075" schemaName="x" behavior="0" /></RootComponents></SolutionManifest></ImportExportXml>'
+        $z = [IO.Compression.ZipFile]::Open($zipPath, 'Create')
+        try { $w = New-Object IO.StreamWriter($z.CreateEntry('solution.xml').Open()); $w.Write($xml); $w.Dispose() } finally { $z.Dispose() }
+        try {
+            $i = Get-ZipSolutionInfo -ZipPath $zipPath
+            $i.UniqueName | Should -Be 'S1'
+            $i.Managed | Should -BeTrue
+            @($i.RootTypes) | Should -Be @(1, 10075)
+            @($i.RootEntities) | Should -Be @('sprk_event')
+        } finally { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'Publish-SolutionComponents (mocked Dataverse)' {
+    BeforeEach { $script:Calls = @() }
     It 'posts exactly one PublishXml for the solution components plus extras, and nothing broader' {
-        $script:Calls = @()
         Mock Invoke-RestMethod {
             $script:Calls += [pscustomobject]@{ Method = $Method; Uri = "$Uri"; Body = $Body }
             switch -Wildcard ("$Uri") {
@@ -116,10 +174,9 @@ Describe 'Publish-SolutionComponents (mocked Dataverse)' {
         $posts[0].Body | Should -Match 'sprk_event'
         $posts[0].Body | Should -Match '11111111-1111-1111-1111-111111111111'
         $posts[0].Body | Should -Match '22222222-2222-2222-2222-222222222222'
-        ($script:Calls.Uri -join ' ') | Should -Not -Match 'PublishAllXml'
+        ($script:Calls.Uri -join ' ') | Should -Not -Match 'PublishAll'
     }
     It 'stops (no publish at all) when a component type is unmapped' {
-        $script:Calls = @()
         Mock Invoke-RestMethod {
             $script:Calls += [pscustomobject]@{ Method = $Method; Uri = "$Uri" }
             switch -Wildcard ("$Uri") {
@@ -130,29 +187,89 @@ Describe 'Publish-SolutionComponents (mocked Dataverse)' {
         { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S } | Should -Throw '*unmapped*'
         @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 0
     }
+    It 'throws when the read-back still finds unpublished content (mutation M4)' {
+        Mock Invoke-RestMethod {
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                '*RetrieveUnpublished*' { return [pscustomobject]@{ content = 'NEW' } }
+                '*/webresourceset(*' { return [pscustomobject]@{ content = 'OLD' } }
+                default { return $null }
+            }
+        }
+        { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -SkipCollateralCheck } | Should -Throw '*still unpublished*'
+    }
 }
 
-Describe 'Invoke-ScopedSolutionImport guard' {
-    It 'rejects --publish-changes before running anything' {
-        { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -ImportArgs @('--publish-changes') -PacExe 'pac' -Context @{} } |
-            Should -Throw '*tenant-wide publish*'
+Describe 'Get-EntityPublishCollateral' {
+    It 'leaves out the solution''s own pending items' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'savedqueries.*RetrieveUnpublishedMultiple') {
+                return [pscustomobject]@{ value = @(
+                        [pscustomobject]@{ savedqueryid = 'AAA'; name = 'mine'; modifiedon = '2' },
+                        [pscustomobject]@{ savedqueryid = 'BBB'; name = 'theirs'; modifiedon = '2' }) }
+            }
+            return [pscustomobject]@{ value = @() }
+        }
+        $r = @(Get-EntityPublishCollateral -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Entity sprk_event -ExcludeIds @('{aaa}'))
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match 'theirs'
+    }
+}
+
+Describe 'Invoke-ScopedSolutionImport guards' {
+    It 'rejects --publish-changes and the -pc short flag before running anything' {
+        { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -ImportArgs @('--publish-changes') -PacExe 'pac' -Context @{} } | Should -Throw '*tenant-wide publish*'
+        { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -ImportArgs @('-pc') -PacExe 'pac' -Context @{} } | Should -Throw '*tenant-wide publish*'
+    }
+    It 'refuses an unmapped component type BEFORE importing (nothing imported)' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(1, 424242); RootEntities = @() } }
+        Mock Get-SolutionComponentRows { $null }
+        { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-must-not-run' -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } } |
+            Should -Throw '*Nothing was imported*'
+    }
+}
+
+Describe 'banned-pattern coverage' {
+    It 'matches every known bypass form' {
+        $samples = @(
+            'Invoke-RestMethod -Uri "$api/PublishAllXml"', '"PublishAll" + "Xml"', 'pac solution publish-all', 'pac  solution  publish',
+            'pac org publish --async', 'pac solution import --path x --publish-changes', 'pac solution import --path x -pc',
+            '  -pc  `', 'Publish-CrmAllCustomization -Conn $c', 'uses: microsoft/powerplatform-actions/publish-solution@v1',
+            'task: PowerPlatformPublishCustomizations@2', '5. Publish all customizations', 'Save + Publish All')
+        foreach ($sm in $samples) {
+            $hit = $false
+            foreach ($pt in $script:BannedPatterns) { if ($sm -match "(?i)$pt") { $hit = $true } }
+            if (-not $hit) { throw "bypass not caught: $sm" }
+        }
+    }
+    It 'does not match the allowed scoped forms' {
+        $ok = @('POST PublishXml with ParameterXml', 'Publish-SolutionComponents -Context $c', 'scripts/Import-SolutionScoped.ps1 -PlanOnly', 'pac solution import --path x --force-overwrite', 'pac solution list', 'Invoke-PublishXml -Context $ctx')
+        foreach ($sm in $ok) { foreach ($pt in $script:BannedPatterns) { if ($sm -match "(?i)$pt") { throw "false positive on '$sm' by '$pt'" } } }
     }
 }
 
 Describe 'no tenant-wide publish anywhere in the repo (D-83)' {
     BeforeAll {
-        $banned = 'PublishAllXml|publish-changes|publish-all|pac solution publish'
-        # The module and this test must name what they ban; docs/adr is ADR history.
-        $out = & git -C $script:RepoRoot grep -n -i -I -E $banned -- scripts .github docs infrastructure src tests `
-            ':(exclude)scripts/lib/Publish-SolutionComponents.ps1' ':(exclude)tests/scripts/Publish-SolutionComponents.Tests.ps1' `
-            ':(exclude)docs/adr' ':(exclude)*package-lock.json' 2>&1
-        $script:Hits = @($out | Where-Object { $_ -and $_ -notmatch '^(warning|fatal):' })
+        # Allow-list: "path<TAB>reason" per line. Narrow and explicit; delete a line when its reason is gone.
+        $allowFile = Join-Path $PSScriptRoot 'publish-lint-allowlist.txt'
+        $allow = @(Get-Content -LiteralPath $allowFile | Where-Object { $_ -and $_ -notmatch '^\s*#' } | ForEach-Object { ($_ -split "`t")[0].Trim() })
+        # The module and this test must name what they ban; docs/adr is ADR history; projects/ notes are history except the skill-amendment note.
+        $excl = @(':(exclude)scripts/lib/Publish-SolutionComponents.ps1', ':(exclude)tests/scripts/Publish-SolutionComponents.Tests.ps1', ':(exclude)tests/scripts/publish-lint-allowlist.txt', ':(exclude)docs/adr', ':(exclude)*package-lock.json')
+        $excl += @($allow | ForEach-Object { ":(exclude)$_" })
+        $roots = @('scripts', '.github', 'docs', 'infrastructure', 'src', 'tests', '.claude')
+        $script:Hits = @()
+        $script:GitExit = @{}
+        foreach ($pt in $script:BannedPatterns) {
+            $out = & git -C $script:RepoRoot grep -n -i -I -P -e $pt -- @($roots + $excl) 2>&1
+            $script:GitExit[$pt] = $LASTEXITCODE
+            $script:Hits += @($out | Where-Object { $_ } | ForEach-Object { "[$pt] $_" })
+        }
     }
-    It 'has zero hits for PublishAllXml, --publish-changes, publish-all, pac solution publish' {
+    It 'ran git grep successfully for every pattern (0 = hits, 1 = none; anything else is a failure, never a pass)' {
+        foreach ($k in $script:GitExit.Keys) { $script:GitExit[$k] | Should -BeIn @(0, 1) }
+    }
+    It 'has zero hits for any banned form' {
         ($script:Hits -join [Environment]::NewLine) | Should -BeNullOrEmpty
-    }
-    It 'detects a reintroduced publish-all (the pattern can fail)' {
-        'Invoke-RestMethod -Uri "$api/PublishAllXml"' -match 'PublishAllXml|publish-changes|publish-all|pac solution publish' | Should -BeTrue
-        'pac solution import --path x --publish-changes' -match 'PublishAllXml|publish-changes|publish-all|pac solution publish' | Should -BeTrue
     }
 }

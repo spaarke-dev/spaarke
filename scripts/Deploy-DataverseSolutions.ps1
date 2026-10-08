@@ -367,6 +367,25 @@ function Import-ManagedSolution {
         [string]$EffectiveMode      # 'FreshInstall' | 'Upgrade' | 'Auto'
     )
 
+    # This path is for MANAGED solutions only (a managed import lands published; an unmanaged one would land unpublished and
+    # nothing here publishes it - task 130 review F4). Refuse an unmanaged ZIP before importing anything.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $probe = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
+    try {
+        $solEntry = $probe.Entries | Where-Object { $_.FullName -eq 'solution.xml' } | Select-Object -First 1
+        $managedFlag = $null
+        if ($solEntry) {
+            $rd = New-Object System.IO.StreamReader($solEntry.Open())
+            try { $managedFlag = ([xml]$rd.ReadToEnd()).ImportExportXml.SolutionManifest.Managed } finally { $rd.Dispose() }
+        }
+    } finally { $probe.Dispose() }
+    if ("$managedFlag" -ne '1') {
+        Write-Host ""
+        Write-Host "  ERROR: $DisplayName ZIP is not a managed solution (solution.xml Managed='$managedFlag'): $ZipPath" -ForegroundColor Red
+        Write-Host "  Unmanaged imports are not published by this script; use scripts/Import-SolutionScoped.ps1 for those." -ForegroundColor Yellow
+        return $false
+    }
+
     # FreshInstall mode is a safety gate: fail early if the solution already
     # exists on the target env (prevents accidental double-install obscuring an
     # earlier install run).
@@ -441,7 +460,7 @@ function Find-SolutionZip {
 
     foreach ($pattern in $searchPatterns) {
         $zips = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "managed" -or $_.Name -notmatch "unmanaged" } |
+            Where-Object { $_.Name -notmatch '(?i)unmanaged' } |
             Sort-Object LastWriteTime -Descending
         if ($zips) {
             return $zips[0].FullName

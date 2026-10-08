@@ -25,15 +25,33 @@
     $script:NoPublishComponentTypes and are skipped on purpose.
 #>
 
-Set-StrictMode -Version Latest
+# No Set-StrictMode here: a dot-sourced module's strict mode would leak into the calling script (reading a missing
+# property such as @odata.nextLink on a last page would start to throw). Task 130 review F1.
 
 # solutioncomponent.componenttype values that have nothing to publish.
 $script:NoPublishComponentTypes = @{
     20 = 'security role'; 21 = 'privilege'; 22 = 'display string'; 29 = 'workflow'; 91 = 'plug-in assembly'
     92 = 'sdk message processing step'; 93 = 'sdk message processing step image'; 95 = 'service endpoint'
-    150 = 'routing rule'; 151 = 'routing rule item'; 152 = 'sla'; 154 = 'sla item'
+    150 = 'routing rule'; 151 = 'routing rule item'; 152 = 'sla'; 153 = 'sla item'; 154 = 'convert rule'
     300 = 'canvas app'; 371 = 'connector'; 372 = 'connector'; 380 = 'environment variable definition'
     381 = 'environment variable value'
+    # Seen in SpaarkeMaster (task 130 review F2). Labels read from spaarkedev1 (GlobalOptionSetDefinitions componenttype and
+    # solutioncomponentdefinitions). None has an element in the PublishXml schema (Microsoft Learn lists entities, web
+    # resources, option sets, site maps, dashboards, ribbons and app modules only), so there is nothing a scoped publish can
+    # send for them. Judgement, not a documented guarantee: a security profile and these configuration tables carry no
+    # draft/unpublished layer. The owner's first real SpaarkeMaster import should confirm nothing stays pending.
+    70 = 'field security profile'; 71 = 'field permission'
+    10075 = 'app setting'; 10139 = 'dataverse search table'; 10141 = 'dataverse search table entity'; 10314 = 'ai skill config'
+}
+
+# Component types this module maps to a publish bucket (see Resolve-PublishPlan). 2/10 are published with their entity.
+$script:MappedComponentTypes = @(1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80)
+
+function Test-ComponentTypeKnown {
+<# True when the type is mapped to a publish bucket or is deliberately a no-publish type. Pure. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ComponentType)
+    return ($script:MappedComponentTypes -contains $ComponentType) -or $script:NoPublishComponentTypes.ContainsKey($ComponentType)
 }
 
 function ConvertTo-PublishGuid {
@@ -57,7 +75,8 @@ function New-PublishParameterXml {
         [string[]]$OptionSets = @(),
         [string[]]$SiteMaps = @(),
         [string[]]$Dashboards = @(),
-        [string[]]$AppModules = @()
+        [string[]]$AppModules = @(),
+        [switch]$ApplicationRibbon
     )
     $name = '^[a-z_][a-z0-9_]*$'
     $sections = [ordered]@{}
@@ -82,6 +101,7 @@ function New-PublishParameterXml {
     & $add 'sitemaps' 'sitemap' $SiteMaps $true
     & $add 'dashboards' 'dashboard' $Dashboards $true
     & $add 'appmodules' 'appmodule' $AppModules $true
+    if ($ApplicationRibbon) { $sections['ribbons'] = '<ribbons><ribbon /></ribbons>' }
     if ($sections.Count -eq 0) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
     return '<importexportxml>' + ($sections.Values -join '') + '</importexportxml>'
 }
@@ -133,7 +153,7 @@ function Resolve-PublishPlan {
     $maps = New-Object System.Collections.Generic.HashSet[string]
     $dash = New-Object System.Collections.Generic.HashSet[string]
     $apps = New-Object System.Collections.Generic.HashSet[string]
-    $skipped = @(); $unmapped = @()
+    $skipped = @(); $unmapped = @(); $appRibbon = $false
     foreach ($c in $Components) {
         $t = [int]$c.componenttype; $id = "$($c.objectid)"
         switch ($t) {
@@ -144,7 +164,7 @@ function Resolve-PublishPlan {
             26 { [void]$entities.Add((& $Lookup 'view' $id)) }
             59 { [void]$entities.Add((& $Lookup 'chart' $id)) }
             60 { $e = & $Lookup 'form' $id; if ($e) { [void]$entities.Add($e) } else { [void]$dash.Add($id) } }
-            50 { $e = & $Lookup 'ribbon' $id; if ($e) { [void]$entities.Add($e) } }
+            50 { $e = & $Lookup 'ribbon' $id; if ($e) { [void]$entities.Add($e) } else { $appRibbon = $true } }
             61 { [void]$webs.Add($id) }
             62 { [void]$maps.Add($id) }
             80 { [void]$apps.Add($id) }
@@ -170,8 +190,42 @@ function Resolve-PublishPlan {
         SiteMaps     = & $sorted $maps
         Dashboards   = & $sorted $dash
         AppModules   = & $sorted $apps
+        ApplicationRibbon = $appRibbon
         Skipped      = $skipped
         Unmapped     = $unmapped
+    }
+}
+
+function Get-SolutionComponentRows {
+<# Components of an installed solution (componenttype, objectid), or $null when the solution is not installed. Read-only. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$SolutionUniqueName)
+    $api = $Context.Api; $h = $Context.Headers
+    $sol = @((Invoke-RestMethod -Method Get -Headers $h -Uri "$api/solutions?`$select=solutionid&`$filter=uniquename eq '$SolutionUniqueName'").value | Where-Object { $_ })
+    if ($sol.Count -eq 0) { return $null }
+    if ($sol.Count -gt 1) { throw "Solution '$SolutionUniqueName' is ambiguous in $api." }
+    return @(Get-DvPages "$api/solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($sol[0].solutionid)" $h)
+}
+
+function Get-ZipSolutionInfo {
+<# Reads solution.xml from a solution ZIP: unique name, managed flag, root component types and root entity names. Pure file read. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
+    try {
+        $entry = $zip.Entries | Where-Object { $_.FullName -eq 'solution.xml' } | Select-Object -First 1
+        if (-not $entry) { throw "No solution.xml in $ZipPath." }
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try { [xml]$doc = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $zip.Dispose() }
+    $m = $doc.ImportExportXml.SolutionManifest
+    $roots = @($m.RootComponents.RootComponent | Where-Object { $_ })
+    return [pscustomobject]@{
+        UniqueName   = "$($m.UniqueName)"
+        Managed      = ("$($m.Managed)" -eq '1')
+        RootTypes    = @($roots | ForEach-Object { [int]$_.type } | Sort-Object -Unique)
+        RootEntities = @($roots | Where-Object { [int]$_.type -eq 1 } | ForEach-Object { "$($_.schemaName)".ToLowerInvariant() } | Sort-Object -Unique)
     }
 }
 
@@ -180,9 +234,8 @@ function Get-SolutionPublishPlan {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$SolutionUniqueName, [switch]$IncludeControlHostEntities)
     $api = $Context.Api; $h = $Context.Headers
-    $sol = @((Invoke-RestMethod -Method Get -Headers $h -Uri "$api/solutions?`$select=solutionid&`$filter=uniquename eq '$SolutionUniqueName'").value)
-    if ($sol.Count -ne 1) { throw "Solution '$SolutionUniqueName' not found (or ambiguous) in $api." }
-    $components = Get-DvPages "$api/solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($sol[0].solutionid)" $h
+    $components = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
+    if ($null -eq $components) { throw "Solution '$SolutionUniqueName' not found in $api." }
     $lookup = {
         param($kind, $id)
         switch ($kind) {
@@ -232,14 +285,18 @@ function Get-EntityPublishCollateral {
            but it can carry other people's pending work on the SAME entity. Report it before publishing.
 #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$Entity)
+    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$Entity, [string[]]$ExcludeIds = @())
     $api = $Context.Api; $h = $Context.Headers; $out = @()
+    $skipIds = @($ExcludeIds | Where-Object { $_ } | ForEach-Object { $_.Trim('{', '}').ToLowerInvariant() })
     foreach ($spec in @(@{ Set = 'savedqueries'; Id = 'savedqueryid'; Filter = "returnedtypecode eq '$Entity'" }, @{ Set = 'systemforms'; Id = 'formid'; Filter = "objecttypecode eq '$Entity'" })) {
         $sel = "`$select=$($spec.Id),name,modifiedon&`$filter=$($spec.Filter)"
         $map = { param($rows) @(@($rows) | Where-Object { $_ } | ForEach-Object { @{ id = $_.($spec.Id); modifiedon = $_.modifiedon; name = $_.name } }) }
         $published = & $map (Get-DvPages "$api/$($spec.Set)?$sel" $h)
         $unpublished = & $map (Get-DvPages "$api/$($spec.Set)/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$sel" $h)
-        foreach ($d in @(Compare-UnpublishedArtifacts -Published $published -Unpublished $unpublished)) { $out += "$($spec.Set): $($d.name) ($($d.id))" }
+        foreach ($d in @(Compare-UnpublishedArtifacts -Published $published -Unpublished $unpublished)) {
+            if ($skipIds -contains "$($d.id)".ToLowerInvariant()) { continue }
+            $out += "$($spec.Set): $($d.name) ($($d.id))"
+        }
     }
     return $out
 }
@@ -290,7 +347,8 @@ function Publish-SolutionComponents {
         [Parameter(Mandatory)][string]$SolutionUniqueName,
         [string[]]$ExtraWebResources = @(),
         [string[]]$ExtraEntities = @(),
-        [switch]$IncludeControlHostEntities
+        [switch]$IncludeControlHostEntities,
+        [switch]$SkipCollateralCheck
     )
     $plan = Get-SolutionPublishPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities
     if (@($plan.Unmapped).Count -gt 0) {
@@ -299,8 +357,11 @@ function Publish-SolutionComponents {
     $xml = New-PublishParameterXml -Entities (@($plan.Entities) + $ExtraEntities) -WebResources (@($plan.WebResources) + $ExtraWebResources) `
         -OptionSets $plan.OptionSets -SiteMaps $plan.SiteMaps -Dashboards $plan.Dashboards -AppModules $plan.AppModules
     Write-Host "Scoped publish of ${SolutionUniqueName}: $(@($plan.Entities).Count) entities, $(@($plan.WebResources).Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules."
-    foreach ($e in @($plan.Entities) + $ExtraEntities | Select-Object -Unique) {
-        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $e)) { Write-Warning "Entity publish of $e will also publish pending change: $c" }
+    if (-not $SkipCollateralCheck) {
+        $own = @(Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName | ForEach-Object { $_.objectid })
+        foreach ($e in @($plan.Entities) + $ExtraEntities | Select-Object -Unique) {
+            foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $e -ExcludeIds $own)) { Write-Warning "Entity publish of $e will also publish pending change: $c" }
+        }
     }
     Invoke-PublishXml -Context $Context -ParameterXml $xml
     $pending = @(Test-PublishedReadBack -Context $Context -Plan $plan)
@@ -333,8 +394,25 @@ function Invoke-ScopedSolutionImport {
     }
     if (-not $PacExe) { throw 'pac CLI not found: need pac.cmd or pac.exe on PATH.' }
     if (-not $Context) { $Context = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
+
+    # PRE-FLIGHT (before anything is imported): an import must never be left unpublished.
+    #  1. every component type the ZIP's root components and the installed solution carry must be mapped or a known no-publish type;
+    #  2. report other people's pending views/forms on the entities this import will publish (warn only; the solution's own
+    #     already-installed items are left out).
+    $zipInfo = Get-ZipSolutionInfo -ZipPath $ZipPath
+    $installed = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
+    $types = @($zipInfo.RootTypes) + @($installed | Where-Object { $_ } | ForEach-Object { [int]$_.componenttype })
+    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_) })
+    if ($unknown.Count -gt 0) {
+        throw "Refusing to import ${SolutionUniqueName}: component type(s) $($unknown -join ', ') are not mapped, so they could not be published afterwards. Map them in scripts/lib/Publish-SolutionComponents.ps1 first. Nothing was imported."
+    }
+    $own = @($installed | Where-Object { $_ } | ForEach-Object { $_.objectid })
+    foreach ($ent in @($zipInfo.RootEntities) + $ExtraEntities | Select-Object -Unique) {
+        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $own)) { Write-Warning "Entity publish of $ent will also publish pending change: $c" }
+    }
+
     & $PacExe solution import --environment $EnvironmentUrl --path $ZipPath @ImportArgs
     if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
     return Publish-SolutionComponents -Context $Context -SolutionUniqueName $SolutionUniqueName `
-        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities
+        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck
 }

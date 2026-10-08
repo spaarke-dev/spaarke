@@ -368,7 +368,7 @@ pac solution list | Select-String "DocumentRibbons"
 **Check 2: Ribbon XML Published**
 
 ```powershell
-# Re-publish all customizations
+# Re-publish only the ribbon's entity
 # Publish only what you changed: PublishXml via scripts/lib/Publish-SolutionComponents.ps1 (never a tenant-wide publish)
 ```
 
@@ -380,7 +380,7 @@ Verify the user has:
 
 **Resolution**:
 1. Import/re-import `DocumentRibbons` solution (v1.4.0.0+)
-2. Publish all customizations
+2. Publish only the imported components (`scripts/Import-SolutionScoped.ps1`)
 3. Clear browser cache and refresh
 4. Verify user security roles
 
