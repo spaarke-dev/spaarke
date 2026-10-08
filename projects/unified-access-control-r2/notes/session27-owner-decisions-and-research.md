@@ -1170,6 +1170,17 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Test containers:** the owner approved the cleanup of the 21 empty test containers; the owner runs `Remove-TestContainers.ps1` as SharePoint admin.
 - **Restricted share:** the owner confirmed it works (the "+ User" filter and the named refusal).
 
+## Round 80 (2026-10-08): BINDING. OWNER decision: re-adding a contact whose grant has lapsed restores it at the picked level
+
+- **The case:** Manage Access "+ Contact" re-adds a contact whose grant has lapsed. `/invite-and-grant` sends no expiry.
+  - After task 113's pre-write check, the server wrote nothing yet answered 200 "granted <level>".
+  - A later expiry renewal would revive the OLD, possibly higher, level.
+- **Decision ("Restore at picked level"):** a re-add is an explicit SET. It restores the grant at the PICKED level with the default 90-day expiry; the server supplies that expiry when the existing row has lapsed.
+  - The grantor ceiling and the contact-issuer cap still bound the result.
+  - A ledger entry is adopted only when the grant is written.
+- **Rejected:** refusing with a 409, because the Expiration toolbar would then restore the old level; and shipping 113 as it was.
+- **Applied in:** task 113, PR #1406.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
