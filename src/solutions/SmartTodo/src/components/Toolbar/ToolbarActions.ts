@@ -50,6 +50,7 @@
  */
 
 import type { ITodo } from '../../types/entities';
+import { parseDueDate } from '../../utils/dueLabelUtils';
 
 // ---------------------------------------------------------------------------
 // Minimal Xrm.WebApi surface
@@ -297,9 +298,10 @@ export function createToolbarActions(
 
     const subject = `To-Dos: ${selected.length} selected`;
     const lines = selected.map(t => {
-      const due = t.sprk_duedate
-        ? ` (due ${new Date(t.sprk_duedate).toLocaleDateString()})`
-        : '';
+      // sprk_duedate is a calendar date (Date Only, task 106): new Date("YYYY-MM-DD") is UTC midnight — the previous
+      // day west of UTC — so it is read as the local day.
+      const dueDay = parseDueDate(t.sprk_duedate);
+      const due = dueDay ? ` (due ${dueDay.toLocaleDateString()})` : '';
       return `- ${t.sprk_name}${due}`;
     });
     const body = lines.join('\n');

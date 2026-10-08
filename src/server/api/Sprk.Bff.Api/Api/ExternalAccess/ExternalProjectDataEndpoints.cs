@@ -460,6 +460,11 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
 
+        // Task 106: sprk_todo.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than
+        // let Dataverse answer 400 behind a 500.
+        if (TodoDueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
         // The parent flows from the ROUTE — the owner's "flows from the creation context". The
         // caller cannot name a parent in the body: CreateExternalTodoRequest is a closed DTO with no
         // regarding member, so the root gated above is necessarily the root written.
@@ -1020,9 +1025,27 @@ public static class ExternalProjectDataEndpoints
                     ["reasonCode"] = "sdap.access.deny.insufficient_rights"
                 });
 
+        if (TodoDueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
+        // Task 106: only a to-do status reason (its state is written with it — ExternalDataService.TodoStateCodeFor).
+        if (request.Statuscode is { } status && ExternalDataService.TodoStateCodeFor(status) is null)
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "statuscode must be Open (1), In Progress (659490001), Completed (2) or Dismissed (659490002).");
+
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// Task 106: a to-do due date must be a calendar date (<c>yyyy-MM-dd</c>, or a timestamp from an earlier SPA build,
+    /// read as its leading ten characters by <see cref="Spaarke.Dataverse.DataverseDateOnly"/>); anything else is a 400
+    /// here rather than Dataverse's 400 behind a 500. Null (not sent) passes.
+    /// </summary>
+    private static IResult? TodoDueDateProblem(string? dueDate) =>
+        dueDate is not null && !Spaarke.Dataverse.DataverseDateOnly.TryParse(dueDate, out _)
+            ? Results.Problem(statusCode: 400, title: "Bad Request", detail: "sprk_duedate must be a calendar date (yyyy-MM-dd).")
+            : null;
 
     // =========================================================================
     // Helpers

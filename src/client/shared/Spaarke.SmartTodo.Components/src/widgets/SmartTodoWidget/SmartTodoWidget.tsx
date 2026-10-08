@@ -121,6 +121,7 @@ import { Header } from '../../components/Header';
 // description / regarding / assigned-to / DATE). Relative import (not the package
 // root) to avoid a self-referential barrel cycle.
 import { matchesTodoSearchQuery } from '../../utils/todoSearchUtils';
+import { buildQuickAddTodoPayload } from '../../utils/quickAddTodoPayload';
 import { useCurrentContactId } from '../../hooks/useCurrentContactId';
 
 // ---------------------------------------------------------------------------
@@ -789,25 +790,11 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     // `contacts`. For "assigned to me" we use the resolved contactId from
     // useCurrentContactId. The quickAddAssignedTo picker overrides when the
     // user selects a different contact.
-    const payload: Record<string, unknown> = { sprk_name: title };
+    // The due date is the date input's own "YYYY-MM-DD" (sprk_duedate is Date Only — task 106); the payload shape,
+    // including the PascalCase `sprk_AssignedTo` bind key, lives in buildQuickAddTodoPayload.
     const assignedToContactId =
       quickAddAssignedTo.trim() && quickAddAssignedToContactId ? quickAddAssignedToContactId : contactId || '';
-    if (assignedToContactId) {
-      // UAT 2026-06-22 round 13: bind key MUST be the navigation property
-      // name (PascalCase `sprk_AssignedTo`), not the lookup column logical
-      // name (lowercase `sprk_assignedto`). Dataverse rejects the lowercase
-      // form with: "An undeclared property 'sprk_assignedto' which only has
-      // property annotations in the payload but no property value was
-      // found in the payload." Verified via EntityDefinitions metadata:
-      // ReferencingEntityNavigationPropertyName = "sprk_AssignedTo".
-      payload['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToContactId})`;
-    }
-    if (quickAddDueDate) {
-      // Date input gives YYYY-MM-DD; treat as end-of-day local.
-      const [y, m, d] = quickAddDueDate.split('-').map(Number);
-      const dt = new Date(y, m - 1, d, 23, 59, 0);
-      payload['sprk_duedate'] = dt.toISOString();
-    }
+    const payload = buildQuickAddTodoPayload({ title, dueDate: quickAddDueDate, assignedToContactId });
 
     try {
       // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5); a refusal is shown as the QuickAdd error.

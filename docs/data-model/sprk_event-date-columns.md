@@ -2,6 +2,7 @@
 
 > **Changed in spaarkedev1 on 2026-10-05** by spaarke-ontology-platform-r1 task 098 (owner-approved).
 > Every other environment still has the old behaviour until the procedure in [§4](#4-per-environment-procedure) is run there.
+> The same change for `sprk_todo.sprk_duedate` (task 106, 2026-10-08): [`sprk_todo-date-columns.md`](sprk_todo-date-columns.md).
 
 ## 1. The columns and their contract
 

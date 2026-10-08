@@ -118,6 +118,8 @@ public sealed class ExternalTodoDto
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The to-do due date (<c>sprk_todo.sprk_duedate</c>) as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse
+    /// Date Only). Parse it as a local calendar date (<c>parseDueDate</c>), never <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -180,6 +182,8 @@ public sealed class CreateExternalTodoRequest
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -208,6 +212,8 @@ public sealed class UpdateExternalTodoRequest
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -225,9 +231,9 @@ public sealed class UpdateExternalTodoRequest
 
     /// <summary>
     /// Update the Dataverse statuscode (1 = Open, 659490001 = In Progress,
-    /// 2 = Completed, 659490002 = Dismissed). Setting Completed/Dismissed
-    /// also moves the record to Inactive statecode (Dataverse handles the
-    /// statecode transition automatically based on statuscode option values).
+    /// 2 = Completed, 659490002 = Dismissed). The BFF writes the matching statecode with it (Completed/Dismissed →
+    /// Inactive, Open/In Progress → Active): Dataverse does NOT move the state itself — a status reason outside the
+    /// row's current state is HTTP 400 (verified live, task 106). Any other value is refused with 400.
     /// </summary>
     [JsonPropertyName("statuscode")]
     public int? Statuscode { get; init; }

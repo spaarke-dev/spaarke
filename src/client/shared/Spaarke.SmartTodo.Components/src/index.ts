@@ -15,6 +15,9 @@ export * from './components';
 // Shared client-side To Do search predicate (§11 — single predicate used by
 // BOTH the Code Page and SmartTodoWidget; smart-todo-r5 follow-up 2026-08-17).
 export { matchesTodoSearchQuery, buildTodoDueDateSearchBlob } from './utils/todoSearchUtils';
+// The quick-add To Do create payload — one builder for the widget and the Code Page (task 106: Date Only due date).
+export { buildQuickAddTodoPayload } from './utils/quickAddTodoPayload';
+export type { QuickAddTodoInput } from './utils/quickAddTodoPayload';
 export type { TodoSearchableFields } from './utils/todoSearchUtils';
 // The canonical due-date tier function (overdue / 3d / 7d / 10d / none — owner
 // decision 2026-10-03, C-17). Exported so other surfaces (e.g. the

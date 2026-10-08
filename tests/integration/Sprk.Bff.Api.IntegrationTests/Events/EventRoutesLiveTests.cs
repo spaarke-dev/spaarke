@@ -541,6 +541,122 @@ public sealed class EventRoutesLiveTests
         leaks.Should().BeEmpty("every zz-098-test record this run created must be gone");
     }
 
+    /// <summary>
+    /// Task 106 (owner decision D-41): sprk_todo.sprk_duedate is Date Only. Every SERVER write path stores the picked day:
+    /// the external app's path through the PRODUCTION <see cref="ExternalDataService"/> (create with an earlier SPA
+    /// build's noon-UTC timestamp, a reschedule, a completion, the list read), and the SDK writers through the PRODUCTION
+    /// <see cref="DataverseServiceClientImpl.CreateAsync"/> with the exact value <c>TodoGenerationService</c> (rule 3) and
+    /// <c>OfficeService</c> (Outlook/Word "create To Do") write — the calendar date at midnight, <see cref="DateTimeKind.Utc"/>.
+    /// Every row is named "zz-106-test …"; cleanup deletes by that prefix, so a row whose id was never learned is
+    /// still found, and a leak fails the test.
+    /// </summary>
+    [LiveEventsFact]
+    public async Task LiveMode_TodoDueDates_AreCalendarDates_OnTheServerWritePaths()
+    {
+        var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
+        if (string.IsNullOrWhiteSpace(dataverseUrl))
+            return; // not opted in
+
+        var projectId = Guid.Parse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_EVENTS_PROJECT_ID")!);
+        var credential = new AzureCliCredential();
+        using var dv = await DataverseClientAsync(dataverseUrl, credential);
+        var liveConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Dataverse:ServiceUrl"] = dataverseUrl,
+            // The production SDK client's token-provider branch, fed the operator's az login (no secret is created).
+            ["Graph:ManagedIdentity:Enabled"] = "true",
+        }).Build();
+        var leaks = new List<string>();
+
+        async Task<JsonElement> ReadTodoAsync(Guid id) =>
+            await dv.GetFromJsonAsync<JsonElement>($"sprk_todos({id})?$select=sprk_duedate,statuscode,statecode");
+
+        try
+        {
+            var behaviour = await dv.GetFromJsonAsync<JsonElement>(
+                "EntityDefinitions(LogicalName='sprk_todo')/Attributes(LogicalName='sprk_duedate')"
+                + "/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata?$select=DateTimeBehavior");
+            behaviour.GetProperty("DateTimeBehavior").GetProperty("Value").GetString().Should().Be("DateOnly",
+                "this leg proves the converted column (docs/data-model/sprk_todo-date-columns.md)");
+
+            // ── The external app's path (production ExternalDataService) ──────────────────────────────────────
+            var external = new ExternalDataService(new HttpClient(), liveConfiguration, credential,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalDataService>.Instance);
+            var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
+
+            // Create, as an earlier SPA build sent it: toISOString() of the picked day's NOON UTC.
+            var ext = await external.CreateTodoAsync(ExternalDataService.TodoRootKind.Project, projectId,
+                new CreateExternalTodoRequest { SprkName = "zz-106-test external legacy date", SprkDuedate = "2026-10-21T12:00:00.000Z" },
+                projectTeam, callerContactId: null);
+            var extId = Guid.Parse(ext.SprkTodoid);
+            _out.WriteLine($"ExternalDataService.CreateTodoAsync(sprk_duedate 2026-10-21T12:00:00.000Z) -> id={extId} sprk_duedate={ext.SprkDuedate}");
+            ext.SprkDuedate.Should().Be("2026-10-21");
+            (await ReadTodoAsync(extId)).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
+
+            // Reschedule (the SPA's PATCH with a new due date).
+            await external.UpdateTodoAsync(extId, new UpdateExternalTodoRequest { SprkDuedate = "2026-10-23" });
+            var rescheduled = await ReadTodoAsync(extId);
+            _out.WriteLine($"ExternalDataService.UpdateTodoAsync(sprk_duedate 2026-10-23) -> read back {rescheduled.GetProperty("sprk_duedate").GetString()}");
+            rescheduled.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-23");
+
+            // Complete (the SPA's status toggle sends statuscode only); the due date is left as it was.
+            await external.UpdateTodoAsync(extId, new UpdateExternalTodoRequest { Statuscode = 2 });
+            var completed = await ReadTodoAsync(extId);
+            _out.WriteLine($"ExternalDataService.UpdateTodoAsync(statuscode 2) -> statuscode={completed.GetProperty("statuscode").GetInt32()} "
+                + $"statecode={completed.GetProperty("statecode").GetInt32()} sprk_duedate={completed.GetProperty("sprk_duedate").GetString()}");
+            completed.GetProperty("statuscode").GetInt32().Should().Be(2);
+            completed.GetProperty("statecode").GetInt32().Should().Be(1, "Completed is an Inactive status reason");
+            completed.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-23");
+
+            // Reopen (the SPA's "Mark as incomplete": statuscode 1 only).
+            await external.UpdateTodoAsync(extId, new UpdateExternalTodoRequest { Statuscode = 1 });
+            var reopened = await ReadTodoAsync(extId);
+            _out.WriteLine($"ExternalDataService.UpdateTodoAsync(statuscode 1) -> statuscode={reopened.GetProperty("statuscode").GetInt32()} "
+                + $"statecode={reopened.GetProperty("statecode").GetInt32()} sprk_duedate={reopened.GetProperty("sprk_duedate").GetString()}");
+            reopened.GetProperty("statecode").GetInt32().Should().Be(0);
+            reopened.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-23");
+
+            // The list read the SPA renders.
+            (await external.GetTodosAsync(ExternalDataService.TodoRootKind.Project, projectId)).Value
+                .Single(t => t.SprkTodoid == ext.SprkTodoid).SprkDuedate.Should().Be("2026-10-23");
+
+            // ── The SDK writers (production DataverseServiceClientImpl) ────────────────────────────────────────
+            using var sdk = new DataverseServiceClientImpl(liveConfiguration,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseServiceClientImpl>.Instance, null, credential);
+            foreach (var (label, value) in new (string, DateTime)[]
+            {
+                // TodoGenerationService rule 3: evt.DueDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                // OfficeService.CreateTodoAsync: due.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).
+                ("generation/office shape (midnight, Utc kind)", new DateOnly(2026, 10, 20).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)),
+                ("midnight, Unspecified kind", new DateOnly(2026, 10, 20).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified)),
+            })
+            {
+                var id = await sdk.CreateAsync(new Entity("sprk_todo")
+                {
+                    ["sprk_name"] = $"zz-106-test sdk {label}",
+                    ["sprk_duedate"] = value,
+                });
+                var stored = (await ReadTodoAsync(id)).GetProperty("sprk_duedate").GetString();
+                _out.WriteLine($"DataverseServiceClientImpl.CreateAsync(sprk_duedate {value:O}, {value.Kind}) -> id={id} read back {stored}");
+                stored.Should().Be("2026-10-20", $"the SDK writer's {label} value is the calendar date it names");
+            }
+        }
+        finally
+        {
+            var rows = await dv.GetFromJsonAsync<JsonElement>("sprk_todos?$select=sprk_todoid,sprk_name&$filter=startswith(sprk_name,'zz-106-test')");
+            var ids = rows.GetProperty("value").EnumerateArray().Select(r => r.GetProperty("sprk_todoid").GetGuid()).ToList();
+            foreach (var id in ids)
+                leaks.AddRange(await DeleteAsync(dv, $"sprk_todos({id})"));
+            var left = (await dv.GetFromJsonAsync<JsonElement>("sprk_todos?$select=sprk_todoid&$filter=startswith(sprk_name,'zz-106-test')"))
+                .GetProperty("value").GetArrayLength();
+            _out.WriteLine($"cleanup: {ids.Count} zz-106-test to-dos found by name; {leaks.Count} delete(s) failed; {left} left.");
+            if (left > 0)
+                leaks.Add($"{left} zz-106-test to-do(s) still present after cleanup");
+        }
+
+        leaks.Should().BeEmpty("every zz-106-test record this run created must be gone");
+    }
+
     private static async Task<JsonElement> ReadDatesAsync(HttpClient dv, Guid id) =>
         await dv.GetFromJsonAsync<JsonElement>(
             $"sprk_events({id})?$select=sprk_duedate,sprk_finalduedate,sprk_basedate,sprk_completeddate,sprk_approveddate,sprk_meetingdate");
