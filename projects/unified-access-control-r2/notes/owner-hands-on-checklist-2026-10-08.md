@@ -106,3 +106,17 @@ Hard-refresh first (Ctrl+Shift+R). The control footer should read 1.0.40.
 5. On a Secure record with an organization grant and a standing contact. **PASS:** both rows show "No effect" with the secure reason. On a Restricted record: every contact-based row shows "No effect", and user shares are unmarked.
 6. Open each level dropdown (+ Contact, + Organization, + User). **PASS:** only View Only, Collaborate and Full Access are offered.
 7. Dark mode. **PASS:** the section, the badges and the reason lines are legible and distinct.
+
+## 7. Access-status banner and No Access indicator (task 153, TrackingFieldTrio 1.0.41, on dev since 2026-10-08)
+
+Hard-refresh first (Ctrl+Shift+R); the control footer should read 1.0.41. Project, Matter and Work Assignment main forms only.
+1. Open a SECURE project as a Read-only user. **PASS:** red banner "SECURE RECORD — …"; no indicator in the tracking panel (round 85: the pill already says Secure).
+2. Open a matter with an active No Access entry, as a Write user. **PASS:** red banner "NO ACCESS RESTRICTION — …"; the red "No Access" indicator; clicking it opens Manage Access at the No Access List.
+3. Open a work assignment that references a walled organization. **PASS:** the No Access banner shows.
+4. Open the matter from step 2 as a Read-only user. **PASS:** the banner shows; the indicator can't be clicked.
+5. Block `/no-access` in the browser dev tools (network request blocking), then reload. **PASS:** only "Access status unavailable" shows; no red banner and no false all-clear.
+6. Save a SECURE record with the network throttled ("Slow 3G"). **PASS:** the red banner never disappears during the save.
+7. Go from a secure record to an unrestricted one. **PASS:** no banner is left behind.
+8. Turn on dark mode. **PASS:** the indicator is readable, including on hover.
+9. Open a create form. **PASS:** no banner shows.
+
