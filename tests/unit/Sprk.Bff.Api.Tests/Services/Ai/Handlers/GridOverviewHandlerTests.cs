@@ -282,6 +282,25 @@ public sealed class GridOverviewHandlerTests : TypedToolHandlerTestFixture
     }
 
     [Fact]
+    public async Task ExecuteChatAsync_TimeZoneReadFails_FallsBackToUtcDate_AndWarningCarriesReasonAndStatus()
+    {
+        // The caller is known but reading their usersettings is refused (a missing prvReadUserSettings is a 403).
+        SetupCallerWho();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("usersettingscollection?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(403, "DATAVERSE_FORBIDDEN", "secret detail that must not be logged"));
+
+        var (fetch, toolToday, result) = await RunWithClockAsync(OverdueTasksFetchXml, DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue("a time zone that cannot be read never fails the tool");
+        fetch.Should().Contain("value=\"2026-10-08\"");
+        toolToday.Should().Be("2026-10-08");
+        var warning = CapturedLogMessages.Where(m => m.LogLevel == LogLevel.Warning).Should().ContainSingle().Subject.FormattedMessage;
+        warning.Should().Contain("lookup-failed").And.Contain("status=403").And.Contain("DATAVERSE_FORBIDDEN");
+        warning.Should().NotContain("secret detail", "the warning is identifier-only");
+    }
+
+    [Fact]
     public async Task ExecuteChatAsync_CallerNotIdentifiable_FallsBackToUtcDate_AndLogsOneReason()
     {
         _dataverse
@@ -293,7 +312,7 @@ public sealed class GridOverviewHandlerTests : TypedToolHandlerTestFixture
         result.Success.Should().BeTrue();
         fetch.Should().Contain("value=\"2026-10-08\"");
         CapturedLogMessages.Where(m => m.LogLevel == LogLevel.Warning).Should().ContainSingle()
-            .Which.FormattedMessage.Should().Contain("caller-unresolved");
+            .Which.FormattedMessage.Should().Contain("caller-unresolved").And.Contain("forbidden");
     }
 
     [Fact]

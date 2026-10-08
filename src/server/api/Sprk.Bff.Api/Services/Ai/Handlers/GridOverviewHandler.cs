@@ -111,12 +111,14 @@ public sealed class GridOverviewHandler : IToolHandler
     {
         var now = _clock.GetUtcNow();
         string reason;
+        string? errorKind = null;
         try
         {
             var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
             if (me.Failure is not null)
             {
                 reason = "caller-unresolved";
+                errorKind = me.Failure.ErrorCode;
             }
             else
             {
@@ -144,15 +146,30 @@ public sealed class GridOverviewHandler : IToolHandler
                 if (day.FallbackReason is null)
                     return day.Today;
                 reason = day.FallbackReason;
+                errorKind = ErrorKindOf(day.Error);
             }
         }
-        catch (Exception) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             reason = "lookup-failed";
+            errorKind = ErrorKindOf(ex);
         }
 
-        _logger.LogWarning("GridOverviewHandler: the caller's time zone could not be read; today is the UTC date ({Reason}).", reason);
+        _logger.LogWarning(
+            "GridOverviewHandler: the caller's time zone could not be read; today is the UTC date ({Reason}, {ErrorKind}).",
+            reason, errorKind ?? "none");
         return DateOnly.FromDateTime(now.UtcDateTime);
+    }
+
+    /// <summary>Identifier-only error kind for the fallback warning: the HTTP status and mapped error code of a failed read
+    /// (a missing privilege shows as 403), else the exception type name. Never a message or any user data.</summary>
+    private static string? ErrorKindOf(Exception? ex) =>
+        ex is null ? null : ex is TimeZoneReadException read ? read.Kind : ex.GetType().Name;
+
+    /// <summary>A failed OBO time-zone read; <see cref="Kind"/> is <c>status=403 code=...</c>, nothing else.</summary>
+    private sealed class TimeZoneReadException(int statusCode, string? errorCode) : Exception("The time-zone read failed.")
+    {
+        public string Kind { get; } = $"status={statusCode} code={errorCode ?? "none"}";
     }
 
     /// <summary>The first row of an OBO collection read; null when none. A failed read throws so the time-zone helper reports <c>lookup-failed</c>.</summary>
@@ -160,7 +177,7 @@ public sealed class GridOverviewHandler : IToolHandler
     {
         var response = await _dataverse.GetAsync(path, ct).ConfigureAwait(false);
         if (!response.IsSuccess)
-            throw new InvalidOperationException("The time-zone read failed.");
+            throw new TimeZoneReadException(response.StatusCode, response.ErrorCode);
         return response.Body is { } body
                && body.TryGetProperty("value", out var value)
                && value.ValueKind == JsonValueKind.Array
