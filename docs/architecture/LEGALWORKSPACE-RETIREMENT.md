@@ -65,7 +65,7 @@ The components themselves remain valuable as a library — they implement the da
 - The `useWorkspaceLayouts` hook (will be unified by R4 task C-3).
 - The `sprk_workspacelayout` Dataverse entity and BFF endpoints serving layouts.
 - The build script `npm --workspace src/solutions/LegalWorkspace run build` — components still need to compile so library imports keep resolving in SpaarkeAi.
-- The `Deploy-LegalWorkspaceCustomPage.ps1` script — **out of scope of this retirement**. It deploys a separate target: the PCF-based `sprk_LegalOperationsWorkspace` Custom Page from `src/client/pcf/LegalWorkspace/Solution/`, not the `sprk_corporateworkspace` web resource. (See §6 for the disambiguation.)
+- ~~`Deploy-LegalWorkspaceCustomPage.ps1`~~ - deleted 2026-10-08 (task 121, D-82): its target (PCF source `src/client/pcf/LegalWorkspace`, removed in 5557abaa80) and the Custom Page `sprk_LegalOperationsWorkspace` no longer exist. `Package-LegalWorkspace.ps1` deleted with it. See §6.
 
 ## 4. Consumer audit (Risk R-6 mitigation)
 
@@ -117,9 +117,9 @@ Two LegalWorkspace-adjacent Dataverse assets exist in the repo; only ONE is reti
 | Asset | What it is | Status |
 |---|---|---|
 | **`sprk_corporateworkspace`** (web resource) | HTML build of `src/solutions/LegalWorkspace/dist/corporateworkspace.html`. Vite + React 19 + Fluent v9. Deployed by `Deploy-CorporateWorkspace.ps1`. | **Retired** by this doc + R4 task 041 |
-| **`sprk_LegalOperationsWorkspace`** (Custom Page) | Power Apps Custom Page hosting the PCF control `sprk_Spaarke.Controls.LegalWorkspace` from `src/client/pcf/LegalWorkspace/`. Deployed by `Deploy-LegalWorkspaceCustomPage.ps1` (PAC CLI + solution import). | **NOT retired** by this doc — separate target; out of W-6 scope |
+| **`sprk_LegalOperationsWorkspace`** (Custom Page) | Former Power Apps Custom Page hosting the PCF control `sprk_Spaarke.Controls.LegalWorkspace`. | **Gone.** PCF source removed from the repo (5557abaa80); the Custom Page does not exist in spaarkedev1 (verified 2026-10-08); `Deploy-LegalWorkspaceCustomPage.ps1` and `Package-LegalWorkspace.ps1` were deleted (task 121, D-82). The unused `SpaarkeLegalWorkspace` solution (stale PCF) remains in dev. |
 
-If a future task retires the Custom Page too, that requires a separate retirement doc + consumer audit. Until then, treat `Deploy-LegalWorkspaceCustomPage.ps1` as active.
+There is no longer a LegalWorkspace Custom Page deploy path; LegalWorkspace code ships only inside the Console (`sprk_spaarkeai`) bundle.
 
 ## 7. Deploy-script changes (R4 task 041 implementation)
 
