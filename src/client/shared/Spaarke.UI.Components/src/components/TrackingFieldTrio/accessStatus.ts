@@ -58,6 +58,16 @@ export function parseAccessStatusResponse(body: unknown, recordId: string): ITra
   return { secure: signal(b.secure), noAccess: signal(b.noAccess) };
 }
 
+/**
+ * Whether the indicator shows the Secure signal at all. OWNER CHANGE POINT (b), pending: the access-permission pill
+ * already reads "Secure" in red; set this one line to `false` and the indicator shows only No Access (and draws nothing
+ * for a record that is only secure). An unknown Secure signal still shows "Access status unavailable" either way.
+ */
+export const INDICATOR_SHOWS_SECURE = true;
+
+/** A request that has not answered by then is "unavailable" (a hung call must not leave the indicator absent). */
+export const ACCESS_STATUS_TIMEOUT_MS = 20000;
+
 /** What the indicator shows. */
 export type AccessIndicatorView =
   /** Both signals `doesNotApply`: nothing at all (no "not secure" / "not restricted" text anywhere). */
@@ -67,12 +77,17 @@ export type AccessIndicatorView =
   /** At least one signal `applies` and none is `unknown`: red. */
   | { kind: 'restricted'; secure: boolean; noAccess: boolean };
 
-export function resolveAccessIndicator(status: ITrackingAccessStatus): AccessIndicatorView {
+export function resolveAccessIndicator(
+  status: ITrackingAccessStatus,
+  showSecure: boolean = INDICATOR_SHOWS_SECURE
+): AccessIndicatorView {
   const secure = signal(status.secure);
   const noAccess = signal(status.noAccess);
   if (secure === 'unknown' || noAccess === 'unknown') return { kind: 'unavailable' };
-  if (secure === 'doesNotApply' && noAccess === 'doesNotApply') return { kind: 'none' };
-  return { kind: 'restricted', secure: secure === 'applies', noAccess: noAccess === 'applies' };
+  const showsSecure = showSecure && secure === 'applies';
+  const showsNoAccess = noAccess === 'applies';
+  if (!showsSecure && !showsNoAccess) return { kind: 'none' };
+  return { kind: 'restricted', secure: showsSecure, noAccess: showsNoAccess };
 }
 
 /**
@@ -84,10 +99,28 @@ export function resolveAccessIndicator(status: ITrackingAccessStatus): AccessInd
 export async function readAccessStatus(
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
   recordType: ExternalGrantRootType,
-  recordId: string
+  recordId: string,
+  timeoutMs: number = ACCESS_STATUS_TIMEOUT_MS
 ): Promise<ITrackingAccessStatus> {
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Bounds the whole call (token acquisition included), and aborts the request when it fires.
+  const timedOut = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => {
+      controller?.abort();
+      resolve('timeout');
+    }, timeoutMs);
+  });
   try {
-    const res = await authenticatedFetch(buildNoAccessPath(recordType, recordId), { method: 'GET' });
+    const answer = await Promise.race([
+      authenticatedFetch(buildNoAccessPath(recordType, recordId), { method: 'GET', signal: controller?.signal }),
+      timedOut,
+    ]);
+    if (answer === 'timeout') {
+      console.warn(`[TrackingFieldTrio] Access status unavailable for ${recordType} ${recordId}: no answer in time.`);
+      return { ...ACCESS_STATUS_UNAVAILABLE };
+    }
+    const res = answer;
     if (!res || !res.ok) {
       console.info(
         `[TrackingFieldTrio] Access status unavailable for ${recordType} ${recordId}: ${res ? res.status : 'no response'}.`
@@ -98,5 +131,7 @@ export async function readAccessStatus(
   } catch (err) {
     console.warn(`[TrackingFieldTrio] Access status unavailable for ${recordType} ${recordId}.`, err);
     return { ...ACCESS_STATUS_UNAVAILABLE };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }

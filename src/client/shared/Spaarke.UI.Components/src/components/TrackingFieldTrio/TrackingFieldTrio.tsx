@@ -261,6 +261,16 @@ const useStyles = makeStyles({
   accessIndicatorRestricted: {
     backgroundColor: tokens.colorPaletteRedBackground2,
     color: tokens.colorNeutralForeground1,
+    // Verifier F4-2: Fluent's transparent Button sets its own :hover / :hover:active background and colour, which
+    // would turn a hovered or pressed "No Access" transparent with brand-coloured text. Stay red, a shade darker.
+    ':hover': {
+      backgroundColor: tokens.colorPaletteRedBackground3,
+      color: tokens.colorNeutralForeground1,
+    },
+    ':hover:active': {
+      backgroundColor: tokens.colorPaletteRedBackground3,
+      color: tokens.colorNeutralForeground1,
+    },
   },
   accessIndicatorUnavailable: {
     backgroundColor: tokens.colorNeutralBackground3,

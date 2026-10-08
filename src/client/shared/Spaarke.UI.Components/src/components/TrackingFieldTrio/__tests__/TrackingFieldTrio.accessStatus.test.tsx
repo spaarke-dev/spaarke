@@ -19,6 +19,8 @@ import {
   readAccessStatus,
   resolveAccessIndicator,
   ACCESS_STATUS_UNAVAILABLE,
+  ACCESS_STATUS_TIMEOUT_MS,
+  INDICATOR_SHOWS_SECURE,
   type ITrackingAccessStatus,
 } from '../accessStatus';
 
@@ -120,9 +122,10 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
   it("asks 064's route for this record with a canonical id, as a GET, and parses the two signals", async () => {
     const fetchFn = jest.fn(async () => res({ recordId: RECORD_ID, secure: 'applies', noAccess: 'doesNotApply' }));
     const status = await readAccessStatus(fetchFn, 'workassignment', `{${RECORD_ID.toUpperCase()}}`);
-    expect(fetchFn).toHaveBeenCalledWith(`/api/v1/records/sprk_workassignment/${RECORD_ID}/no-access`, {
-      method: 'GET',
-    });
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/v1/records/sprk_workassignment/${RECORD_ID}/no-access`,
+      expect.objectContaining({ method: 'GET' })
+    );
     expect(status).toEqual({ secure: 'applies', noAccess: 'doesNotApply' });
   });
 
@@ -152,6 +155,27 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
   });
 });
 
+describe('readAccessStatus — a hung request (hardening)', () => {
+  beforeEach(() => jest.spyOn(console, 'warn').mockImplementation(() => {}));
+  afterEach(() => jest.restoreAllMocks());
+
+  it('is unavailable after the timeout, and aborts the request', async () => {
+    let signal: AbortSignal | undefined;
+    const fetchFn = jest.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>(() => {});
+    });
+    const status = await readAccessStatus(fetchFn, 'matter', RECORD_ID, 20);
+    expect(status).toEqual(ACCESS_STATUS_UNAVAILABLE);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('defaults to a bounded wait', () => {
+    expect(ACCESS_STATUS_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(ACCESS_STATUS_TIMEOUT_MS).toBeLessThanOrEqual(30000);
+  });
+});
+
 describe('resolveAccessIndicator (task 153)', () => {
   it.each([
     [status('doesNotApply', 'doesNotApply'), { kind: 'none' }],
@@ -166,6 +190,20 @@ describe('resolveAccessIndicator (task 153)', () => {
     [ACCESS_STATUS_UNAVAILABLE, { kind: 'unavailable' }],
   ])('%j → %j', (input, expected) => {
     expect(resolveAccessIndicator(input as ITrackingAccessStatus)).toEqual(expected);
+  });
+
+  // Owner change point (b), pending: the indicator may show only No Access (the pill already says Secure).
+  it.each([
+    [status('applies', 'doesNotApply'), { kind: 'none' }],
+    [status('applies', 'applies'), { kind: 'restricted', secure: false, noAccess: true }],
+    [status('doesNotApply', 'applies'), { kind: 'restricted', secure: false, noAccess: true }],
+    [status('unknown', 'doesNotApply'), { kind: 'unavailable' }],
+  ])('with the Secure signal switched off: %j → %j', (input, expected) => {
+    expect(resolveAccessIndicator(input as ITrackingAccessStatus, false)).toEqual(expected);
+  });
+
+  it('shows the Secure signal today (change point b not flipped)', () => {
+    expect(INDICATOR_SHOWS_SECURE).toBe(true);
   });
 });
 
@@ -265,6 +303,32 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
       fireEvent.focus(el);
       expect(screen.getByText(/You cannot manage access on this record\./)).toBeInTheDocument();
     });
+  });
+
+  it('a clickable red indicator stays red on hover and press (verifier F4-2)', () => {
+    renderTrio(
+      makeProps({ onOpenGrantModal: jest.fn(), canGrantAccess: true, accessStatus: status('doesNotApply', 'applies') })
+    );
+    const button = screen.getByRole('button', { name: 'No Access' });
+    const classes = Array.from(button.classList);
+    const rules: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from((sheet as CSSStyleSheet).cssRules)) rules.push(rule.cssText);
+    }
+    // A rule on one of the button's own classes, for exactly this pseudo-class, setting the property to the token.
+    const ownRule = (pseudo: string, property: string, token: string) =>
+      rules.some(r => {
+        const selector = r.slice(0, r.indexOf('{'));
+        const body = r.slice(r.indexOf('{'));
+        return (
+          classes.some(c => selector.trim() === `.${c}${pseudo}`) &&
+          new RegExp(`(^|[{;\\s])${property}:\\s*var\\(--${token}\\)`).test(body)
+        );
+      });
+    expect(ownRule(':hover', 'background-color', 'colorPaletteRedBackground3')).toBe(true);
+    expect(ownRule(':hover:active', 'background-color', 'colorPaletteRedBackground3')).toBe(true);
+    expect(ownRule(':hover', 'color', 'colorNeutralForeground1')).toBe(true);
+    expect(ownRule(':hover:active', 'color', 'colorNeutralForeground1')).toBe(true);
   });
 
   it('the person icon still opens Manage Access at the top, without passing the click event as a section', () => {

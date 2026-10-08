@@ -6,5 +6,7 @@ export {
   readAccessStatus,
   resolveAccessIndicator,
   ACCESS_STATUS_UNAVAILABLE,
+  ACCESS_STATUS_TIMEOUT_MS,
+  INDICATOR_SHOWS_SECURE,
 } from './accessStatus';
 export type { AccessSignalState, ITrackingAccessStatus, AccessIndicatorView } from './accessStatus';

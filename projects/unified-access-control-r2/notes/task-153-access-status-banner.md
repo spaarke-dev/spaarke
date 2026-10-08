@@ -92,15 +92,16 @@ No endpoint, column, package or DI registration.
 
 | Suite | Tests |
 |---|---|
-| `src/__tests__/accessStatusBanner.test.ts` (the real script in jsdom) | 28 |
-| `TrackingFieldTrio/__tests__/TrackingFieldTrio.accessStatus.test.tsx` | 43 |
+| `src/__tests__/accessStatusBanner.test.ts` (the real script in jsdom) | 34 (28 + 6 in verifier pass 1) |
+| `TrackingFieldTrio/__tests__/TrackingFieldTrio.accessStatus.test.tsx` | 51 (43 + 8 in verifier pass 1) |
 | `AccessGrantModal/__tests__/AccessGrantModal.initialSection.test.tsx` | 4 |
 | Existing TrackingFieldTrio + AccessGrantModal suites | unchanged, green |
 
 Full `@spaarke/ui-components` jest: 4179 passed, 1 failed (`buildDynamicWorkspaceConfig.test.ts`, pre-existing, #1345).
 Seeded mutations of the banner (unknown rendered as nothing; no supersession drop; no record-left drop; null Response
 as "clear"; unknown state as doesNotApply; one global sequence for every form) each fail at least one test.
-PCF `scripts/Invoke-PcfBuildProd.ps1` succeeded; `bundle.js` 1,023,627 bytes (was 1,017,260 at 1.0.40, +6.4 KB);
+PCF `scripts/Invoke-PcfBuildProd.ps1` succeeded; `bundle.js` 1,024,348 bytes after verifier pass 1 (1,023,627 at
+first pass; 1,017,260 at 1.0.40, +7.1 KB);
 `pcf-scripts lint` clean. Every new test asserts rendered output or the request sent, not a mock echo.
 
 ## Known limits
@@ -110,8 +111,33 @@ PCF `scripts/Invoke-PcfBuildProd.ps1` succeeded; `bundle.js` 1,023,627 bytes (wa
   already parent-aware (064 counts entries through a secure parent). One read point per client
   (`signalsOf` in the banner, `parseAccessStatusResponse` in the shared core); if 174 makes `secure` the effective value
   nothing here changes, and if it adds a separate field only those two functions change.
-- **K2** While the PCF's status request is in flight the indicator is not drawn (the form banner shows the result; an
-  answer that never arrives leaves the banner's own unavailable notice when the call fails).
+- **K2** While the PCF's status request is in flight (at most `ACCESS_STATUS_TIMEOUT_MS`, 20 s) the indicator is not
+  drawn; after that it shows "Access status unavailable".
+
+## Verifier pass 1 fixes (2026-10-08)
+
+Pass 1 found nothing for security, leakage or fail-open. Fixed:
+
+- **F4-1, the banner vanished on every save.** `evaluate()` cleared the notifications before the request, so after a
+  save or a data refresh the SECURE / NO ACCESS banner disappeared for the round trip (a false "no restriction"
+  moment). Now a per-FORM state (`WeakMap` keyed by the form context: evaluation number + the record last rendered)
+  keeps the current notifications while the SAME record is re-evaluated on that form; no record, another record, or no
+  per-form state (no `WeakMap`) clears up front as before. `render()` replaces ids in place and clears only the ones it
+  does not show. The evaluation counter is per form (it was per record), so one record open in two forms is correct in
+  both. Tests: a pending re-evaluation keeps the ERROR notifications; another record clears first; the same record in
+  two forms with overlapping evaluations; the no-`WeakMap` fallback. Seeded (always clear; per-record counter) → fail.
+- **F4-2, the red indicator lost its colour on hover and press.** Fluent's transparent Button sets its own `:hover` /
+  `:hover:active` background and colour. `accessIndicatorRestricted` now sets both to `colorPaletteRedBackground3` /
+  `colorNeutralForeground1`. Test: the button's own classes carry those rules (Griffel's generated CSS); seeded → fail.
+- **Hardening, hung requests.** The banner's `fetchSignals` (`Config.timeoutMs`, 20 s) and the PCF's
+  `readAccessStatus` (`ACCESS_STATUS_TIMEOUT_MS`, 20 s) bound the whole call (token acquisition included) and abort the
+  request; a timeout is "unavailable". Tests for both.
+
+**Owner change points (pending, not flipped):**
+- (a) banner text pointing at the new indicator: `Spaarke.AccessStatus.ManageAccessFrom` (one line in
+  `sprk_accessstatus_banner.js`; both closed-copy strings use it).
+- (b) indicator shows only No Access: `INDICATOR_SHOWS_SECURE` (one line in `TrackingFieldTrio/accessStatus.ts`; tests
+  for the `false` behaviour already pass through `resolveAccessIndicator(status, false)`).
 
 ## Filed (out of scope)
 

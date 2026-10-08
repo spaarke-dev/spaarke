@@ -27,9 +27,11 @@
  *   notification. Nothing anywhere says "not secure" or "not restricted".
  * - Unlike sprk_kpiassessment_quickcreate.js, a missing helper or token is NOT skipped silently.
  *
- * Every evaluation first clears the three notification ids, then shows its result; a late answer for a record the
- * form has left, or older than a newer evaluation, is dropped. A create form (no record id) makes no call. Never
- * throws: the form always loads and saves.
+ * A re-evaluation of the record already shown on THIS form (after a save or a data refresh) keeps the current
+ * notifications until its answer replaces them, so a save never opens a "no restriction" gap; a different record, or
+ * none, clears them first. A late answer for a record the form has left, or older than a newer evaluation on the same
+ * form, is dropped. A request that does not answer within Config.timeoutMs is "unavailable". A create form (no record
+ * id) makes no call. Never throws: the form always loads and saves.
  *
  * Task 174 (owner rounds 82/84): for a filed work assignment or project the Secure signal should be the parent-derived
  * value. 064's `secure` is the record's own flag until 174 exposes the effective one; `signalsOf` is the ONE place
@@ -45,6 +47,8 @@ Spaarke.AccessStatus = Spaarke.AccessStatus || {};
 Spaarke.AccessStatus.Config = {
     /** @type {string|null} Resolved BFF base URL (sprk_BffApiBaseUrl environment variable). */
     apiBaseUrl: null,
+    /** A request that has not answered by then shows "unavailable" (a hung call must not leave the form silent). */
+    timeoutMs: 20000,
     version: "1.0.0"
 };
 
@@ -62,12 +66,18 @@ Spaarke.AccessStatus.Ids = {
     unavailable: "sprk_access_unavailable"
 };
 
+/**
+ * Where the banner tells managers Manage Access is opened from. OWNER CHANGE POINT (a), pending: to point at the new
+ * indicator instead, set this one line to e.g. "the red Secure / No Access marker in the tracking panel".
+ */
+Spaarke.AccessStatus.ManageAccessFrom = "the person icon in the tracking panel";
+
 /** The closed copy (task 153 POML "banner copy"; implement the owner's revision verbatim, compose no other strings). */
 Spaarke.AccessStatus.Text = {
     secure: "SECURE RECORD — only people given access explicitly can see this record. People who can manage access " +
-        "see and change who has access in Manage Access (the person icon in the tracking panel).",
+        "see and change who has access in Manage Access (" + Spaarke.AccessStatus.ManageAccessFrom + ").",
     noAccess: "NO ACCESS RESTRICTION — named people or organizations are blocked from this record. People who can " +
-        "manage access see the list in Manage Access › No Access (the person icon in the tracking panel).",
+        "manage access see the list in Manage Access › No Access (" + Spaarke.AccessStatus.ManageAccessFrom + ").",
     unavailable: "Access status unavailable — whether this record is secure or under a No Access restriction could " +
         "not be checked. Do not assume it is unrestricted; reload the form to try again."
 };
@@ -75,11 +85,48 @@ Spaarke.AccessStatus.Text = {
 Spaarke.AccessStatus._cachedApiBaseUrl = null;
 
 /**
- * The number of the latest evaluation, per record ("table:id"); an older one's answer is dropped. Per record, not one
- * counter for the library: two forms can host this library at once (a record opened in a dialog over another form),
- * and one form's evaluation must never drop the other's answer after that form's notifications were cleared.
+ * Per-FORM evaluation state, keyed by the form context: { seq, lastKey }. `seq` numbers the form's evaluations (an older
+ * answer is dropped); `lastKey` is the record ("table:id") whose answer the form shows now. Per form, not per library or
+ * per record: two forms can host this library at once (a record opened in a dialog over another form, possibly the
+ * same record), and one form's evaluation must never drop or overwrite the other's. Kept if the library loads again.
  */
-Spaarke.AccessStatus._seqByRecord = Spaarke.AccessStatus._seqByRecord || {}; // kept if the library is loaded again
+Spaarke.AccessStatus._forms = Spaarke.AccessStatus._forms || (typeof WeakMap === "function" ? new WeakMap() : null);
+
+/** Fallback when no per-form state is available (no WeakMap, or no object form context): a counter per record. */
+Spaarke.AccessStatus._seqByRecord = Spaarke.AccessStatus._seqByRecord || {};
+
+/** The form's evaluation state, or null when it cannot be kept (the caller then clears up front, as before). */
+Spaarke.AccessStatus._stateOf = function (formContext) {
+    var forms = Spaarke.AccessStatus._forms;
+    if (!forms || !formContext || typeof formContext !== "object") {
+        return null;
+    }
+
+    var state = forms.get(formContext);
+    if (!state) {
+        state = { seq: 0, lastKey: null };
+        forms.set(formContext, state);
+    }
+
+    return state;
+};
+
+/** Resolves with the promise's value, or with `fallback` after `ms` (never rejects on the timer). */
+Spaarke.AccessStatus._within = function (promise, ms, fallback, onTimeout) {
+    return new Promise(function (resolve, reject) {
+        var timer = setTimeout(function () {
+            try { if (onTimeout) { onTimeout(); } } catch (e) { /* ignore */ }
+            resolve(fallback);
+        }, ms);
+        promise.then(function (value) {
+            clearTimeout(timer);
+            resolve(value);
+        }, function (error) {
+            clearTimeout(timer);
+            reject(error);
+        });
+    });
+};
 
 /** Resolves the BFF base URL from the sprk_BffApiBaseUrl environment variable (value override, else default). */
 Spaarke.AccessStatus.getApiBaseUrl = function () {
@@ -158,7 +205,27 @@ Spaarke.AccessStatus.signalsOf = function (body, recordId) {
  * Asks 064's route about one record. Resolves (never rejects) with the signals, or null for every answer that cannot
  * be trusted - including a missing helper, no BFF URL, no token and a null Response.
  */
-Spaarke.AccessStatus.fetchSignals = async function (record) {
+Spaarke.AccessStatus.fetchSignals = function (record) {
+    var controller = typeof AbortController === "function" ? new AbortController() : null;
+    var timedOut = {};
+    return Spaarke.AccessStatus._within(
+        Spaarke.AccessStatus._fetchSignals(record, controller ? controller.signal : undefined),
+        Spaarke.AccessStatus.Config.timeoutMs,
+        timedOut,
+        function () { if (controller) { controller.abort(); } }
+    ).then(function (result) {
+        if (result === timedOut) {
+            console.warn("[Access Status] The access status route did not answer in time; shown as unavailable.");
+            return null;
+        }
+        return result;
+    }, function () {
+        return null;
+    });
+};
+
+/** The request itself (fetchSignals bounds it in time). Resolves (never rejects) with the signals or null. */
+Spaarke.AccessStatus._fetchSignals = async function (record, signal) {
     try {
         if (typeof Spaarke.BffAuth === "undefined" || typeof Spaarke.BffAuth.authenticatedFetch !== "function") {
             console.error("[Access Status] Spaarke.BffAuth is not loaded (register sprk_/scripts/bff_auth.js first); " +
@@ -172,10 +239,12 @@ Spaarke.AccessStatus.fetchSignals = async function (record) {
         }
 
         var url = baseUrl + "/api/v1/records/" + record.table + "/" + encodeURIComponent(record.recordId) + "/no-access";
-        var response = await Spaarke.BffAuth.authenticatedFetch(url, {
-            method: "GET",
-            headers: { "Accept": "application/json" }
-        }, baseUrl);
+        var options = { method: "GET", headers: { "Accept": "application/json" } };
+        if (signal) {
+            options.signal = signal;
+        }
+
+        var response = await Spaarke.BffAuth.authenticatedFetch(url, options, baseUrl);
 
         if (!response) {
             console.warn("[Access Status] No BFF token could be acquired; the access status is shown as unavailable.");
@@ -223,45 +292,72 @@ Spaarke.AccessStatus._show = function (formContext, text, level, id) {
 
 /**
  * Shows one result: the red notification of each signal that applies, or ONLY the unavailable notice when the result
- * is missing or any signal is unknown. Clears everything first.
+ * is missing or any signal is unknown. Every id not shown is cleared; an id shown again is replaced in place (no gap).
  */
 Spaarke.AccessStatus.render = function (formContext, signals) {
     var ids = Spaarke.AccessStatus.Ids;
     var text = Spaarke.AccessStatus.Text;
-    Spaarke.AccessStatus._clear(formContext);
+    var show = [];
 
     if (!signals || signals.secure === "unknown" || signals.noAccess === "unknown") {
-        Spaarke.AccessStatus._show(formContext, text.unavailable, "INFO", ids.unavailable);
-        return;
+        show.push([text.unavailable, "INFO", ids.unavailable]);
+    } else {
+        if (signals.secure === "applies") {
+            show.push([text.secure, "ERROR", ids.secure]);
+        }
+        if (signals.noAccess === "applies") {
+            show.push([text.noAccess, "ERROR", ids.noAccess]);
+        }
     }
 
-    if (signals.secure === "applies") {
-        Spaarke.AccessStatus._show(formContext, text.secure, "ERROR", ids.secure);
-    }
-
-    if (signals.noAccess === "applies") {
-        Spaarke.AccessStatus._show(formContext, text.noAccess, "ERROR", ids.noAccess);
-    }
+    var shown = show.map(function (n) { return n[2]; });
+    [ids.secure, ids.noAccess, ids.unavailable].forEach(function (id) {
+        if (shown.indexOf(id) < 0) {
+            try {
+                formContext.ui.clearFormNotification(id);
+            } catch (error) {
+                /* never break the form */
+            }
+        }
+    });
+    show.forEach(function (n) {
+        Spaarke.AccessStatus._show(formContext, n[0], n[1], n[2]);
+    });
 };
 
 /** One evaluation of the form's record. Resolves when it has rendered (or was dropped). Never throws. */
 Spaarke.AccessStatus.evaluate = async function (formContext) {
     try {
-        Spaarke.AccessStatus._clear(formContext);
-
         var record = Spaarke.AccessStatus.recordOf(formContext);
+        var key = record ? record.table + ":" + record.recordId : null;
+        var state = Spaarke.AccessStatus._stateOf(formContext);
+
+        // Keep what the form shows only while re-evaluating the SAME record on THIS form (a save, a data refresh), so a
+        // save never opens a "no restriction" gap. Anything else - no record, another record, no per-form state - clears
+        // first, so one record's banner is never shown on another.
+        if (!record || !state || state.lastKey !== key) {
+            Spaarke.AccessStatus._clear(formContext);
+            if (state) {
+                state.lastKey = null;
+            }
+        }
+
         if (!record) {
             return; // a create form or an unsaved record: nothing to ask about
         }
 
-        var key = record.table + ":" + record.recordId;
-        var seq = (Spaarke.AccessStatus._seqByRecord[key] || 0) + 1;
-        Spaarke.AccessStatus._seqByRecord[key] = seq;
+        var seq;
+        if (state) {
+            seq = ++state.seq;
+        } else {
+            seq = (Spaarke.AccessStatus._seqByRecord[key] || 0) + 1;
+            Spaarke.AccessStatus._seqByRecord[key] = seq;
+        }
 
         var signals = await Spaarke.AccessStatus.fetchSignals(record);
 
-        // Drop an answer older than a newer evaluation of this record, or for a record the form has left.
-        if (seq !== Spaarke.AccessStatus._seqByRecord[key]) {
+        // Drop an answer older than a newer evaluation on this form, or for a record the form has left.
+        if (state ? seq !== state.seq : seq !== Spaarke.AccessStatus._seqByRecord[key]) {
             return;
         }
 
@@ -271,6 +367,9 @@ Spaarke.AccessStatus.evaluate = async function (formContext) {
         }
 
         Spaarke.AccessStatus.render(formContext, signals);
+        if (state) {
+            state.lastKey = key;
+        }
     } catch (error) {
         console.error("[Access Status] Error while evaluating:", error);
     }

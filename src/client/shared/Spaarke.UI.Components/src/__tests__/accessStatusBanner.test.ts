@@ -321,4 +321,92 @@ describe('sprk_accessstatus_banner.js (task 153)', () => {
     fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
     await expect(load(form)).resolves.toBeDefined();
   });
+  describe('verifier pass 1 (F4-1): a save or refresh never opens a "no restriction" gap', () => {
+    it('keeps the earlier ERROR notifications while a re-evaluation of the same record is pending', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
+      const form = await load();
+      expect(ids(form)).toEqual(['sprk_access_noaccess', 'sprk_access_secure']);
+
+      form.ui.clearFormNotification.mockClear();
+      let resolveSecond: (v: unknown) => void = () => {};
+      fetchMock.mockImplementationOnce(() => new Promise(resolve => (resolveSecond = resolve)));
+      form.postSave.forEach(h => h(ctxOf(form)));
+      await flush();
+      // The answer is pending: the banner is still there, not cleared.
+      expect(ids(form)).toEqual(['sprk_access_noaccess', 'sprk_access_secure']);
+      expect(form.ui.clearFormNotification).not.toHaveBeenCalledWith('sprk_access_secure');
+
+      resolveSecond(jsonResponse(statusBody('applies', 'doesNotApply')));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_secure']);
+    });
+
+    it('clears up front when the form shows a different record than the one last rendered', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
+      const form = await load();
+      fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+      form.id = OTHER_ID;
+      win.Spaarke.AccessStatus.onLoad(ctxOf(form));
+      await flush();
+      expect(ids(form)).toEqual([]);
+    });
+
+    it('the same record in two forms, with overlapping evaluations, leaves both forms correct', async () => {
+      const pending: Array<(v: unknown) => void> = [];
+      fetchMock.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+      const formA = makeForm('sprk_matter', RECORD_ID);
+      const formB = makeForm('sprk_matter', RECORD_ID);
+      win.Spaarke.AccessStatus.onLoad(ctxOf(formA)); // A, evaluation 1
+      await flush();
+      win.Spaarke.AccessStatus.onLoad(ctxOf(formB)); // B, evaluation 1
+      await flush();
+      formA.postSave.forEach(h => h(ctxOf(formA))); // A, evaluation 2
+      await flush();
+      expect(pending).toHaveLength(3);
+
+      pending[1](jsonResponse(statusBody('applies', 'doesNotApply'))); // B's answer
+      pending[2](jsonResponse(statusBody('doesNotApply', 'applies'))); // A's newer answer
+      await flush();
+      pending[0](jsonResponse(statusBody('applies', 'applies'))); // A's older answer arrives last
+      await flush();
+      expect(ids(formA)).toEqual(['sprk_access_noaccess']);
+      expect(ids(formB)).toEqual(['sprk_access_secure']);
+    });
+
+    it('without per-form state (no WeakMap), it falls back to clearing up front', async () => {
+      win.Spaarke.AccessStatus._forms = null;
+      fetchMock.mockResolvedValue(jsonResponse(statusBody('applies', 'applies')));
+      const form = await load();
+      fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+      form.postSave.forEach(h => h(ctxOf(form)));
+      await flush();
+      expect(ids(form)).toEqual([]);
+    });
+  });
+
+  describe('a hung request (hardening)', () => {
+    it('shows only the unavailable notice after Config.timeoutMs, and aborts the request', async () => {
+      win.Spaarke.AccessStatus.Config.timeoutMs = 200;
+      let signal: AbortSignal | undefined;
+      fetchMock.mockImplementation((_url: string, options: { signal?: AbortSignal }) => {
+        signal = options.signal;
+        return new Promise(() => {});
+      });
+      const form = await load();
+      expect(ids(form)).toEqual([]);
+      await new Promise(r => setTimeout(r, 300));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_unavailable']);
+      expect(signal?.aborted).toBe(true);
+    });
+
+    it('a token acquisition that never settles is bounded too', async () => {
+      win.Spaarke.AccessStatus.Config.timeoutMs = 30;
+      fetchMock.mockImplementation(() => new Promise(() => {}));
+      const form = await load();
+      await new Promise(r => setTimeout(r, 60));
+      await flush();
+      expect(ids(form)).toEqual(['sprk_access_unavailable']);
+    });
+  });
 });
