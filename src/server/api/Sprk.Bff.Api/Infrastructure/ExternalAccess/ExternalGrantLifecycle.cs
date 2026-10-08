@@ -714,8 +714,10 @@ internal static class ExternalGrantLifecycle
         {
             // LOGICAL name (sprk_project), the key shape GetRootRecordFlagsAsync's sources use — an entity-set
             // name here would return an empty map, which DecideGrantPolicy treats as unreadable (never as "open").
+            // Task 174 (owner round 84; #1442): the EFFECTIVE flags — a work assignment or project filed under a secure,
+            // Limited or Restricted parent refuses as its parent would; an undecidable filing is unreadable (503).
             flags = await participations
-                .GetRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct)
+                .GetEffectiveRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -883,7 +885,8 @@ internal static class ExternalGrantLifecycle
     {
         ArgumentNullException.ThrowIfNull(mayConfer);
 
-        var flags = await participations.GetRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct);
+        // Task 174: the EFFECTIVE flags, as the read path folds them — the rows that count are the rows the read path lets confer.
+        var flags = await participations.GetEffectiveRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct);
         var directOnly = !flags.TryGetValue(rootId, out var f) || f.IsUnreadable || f.IsDirectOnly;
 
         var rows = new List<ExternalGrantRow>(

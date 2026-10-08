@@ -31,9 +31,13 @@ internal static class GrantPolicyTestDoubles
     {
         private readonly RootRecordFlags _defaultFlags;
 
-        public FlagStubParticipationService(RootRecordFlags defaultFlags)
+        /// <param name="defaultFlags">What an unseeded id answers.</param>
+        /// <param name="filing">Task 174: the filing world the effective-flag read walks; by default nothing is filed under
+        /// anything (every record's own flags are its effective flags).</param>
+        public FlagStubParticipationService(RootRecordFlags defaultFlags, Spaarke.Dataverse.IGenericEntityService? filing = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: filing ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
             _defaultFlags = defaultFlags;
         }
@@ -435,7 +439,8 @@ internal static class GrantPolicyTestDoubles
             Microsoft.Extensions.Configuration.IConfiguration? configuration)
             : base(new HttpClient(), cache,
                    configuration ?? new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-                   credential: null!, AccessorFor(context), NullLogger<ExternalParticipationService>.Instance)
+                   credential: null!, AccessorFor(context), NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

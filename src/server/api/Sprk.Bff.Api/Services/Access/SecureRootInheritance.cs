@@ -187,6 +187,33 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
 
     /// <summary>At least one record it is filed under is (readably) secure — the record is secure whatever the rest say.</summary>
     public bool HasSecureParent => SecureParents.Count > 0;
+
+    /// <summary>
+    /// Task 174 (owner round 84): the most restrictive <c>sprk_accesspermission</c> among the records the climb read above
+    /// this one (Restricted over Limited), and the record that carries it — <c>null</c> when none of them is Limited or
+    /// Restricted. Read in the SAME parent read as the Secure flag (no extra query). Only as deep as the climb went: the
+    /// sharee rule's one-level climb reports the direct parents' value, the walls' climb every ancestor's.
+    /// </summary>
+    public FilingPermission? StrictestPermission { get; init; }
+}
+
+/// <summary>
+/// Task 174 (owner round 84): an Access Permission a record inherits from a record it is filed under — the option value
+/// (<c>ExternalParticipationService.AccessPermissionLimited</c> or <c>AccessPermissionRestricted</c>) and that record.
+/// </summary>
+public sealed record FilingPermission(int Value, SecureFilingParent From)
+{
+    /// <summary>Restricted (2) over Limited (1); any other value is Standard (0), as the flag read maps it.</summary>
+    internal static int Rank(int? value) => value switch
+    {
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.AccessPermissionRestricted => 2,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.AccessPermissionLimited => 1,
+        _ => 0,
+    };
+
+    /// <summary>The stricter of two (the first on a tie); <c>null</c> stands for Standard.</summary>
+    internal static FilingPermission? Stricter(FilingPermission? a, FilingPermission? b) =>
+        b is null || (a is not null && Rank(a.Value) >= Rank(b.Value)) ? a : b;
 }
 
 /// <summary>
@@ -291,6 +318,7 @@ public sealed class SecureRootInheritance
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
     private const string IsSecureColumn = "sprk_issecure";
+    private const string AccessPermissionColumn = "sprk_accesspermission"; // task 174: read with the flag (round 84)
     private const string OwningTeamColumn = "owningteam";
     private const string ContainerColumn = "sprk_containerid";
 
@@ -2248,7 +2276,7 @@ public sealed class SecureRootInheritance
         IReadOnlyList<FiledRootRef> filed;
         try
         {
-            var flag = await ReadParentAsync(parent, parentId, ct).ConfigureAwait(false);
+            var flag = await ReadParentAsync(_dataverse, parent, parentId, ct).ConfigureAwait(false);
 
             // A record that is not (or no longer) there, or reads NOT secure, passes nothing on — and its filed records are
             // not read at all (a share on an ordinary matter costs no read of what is filed under it). An EMPTY flag is never
@@ -2357,14 +2385,21 @@ public sealed class SecureRootInheritance
 
         public List<SecureFilingParent> Secure { get; } = new();
 
+        /// <summary>Task 174: the strictest Access Permission met on the way up (null = Standard).</summary>
+        public FilingPermission? Strictest { get; set; }
+
         public string? Unknown { get; set; }
     }
 
     /// <summary>A row's filing as read: the facts (<c>null</c> = the row does not exist), or a fault.</summary>
     private readonly record struct FactsRead(FilingFacts? Facts, bool Faulted);
 
-    /// <summary>A matter's or project's flag and name as read: the row (<c>null</c> = it does not exist), or a fault.</summary>
-    private readonly record struct ParentRead((bool? Flag, string? Name)? Row, bool Faulted);
+    /// <summary>A matter's or project's flag, name and Access Permission (task 174) as read: the row (<c>null</c> = it does
+    /// not exist), or a fault.</summary>
+    private readonly record struct ParentRead(ParentRow? Row, bool Faulted);
+
+    /// <summary>One matter or project as the parent read returns it.</summary>
+    private readonly record struct ParentRow(bool? Flag, string? Name, int? Permission);
 
     /// <summary>
     /// The climb behind <see cref="ReadSecureParentsAsync"/> and <see cref="ReadSecureParentsOfManyAsync"/> (round 61 item
@@ -2424,6 +2459,7 @@ public sealed class SecureRootInheritance
 
                     var (answer, filedUnder) = decisions[row];
                     climb.Unknown ??= answer.Unverifiable;
+                    climb.Strictest = FilingPermission.Stricter(climb.Strictest, answer.StrictestPermission);
                     foreach (var parent in answer.SecureParents)
                     {
                         if (!climb.Secure.Any(s => string.Equals(s.Table, parent.Table, StringComparison.OrdinalIgnoreCase) && s.Id == parent.Id))
@@ -2443,7 +2479,9 @@ public sealed class SecureRootInheritance
             }
         }
 
-        return climbs.ToDictionary(c => c.Start.Id, c => new SecureParentsAnswer(c.Secure, c.Unknown));
+        return climbs.ToDictionary(
+            c => c.Start.Id,
+            c => new SecureParentsAnswer(c.Secure, c.Unknown) { StrictestPermission = c.Strictest });
     }
 
     /// <summary>Reads the filing of every row in <paramref name="rows"/> into <paramref name="into"/>. Never throws a read
@@ -2525,7 +2563,7 @@ public sealed class SecureRootInheritance
                     var found = await ReadParentsOfManyAsync(dataverse, group.Key, chunk.Select(p => p.Id).ToArray(), ct)
                         .ConfigureAwait(false);
                     foreach (var parent in chunk)
-                        reads[parent] = new ParentRead(found.TryGetValue(parent.Id, out var p) ? p : null, false);
+                        reads[parent] = new ParentRead(found.TryGetValue(parent.Id, out var p) ? p : (ParentRow?)null, false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
@@ -2923,6 +2961,7 @@ public sealed class SecureRootInheritance
     {
         var secure = new List<SecureFilingParent>();
         var existing = new List<(string Table, Guid Id)>();
+        FilingPermission? strictest = null;
         foreach (var (table, id) in named.Distinct())
         {
             var read = reads[(table, id)];
@@ -2935,6 +2974,14 @@ public sealed class SecureRootInheritance
             if (read.Row is not { } parent)
                 continue; // a record that does not exist confers nothing
             existing.Add((table, id));
+
+            // Task 174 (owner round 84): the parent's Access Permission, from the same row (a null value is Standard).
+            if (FilingPermission.Rank(parent.Permission) > 0)
+            {
+                strictest = FilingPermission.Stricter(strictest,
+                    new FilingPermission(parent.Permission!.Value, new SecureFilingParent(table, id, parent.Name)));
+            }
+
             if (parent.Flag is null)
             {
                 unknown ??= $"the {table} it is filed under has no secure flag value (empty is never read as not secure)";
@@ -2945,34 +2992,28 @@ public sealed class SecureRootInheritance
                 secure.Add(new SecureFilingParent(table, id, parent.Name));
         }
 
-        return (new SecureParentsAnswer(secure, unknown), existing);
+        return (new SecureParentsAnswer(secure, unknown) { StrictestPermission = strictest }, existing);
     }
 
-    /// <summary>A matter's or project's flag and its name, or <c>null</c> when it does not exist.</summary>
-    private Task<(bool? Flag, string? Name)?> ReadParentAsync(string table, Guid id, CancellationToken ct) =>
-        ReadParentAsync(_dataverse, table, id, ct);
-
-    private static async Task<(bool? Flag, string? Name)?> ReadParentAsync(
+    /// <summary>A matter's or project's flag, name and Access Permission, or <c>null</c> when it does not exist.</summary>
+    private static async Task<ParentRow?> ReadParentAsync(
         IGenericEntityService dataverse, string table, Guid id, CancellationToken ct)
     {
-        var nameColumn = string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
-        var query = Query(table, new[] { IsSecureColumn, nameColumn });
+        var nameColumn = NameColumnOf(table);
+        var query = Query(table, new[] { IsSecureColumn, nameColumn, AccessPermissionColumn });
         query.TopCount = 1;
         query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
         var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (row is null)
-            return null;
-
-        return (row.GetAttributeValue<bool?>(IsSecureColumn), row.GetAttributeValue<string>(nameColumn));
+        return row is null ? null : ToParentRow(row, nameColumn);
     }
 
-    /// <summary>#1410: the flag and name of every row of <paramref name="table"/> in <paramref name="ids"/> (at most
-    /// <see cref="IdsPerQuery"/>) in one query — one id is the one-record query; a row that does not exist is absent. A
-    /// fault propagates.</summary>
-    private static async Task<IReadOnlyDictionary<Guid, (bool? Flag, string? Name)>> ReadParentsOfManyAsync(
+    /// <summary>#1410: the flag, name and Access Permission of every row of <paramref name="table"/> in <paramref name="ids"/>
+    /// (at most <see cref="IdsPerQuery"/>) in one query — one id is the one-record query; a row that does not exist is absent.
+    /// A fault propagates.</summary>
+    private static async Task<IReadOnlyDictionary<Guid, ParentRow>> ReadParentsOfManyAsync(
         IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
     {
-        var found = new Dictionary<Guid, (bool? Flag, string? Name)>();
+        var found = new Dictionary<Guid, ParentRow>();
         if (ids.Length == 1)
         {
             if (await ReadParentAsync(dataverse, table, ids[0], ct).ConfigureAwait(false) is { } one)
@@ -2980,17 +3021,29 @@ public sealed class SecureRootInheritance
             return found;
         }
 
-        var nameColumn = string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
-        var query = Query(table, new[] { IsSecureColumn, nameColumn });
+        var nameColumn = NameColumnOf(table);
+        var query = Query(table, new[] { IsSecureColumn, nameColumn, AccessPermissionColumn });
         query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
         foreach (var row in await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false))
         {
             if (ids.Contains(row.Id))
-                found[row.Id] = (row.GetAttributeValue<bool?>(IsSecureColumn), row.GetAttributeValue<string>(nameColumn));
+                found[row.Id] = ToParentRow(row, nameColumn);
         }
 
         return found;
     }
+
+    private static string NameColumnOf(string table) =>
+        string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
+
+    /// <summary>Task 174: <c>sprk_accesspermission</c> is a choice column; the SDK returns an <see cref="OptionSetValue"/>.
+    /// Absent or empty is Standard (the flag read's rule).</summary>
+    private static ParentRow ToParentRow(Entity row, string nameColumn) => new(
+        row.GetAttributeValue<bool?>(IsSecureColumn),
+        row.GetAttributeValue<string>(nameColumn),
+        row.Attributes.TryGetValue(AccessPermissionColumn, out var permission)
+            ? permission switch { OptionSetValue o => o.Value, int i => i, _ => null }
+            : null);
 
     private readonly ConcurrentDictionary<Guid, string?> _recordTypes = new();
 

@@ -655,8 +655,10 @@ public sealed class AssignedAccessMaterializer
     {
         try
         {
+            // Task 174 (owner round 84): the EFFECTIVE flags — Restricted, Limited or Secure through a parent governs what an
+            // assignee is given, exactly as the read path cancels it.
             var flags = await _participations
-                .GetRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
+                .GetEffectiveRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
             // Absent = unreadable at write time (task 138's rule), never "no veto".
             return flags.TryGetValue(run.RootId, out var f) && !f.IsUnreadable ? f : null;
         }
@@ -2005,7 +2007,8 @@ public sealed class AssignedAccessMaterializer
         try
         {
             var logical = ExternalGrantRoot.LogicalNameFor(rootType);
-            var flags = await _participations.GetRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
+            // Task 174: the composition's gates use the EFFECTIVE flags, so this mirror does too.
+            var flags = await _participations.GetEffectiveRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
             if (!flags.TryGetValue(rootId, out var f) || f.IsUnreadable)
                 return new[] { ResidualTerm.Unknown };
             if (f.IsDirectOnly || f.IsRestricted || f.IsInactive)

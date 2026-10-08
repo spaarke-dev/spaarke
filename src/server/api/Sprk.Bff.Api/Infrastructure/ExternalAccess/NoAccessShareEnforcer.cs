@@ -569,6 +569,18 @@ public sealed class NoAccessShareEnforcer
             flags = new Dictionary<Guid, RootRecordFlags>();
         }
 
+        // Task 174 (owner rounds 82/84: Q4's "secure" means the record or any filing ancestor): a work assignment or project
+        // whose own flag is not set yet but which is filed under a secure matter or project IS secure for the entry on it.
+        // Only then is the single-record walk read; an undecidable filing is unreadable (nothing enforced, reported).
+        if (flags.TryGetValue(recordId, out var own) && !own.IsUnreadable && !own.IsSecure)
+        {
+            flags = new Dictionary<Guid, RootRecordFlags>
+            {
+                [recordId] = await EffectiveRootFlags.FoldOneAsync(_dataverse, _logger, logicalName, recordId, own, ct)
+                    .ConfigureAwait(false),
+            };
+        }
+
         if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
         {
             run.Fail(logicalName, recordId, null, "flags-unreadable",
