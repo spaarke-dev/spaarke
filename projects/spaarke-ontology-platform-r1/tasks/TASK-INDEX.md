@@ -171,7 +171,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 |---|---|---|---|---|---|---|
 | ✅ [done] 024 | [Grammar extension: subject-only rules, now+Nd, Do subjects, quiet-window knob](024-grammar-extension-do-lane.poml) | FULL | **opus**/high | 021, 022 | K | **D-16**, **D-13** (FR-17a knob). Still one filter per body; everything else still refused. **Before 031** (feeds 037) · **[uac]** |
 | 🔲 [open] 025 | [Threshold rule type: schema + compiler (spend threshold)](025-threshold-rule-type-schema-and-compiler.poml) | FULL | sonnet/high | 024, 031 | C | **D-16**. Proves the 031 job runs it with **no evaluator change**. Switch stays refused. **After 031** |
-| 🔲 [open] 026 | [Rule-body describer (plain-language condition, read-side)](026-rule-body-describer.poml) | FULL | sonnet/high | 024 | — | #11. Feeds the wizard's *How this was determined* (058) and the admin rule page (100) |
+| ✅ [done] 026 | [Rule-body describer (plain-language condition, read-side)](026-rule-body-describer.poml) | FULL | sonnet/high | 024 | — | #11. Feeds the wizard's *How this was determined* (058) and the admin rule page (100) |
 
 ### Phase 3 — Evaluator, Signal lifecycle and read
 
@@ -200,7 +200,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 036 | [Closed BFF action catalog + decision-plan read endpoint](036-action-catalog-and-decision-plan-read.poml) | FULL | sonnet/high | 007 | L | Approve variance record-only (**D-19**); dismissal reasons per lane; reassign / extend **Routine (D-45)**; adds record-the-response (D-54) and assign-work as a plan action (D-51) · **[uac]** |
+| ✅ [done] 036 | [Closed BFF action catalog + decision-plan read endpoint](036-action-catalog-and-decision-plan-read.poml) | FULL | sonnet/high | 007 | L | Approve variance record-only (**D-19**); dismissal reasons per lane; reassign / extend **Routine (D-45)**; adds record-the-response (D-54) and assign-work as a plan action (D-51) · **[uac]** |
 | 🔲 [open] 043 | [**The decision commit route** (record last, idempotent)](043-decision-commit-route.poml) | FULL | **opus**/high | 040, 036, 044, 046, 070 | — | 🔴 **D-17**: validate → writes → email last → one record → close. Failure = no record + which writes landed. Confirm = confirmation; gate tier from a pure `PublicContracts` function (**D-52**) · **[uac]** |
 | 🔲 [open] 044 | [Executors: Revise budget, Approve variance, Do actions, Next steps](044-decision-action-executors.poml) | FULL | sonnet/high | 036, 008, 047 | — | **D-18** writer creates the revision after a caller check; budget amount written **as the signed-in user (D-55)**; reschedule writes `sprk_duedate` (D-27); record-the-response writes the **D-54** columns (047) · **[uac]** |
 | 🔲 [open] 046 | [Server-side work-assignment create](046-server-side-work-assignment-create.poml) | FULL | **opus**/high | 008 | — | **D-21**. Preserve the wizard's BU cascade; area owner reviews · **[uac]** |
