@@ -92,7 +92,23 @@ onto this branch (`d0f1fb469` + the guard commit) because task 046 cannot work w
 
 ### 0.6 Measurements
 
-(publish size, CVE, full suites — filled at completion)
+- **Publish size** (`.claude/rules/bff-hygiene.md`): three FRESH worktrees at short paths, `dotnet restore` +
+  `dotnet publish -c Release` (the `Deploy-BffApi.ps1` commands), zipped with **PowerShell `Compress-Archive`**, PDBs as
+  published. **192 files on all three sides.**
+
+  | Side | Commit | Zip |
+  |---|---|---|
+  | master (fresh) | `ccde3eb6d` | 36.22 MB (37,978,933 B) |
+  | this branch's merge-base with the ontology branch | `0977c274d` | 36.23 MB (37,994,147 B) |
+  | this branch | `27a361c68` | 36.24 MB (38,001,292 B) |
+
+  **Task 046's own delta: +7,145 B (+0.007 MB)** (branch vs its merge-base); +0.02 MB vs master, which also includes the
+  ontology branch's other unmerged work. Ceiling 60 MB: far below. (The figures are lower than root CLAUDE.md's recorded
+  45.42 MB baseline; the rule is to compare fresh builds, which these are, with equal file counts.)
+- **CVE**: `dotnet list package --vulnerable --include-transitive` → "no vulnerable packages"; no `.csproj` changed.
+- **Full BFF unit suite**: **18,782 passed, 0 failed, 54 skipped** (34 min; contended with other streams' suites).
+- **Full ArchTests**: **818/818** (built explicitly).
+- **UI package**: `npm run build` (tsc) exit 0; eslint clean on the changed files; jest 79/79 for the wizard + adapter.
 
 ## First pass (escalation record, unchanged)
 
