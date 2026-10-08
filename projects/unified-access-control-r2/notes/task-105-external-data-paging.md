@@ -26,9 +26,16 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
   - Hitting the cap logs a warning: `collection_truncated`, the url, the cap and the row count.
   - A failure on a later page logs an error naming the page, the row count and the url.
   - A nextLink outside the Dataverse Web API base is not followed (the bearer token never leaves). The read is reported as truncated.
-  - A first-page failure keeps its old behaviour: logged and returned empty (out of scope per the POML).
+  - A first-page failure is truncated too: logged (`page 1 failed; nothing was read`) and returned EMPTY AND FLAGGED, never as an empty list. The main session decided this on 2026-10-08 under the owner's finding rule: it was this report's defect 2, the same honesty class as the task, in the function changed here. Before, a Dataverse fault showed the user "no documents".
   - A plain loop, not the `PrivilegeGroupResolver` iterator (ISS-001): each page's rows are added once.
 - The four `$top=200` sites drop `$top` and add a primary-key tiebreaker to `$orderby`, so pages cannot overlap (Learn, "Page results", deterministic ordering).
+- **Every caller of the reader was checked for a first-page failure.**
+  - The display lists (projects, documents, to-dos, events, the grant-row id read behind contacts, and contact/account details) surface the flag. A failed id read gives an empty contact list flagged truncated, and organisations inherit it.
+  - Every id chunk failing gives `FirstPageFailed`, which is flagged.
+  - The one create-payload reader, `ResolveRecordTypeRefAsync`, now FAILS the to-do create with a 503 problem (`todo_record_type_unreadable`, "nothing was created, please try again") when its read is not complete. Writing the create would silently drop the fourth ADR-024 resolver field.
+  - That failure is no longer cached as "absent" for the service instance's life. Before, every failure, and any exception, was cached that way.
+  - A COMPLETE read with no row (type not configured) keeps the non-fatal design: the create goes ahead without the bind.
+  - No reader makes an access decision.
 - **Id-list reads are chunked** (`GetByIdsAsync`, `IdFilterChunkSize` = 100) for contacts, accounts and projects. Paging the grant rows to 5,000 would otherwise push the contact-detail read's single `contactid eq … or …` filter past the 32 KB URL limit at about 450 participants. The 400 would come back as an empty contact list, a regression this task would have introduced. If some chunks fail and others succeed, the result is truncated. If every chunk fails, it is `FirstPageFailed`, as before. A multi-chunk result is re-sorted by name.
 - `GetProjectsAsync`, `GetDocumentsAsync`, `GetTodosAsync`, `GetEventsAsync`, `GetContactsAsync` and `GetOrganizationsAsync` return `ExternalCollectionResponse<T>` carrying `Truncated`. Organizations inherit the contact list's flag.
 - **Found in passing and fixed:** `ResolveRecordTypeRefAsync` filtered `sprk_recordtype_refs` on `sprk_recordentitylogicalname`, which does not exist. The live answer is 400 `0x80060888`; the column is `sprk_recordlogicalname` (live metadata 2026-10-08). So every external to-do create logged "sprk_recordtype_ref not found" and never wrote `sprk_RegardingRecordType@odata.bind`, writing three of ADR-024's four resolver fields instead of four. Its `$top=1` is also dropped (the reader refuses `$top`).
@@ -39,7 +46,9 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
 **SPA: `src/client/external-spa`.**
 - `web-api-client.ts`: `getCollection` and the six list functions return `ListResult<T> { items, truncated }`. The inert `$top: 100/200` defaults are removed (`getCollection` never sent options; the BFF ignores them), and the `$top` option is documented as not applied.
 - `components/TruncatedListNotice.tsx` (new): one Fluent v9 warning `MessageBar` with one wording, "This list is incomplete: only N {noun} could be shown. Some {noun} are not listed here."
-- `DocumentLibrary`, `SmartTodo`, `EventsCalendar` and `ContactsOrganizations` (contacts and organisations) render the notice. The dashboard's "My Documents" count becomes a lower bound ("N+", "more than N") when any project's list was cut short.
+- `DocumentLibrary`, `SmartTodo`, `EventsCalendar` and `ContactsOrganizations` (contacts and organisations) render the notice.
+  - For an empty truncated list (the first page failed), the notice says "The {noun} could not be loaded just now, so none are shown. This does not mean there are none — please try again."
+  - Each view's own "No documents / No tasks yet / No events yet / No contacts…" empty state is suppressed, because it would contradict the notice. The dashboard's "My Documents" count becomes a lower bound ("N+", "more than N") when any project's list was cut short.
 
 ## 3. Placement justification (root CLAUDE.md §10) and component justification (§11)
 
@@ -51,14 +60,17 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
 
 ## 4. Tests
 
-- `tests/integration/regression/Issue963_ExternalDataPagingTests.cs` (regression KEEP path), 28 tests. A loopback fake Dataverse (WireMock) pages like the live service: it honours `maxpagesize`, emits a `$skiptoken` nextLink, sends no nextLink under `$top`, and returns the smaller of `$top` and `maxpagesize`. The real service runs over a real `HttpClient`. The tests:
+- `tests/integration/regression/Issue963_ExternalDataPagingTests.cs` (regression KEEP path), 34 tests. A loopback fake Dataverse (WireMock) pages like the live service: it honours `maxpagesize`, emits a `$skiptoken` nextLink, sends no nextLink under `$top`, and returns the smaller of `$top` and `maxpagesize`. The real service runs over a real `HttpClient`. The tests:
   - each of the four reads at 250 children returns all 250, unique, not truncated, in 2 requests, with page 2 being the nextLink;
   - each read beyond the cap returns 5,000, truncated, in exactly 25 requests, with a warning naming the url and "Returning 5000 rows";
   - exactly the cap is complete;
   - page 2 failing returns truncated with page 1's 200 rows and an error log naming page 2;
   - fewer than one page means one request and not truncated;
   - every request carries `Prefer: odata.maxpagesize=200` and no `$top`;
-  - a first-page failure stays empty and not truncated (pinned);
+  - a first-page failure (each of the four reads) returns empty, truncated, with an error log naming page 1 and the url;
+  - every id chunk failing means truncated;
+  - a to-do create whose record-type read fails is refused with 503 `todo_record_type_unreadable`, POSTs nothing, and is not cached (the next create binds the type);
+  - a type that is genuinely not configured still creates without the bind;
   - a nextLink to another host is not followed (that host records zero requests) and the list is truncated;
   - contact details come in 3 chunks with a short URL, re-sorted;
   - a failed contact chunk means truncated;
@@ -67,7 +79,11 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
   - an external to-do create binds the record-type ref found through the live column (the fake answers 400 for any other column, as Dataverse does: G-13).
 - `tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs`: `ListRoute_CarriesTruncatedOnlyWhenTheReadWasCutShort` across 5 list routes. The field is absent for a complete list and `true` for a cut one, through the real host.
 - Stubs updated for the new return type: `ExternalAccessContractTests`, `ExternalTodoScopeTests`, `EventRoutesLiveTests`.
-- SPA: `tests/TruncatedLists.test.tsx`, 10 tests. The envelope maps `truncated`. Each of the 4 views shows the notice for a cut list (2 notices on the contacts tab) and none for a complete one. The existing mocks are moved to `ListResult`.
+- SPA: `tests/TruncatedLists.test.tsx`, 18 tests. The envelope maps `truncated`. Each of the 4 views:
+  - shows the notice for a cut list (2 notices on the contacts tab);
+  - for an empty truncated list, shows "could not be loaded" and NOT its own empty state;
+  - keeps its empty state for a complete empty list;
+  - shows no notice for a complete list. The existing mocks are moved to `ListResult`.
 
 **Perturbations** (each committed first, then reverted):
 
@@ -81,12 +97,15 @@ Live data on dev, 2026-10-08: no project has more than 200 children today. The m
 | Restoring `sprk_recordentitylogicalname` | 1 fails |
 | SPA: dropping `truncated` in `getCollection` | 5 fail |
 | SPA: removing the EventsCalendar notice | 1 fails |
+| Dropping the flag on a first-page failure | 6 fail |
+| Treating a failed record-type read as "absent" | 1 fails |
+| SPA: SmartTodo showing "No tasks yet" for an empty truncated list | 1 fails |
 
 ## 5. Known limits (K-class, no fix)
 
-- **K2.** A first-page failure is still "empty, not truncated", as the POML scopes it. A Dataverse outage shows an empty list, as it did before this task. This is the same honesty class as the defect, and it is left for the owner to schedule.
 - **K4.** `GetCollectionPageAsync` still swallows cancellation like the old reader. A client that disconnects during page 2 logs one `collection_truncated` error.
 - **K4.** The dashboard reads every project's full document list, up to 5,000 each (before: 200), to show 10 and a count. The live maximum today is 6 per project.
+- **Found in passing, reported, not fixed:** `GetRootDisplayNameAsync` (the to-do create's root-name read) goes through `GetSingleAsync`, which returns `null` both for a missing record and for a failed read. A transient failure there writes an empty `sprk_regardingrecordname` on the new to-do. It is not a reader of the paged collection, and fixing it means changing `GetSingleAsync`'s callers.
 - The project list's `truncated` is in the response but not bannered: the dashboard's rows come from `/me`, so a cut detail read shows an id in place of a name, not a missing row.
 
 ## 6. Live gate (after merge; needs the owner's OK for the seed writes)
