@@ -220,8 +220,8 @@ public sealed class SignalSentenceTemplateException : Exception
 /// <c>SecureChildLineage</c> lists <c>sprk_signal</c>. That entry, and the <c>prvReadsprk_Signal</c> entry in
 /// <c>config/secure-record-owner-role.json</c>, are added by master PR #1390 (task 039), NOT by this branch.
 /// <b>Whether the create itself succeeds does not depend on #1390</b>: it depends on the LIVE Secure Record Owner
-/// role holding Read on <c>sprk_signal</c> in that environment (task 008's role edit, applied by
-/// <c>Set-SecureRecordOwnerRolePrivileges.ps1</c> from the config). Where the role lacks it, Dataverse refuses the
+/// role holding Read on <c>sprk_signal</c> in that environment (applied in dev directly by task 008; elsewhere by
+/// <c>Set-SecureRecordOwnerRolePrivileges.ps1</c>, once #1390's config entry is present). Where the role lacks it, Dataverse refuses the
 /// create with 403 <c>0x80040299</c> ("Read Privilege Check For Owner failed" — the refusal recorded for
 /// <c>sprk_signal</c> by task 079, by Assign rather than create, and for <c>sprk_spendsignal</c> by uac-r2 task 146),
 /// and this writer surfaces it as <see cref="OntologyWriterFailureReason.DataverseAccessDenied"/>. Where the role
