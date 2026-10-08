@@ -4,7 +4,7 @@
     <title>C10 part 2 (server) — every BFF writer of a child record assigns its owner: the named Secure owner team when the parent is secure, the parent's BU default team otherwise; refuse when unresolved; ArchTest census of owner-less creates (#1034)</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2; GitHub #1034 / ISS-007)</phase>
     <gate>after 144 (named team + resolver secure branch) and 145 (owner-role child privileges) merge; AND after word-add-in-r1 PR #1045 is merged to master and master is merged into this branch (it wires the Office writers and rewrites RecordOwnershipResolver.cs). SHIP-TOGETHER: must not be deployed to a shared environment before task 149 merges (see constraints).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-boundary .cs change across ~20 BFF writers (tags bff-api, auth, security); modifies ownership of user-facing records; new ArchTest.</rigor-reason>
     <model-tier>opus</model-tier>
