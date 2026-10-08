@@ -95,6 +95,13 @@ in the customer's own tenant (Microsoft 365 admin center → Integrated apps) as
 The first test tenant (`spaarketestpartner`) was created as an External ID (CIAM) tenant by mistake — no Microsoft 365
 possible; the owner is deleting it (Azure resource in `rg-spaarke-dev`, next to the real `spaarkeextid`, which stays).
 
+**Finding 2026-10-08 (first deployment in the test organization):** uploading the unified package
+`spaarke-addin-1.1.1.zip` in Dewey Cheatham's Integrated apps fails at consent with AADSTS700016 — the package's
+`webApplicationInfo.id` is the add-in app `c1258e2d…`, which is single-tenant, so no other organization can consent
+to it. No customer IT can deploy the add-in until it is multi-tenant (recommended) or the package drops
+`webApplicationInfo`. Raised with word-add-in-r1: `notes/coordination/2026-10-08-to-word-add-in-r1-4.md`. The same will
+apply to the Teams client app external-access-r3 creates (customers' IT installs the Teams app in their own tenant).
+
 ## Live actions (each owner-approved)
 
 | Date | Action | Result |
