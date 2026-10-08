@@ -18,10 +18,20 @@
 //   - IOpenAiClient (session-title completion) and auth (fake scheme).
 //   - IDistributedCache: a RECORDING decorator over a real MemoryDistributedCache — every cache write in
 //     the host (TenantCache sits on top of it) is observable for the ADR-014 assertion.
-//   Not doubled: the data-driven chat-tool catalog read (AnalysisToolService → Dataverse over an
-//   IHttpClientFactory client). TestOutboundNetworkGuard refuses it instantly and production degrades to
-//   a zero-tool agent — the same deterministic outcome on every machine, and a tool-free turn is what
-//   these tests want.
+//   - The data-driven chat-tool catalog read (AgentToolCatalogProjector → AnalysisToolService.ListToolsAsync
+//     → the typed HttpClient "AnalysisToolService"): a boundary stub answers the Dataverse Web API with an
+//     EMPTY OData page ({"value":[]}). The real service still builds the query and parses the page, so every
+//     turn runs the catalog-read-SUCCEEDED branch with an empty catalog — no outbound attempt, and no
+//     dependence on TestOutboundNetworkGuard refusing the call. The stub is an ADDITIONAL (outer) handler,
+//     not the primary one, because the guard wraps whatever primary handler a client ends up with; it
+//     asserts nothing and records nothing (not antipattern B1).
+//
+// COVERAGE NOTE — the model boundary
+//   RemoveAll<IChatClient>() removes the WHOLE registered pipeline, including Microsoft.Extensions.AI's
+//   FunctionInvokingChatClient that AiModule wraps around the Azure OpenAI client (AddChatClient(...)
+//   .UseFunctionInvocation(), AiModule.cs ~152). Spaarke's own agent middleware (content safety, cost
+//   control, telemetry, routing) IS real here, but a regression in the function-invocation wrapper or its
+//   registration is NOT covered by these tests.
 //
 // WHAT IS DELIBERATELY NOT HERE
 //   - First-token / per-event latency: timing assertions against a scripted client prove nothing about
@@ -127,8 +137,11 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
         {
             frame.Json.TryGetProperty("type", out _).Should().BeTrue();
             frame.Json.TryGetProperty("content", out _).Should().BeTrue();
+            frame.Json.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Null,
+                "text-only events carry no structured payload (the structured case is the suggestions test)");
             frame.Json.TryGetProperty("Type", out _).Should().BeFalse("the payload is camelCase");
             frame.Json.TryGetProperty("Content", out _).Should().BeFalse("the payload is camelCase");
+            frame.Json.TryGetProperty("Data", out _).Should().BeFalse("the payload is camelCase");
         }
 
         // One token event per scripted update, in order, concatenating to the scripted text.
@@ -137,6 +150,40 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
         string.Concat(tokenContents).Should().Be(string.Concat(tokens));
 
         frames.Single(f => f.Type == "done").Json.GetProperty("content").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task SendMessage_NoDocumentAndResponseAsksForUpload_EmitsTypedActionChipsInSuggestionsDataBeforeDone()
+    {
+        // ChatEndpoints.BuildMissingContextActionChips: no document on the session or the request, and the
+        // assembled response contains a missing-context keyword ("please upload a document") ⇒ the three
+        // deterministic 'action' chips ride ONE "suggestions" frame's structured `data` payload.
+        var caller = NewCaller();
+        var sessionId = await _fixture.CreateSessionAsync(caller);
+        _fixture.ChatClient.ScriptTokens(["To review the clause, ", "please upload a document ", "first."]);
+
+        var (response, body) = await SendTurnAsync(sessionId, caller);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var frames = ParseFrames(body);
+        frames.Select(f => f.Type).Should().Equal(
+            "typing_start", "token", "token", "token", "typing_end", "suggestions", "done");
+
+        var suggestions = frames.Single(f => f.Type == "suggestions").Json;
+        suggestions.GetProperty("content").ValueKind.Should().Be(JsonValueKind.Null, "structured events carry `data`, not `content`");
+        var data = suggestions.GetProperty("data");
+        data.TryGetProperty("Suggestions", out _).Should().BeFalse("the structured payload is camelCase too");
+        var chips = data.GetProperty("suggestions").EnumerateArray().ToList();
+        chips.Select(c => (
+                Kind: c.GetProperty("kind").GetString(),
+                Label: c.GetProperty("label").GetString(),
+                ActionId: c.GetProperty("actionId").GetString()))
+            .Should().Equal(
+                ("action", "Upload File", "upload"),
+                ("action", "Browse Matter Documents", "search"),
+                ("action", "Select a Matter", "select"));
+        chips.Should().OnlyContain(c => c.GetProperty("targetBindingId").ValueKind == JsonValueKind.Null,
+            "an action chip is routed by actionId, never by a Binding id");
     }
 
     // =========================================================================================
@@ -165,7 +212,8 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
         error.Should().Be(ChatEndpoints.BuildTurnFailedErrorEvent().Content);
         body.Should().NotContain("SENTINEL", "the exception message must never reach the wire");
         body.Should().NotContain(nameof(InvalidOperationException), "the exception type must never reach the wire");
-        body.Should().NotContain(" at ", "no stack frame may reach the wire");
+        body.Should().NotContain("   at Sprk.", "no stack frame may reach the wire");
+        body.Should().NotContain("   at System.", "no stack frame may reach the wire");
 
         // Nothing follows the error: no done, and the half-generated answer is NOT persisted as an assistant turn.
         frames.Should().NotContain(f => f.Type == "done");
@@ -211,9 +259,15 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
         manyWrites.Should().Contain(w => w.Key.Contains(manySession, StringComparison.Ordinal),
             "the turn's history write-through goes to the session cache entry");
 
-        // ADR-014: cache writes do not grow with the number of streamed tokens.
+        // ADR-014: cache writes do not grow with the number of streamed tokens...
         manyWrites.Count.Should().Be(fewWrites.Count,
             "a 30-token turn must not write the cache more often than a 3-token turn — tokens are transient");
+
+        // ...and after the warm-up, a turn writes ONLY its own session entry (no token-keyed or side entries).
+        fewWrites.Should().OnlyContain(w => w.Key.Contains(fewSession, StringComparison.Ordinal),
+            "post-warm-up, the only cache writes of a turn are the session hot-cache write-throughs");
+        manyWrites.Should().OnlyContain(w => w.Key.Contains(manySession, StringComparison.Ordinal),
+            "post-warm-up, the only cache writes of a turn are the session hot-cache write-throughs");
 
         // ADR-014: no written value IS an individual token (raw or JSON-encoded).
         foreach (var write in fewWrites.Concat(manyWrites))
@@ -246,7 +300,9 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
             .ToList();
 
         var endpoint = endpoints.Should().ContainSingle($"exactly one POST {MessagesRoute} endpoint is mapped").Subject;
-        endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()!.PolicyName.Should().Be("ai-stream",
+        var rateLimiting = endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>();
+        rateLimiting.Should().NotBeNull("the streaming route must carry a rate-limiting policy (ADR-016)");
+        rateLimiting!.PolicyName.Should().Be("ai-stream",
             "ADR-016: the costly streaming route is bound to the strict per-user 'ai-stream' policy");
         endpoint.Metadata.GetMetadata<DisableRateLimitingAttribute>().Should().BeNull(
             "nothing may opt the streaming route back out of rate limiting");
@@ -545,6 +601,10 @@ public sealed class ChatMessageStreamingFixture : WebApplicationFactory<Program>
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache>(Cache);
 
+            // The chat-tool catalog's Dataverse Web API read answers an empty OData page (see file header).
+            services.AddHttpClient(nameof(AnalysisToolService))
+                .AddHttpMessageHandler(() => new EmptyODataPageHandler());
+
             services.AddSingleton(Requests);
             services.AddSingleton<IStartupFilter, RequestCompletionStartupFilter>();
 
@@ -670,6 +730,20 @@ public sealed class RecordingDistributedCache : IDistributedCache
     public void Remove(string key) => _inner.Remove(key);
 
     public Task RemoveAsync(string key, CancellationToken token = default) => _inner.RemoveAsync(key, token);
+}
+
+/// <summary>
+/// Dataverse Web API boundary stub: answers every request with an empty OData collection page. Registered as
+/// an outer (additional) handler, so the request never reaches the primary handler or the network.
+/// </summary>
+internal sealed class EmptyODataPageHandler : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StringContent("""{"value":[]}""", Encoding.UTF8, "application/json"),
+        });
 }
 
 /// <summary>Signals when the host has finished a tagged request (the handler and every middleware returned).</summary>
