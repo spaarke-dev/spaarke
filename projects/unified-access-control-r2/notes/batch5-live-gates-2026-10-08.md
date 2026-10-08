@@ -14,3 +14,9 @@
    - The platform added 9 default privileges (SharePoint data, plugin/SDK reads at Global), which are reported only.
    - Microsoft's service roles were left as they are; per the main-session default, the owner did not object.
 6. **Owner manual live gate:** checklist (a)–(p) in `notes/task-154-no-access-management-forms.md`.
+
+## Task 105: external data paging (PR #1408, `37d0c944c`, closes #963), deployed 2026-10-08
+
+- **Deployed:** the BFF (healthz 200) and the external SPA (workflow `deploy-external-spa.yml`, run 37741946955, success).
+- **Live gate pending owner OK:** seed 250 `sprk_document` rows on a test project, then confirm the external `/documents` returns 250 with no `truncated` and the SPA shows no notice. No dev project has more than 200 children today.
+- **Filed:** #1409 (an external to-do gets an empty regarding name on a transient read failure).
