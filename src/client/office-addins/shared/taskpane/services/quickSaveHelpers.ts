@@ -4,6 +4,7 @@ import { mapProblemDetailsToMessage, type ProblemDetails } from '../utils/errorM
 import type { DocumentIdentityOutcome } from './documentIdentityService';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { buildOpenRecordUrl } from './openRecordLauncher';
+import type { CapturedAttachment, EmailContentCapture } from './emailContentCapture';
 
 /**
  * quickSaveHelpers.ts
@@ -50,12 +51,16 @@ export interface OfficeSaveRequestBody {
     senderName?: string;
     recipients: Array<{ type: 'To' | 'Cc' | 'Bcc'; email: string; name?: string }>;
     sentDate?: string;
-    body: undefined;
+    /** Task 116a: read in the add-in. Undefined only when the host cannot read it — the server then uses Graph. */
+    body: string | undefined;
     isBodyHtml: true;
+    /** Task 116a: the attachments read in the add-in (absent when nothing was read). */
+    attachments?: CapturedAttachment[];
     /** Task 046 (b): always true here; the ribbon files under the email's own subject and never takes a typed name. */
     isNameSystemDerived: true;
     internetMessageId: string;
-    selectedAttachmentFileNames: undefined;
+    /** Undefined = "all" (server rule); with a capture, the names of the attachments actually sent. */
+    selectedAttachmentFileNames: string[] | undefined;
   };
   idempotencyKey: string;
 }
@@ -68,14 +73,17 @@ function mapRecipientType(type: 'to' | 'cc' | 'bcc'): 'To' | 'Cc' | 'Bcc' {
 }
 
 /**
- * Build the `POST /api/office/save` body that files an email to the engine-predicted
- * record. The email body + attachment content are fetched server-side via Graph (OBO),
- * so the client sends only the internetMessageId + metadata — identical to useSaveFlow.
+ * Build the `POST /api/office/save` body that files an email to the engine-predicted record.
+ *
+ * Task 116a: `content` is the body + attachments read in the add-in (`captureEmailContent`), sent the same way the
+ * pane sends them. Without it the request carries only the internetMessageId + metadata and the server fetches the
+ * email through Graph — which cannot reach a B2B guest's home-tenant mailbox, so a guest needs `content`.
  */
 export function buildEmailSaveRequest(
   context: QuickSaveEmailContext,
   target: EntitySearchResult,
-  idempotencyKey: string
+  idempotencyKey: string,
+  content?: EmailContentCapture
 ): OfficeSaveRequestBody {
   return {
     contentType: 'Email',
@@ -103,10 +111,11 @@ export function buildEmailSaveRequest(
       ...(context.sentDate ? { sentDate: context.sentDate.toISOString() } : {}),
       // Task 046 (b): the subject is the email's own, so the server stores it with a short unique suffix.
       isNameSystemDerived: true,
-      body: undefined,
+      body: content?.body,
       isBodyHtml: true,
+      ...(content ? { attachments: content.attachments } : {}),
       internetMessageId: context.internetMessageId,
-      selectedAttachmentFileNames: undefined,
+      selectedAttachmentFileNames: content?.selectedAttachmentFileNames,
     },
     idempotencyKey,
   };
