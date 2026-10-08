@@ -383,6 +383,52 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
             .Which.GetProperty("inForce").GetBoolean().Should().BeTrue();
     }
 
+    /// <summary>
+    /// Verifier pass 2: the record AND its secure parent both reference the walled organization, and the filed record is
+    /// not flagged secure yet (the inheritance window, or a refused / failed inheritance). The user wall reaches it through
+    /// the parent, so it is in force, as the share-time guard says; finding it on the direct path too must not hide that.
+    /// </summary>
+    [Fact]
+    public async Task AUserWallOverAnOrganizationTheRecordAndItsSecureParentBothReference_IsInForce_WhateverTheRecordsOwnFlag()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+        H.Participations.RecordOrganizations[SecureMatter] = new[] { OtherOrg };
+        H.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { OtherOrg };
+        var wall = H.Store.AddEntry(subjectUser: WalledUser, objectOrganization: OtherOrg, modifiedBy: Author);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.DoesNotApply);
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies,
+            "the wall reaches the record through its secure parent (round 61), whatever its own flag reads");
+        var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle("listed once").Subject;
+        row.GetProperty("entryId").GetGuid().Should().Be(wall);
+        row.GetProperty("viaSecureParent").GetBoolean().Should().BeFalse("its first path is the record's own");
+        row.GetProperty("alsoViaSecureParent").GetBoolean().Should().BeTrue();
+        row.GetProperty("coveredRecordId").GetGuid().Should().Be(FiledWorkAssignment);
+        row.GetProperty("inForce").GetBoolean().Should().BeTrue();
+        row.GetProperty("notInForceReason").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task AUserWallOverAnOrganizationOnlyTheNonSecureRecordReferences_IsNotInForce_AndNotMarkedViaTheParent()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+        H.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { OtherOrg };
+        H.Store.AddEntry(subjectUser: WalledUser, objectOrganization: OtherOrg, modifiedBy: Author);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.DoesNotApply);
+        var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
+        row.GetProperty("alsoViaSecureParent").GetBoolean().Should().BeFalse();
+        row.GetProperty("notInForceReason").GetString().Should().Be(NoAccessEntryNotInForceReason.UserWallOnNonSecureRecord);
+    }
+
     [Fact]
     public async Task WhatTheRecordIsFiledUnder_Unreadable_IsUnknown_AndTheEntriesUnavailable()
     {

@@ -221,7 +221,9 @@ public static class RecordNoAccessEndpoint
 
             var wellFormed = NoAccessShareEnforcer.TryClassify(entry.Row, out var subjectKind, out var isOrgObject);
             var viaSecureParent = !IsThisRecord(cover, logicalName, recordId);
-            var (inForce, notInForceReason) = InForce(wellFormed, subjectKind, viaSecureParent, secure);
+            // ANY path through a secure parent binds a user wall (round 61), including an entry also found directly.
+            var (inForce, notInForceReason) =
+                InForce(wellFormed, subjectKind, viaSecureParent || cover.AlsoViaSecureParent, secure);
             anyInForce |= inForce == true;
             anyUndecided |= inForce is null;
             if (canSeeEntries)
@@ -311,6 +313,7 @@ public static class RecordNoAccessEndpoint
             CoveredRecordType: cover.CoveredRecordType,
             CoveredRecordId: cover.CoveredRecordId,
             ViaSecureParent: viaSecureParent,
+            AlsoViaSecureParent: cover.AlsoViaSecureParent,
             Malformed: !wellFormed,
             InForce: inForce,
             NotInForceReason: notInForceReason,

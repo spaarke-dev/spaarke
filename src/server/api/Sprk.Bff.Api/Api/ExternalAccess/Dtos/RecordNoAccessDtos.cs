@@ -85,6 +85,9 @@ public sealed record RecordNoAccessStatus(
 /// <param name="CoveredRecordId">That record's id.</param>
 /// <param name="ViaSecureParent">True when the entry covers this record because it covers a secure record this one is
 /// filed under (round 61: a parent's list reaches every secure record filed below it).</param>
+/// <param name="AlsoViaSecureParent">True when the entry reaches this record on its listed path AND (again) through a secure
+/// record it is filed under, e.g. this record and its secure parent both reference the walled organization. A user wall
+/// is then in force whatever this record's own Secure flag reads.</param>
 /// <param name="Malformed">The entry fails the well-formedness rule (schema Business Rule 1, task 154's canonical id): it
 /// walls nobody off and does not count toward <see cref="RecordNoAccessStatus.NoAccess"/>. Listed so it can be fixed.</param>
 /// <param name="InForce">Whether the entry walls anyone off THIS record: true; false (see <paramref name="NotInForceReason"/>,
@@ -106,6 +109,7 @@ public sealed record RecordNoAccessEntry(
     string CoveredRecordType,
     Guid CoveredRecordId,
     bool ViaSecureParent,
+    bool AlsoViaSecureParent,
     bool Malformed,
     bool? InForce,
     string? NotInForceReason,

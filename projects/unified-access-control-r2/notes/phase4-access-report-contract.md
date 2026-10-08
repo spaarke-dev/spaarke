@@ -66,7 +66,8 @@ An entry is **in force** on the record when:
   records; on a non-secure record the read-time veto and the enforcer remove nothing for it). On a record whose `secure`
   is `doesNotApply` it is `inForce: false`, `notInForceReason: "userWallOnNonSecureRecord"`; when `secure` is `unknown`
   it is `inForce: null`, `notInForceReason: "secureStateUnknown"`. A user wall reached through a secure PARENT
-  (`viaSecureParent: true`) is in force whatever this record's own flag reads: the parent is secure (round 61).
+  (`viaSecureParent: true`, or `alsoViaSecureParent: true` when it reaches the record directly as well) is in force
+  whatever this record's own flag reads: the parent is secure (round 61).
 - A contact or organization wall is in force on any record (the contact plane; owner N3 on non-secure records).
 
 `doesNotApply` only when every covering entry was read and none is in force or undecided. **`unknown`** when the
@@ -96,6 +97,7 @@ referenced organizations, the filing walk, the covering query or any entry read 
 | `objectOrganizationId` / `objectOrganizationName` | guid? / string? | for an organization wall |
 | `coveredRecordType` / `coveredRecordId` | string / guid | the record the entry covers this one THROUGH: this record, or a secure parent |
 | `viaSecureParent` | bool | true when it covers this record through a secure record it is filed under |
+| `alsoViaSecureParent` | bool | true when it reaches this record on its listed path AND (again) through a secure parent (e.g. this record and the parent both reference the walled organization); listed once, on its first path (this record's own when it has one) |
 | `malformed` | bool | true: walls nobody off; listed so it can be fixed |
 | `inForce` | bool? | true: walls someone off this record; false: listed but inert here; null: undecided (Secure flag unread) |
 | `notInForceReason` | string? | `malformed` / `userWallOnNonSecureRecord` / `secureStateUnknown`; null when `inForce` is true |

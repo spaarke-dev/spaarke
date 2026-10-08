@@ -98,6 +98,18 @@ public class AuthorizationGateTimingTests
         probe.Waits.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task OnTheGate_ACancellationDuringTheWait_IsACancellation_NeverAnAnswer()
+    {
+        using var cts = new CancellationTokenSource();
+        var probe = new TimingProbe { OnWait = cts.Cancel };
+
+        var act = () => probe.GetCallerRightsForAuthorizationGateAsync("caller", Set, Denied, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("a cancelled request is not a denial or an allow");
+        probe.Asks.Should().Be(1, "nothing is asked again after the request is cancelled");
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.NotFound, false, true)]
     [InlineData(HttpStatusCode.NotFound, true, true)]
@@ -222,9 +234,14 @@ public class AuthorizationGateTimingTests
             return Task.FromResult(answer);
         }
 
+        /// <summary>Runs inside each wait (e.g. to cancel the request mid-wait).</summary>
+        public Action? OnWait { get; init; }
+
         protected override Task DelayAsync(TimeSpan delay, CancellationToken ct)
         {
             WaitQueue.Enqueue(delay);
+            OnWait?.Invoke();
+            ct.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
     }

@@ -94,7 +94,15 @@ public sealed record NoAccessEnforcementReport(
 
 /// <summary>One active entry covering a record, and the record it covers it through: the record itself, or a secure
 /// record it is filed under (task 064).</summary>
-public sealed record NoAccessCoveringEntry(Guid EntryId, string CoveredRecordType, Guid CoveredRecordId);
+/// <param name="EntryId">The entry.</param>
+/// <param name="CoveredRecordType">The FIRST path it was found on: the record itself when it names it or an organization
+/// it references, otherwise the secure parent.</param>
+/// <param name="CoveredRecordId">That record's id.</param>
+/// <param name="AlsoViaSecureParent">Found on its first path AND (again) through a secure record the record is filed under
+/// (task 064 verifier pass 2): e.g. both the record and its secure parent reference the walled organization. A parent path
+/// binds whatever the record's own Secure flag says, so it must not be lost when the entry is listed once.</param>
+public sealed record NoAccessCoveringEntry(
+    Guid EntryId, string CoveredRecordType, Guid CoveredRecordId, bool AlsoViaSecureParent = false);
 
 /// <summary>
 /// The active No Access entries covering one record (<see cref="NoAccessShareEnforcer.ReadCoverageAsync"/>, task 064).
@@ -398,12 +406,14 @@ public sealed class NoAccessShareEnforcer
     /// <see cref="EnforceForRecordAsync"/> so the enforcer and the per-record read share it). Every entry whose object is the
     /// record or an organization it references (ANY org-typed lookup, B-10), and the same for every secure record it is filed
     /// under, up the chain (round 61 item 1, through the ONE parent walk
-    /// <see cref="SecureRootInheritance.ReadSecureParentsAsync"/>). Each entry carries the record it covers through.
+    /// <see cref="SecureRootInheritance.ReadSecureParentsAsync"/>). Each entry carries the record it covers through, and
+    /// whether it ALSO reaches the record through a secure parent.
     /// </summary>
     /// <remarks>
     /// Never throws a read fault: an unreadable referenced-organization set, filing or entry query comes back
     /// <see cref="NoAccessCoverage.IsReadable"/> = false with the reason, never "no entries" (NFR-01). The record's own
-    /// entries come first, so an entry reached both directly and through a parent is reported on its direct path. The
+    /// entries come first, so an entry reached both directly and through a parent is reported once, on its direct path,
+    /// with <see cref="NoAccessCoveringEntry.AlsoViaSecureParent"/> set. The
     /// query asks for ACTIVE entries; whether each is well-formed (<see cref="TryClassify"/>) is the caller's to judge.
     /// </remarks>
     /// <param name="entityLogicalName">The record's table: <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c>.</param>
@@ -434,9 +444,21 @@ public sealed class NoAccessShareEnforcer
             foreach (var parent in parents.SecureParents)
             {
                 var (parentEntryIds, parentTruncated) = await EntriesCoveringAsync(parent.Table, parent.Id, ct).ConfigureAwait(false);
-                covering.AddRange(parentEntryIds
-                    .Where(id => covering.All(c => c.EntryId != id))
-                    .Select(id => new NoAccessCoveringEntry(id, parent.Table, parent.Id)));
+                foreach (var id in parentEntryIds)
+                {
+                    // Listed once per entry, but a parent path is never dropped: an entry already found on the record's
+                    // own path is MARKED as also reaching it through this secure parent (task 064 verifier pass 2).
+                    var index = covering.FindIndex(c => c.EntryId == id);
+                    if (index < 0)
+                    {
+                        covering.Add(new NoAccessCoveringEntry(id, parent.Table, parent.Id));
+                    }
+                    else
+                    {
+                        covering[index] = covering[index] with { AlsoViaSecureParent = true };
+                    }
+                }
+
                 truncated |= parentTruncated;
             }
 

@@ -153,6 +153,17 @@ Write holder on a filed child through the parent's organization-wall entries. **
 Write holders as typed (an administrator could put sensitive text there; Reason stays out). **K3** a walled internal user
 who still holds Write through a team or role (N2) sees the entry naming them (see Authorization).
 
+## Verifier pass 2 (main session, 2026-10-08): fix
+
+| Finding | Fix |
+|---|---|
+| F3: an entry reaching the record two ways was judged on its direct path only. `ReadCoverageAsync` dropped a parent-path hit already listed directly, so a user wall over an organization that BOTH a not-yet-secure filed record and its secure parent reference read `inForce: false` / `doesNotApply`, while the share-time guard (`SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`) says Walled. Non-monotonic: without the direct reference it counted. | `NoAccessCoveringEntry.AlsoViaSecureParent`: the duplicate is no longer dropped but MARKS the listed entry; the endpoint ORs it into the in-force decision, and the row carries `alsoViaSecureParent`. The enforcer is unchanged (it enforces distinct entry ids). The read-time veto path is untouched (#1410 is fixed separately). Contract note updated. |
+
+Tests: the overlap case (applies, `inForce: true`, listed once with `alsoViaSecureParent: true`), its negative (only the
+non-secure record references the organization: not in force, not marked), and a cancellation during the gate's wait (a
+cancellation, never an answer; nothing re-asked). Perturbations: the endpoint ignoring the mark, and the coverage dropping
+the parent path again, both caught.
+
 ## Owner questions
 
 1. **Reason for Write holders?** O2's answer says Write holders see a record's entries; the 067 amendment's "(Reason
