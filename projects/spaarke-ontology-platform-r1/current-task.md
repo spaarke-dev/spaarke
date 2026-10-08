@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Task** | No main-session task — orchestrating parallel streams (owner choice). Counts, critical path, stream table: top of `tasks/TASK-INDEX.md` (96 tasks). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 47/97 tasks done. ArchTests 818/818. Working tree clean. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 48/97 tasks done. ArchTests 818/818. Working tree clean. |
 | **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
@@ -34,7 +34,7 @@
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
-| **060** D-74 (supersedes D-57): Briefing stays Open-only, **#1384 closed unmerged**; data fix of the Draft rows running (`aa669e43432b512f5`, dev data change approved, escalate if any row unclassifiable) | — | Read classification → 060 ✅ |
+| **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
 | **#1413** (068) round 2 `e5f55a418` (D-73 order, D-72 note); review: F1 live node lacks the repo's myMatters condition (068 regression or pre-existing?), F2 card shows "Today" for no-due-date rows | author fixing (`a17154f00e69eeced`) | Re-check → owner merge → 068 ✅ |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
@@ -48,7 +48,7 @@
 | a4aa08d7260331359 | 106 author (To Do dates Date Only, `C:\wts-106`) | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 068 author — #1413 review fixes F1/F2 | running |
-| aa669e43432b512f5 | 060 data-fix author (D-74) | running |
+| aa669e43432b512f5 | 060 author (done) | idle |
 | aee49df31b5a7dc81 | Reviewer: #1384 + #1413 — done | idle |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
 | aa80f91b9ac7b3b76 | 112 author — #1422 accepted at `96b9d884f`; next: merge master after #1424, then owner merge question | idle |

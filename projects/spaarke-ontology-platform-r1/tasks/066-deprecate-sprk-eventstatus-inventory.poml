@@ -93,7 +93,7 @@
     <criterion testable="true">Tests cover each moved reader; all tests pass; affected packages build.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-62; D-28.</notes>
+  <notes>Input from task 060 (2026-10-08): sprk_eventstatus disagrees with statuscode on many sprk_event rows in spaarkedev1 (e.g. a0cb27af-992e-f111-88b5-7ced8d1dc988 is Completed in sprk_eventstatus but Draft in statuscode; most Draft rows have it null); not fixed in 060. spec.md FR-62; D-28.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -1,6 +1,8 @@
 # Task 060 — Draft `sprk_event` classification (spaarkedev1, 2026-10-08, D-74)
 
-**Outcome: ESCALATED. No row was written.** All queries were read-only. 4 of 49 rows cannot be classified with confidence (binding escalation, POML + task brief step 3). A write of zero rows is the safe default; nothing in this note changes any record.
+**FINAL OUTCOME (2026-10-08, after owner decision): 1 row opened, 48 left Draft. Draft count 49 -> 48.**
+
+Sections 1-6 below are the original read-only classification, written when 4 of 49 rows could not be classified and the task was escalated (nothing was written at that point). The owner then decided the four (section 7).
 
 ## 1. Count (fresh, 2026-10-08)
 
@@ -68,3 +70,24 @@ Corrected-row visibility cannot be demonstrated because no row was corrected. Re
 
 For each of the 4 U rows: set Open (live work), leave Draft, or delete as test data. Until then the 45 P rows and the 4 U rows stay Draft and issue #1050 stays open.
 Recommended: leave the 45 P rows alone; set Open only the two rows the domain owner confirms as real (likely 8a6b371f and 007b8ac2); treat 9c9de352 (due 2024) and cbaa61fa as leave-Draft/test unless told otherwise.
+
+## 7. Owner decision and outcome (dev data change, spaarkedev1 only)
+
+| sprk_eventid | Name | Decision | Before | After |
+|---|---|---|---|---|
+| 8a6b371f-8a96-f111-b8db-0022482fb5a7 | Review and finalize amendments to Canadian Patent Application No. 3,116,549 claims | **Open** (real work) | statecode 0 Active, statuscode 1 Draft | statecode 0 Active, statuscode 659490001 Open (read back; modifiedon 2026-10-08T11:20:30) |
+| cbaa61fa-6f96-f111-b8dc-7ced8ddc4a05 | Create New Matter Follow-up Task | leave Draft | Draft | Draft (untouched) |
+| 9c9de352-3b7a-f111-ab0e-70a8a590c51c | Review engagement letter document | leave Draft | Draft | Draft (untouched; due 2024-06-14 stale) |
+| 007b8ac2-7a80-f111-ab0f-7ced8ddc4a05 | Follow up on Engagement Letter | leave Draft | Draft | Draft (untouched) |
+
+Only the one row was written; the statecode/statuscode pair used is Active(0)/Open(659490001), the pair TaskActionCore uses.
+
+**Counts:** before 49 Draft, after **48** Draft (re-counted, `statuscode = 1`).
+
+**Why the 48 remain Draft:** 45 are person-created rows (test-style data created by Ralph Schroeder in user sessions; not platform rows; section 3 P); 3 are the unresolved rows the owner chose to leave Draft (cbaa61fa, 9c9de352, 007b8ac2). No platform-created row is among them.
+
+**Briefing collector check (read-only):** the collector's filter shape (event type Task `124f5fc9-98ff-f011-8406-7c1e525abd8b`, statuscode Open 659490001, `sprk_duedate` before today 2026-10-08) returns `8a6b371f-8a96-f111-b8db-0022482fb5a7` (due 2026-08-21). It appears in the Overdue channel.
+
+**Finding: 0 rows were platform-created.** The ISS-003 premise (the platform left tasks stranded in Draft) did not hold in dev. The #1032 code bug (TaskActionCore not setting Open) was real, but it left no stranded data here: all 10 BFF-created events are Open and none of the 49 Draft rows was created by the BFF identity. The one row opened was opened because the owner judged it real work, not because it was a platform casualty.
+
+**Follow-up input for task 066:** `sprk_eventstatus` disagrees with `statuscode` on many rows (see section 5).

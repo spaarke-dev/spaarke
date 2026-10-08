@@ -4,7 +4,7 @@
     <title>ISS-003: resolve the sprk_event rows stranded in Draft</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data correctness in another domain that this project depends on; the Do lane under-reports without it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,10 +85,11 @@
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
   <completion>
-    <status>in-progress (D-74: classification done; ESCALATED, 4 of 49 rows unclassifiable, no write made)</status>
+    <status>completed</status>
     <date>2026-10-08</date>
+    <d74-final>2026-10-08 FINAL (D-74, owner decision on the 4 escalated rows): set ONLY 8a6b371f-8a96-f111-b8db-0022482fb5a7 to Open (statecode 0, statuscode Draft 1 -> Open 659490001; read back). Left Draft: cbaa61fa-6f96-f111-b8dc-7ced8ddc4a05, 9c9de352-3b7a-f111-ab0e-70a8a590c51c, 007b8ac2-7a80-f111-ab0f-7ced8ddc4a05 and the 45 person-created rows. Draft count 49 -> 48. Opened row passes the collector filter (Task, Open, due 2026-08-21 before today) and shows as Overdue. FINDING: 0 rows were platform-created; the #1032 bug existed but left no stranded data in dev. Issue 1050 closed. sprk_eventstatus vs statuscode mismatch passed to task 066. Details: notes/060-draft-classification.md.</d74-final>
     <d74-update>2026-10-08 (D-74 pass): live re-count 49 Draft (statuscode 1) in spaarkedev1. Classified all 49 read-only, see notes/060-draft-classification.md. Wrongly-Draft platform rows: 0. All 10 BFF-created (mi-bff-api-dev) sprk_event rows are already Open; all 49 Draft rows were created by a person (Ralph Schroeder), none has source/communication fields set, and TaskActionCore wrote sprk_event only from 2026-08-06. Person-created, leave Draft: 45. Unresolved, ESCALATED per binding rule: 4 (8a6b371f-8a96-f111-b8db-0022482fb5a7, cbaa61fa-6f96-f111-b8dc-7ced8ddc4a05, 9c9de352-3b7a-f111-ab0e-70a8a590c51c, 007b8ac2-7a80-f111-ab0f-7ced8ddc4a05), all Task-typed so they would enter the Briefing. NO Dataverse writes made; counts before = after = 49. Issue 1050 NOT closed. Only 20 of the 49 are Task-typed (the only ones the Briefing's task channels can see). Needs owner/domain-owner decision per U row (open / leave / delete); then apply and re-count, close 1050, set completed + TASK-INDEX marker together.</d74-update>
     <summary>2026-10-08: owner decision D-74 supersedes D-57 below. PR #1384 closed unmerged; the Briefing stays Open-only; do steps 1-5 (classify and fix the Draft rows). HISTORY (superseded): RE-SCOPED by owner decision D-57 (2026-10-07): NO Dataverse data changes; the data-fix part is closed as not needed. The 49 Draft events (live re-count) are open work under EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned). Replacement deliverable: DailyBriefingCollector's Upcoming/Overdue task channels now filter statuscode by IsOpenWork instead of Open alone (the only briefing reader filtering events on Open; TodoGenerationService already used IsOpenWork). Shipped as its own PR #1384 to master (branch fix/briefing-open-work-060). New test CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses fails on the old filter. Live on spaarkedev1: zz-060- Draft/OnHold/Completed events, old filter returned [], new filter returned draft + onhold, Completed excluded, all test rows deleted. Publish size master 36.22 MB vs branch 36.22 MB (delta 0.00, 192 files each, Compress-Archive); no vulnerable packages. Issue 1050 to be closed on merge with the re-scope note.</summary>
-    <needs>Merge of PR #1384; then set status completed and TASK-INDEX marker (main session). Possible trivial rebase against PR #1359 (same file, disjoint hunks).</needs>
+    <needs>none</needs>
   </completion>
 </task>

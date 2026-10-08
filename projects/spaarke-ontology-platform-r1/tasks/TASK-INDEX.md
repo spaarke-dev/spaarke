@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **94 tasks** across 14 phases (37 ✅ · 2 🔄 (079, 098) · 54 🔲 · 1 superseded)
+> (spec §9) · **97 tasks** across 14 phases (48 ✅ · 1 🔄 · 47 🔲 · 1 cancelled; updated 2026-10-08)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -238,7 +238,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔄 [wip] 060 | [ISS-003 stranded Draft events](060-iss003-stranded-draft-events.poml) | FULL | sonnet/high | — | — | **Blocks the Do lane** or it under-reports. **D-74 pass 2026-10-08: all 49 Draft rows classified read-only (0 platform-wrong, 45 person-created, 4 unresolved and ESCALATED), no writes; waiting on owner decision for 4 rows, see `notes/060-draft-classification.md`** |
+| ✅ [done] 060 | [ISS-003 stranded Draft events](060-iss003-stranded-draft-events.poml) | FULL | sonnet/high | — | — | D-74 (2026-10-08): 49 Draft classified; 0 platform-created; owner opened 1 (8a6b371f), 48 left Draft; issue #1050 closed; see `notes/060-draft-classification.md` |
 | 🔲 [open] 061 | [Do lane: four policies as subject-only rules (incl. overdue To Do)](061-do-lane-temporal-policies.poml) | FULL | sonnet/high | 060, 034, 024, 036, 037, 047 | — | **Amended (D-16)**: evaluated by the one evaluator; the collector is the reference, **not modified**. Overdue starts at **1 day (D-43)**; WA rule reads the **D-54** response columns; **fourth policy: overdue To Do for ALL To Dos (D-31)** |
 | 🔲 [open] 062 | [Know → narrative; retire Critical Today; remove LLM Top action](062-know-narrative-and-retire-critical-today.poml) | FULL | sonnet/high | 061, 038, 059 | F | Rank is deterministic or it is not explainable. `sprk_highpriority` is the 2nd rank key (**D-42**) |
 | 🔲 [open] 063 | [First Know-promotion rule](063-first-know-promotion-rule.poml) | STANDARD | sonnet/medium | 061, 036, 046 | F | Offers **Assign Work (D-51)**; needs a (matter, budget) verified join — escalates |
