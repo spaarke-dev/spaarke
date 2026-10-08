@@ -95,3 +95,14 @@ These are the live checks that need a person in the app, Teams/SPA, Word, or a s
 - **Test containers:** run `notes/Remove-TestContainers.ps1` after the agent confirms all 21 ids are unreferenced.
 - **165:** grant the SPE Admin app role to testuser1 and approve the write probes on throwaway data. Then **165 (d)** in SpeAdminApp: list, open and edit your config, and start a bulk delete on a throwaway container.
 - **171 D3/B2/J4:** create, enable and disable a test user W; provide an external-flagged licensed user's session; self-register a demo user.
+
+## 6. Manage Access: No Access List and markers (task 067, TrackingFieldTrio 1.0.40, on dev since 2026-10-08)
+
+Hard-refresh first (Ctrl+Shift+R). The control footer should read 1.0.40.
+1. As a Write holder, open Manage Access on a matter with an in-force wall on contact C, where C holds a grant. **PASS:** C is listed in the No Access List as "No Access", and C's Current Access row shows the red marker with the level struck through.
+2. On a non-secure record with a user wall. **PASS:** the entry shows "Not in force: user walls apply only to secure records", and that user's share row is unmarked.
+3. With an organization wall in force and a member contact holding a grant. **PASS:** that contact's row is marked. If you see "could not be checked" instead, report it.
+4. As a Read-only user. **PASS:** the Manage Access icon stays disabled, and the browser's network panel shows no `/no-access` request.
+5. On a Secure record with an organization grant and a standing contact. **PASS:** both rows show "No effect" with the secure reason. On a Restricted record: every contact-based row shows "No effect", and user shares are unmarked.
+6. Open each level dropdown (+ Contact, + Organization, + User). **PASS:** only View Only, Collaborate and Full Access are offered.
+7. Dark mode. **PASS:** the section, the badges and the reason lines are legible and distinct.
