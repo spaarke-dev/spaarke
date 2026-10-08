@@ -33,7 +33,7 @@
 | What | Waiting for | Then |
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
-| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 ✅ #1429 MERGED** 73d3b970e; dev deploy of master BFF + Console running (D-75, `a0f6ca4f806cc9dff`) |
+| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 ✅ #1429 MERGED** 73d3b970e; deployed to dev 2026-10-08 17:12-17:19Z (BFF 73d3b970e, SpaarkeAi, SmartTodo, DailyBriefing; LegalWorkspace not deployed: its script does a tenant-wide publish; SPA via #1428); owner browser checks = card r6 on the checklist page |
 | **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
 | **#1413** (068) `ded3cc069` green; D-73 live; F2 fixed. D-76 restore FAILED safely (reverted): the repo's `joinIds` in a FetchXML `in` condition makes Dataverse reject the query → **ISS-018 #1452** | full Opus investigation running (`a89e40f06d97401ae`, read-only; report → notes/iss-018-fetchxml-list-rendering-investigation.md) | Owner decides fix + whether #1413 ships decoupled; then re-check → merge |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
@@ -47,7 +47,7 @@
 | a67ad20f7bead7126 | 098 author (#1359 merged) | idle |
 | a4aa08d7260331359 | 106 author (#1429 merged) | idle |
 | af73df1eb324b2a9f | Reviewer: PR #1429 (106) — approved | idle |
-| a0f6ca4f806cc9dff | Dev deploy: master BFF + Console (D-75) | running |
+| a0f6ca4f806cc9dff | Dev deploy (D-75) — done | idle |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 068 author — #1413 at `ded3cc069`; D-76 reverted pending #1452 | idle |
 | a89e40f06d97401ae | ISS-018 full investigation (Opus, read-only) | running |
