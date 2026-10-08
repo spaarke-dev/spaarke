@@ -33,7 +33,7 @@
 | What | Waiting for | Then |
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
-| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
+| **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 → PR #1429** green (`65c83f68c`; 43 values converted, 5 hand-corrected; +376 B); ⚠️ dev quick-add / "Add to To Do" with a due date return HTTP 400 until #1429 deploys → independent review `af73df1eb324b2a9f` running → owner merge + dev deploy approval; 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
 | **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
 | **#1413** (068) round 2 `e5f55a418` (D-73 order, D-72 note); review: F1 live node lacks the repo's myMatters condition (068 regression or pre-existing?), F2 card shows "Today" for no-due-date rows | author fixing (`a17154f00e69eeced`) | Re-check → owner merge → 068 ✅ |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
@@ -45,7 +45,8 @@
 | ID | Role | State |
 |---|---|---|
 | a67ad20f7bead7126 | 098 author (#1359 merged) | idle |
-| a4aa08d7260331359 | 106 author (To Do dates Date Only, `C:\wts-106`) | running |
+| a4aa08d7260331359 | 106 author — PR #1429 done | idle |
+| af73df1eb324b2a9f | Reviewer: PR #1429 (106) | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 068 author — #1413 review fixes F1/F2 | running |
 | aa669e43432b512f5 | 060 author (done) | idle |

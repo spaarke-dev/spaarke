@@ -4,7 +4,7 @@
     <title>sprk_todo date columns to Date Only, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable after 098 merges</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>One-way Dataverse schema change plus a data conversion, then BFF and client date handling.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -61,6 +61,8 @@
   </escalation>
 
   <notes>Created 2026-10-07 by the main session on owner decision D-41 (found by task 024).</notes>
+
+  <completion>PR OPEN 2026-10-08, awaiting owner merge: PR #1429 (branch fix/todo-date-only-106, worktree C:\wts-106, head 65c83f68c). Schema done in spaarkedev1: sprk_duedate UserLocal to DateOnly (sprk_completedon, sprk_lastsyncedutc and the system columns are instants, unchanged); sprk_todo published alone; ConvertDateAndTimeBehavior job b2977fd0 Succeeded (37 converted by rule, 0 not converted); 5 SmartTodo quick-add values (23:59 Eastern) hand-corrected, so 43 of 43 read back as the picked day. Ships via SpaarkeMaster only (SpaarkeCore has sprk_todo without subcomponents); procedure in docs/data-model/sprk_todo-date-columns.md. Code: quick-add, Daily Briefing Add to To Do, external app create (BFF normalises and refuses non-dates), external app complete/reopen (pre-existing 400: statecode now written with statuscode), external list, toolbar Email, Quick Summary overdue badge, and the sprk_event feed Overdue filter (same class, found in review). Fixes #1402 and a master Tier 1 compile break (EventRoutesLiveTests.cs line 407). Live: server paths (EventRoutesLiveTests LiveMode_TodoDueDates) and browser payloads proven; zz-106 rows deleted. Tests: BFF unit 18,632 pass, ArchTests 811/811; publish delta +376 B. CI on 65c83f68c: 44 checks, 40 pass, 4 skipped by path filters, 0 failed (Tier 2 Plugin Size was cancelled by its 5-minute timeout during NuGet restore and passed on rerun). Filed in passing: #1412, #1416, #1417. Not proven live: the BFF child-record route itself (no user token for the BFF audience), TodoGenerationService and OfficeService end to end, the solution-import route. Until #1429 is deployed to spaarkedev1, quick-add and Daily Briefing Add to To Do with a due date get HTTP 400 there.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

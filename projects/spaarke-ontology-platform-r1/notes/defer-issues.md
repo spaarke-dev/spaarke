@@ -343,6 +343,18 @@ pattern should be copied. The "found by name" message also counts every register
 
 ---
 
+### ISS-014 / ISS-015 / ISS-016 — found by task 106, outside its scope
+
+| Id | GitHub | What | Urgency |
+|---|---|---|---|
+| ISS-014 | [#1412](https://github.com/spaarke-dev/spaarke/issues/1412) | The **Deploy SpaarkeAi** workflow fails on master | next-round (affects task 114's deploy path) |
+| ISS-015 | [#1416](https://github.com/spaarke-dev/spaarke/issues/1416) | Daily Briefing `emailShareDraft` test mock is wrong (one pre-existing jest failure) | next-round |
+| ISS-016 | [#1417](https://github.com/spaarke-dev/spaarke/issues/1417) | SmartTodo jest config key typo `setupFilesAfterEach` (should be `setupFilesAfterEnv`), so the setup file never loads | next-round (small) |
+
+Filed 2026-10-08 by the task 106 author; reported to the owner.
+
+---
+
 ## Deferred scope
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
