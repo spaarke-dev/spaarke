@@ -110,7 +110,8 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
 - Writer branch:
   - Signals/Ontology/DecisionPlan/RuleBody tests: 514 passed.
   - ArchTests (rebuilt): 818 passed. The first run caught an unlisted owner write, fixed by routing through `ApplyTo`.
-  - Full suite: see the completion report.
+  - Full suite after the merge: 18,882 passed, 0 failed, 54 skipped.
+- PR #1390 CI: 33 pass, 5 skipping, 0 pending, 0 failing. One advisory job (Markdown Link Validator) first came back "cancelled" although every step succeeded; it passed on a rerun.
 - New unit tests (4), the contract set: secure (owner in the create, no BU, `owningteam` read back, resolver parents), read-back mismatch (part of "verify by reading back owningteam"), not secure (FR-14 unchanged), refused (no write, Warning 50304, `owner_refused`).
 - Publish size (#1390): fresh master `36ff14147` 36.22 MB / 192 files vs branch `0615f9781` 36.22 MB / 192 files, `Compress-Archive` Optimal from short paths. Delta 0.00 MB. No package change.
 
