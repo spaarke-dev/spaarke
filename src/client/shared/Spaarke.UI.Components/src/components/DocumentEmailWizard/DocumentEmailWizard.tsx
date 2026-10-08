@@ -44,7 +44,7 @@ import { SendEmailStep } from '../EmailStep/SendEmailStep';
 import { extractEmailFromUserName } from '../EmailStep/emailHelpers';
 
 import { searchUsersAndContacts } from '../../services/userLookup';
-import { sendCommunication } from '../../services/communicationApi';
+import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -526,7 +526,14 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       sendMode: 'sharedMailbox',
     };
 
-    const result = await sendCommunication(opts, { authenticatedFetch, bffBaseUrl });
+    let result: { communicationId: string };
+    try {
+      result = await sendCommunication(opts, { authenticatedFetch, bffBaseUrl });
+    } catch (err) {
+      // The wizard shell shows `message`; a refused send's sentence for the user is its `detail`
+      // (`message` is the developer form "sendCommunication failed (status): …").
+      throw err instanceof SendCommunicationError ? new Error(err.detail) : err;
+    }
     onSent?.(result.communicationId);
 
     return {
