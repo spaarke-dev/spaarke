@@ -524,6 +524,56 @@ public class SignalWriterTests
     }
 
     [Fact]
+    public async Task WriteAsync_SecureOwner_ReEvaluation_ExistingRowOwnedByTheSecureTeam_RefreshesLastEvaluated()
+    {
+        // Review B-2: the reconcile path checks a secure row by owningteam. The secure path resolves no matter BU, so a
+        // business-unit check here (secureTeamId not passed) would compare against Guid.Empty and refuse this row.
+        var writerOrg = new FakeOrganizationService();
+        var request = MatterSubjectRequest();
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["owningteam"] = new EntityReference("team", SecureTeamId),
+            ["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+        var writer = Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(SecondRun),
+            ownership: new FakeOwnershipResolver { Answer = SecureAnswer() });
+
+        var result = await writer.WriteAsync(request);
+
+        result.Created.Should().BeFalse();
+        result.SignalId.Should().Be(existingId);
+        writerOrg.UpdateCalls.Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo(new[] { "sprk_lastevaluated" });
+    }
+
+    [Fact]
+    public async Task WriteAsync_SecureOwner_ReEvaluation_ExistingRowOwnedByAnotherTeam_EscalatesSecureOwnerMismatch_NoUpdate()
+    {
+        // Review B-2: a secure Signal that reads back with another owner is refused as secure_owner_mismatch (not a
+        // business-unit mismatch) and is not touched.
+        var writerOrg = new FakeOrganizationService();
+        var request = MatterSubjectRequest();
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["owningteam"] = new EntityReference("team", DefaultTeamId),
+            ["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+        var writer = Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(SecondRun),
+            ownership: new FakeOwnershipResolver { Answer = SecureAnswer() });
+
+        var act = async () => await writer.WriteAsync(request);
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.SecureOwnerMismatch);
+        writerOrg.UpdateCalls.Should().BeEmpty("a mis-owned secure row is never touched");
+    }
+
+    [Fact]
     public async Task WriteAsync_NotSecure_KeepsTheFr14Path_OwnerLeftAsWriter_BusinessUnitFromTheMatter()
     {
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
