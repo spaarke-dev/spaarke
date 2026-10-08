@@ -217,10 +217,17 @@ public sealed class SignalSentenceTemplateException : Exception
 /// (<see cref="OntologyWriterEvents.WriteSkippedOwnerRefused"/>), metered as
 /// <see cref="OntologyWriterFailureReason.OwnerRefused"/> and returned as a skipped result. The writer grants no
 /// shares: uac-r2's 2-minute secure-child reconcile mirrors the root's sharees onto the row, but only once
-/// <c>SecureChildLineage</c> lists <c>sprk_signal</c> and <c>config/secure-record-owner-role.json</c> grants
-/// <c>prvReadsprk_Signal</c>. Both are added by master PR #1390 (task 039), NOT by this branch: until #1390 is merged
-/// into this branch, a Secure-team-owned Signal written by this code is owned correctly but its sharees are never
-/// mirrored, so only the BFF can read it. Merge #1390 (through master) before this writer ships.</para>
+/// <c>SecureChildLineage</c> lists <c>sprk_signal</c>. That entry, and the <c>prvReadsprk_Signal</c> entry in
+/// <c>config/secure-record-owner-role.json</c>, are added by master PR #1390 (task 039), NOT by this branch.
+/// <b>Whether the create itself succeeds does not depend on #1390</b>: it depends on the LIVE Secure Record Owner
+/// role holding Read on <c>sprk_signal</c> in that environment (task 008's role edit, applied by
+/// <c>Set-SecureRecordOwnerRolePrivileges.ps1</c> from the config). Where the role lacks it, Dataverse refuses the
+/// create with 403 <c>0x80040299</c> ("Read Privilege Check For Owner failed" — the refusal recorded for
+/// <c>sprk_signal</c> by task 079, by Assign rather than create, and for <c>sprk_spendsignal</c> by uac-r2 task 146),
+/// and this writer surfaces it as <see cref="OntologyWriterFailureReason.DataverseAccessDenied"/>. Where the role
+/// holds it (spaarkedev1 since task 008; the create was proven live there on 2026-10-08) but #1390 is not deployed,
+/// the row is Secure-team-owned and its sharees are never mirrored, so only the BFF can read it. Ship this writer
+/// only after #1390 and the role edit are in the target environment.</para>
 /// </remarks>
 public sealed partial class SignalWriter
 {
