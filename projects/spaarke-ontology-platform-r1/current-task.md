@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Task** | No main-session task — orchestrating parallel streams (owner choice). Counts, critical path, stream table: top of `tasks/TASK-INDEX.md` (96 tasks). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 49/97 tasks done. ArchTests 818/818. Working tree clean. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 50/107 tasks done. ArchTests 818/818. Working tree clean. |
 | **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
@@ -35,9 +35,9 @@
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | **106 ✅ #1429 MERGED** 73d3b970e; deployed to dev 2026-10-08 17:12-17:19Z (BFF 73d3b970e, SpaarkeAi, SmartTodo, DailyBriefing; LegalWorkspace not deployed: its script does a tenant-wide publish; SPA via #1428); owner browser checks = card r6 on the checklist page |
 | **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
-| **#1413** (068) `ded3cc069` green; D-73 live; F2 fixed; D-76 moved to task 120 | re-check of rounds 2-3 (`aee49df31b5a7dc81`) | Owner merge question (safe decoupled per ISS-018 report) → 068 ✅ |
+| **#1413** (068) **MERGED** 885d0c5f9; 068 ✅ | — | — |
 | **ISS-018** (#1452): NO notification delivered in dev since >=2026-07-11 (3 defects + silent scheduler). Owner D-77..D-80 | **task 120** running (`aae6c79edd0f863de`, Opus, `C:\wts-120`) | PR green → review → owner approves dev BFF deploy → live node updates + D-76/D-79 scope + audit (D-80) → main session amends ADR-034 (.claude) |
-| **No-parking sweep** (D-81): every open issue → task 121+ (LegalWorkspace deploy w/o tenant publish, external SPA deploy, #1387 #1399 #1412 #1416 #1417 #1420 #1421 #1447 #1048 #1049 #1388 #1392) | planning agent `a8072bc88a2a6b8e0` writing POMLs | Review the new tasks → launch in parallel |
+| **No-parking sweep** (D-81) → tasks 121-129 created (f41dd8246). Running: 121 LegalWorkspace (`ad65e27c9c4cfb43f`), 122 external SPA prep (`aa7172378485e5bc3`), 124 Grid today (`a056f2ea863d70ff0`), 127 SpaarkeAi clean build (`ab9461eef8912ff0b`), 128 test harness (`a462472ad7bfe2b32`), 129 final-due-date views + VisualHost (`a6b457c62db78cb23`). Queued: 123, 125; 126 waits for uac-r2 rule | each stops at owner-approval steps | Review each PR → owner approvals → merge |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |
 | **#1424** master compile fix **MERGED** 7c5f39d0d (owner pre-approval); #1418 closed | — | — |
@@ -54,9 +54,9 @@
 | a17154f00e69eeced | 068 author — #1413 at `ded3cc069`; D-76 reverted pending #1452 | idle |
 | a89e40f06d97401ae | ISS-018 investigation (done) | idle |
 | aae6c79edd0f863de | Task 120 author (ISS-018 fix) | running |
-| a8072bc88a2a6b8e0 | Planner: open issues → tasks 121+ | running |
+| a8072bc88a2a6b8e0 | Planner (done) | idle |
 | aa669e43432b512f5 | 060 author (done) | idle |
-| aee49df31b5a7dc81 | Reviewer: re-checking #1413 rounds 2-3 | running |
+| aee49df31b5a7dc81 | Reviewer (#1413 merged) | idle |
 | af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
 | aa80f91b9ac7b3b76 | 112 author — merging master into #1422 for green CI | running |
 | a747ef8af51f83500 | Reviewer: PR #1422 (112) — done (text fixes F2-1/F2-2) | idle |
