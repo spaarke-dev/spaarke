@@ -2,21 +2,15 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. the new "Multi-customer add-in (Model 1)" block). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-08 (context-handoff before /compact). UAT round 12 in progress: 116 merged + live; 117-119 done but UNCOMMITTED; 120 running in a background agent.
+> **Last Updated**: 2026-10-08. UAT round 12: 116 live; 117-120 done, gates green, committed — PR → merge → dev BFF deploy (owner approved) → owner live checks; then task 121.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Task** | **UAT round 12** (`notes/042-uat-round12-2026-10-08.md`) — B2B guest (`ralph@deweycheatham.onmicrosoft.com`) in Outlook on the web + owner in Word. Tasks 117-120. |
-| **Status** | 116 merged (#1403 `7adfa0205`), add-in deployed. **117, 118, 119: done, UNCOMMITTED in this worktree** (agents finished; gates green per their reports). **120: background agent RUNNING** — BFF `POST /api/documents/resolve-email-identity` + Outlook "already saved" green box + web open fallback. Owner APPROVED the 120 server addition and a dev BFF deploy (2026-10-08). |
-| **Next Action** | 1) WAIT for the task-120 agent's completion notification — do NOT commit or run gates before it finishes (it edits App.tsx/SaveFlow/server files in this tree). 2) Then: add new client suites to `src/client/office-addins/ci-gated-suites.txt` (from 117: `shared/taskpane/components/__tests__/SaveFlow.copyRecordLink.test.tsx`; from 119: `shared/taskpane/components/__tests__/FindResultsList.openAffordance.test.tsx`; plus 120's reported suites); run full gates (jest, lint, tsc prod 0 / test debt ≤ 68, prettier; server: `dotnet build` + office-scope filter); TASK-INDEX rows 117-120 + POML statuses + drift check; commit; merge master; PR with Placement Justification (from 120's report) + publish-size numbers; `gh pr merge N --auto --merge`. 3) After merge: deploy BFF to dev from a fresh short-path worktree of origin/master (`scripts/Deploy-BffApi.ps1`, verify 4/4 SHA-256, /healthz, new route 401), remove the worktree; confirm the add-in deploy for the merge SHA. 4) Owner live checks (round 12) listed below. |
-
-### Uncommitted in the worktree (117-119; 120 adds more)
-- 117: `SaveFlow.tsx` (Copy Link = Spaarke `sprk_document` record link via `buildOpenRecordUrl`; hidden without ORG_URL), SaveFlow tests (`buttonFeedback`, `savedState`, `alreadySaved`, new `copyRecordLink`), `notes/117-…md`, `tasks/117-…poml` (120 sets it completed).
-- 118: Outlook Quick Save dialog — `shared/commands/{quickSaveDialog.ts,notify.html,readSavedDocument.ts}` (moved from `word/commands/`), `word/commands/index.ts`, `outlook/commands/index.ts` (unfileable/none/404 → save UNFILED + message; info bars removed), `quickSaveHelpers.ts` (`target: null`), `webpack.config.js` (notify page copied for both hosts), tests, `notes/118-…md`, `tasks/118-…poml`.
-- 119: `FindResultsList.tsx` (visible open affordance; handlers already wired), new `FindResultsList.openAffordance.test.tsx`, `notes/119-…md`, `tasks/119-…poml`.
-- Round note `notes/042-uat-round12-2026-10-08.md`; project `CLAUDE.md` standing block "Multi-customer add-in (Model 1)" + two git/shell gotchas.
+| **Status** | 116 merged (#1403). 117-120 DONE and committed on the branch (jest 102/1347, lint 0, tsc prod 0 / debt 68, BFF build 0/0, office scope 4830/0, publish +2,846 B 192=192). 121 (pane email save sends the Exchange item id as internetMessageId — found by 120) is OPEN. |
+| **Next Action** | 1) Merge the round-12 PR (`gh pr merge N --auto --merge`); confirm the add-in deploy for the merge SHA. 2) Deploy the BFF to dev from a fresh short-path worktree of origin/master (`pwsh scripts/Deploy-BffApi.ps1` from that worktree; verify 4/4 SHA-256, /healthz, `POST /api/documents/resolve-email-identity` → 401 unauthenticated); remove the worktree. Owner approved this deploy 2026-10-08. 3) Hand the owner the round-12 live checks (below + `notes/120-…md`). 4) Task 121 (POML ready) — needs a further dev BFF deploy go. |
 
 ### Round 12 live checks for the owner (after deploy)
 Outlook (guest, web): Copy Link → Spaarke record link (not `aka.ms/spe-openfilelocation`); reopen a saved email → green "Saved to Spaarke" box + record / "File to record"; Find rows open (web uses a normal tab); Quick Save → progress → success + "Open in Spaarke", contact suggestion / new email → saved UNFILED with the message; an unticked attachment is inside the .eml; pictures in the body render in the .eml? Word: Copy Link = record link; Find rows open.

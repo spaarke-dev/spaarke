@@ -84,7 +84,9 @@
       `@types/office-js`'s `Office.UI.displayDialogAsync` doc comment, which explicitly says this IS
       callable "from a UI-less command button") is the genuine host-native mechanism for a Word
       ExecuteFunction command to show the user something without opening the task pane.
-      `word/commands/index.ts` (`notify()`, and the Quick Save dialog in `quickSaveDialog.ts`) are the only callers.
+      `word/commands/index.ts` (`notify()`), the Quick Save dialog (`shared/commands/quickSaveDialog.ts`, Word and Outlook)
+      are the only callers. Task 118: this one page lives in `shared/commands/` and webpack emits it for both hosts
+      (`word/commands-notify.html`, `outlook/commands-notify.html`).
 
       Task 089 (UAT-9): an ERROR says why — often the server's own reason — so it must stay readable. Every message
       and link is rendered with textContent / a validated href only (never parsed as HTML), so a server-supplied
