@@ -258,4 +258,4 @@ For the subgrid "Add Record" action, configure a Quick Create form:
 
 ---
 
-*Schema version: 1.1 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-09-08 by `unified-access-control-r2` task 026 (review finding M4 — `sprk_contactid`→`sprk_contact`, `sprk_projectid`→`sprk_project`, `sprk_expirydate`→`sprk_expiresdate`, `sprk_accountid`→`sprk_organization`); 2026-10-07 by task 101 (the documented views were never applied; live views recorded; expiry views added)*
+*Schema version: 1.2 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-09-08 by `unified-access-control-r2` task 026 (review finding M4 — `sprk_contactid`→`sprk_contact`, `sprk_projectid`→`sprk_project`, `sprk_expirydate`→`sprk_expiresdate`, `sprk_accountid`→`sprk_organization`); 2026-10-07 by task 101 (the documented views were never applied; live views recorded; expiry views added)*

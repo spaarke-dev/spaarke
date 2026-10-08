@@ -1231,10 +1231,10 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../
 # Dry run (default): checks every column against metadata, runs both queries live, prints the plan. Zero writes.
 pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1
 
-# Create (or rewrite a same-named view that differs, after saving a snapshot to scripts/logs/), publish, then verify.
+# Create, rewrite a same-named view that differs (snapshot to scripts/logs/ first), add to SpaarkeCore if missing, publish when anything was written or is unpublished, then verify.
 pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Apply
 
-# Check: exit 0 = both views exist with the right definition and their saved queries return the right rows.
+# Check: exit 0 = both views exist once, are published with the right definition, are in SpaarkeCore, and return the right rows (all pages).
 pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Verify
 ```
 

@@ -145,19 +145,40 @@ pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Verify    # 3. read-only
 ```
 
 The script is idempotent:
-- A view that already matches is left alone.
-- A same-named view whose query or columns differ is rewritten, and its old definition is saved to `scripts/logs/`
-  first.
+- A view that already matches, is published and is in the solution is left alone.
+- A same-named view whose **pending** (unpublished) definition differs is rewritten. The pending definition is what
+  the next publish makes live. Before it writes, the script runs the new query and checks its rows, saves the old
+  definition to `scripts/logs/`, and then sends a `PATCH` with `If-Match: *` (an update only, never an upsert).
+- A view that is not in SpaarkeCore is added with `AddSolutionComponent` (type 26), even when its definition already
+  matches, so a hand-built view gets added too.
+- **Publish**: the table is published whenever the run wrote anything **or** a view has unpublished changes
+  (`RetrieveUnpublished` ≠ published). So a re-run after a failed publish publishes.
 - Two views with the same name make it refuse.
 - It **never** touches the default view, any other view, a role or the schema.
 
-Its checks are semantic: filter conditions and their grouping, sort, attributes and cells. A view built by hand
-(§6) is therefore verified the same way.
+**Solution membership** is decided only by `scripts/common/DataverseSolutionMembership.ps1` (`Get-DvSolutionMembership` +
+`Test-DvInSolution` with the table's MetadataId). That gives the answer Dataverse means: direct, or through a table
+included with all its subcomponents. It is pinned by `SchemaScriptSolutionMembershipGuardTests`.
+
+**Comparison** is semantic. The filter is compared as a normalised tree: siblings are sorted, a nested filter of the
+same type is spliced into its parent, and a one-child wrapper is dropped. Any other nested group stays a group, so
+`(A or B) and C` is **not** `A or B or C`, and `(A or B) and C` is not `(A or C) and B`. Sort, link-entity count, the
+needed attributes (extras such as the portal's `sprk_name` are ignored; a missing column is not) and the cells are
+compared too. A view built by hand (§6) is therefore verified the same way. This was checked by harness: a
+maker-portal-shaped View 2, with reordered attributes and conditions and an extra `sprk_name`, compares equal, and
+every grouping change compares unequal.
+
+**Paging**: the Web API pages `?fetchXml=` with a paging cookie (`@Microsoft.Dynamics.CRM.morerecords` +
+`fetchxmlpagingcookie`, URL-encoded twice), not `@odata.nextLink`. `Get-FetchRows` follows the cookie. A saved view is
+run through **its own saved fetchxml**, not `?savedQuery=`, so one loop pages both. Checked on dev with page sizes 10
+and 7: all 57 rows came back across 6 and 9 requests, with no duplicates. Before this fix, more than 5,000 Active
+grants would have failed the row-count check and blocked `-Apply` and `-Verify` for good.
 
 What `-Verify` checks, for each view:
 1. It exists exactly once.
-2. Its saved definition means the same thing as the definition above.
-3. Its **saved query**, run through the Web API `?savedQuery=`, returns:
+2. Its **published** definition means the same thing as the definition above, and it has **no unpublished changes**.
+3. It is in SpaarkeCore.
+4. Its published query, every page of it, returns:
    - only Active rows;
    - rows in expiry order, undated first;
    - for View 1, exactly the Active row count;
@@ -165,9 +186,15 @@ What `-Verify` checks, for each view:
 
    Both window checks allow one day either side, because the relative operators use the viewing user's time zone.
 
+**Assumption, not observed live** (no write was allowed): a view created through the Web API is returned by
+`GET savedqueries` before it is published, because it is a new record rather than a change to a published one. If a
+publish fails after a create and that assumption is wrong, a re-run could create the view a second time. The script
+prints the created ids when it fails and names the remedy; `-Verify` refuses two same-named views.
+
 ### Run so far (read-only, 2026-10-07, spaarkedev1)
 ```
 Metadata    : 9 columns + statecode present; sprk_expiresdate is DateOnly; object type code 10911
+Solution    : SpaarkeCore (table in it)
 Active rows : 57 (undated: 0)
 [Active External Shares by Expiration]  PLAN create (query runs: 57 rows, all checks pass)
 [External Shares Expiring in 30 Days]   PLAN create (query runs: 0 rows, all checks pass)
@@ -205,6 +232,8 @@ runs show the same filter returning the right rows.
 |---|---|---|---|
 | D-1 | **`sprk_name` is never written** on a grant row: 92 of 92 rows on dev are blank. Every existing view of the table ("Active External Record Accesses", the default; "All External Record Access") shows an empty Name column, and that column is the grid's open-record link. Failure: a user opening the default grid sees a blank first column, with no record name to click. | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs:1106-1122` (`BuildGrantPayload` has no `sprk_name`). The materializer creates through the same `CreateGrantAsync` (`Services/ExternalAccess/AssignedAccessMaterializer.cs:1489`) | **Filed as [#1394](https://github.com/spaarke-dev/spaarke/issues/1394) and reported, not fixed**: out of scope (BFF code under `Api/ExternalAccess`, which this task must not touch while task 154 runs). The new views leave the column out. |
 | D-2 | **`views-schema.md` documented four views that do not exist live.** "Active Participants" (shown as the default), "By Project", "By Contact" and "Expiring Access" are absent. The live views are "Active External Record Accesses" (default), "All External Record Access", "Inactive External Record Accesses" and the system lookup / quick find / associated / advanced find views. This is the same class as the nine docs-versus-metadata mismatches recorded so far, and the tenth found. | `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md` | **Fixed in this task**: the file now records the live views, marks the four as never applied, and points to these two. |
+| D-3 | **`entity-schema.md` documented the same never-applied views.** It also listed two columns that do not exist (`sprk_approvedby`, `sprk_approveddate`, with a relationship), called `sprk_name` "Computed", and left out the live `sprk_invoice` and `sprk_recordtype` lookups. | `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md` (Views, Approval Fields, Form Layout, Relationships, Primary Fields) | **Fixed in this task** (verifier F4 + found while fixing it): a 2026-10-07 correction block, inline markings, and the views marked "design, not live". |
+| D-4 | **This task's first script** read only one FetchXML page, compared signatures ignoring filter nesting, wrote with a `PATCH` without `If-Match`, did not decide solution membership through the shared helper (failing Arch Tests), and could not detect an unpublished view. While fixing these, the harness caught two more of its own bugs: `RetrieveUnpublished` rejects the paging `Prefer` header, and a wrapped-list return collapsed every filter signature. | `scripts/Deploy-ExternalShareExpiryViews.ps1` | **Fixed** (verifier F1, F3, F4, K) before any live run. |
 
 Data observation, **not triaged as a defect**: **46 of 58** Active rows have no Granted By. Most were written on
 2026-10-06 by the BFF identity. The grant core leaves `sprk_grantedby` out when it cannot resolve a grantor
