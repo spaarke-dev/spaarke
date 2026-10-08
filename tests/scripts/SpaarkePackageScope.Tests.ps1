@@ -80,7 +80,7 @@ function Get-DevPages {
                     [PSCustomObject]@{ savedqueryid = 'Q1'; name = 'Contacts with Identity Collisions'; returnedtypecode = 'contact' }
                     [PSCustomObject]@{ savedqueryid = 'Q2'; name = 'Active Matters'; returnedtypecode = 'sprk_matter' }
                 )) }
-        'systemforms'                    = @{ Filter = 'ismanaged eq false'; Page = (Page @()) }
+        'systemforms'                    = @{ Filter = 'ismanaged eq false'; Page = (Page @([PSCustomObject]@{ formid = 'F1'; name = 'Documents'; objecttypecode = 'none' })) }
         'fieldsecurityprofiles'          = @{ Filter = 'ismanaged eq false'; Page = (Page @([PSCustomObject]@{ fieldsecurityprofileid = 'P1'; name = 'Identity Link Readers' })) }
         'roles'                          = @{ Filter = 'ismanaged eq false'; Page = (Page @(
                     [PSCustomObject]@{ roleid = 'R1'; name = 'Spaarke Core User'; _parentrootroleid_value = 'R1' }
@@ -116,9 +116,16 @@ Describe 'Get-PackageRuleComponents (T218c)' {
         ($names -contains 'sprk_status') | Should Be $true
     }
 
-    It 'takes unmanaged views on OOB tables, not those on sprk_ tables (they ship with the table)' {
+    It 'takes unmanaged views on OOB tables, not those on sprk_ tables (they ship with the table), with the OOB table as parent' {
         ($names -contains 'contact: Contacts with Identity Collisions') | Should Be $true
         ($names -contains 'sprk_matter: Active Matters') | Should Be $false
+        ($rule | Where-Object Name -eq 'contact: Contacts with Identity Collisions').ParentEntityId | Should Be 'e3'
+    }
+
+    It 'takes unmanaged dashboards, labelled as such, with no parent table' {
+        $d = $rule | Where-Object Name -eq 'dashboard: Documents'
+        $d.TypeName | Should Be 'SystemForm'
+        $d.ParentEntityId | Should Be $null
     }
 
     It 'takes unmanaged field security profiles' {
@@ -183,7 +190,7 @@ Describe 'Compare-PackageScope (T218c)' {
     ) -AlsoIncluded @('Secure Record Owner', 'No Such Role')
     $rule = @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope $scope)
     $membership = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($k in '2|a1', '9|o1', '61|w2', '66|c1', '66|c2', '80|m1', '380|v1', '20|r1', '20|r2', '26|q1', '70|p1') { $membership[$k] = 0 }
+    foreach ($k in '2|a1', '9|o1', '61|w2', '66|c1', '66|c2', '80|m1', '380|v1', '20|r1', '20|r2', '26|q1', '70|p1', '60|f1') { $membership[$k] = 0 }
     $membership['1|e1'] = 2
     $membership['1|e3'] = 1
     $membership['1|ms99'] = 0
@@ -201,6 +208,13 @@ Describe 'Compare-PackageScope (T218c)' {
 
     It 'reports an excluded component that is packaged anyway' {
         @($result.ExcludedButInPackage | ForEach-Object Name) | Should Be @('sprk_Spaarke.Controls.DueDatesWidget')
+    }
+
+    It 'treats the OOB table row that comes with an in-scope view as explained' {
+        $m = [System.Collections.Generic.Dictionary[string, int]]::new($membership, [StringComparer]::OrdinalIgnoreCase)
+        $m.Remove('2|a1') | Out-Null; $m['1|e3'] = 2   # only the view explains contact now
+        $r = Compare-PackageScope -RuleComponents $rule -MembershipKeys $m -Scope $scope
+        @($r.OutsideRule | Where-Object { $_.ObjectId -eq 'e3' }).Count | Should Be 0
     }
 
     It 'reports packaged components the rule does not explain (dragged-in tables, env-var values), not OOB parents' {

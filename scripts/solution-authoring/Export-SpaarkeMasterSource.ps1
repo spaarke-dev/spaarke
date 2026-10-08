@@ -73,7 +73,7 @@ if ($left.Count -gt 0) { throw "Environment-variable values remain in the source
 $leaks = @(Find-LeakyDependencies -SolutionXmlPath (Join-Path $OutputFolder 'Other/Solution.xml'))
 if ($leaks.Count -gt 0) {
     $leaks | ForEach-Object { Write-Host "    LEAK: $_" -ForegroundColor Red }
-    throw "$($leaks.Count) missing dependenc(ies) on solution=Active (F12): the package references Spaarke components it does not contain. Bring them into scope (Assemble-SpaarkeMasterSolution.ps1) and export again — do not commit this source."
+    throw "$($leaks.Count) missing dependenc(ies) on solution=Active (F12): the package references Spaarke components it does not contain. Bring them into scope (Assemble-SpaarkeMasterSolution.ps1) and export again. $OutputFolder now holds this REJECTED export - restore it with 'git checkout -- $OutputFolder' (and 'git clean -fd' there); do not commit it."
 }
 
 $version = ([xml](Get-Content (Join-Path $OutputFolder 'Other/Solution.xml') -Raw)).ImportExportXml.SolutionManifest.Version

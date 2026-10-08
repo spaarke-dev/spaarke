@@ -6,7 +6,8 @@
 .DESCRIPTION
     T218c (ADR-027 §3 amended 2026-10-07). The scope is a RULE (scripts/solution-authoring/SpaarkePackageScope.psm1 +
     docs/data-model/package-scope.json): every unmanaged sprk_ component of the scoped types, sprk_ columns on OOB
-    tables and the Spaarke root-unit roles, minus committed exclusions. Before T218c this script added only what was
+    tables, unmanaged views/forms on OOB tables, unmanaged dashboards, field security profiles and Spaarke root roles
+    from any business unit, minus committed exclusions. Before T218c this script added only what was
     already inside some Spaarke solution; the first rule run (2026-10-07) found 44 in-scope components missing.
 
     Flags (T218c review): every custom table goes in WITH all its subcomponents (DoNotIncludeSubcomponents = false) -
@@ -15,8 +16,8 @@
     FALSE: with true, the 2026-08-23 rebuild dragged five Microsoft tables (environmentvariabledefinition/value,
     msdyn_aimodelcatalog, msdyn_analysisoverride, msdyn_analysisresultdetail) into SpaarkeMaster whole. Dependencies
     on Microsoft components are platform dependencies of the import; dependencies on Spaarke components are in scope
-    by rule. An OOB table whose sprk_ column is added goes in METADATA-ONLY first, so Spaarke never ships Microsoft's
-    table customizations. A sprk_ table packaged as a shell (behavior != 0) is re-added with all subcomponents.
+    by rule. An OOB table whose sprk_ column, view or form is added goes in as a SHELL first (DoNotIncludeSubcomponents
+    + empty IncludedComponentSettingsValues - rootcomponentbehavior 2), so Spaarke never ships Microsoft's table metadata. A sprk_ table packaged as a shell (behavior != 0) is re-added with all subcomponents.
 
     Export is a separate step: Export-SpaarkeMasterSource.ps1.
 
@@ -113,22 +114,24 @@ if ($WhatIfPreference) {
 }
 
 # ---- Apply --------------------------------------------------------------------
-function Add-Component([string]$Id, [int]$Type, [bool]$Required, [bool]$NoSubcomponents) {
-    Invoke-DataverseWrite 'AddSolutionComponent' 'POST' @{
+function Add-Component([string]$Id, [int]$Type, [bool]$Required, [bool]$NoSubcomponents, [switch]$Shell) {
+    $body = @{
         ComponentId               = $Id
         ComponentType             = $Type
         SolutionUniqueName        = $MasterSolutionUniqueName
         AddRequiredComponents     = $Required
         DoNotIncludeSubcomponents = $NoSubcomponents
-    } | Out-Null
+    }
+    if ($Shell) { $body.IncludedComponentSettingsValues = @() }   # with DoNotIncludeSubcomponents: shell only (behavior 2)
+    Invoke-DataverseWrite 'AddSolutionComponent' 'POST' $body | Out-Null
 }
 
 $failed = @()
 $addedTables = @{}
 foreach ($item in (@($toAdd) + @($shells) | Sort-Object ComponentType, Name)) {
     try {
-        if ($item.TypeName -eq 'Attribute' -and $item.ParentEntityId -and -not $membership.ContainsKey("1|$($item.ParentEntityId)") -and -not $addedTables.ContainsKey($item.ParentEntityId)) {
-            Add-Component $item.ParentEntityId 1 $false $true      # OOB table, metadata-only
+        if ($item.TypeName -ne 'Entity' -and $item.ParentEntityId -and -not $membership.ContainsKey("1|$($item.ParentEntityId)") -and -not $addedTables.ContainsKey($item.ParentEntityId)) {
+            Add-Component $item.ParentEntityId 1 $false $true -Shell   # OOB table, shell only
             $addedTables[$item.ParentEntityId] = $true
         }
         Add-Component $item.ObjectId $item.ComponentType $false $false   # with subcomponents, no dependencies
@@ -141,6 +144,14 @@ foreach ($item in (@($toAdd) + @($shells) | Sort-Object ComponentType, Name)) {
 
 if ($failed.Count -gt 0) {
     Write-Error "$($failed.Count) component(s) failed to add - version NOT bumped. Fix and re-run (idempotent), then Test-SolutionCompleteness.ps1."
+    exit 1
+}
+
+# Verify before bumping: re-read membership; every in-scope table must now be packaged WITH its subcomponents.
+$after = Compare-PackageScope -RuleComponents $rule -MembershipKeys (Get-SolutionMembershipKeys -Get $get -SolutionUniqueName $MasterSolutionUniqueName) -Scope $scope
+if (@($after.MissingFromPackage).Count -gt 0 -or @($after.PackagedAsShell).Count -gt 0) {
+    @($after.MissingFromPackage) + @($after.PackagedAsShell) | ForEach-Object { Write-Warning "Still not packaged in full: $($_.TypeName) $($_.Name)" }
+    Write-Error "The adds did not take effect for every component - version NOT bumped. Investigate (a shell may need removing and re-adding), then re-run."
     exit 1
 }
 Invoke-DataverseWrite "solutions($($master.solutionid))" 'PATCH' @{ version = $newVersion } | Out-Null

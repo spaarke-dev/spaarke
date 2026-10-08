@@ -9,7 +9,8 @@
       publisher prefix (sprk_):
         Entity (not N:N intersect tables — they ship with their relationship), global OptionSet, WebResource
         (incl. every code page), CustomControl (PCF), AppModule, SiteMap, EnvironmentVariableDefinition;
-      + sprk_ custom columns on non-sprk (OOB) tables, and unmanaged system views / forms on OOB tables;
+      + sprk_ custom columns on non-sprk (OOB) tables, unmanaged system views / forms on OOB tables, and unmanaged
+        dashboards;
       + root security roles (any business unit) whose name matches the scope's role pattern, plus the named extras;
       + every unmanaged field security profile (they secure sprk_ columns; no other publisher authors in dev);
       − the committed exclusions in docs/data-model/package-scope.json (each with a reason and a date).
@@ -102,7 +103,8 @@ function New-ScopeItem([string]$TypeName, [string]$ObjectId, [string]$Name, [str
         ComponentType  = Get-PackageComponentTypeCode -TypeName $TypeName
         ObjectId       = ([string]$ObjectId).ToLowerInvariant()
         Name           = $Name
-        # Attributes of OOB tables: the table's MetadataId — Assemble adds the table metadata-only first.
+        # Columns, views and forms of OOB tables: the table's MetadataId — Assemble adds the table as a shell first,
+        # and the outside-the-rule check treats that table row as explained.
         ParentEntityId = if ($ParentEntityId) { $ParentEntityId.ToLowerInvariant() } else { $null }
         Excluded       = $false
         Reason         = $null
@@ -156,16 +158,22 @@ function Get-PackageRuleComponents {
         $items.Add((New-ScopeItem EnvironmentVariableDefinition $v.environmentvariabledefinitionid $v.schemaname))
     }
 
-    # Views and forms on OOB tables (those on sprk_ tables ship with their table).
+    # Views and forms on OOB tables (those on sprk_ tables ship with their table); unmanaged dashboards
+    # (systemforms with objecttypecode 'none') are in scope too. A view/form carries its OOB table as ParentEntityId so
+    # the table row Dataverse adds with it is explained, not reported as outside the rule.
+    $tableIds = @{}
+    foreach ($e in $entities) { $tableIds[$e.LogicalName] = $e.MetadataId }
     foreach ($q in @(Get-AllPages $Get "savedqueries?`$select=savedqueryid,name,returnedtypecode&`$filter=ismanaged eq false")) {
-        if ($q.returnedtypecode -and -not ([string]$q.returnedtypecode).StartsWith($prefix)) {
-            $items.Add((New-ScopeItem SavedQuery $q.savedqueryid "$($q.returnedtypecode): $($q.name)"))
+        $table = [string]$q.returnedtypecode
+        if ($table -and -not $table.StartsWith($prefix)) {
+            $items.Add((New-ScopeItem SavedQuery $q.savedqueryid "${table}: $($q.name)" $tableIds[$table]))
         }
     }
     foreach ($f in @(Get-AllPages $Get "systemforms?`$select=formid,name,objecttypecode&`$filter=ismanaged eq false")) {
-        if ($f.objecttypecode -and -not ([string]$f.objecttypecode).StartsWith($prefix)) {
-            $items.Add((New-ScopeItem SystemForm $f.formid "$($f.objecttypecode): $($f.name)"))
-        }
+        $table = [string]$f.objecttypecode
+        if (-not $table -or $table.StartsWith($prefix)) { continue }
+        if ($table -eq 'none') { $items.Add((New-ScopeItem SystemForm $f.formid "dashboard: $($f.name)")); continue }
+        $items.Add((New-ScopeItem SystemForm $f.formid "${table}: $($f.name)" $tableIds[$table]))
     }
 
     foreach ($p in @(Get-AllPages $Get "fieldsecurityprofiles?`$select=fieldsecurityprofileid,name&`$filter=ismanaged eq false")) {
