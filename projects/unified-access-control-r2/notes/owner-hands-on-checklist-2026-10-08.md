@@ -120,3 +120,8 @@ Hard-refresh first (Ctrl+Shift+R); the control footer should read 1.0.41. Projec
 8. Turn on dark mode. **PASS:** the indicator is readable, including on hover.
 9. Open a create form. **PASS:** no banner shows.
 
+## 8. Child records show their parent's Access Permission (task 173, on dev since 2026-10-08)
+
+1. **Your UAT (G-1):** in Word for the web, on a document under PAT-176903, create a To Do through the add-in, then open it. **PASS:** Access Permission shows Restricted, locked, with "Access permission is inherited from …".
+2. **Forms (G-4):** check the To Do, Event, Communication (Message) and Document main forms. **PASS:** on a filed record the field is locked with the "inherited from" note; on a record with no parent it is editable. No console errors, and readable in dark mode.
+
