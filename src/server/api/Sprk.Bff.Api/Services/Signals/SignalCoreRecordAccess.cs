@@ -205,9 +205,21 @@ public sealed class SignalCoreRecordAccess
             var who = await _userClient.GetAsync("WhoAmI", ct).ConfigureAwait(false);
             if (!who.IsSuccess)
             {
-                _logger.LogWarning("Signal access: reading the {What} was denied and the caller has no Dataverse identity ({ErrorCode}).",
+                // Only "the caller has no Dataverse identity" is unresolved: Dataverse refusing them, or the same user-context
+                // / OBO codes the first read maps. Throttling, a 5xx or a transport fault says nothing about WHO they are, so a
+                // known caller under load must get the same 404 whether or not the row exists.
+                if (who.ErrorCode is DataverseUserClientErrorCodes.AccessDenied
+                    or DataverseUserClientErrorCodes.UserContextRequired
+                    or DataverseUserClientErrorCodes.OboExchangeFailed
+                    or DataverseUserClientErrorCodes.OboNotConfigured)
+                {
+                    _logger.LogWarning("Signal access: reading the {What} was denied and the caller has no Dataverse identity ({ErrorCode}).",
+                        what, who.ErrorCode);
+                    return SignalAccessDecision.CallerUnresolved;
+                }
+
+                _logger.LogWarning("Signal access: reading the {What} was denied and the caller's identity could not be checked ({ErrorCode}); denying as not found.",
                     what, who.ErrorCode);
-                return SignalAccessDecision.CallerUnresolved;
             }
         }
 

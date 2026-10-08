@@ -187,22 +187,43 @@ public class RuleBodyDescriberTests
         var entry = logger.Entries.Should().ContainSingle().Subject;
         entry.EventId.Id.Should().Be(OntologyWriterEvents.RuleDescriptionRefused.Id);
         entry.Field("Reason").Should().Be(RuleDescriptionRefusalReason.LookupReadFailed);
+        entry.Field("ExceptionType").Should().Be(nameof(InvalidOperationException));
         entry.Message.Should().NotContain("dataverse is down");
         reasons().Should().Equal(RuleDescriptionRefusalReason.LookupReadFailed);
+    }
+
+    [Fact]
+    public async Task ATimeoutStyleTaskCanceledException_WhenTheCallerDidNotCancel_IsARefusal_NotAnException()
+    {
+        var logger = new CapturingLogger<RuleBodyDescriber>();
+        var entities = Substitute.For<IGenericEntityService>();
+        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new TaskCanceledException("the HTTP client timed out"));
+        var schema = new RuleBodySchemaValidator();
+        var validator = new PolicyVersionValidator(
+            schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
+
+        var result = await new RuleBodyDescriber(validator, entities, logger)
+            .DescribeAsync(Fixture("pathb-existence.rulebody.json"), CancellationToken.None);
+
+        result.IsRefused.Should().BeTrue();
+        logger.Entries.Should().ContainSingle().Which.Field("ExceptionType").Should().Be(nameof(TaskCanceledException));
     }
 
     [Fact]
     public async Task ACancelledRead_StillThrows_ItIsNotARefusal()
     {
         var entities = Substitute.For<IGenericEntityService>();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // the CALLER cancelled
         entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new OperationCanceledException());
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(
             schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
         var describer = new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance);
 
-        var act = () => describer.DescribeAsync(Fixture("pathb-existence.rulebody.json"), CancellationToken.None);
+        var act = () => describer.DescribeAsync(Fixture("pathb-existence.rulebody.json"), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

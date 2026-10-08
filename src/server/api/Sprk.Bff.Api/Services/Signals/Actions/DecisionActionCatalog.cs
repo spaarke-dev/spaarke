@@ -246,8 +246,23 @@ public static class DecisionActionCatalog
     /// <summary>The catalog proper: <see cref="Declared"/> with every exclusion made mutual.</summary>
     private static readonly DecisionActionDefinition[] Definitions = Mutualize(Declared);
 
-    private static DecisionActionDefinition[] Mutualize(DecisionActionDefinition[] declared) =>
-        declared
+    /// <summary>
+    /// Makes every declared exclusion mutual. Throws (at static initialisation, so the catalog cannot load) when an exclusion
+    /// names a code that is not declared: a typo would otherwise silently drop the exclusion.
+    /// </summary>
+    internal static DecisionActionDefinition[] Mutualize(DecisionActionDefinition[] declared)
+    {
+        var codes = declared.Select(d => d.Code).ToHashSet(StringComparer.Ordinal);
+        foreach (var action in declared)
+        {
+            foreach (var excluded in action.Excludes.Where(e => !codes.Contains(e)))
+            {
+                throw new InvalidOperationException(
+                    $"Action catalog: '{action.Code}' excludes '{excluded}', which is not a declared action.");
+            }
+        }
+
+        return declared
             .Select(a => a with
             {
                 Excludes = declared
@@ -256,6 +271,7 @@ public static class DecisionActionCatalog
                     .ToArray(),
             })
             .ToArray();
+    }
 
     private static readonly FrozenDictionary<string, DecisionActionDefinition> ByCode =
         Definitions.ToFrozenDictionary(d => d.Code, StringComparer.Ordinal);

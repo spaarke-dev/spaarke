@@ -119,3 +119,15 @@ Evidence: `Domain.Signals` + `Services.Signals` unit suites 375/375 (the earlier
 pass against spaarkedev1; `Spaarke.ArchTests` built explicitly then run 817/818, the one failure being the writer-credential I5
 test that master/docs branch fixed in `0977c274d` (not in this branch's base); `RouteAuthorizationGuardTests` 86/86. Publish
 size was not re-measured: round 2 adds no package and only small code (previous +0.03 MB).
+
+## Round 3 (final)
+
+| # | Finding | Fix |
+|---|---|---|
+| F-1 | After a Dataverse 403 the `WhoAmI` identity check treated every failure as "caller unresolved" | `CallerUnresolved` only for `AccessDenied` or the user-context / OBO codes (`UserContextRequired`, `OboExchangeFailed`, `OboNotConfigured`); `RateLimited`, `ServiceError` and anything else fall through to the uniform 404 (logged). Tests: 429 and 5xx after a 403 give 404; an OBO failure still gives the 403. |
+| K-1 | `Mutualize` silently dropped an exclude naming an unknown code | It now throws at static initialisation (`InvalidOperationException`); test calls it with a typo'd and a good declaration. The `record-the-response` <-> `extend-response-date` (and `send-reminder`) pair is pinned as mutual, with reminder and extend still compatible. |
+| K-2 | Describer catch used `ex is not OperationCanceledException` | Filter is now `ex is not OperationCanceledException \|\| !ct.IsCancellationRequested` (and not `PredicateCompilationException`): a timeout-style `TaskCanceledException` is a refusal; the caller's own cancellation still propagates. Tests for both. |
+| K-4 | Refusal log had no exception type | `exceptionType={ExceptionType}` (type name only, `none` when there was no exception) added to the log; the metric stays dimensioned by reason only. Asserted in the tests. |
+
+Evidence: Domain.Signals + Services.Signals + describer unit and live seam tests 383/383; `RouteAuthorizationGuardTests` and
+`PredicateCompilerCallerGuardTests` pass (ArchTests built explicitly first).

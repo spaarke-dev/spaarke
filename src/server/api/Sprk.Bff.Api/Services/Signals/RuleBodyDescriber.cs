@@ -112,12 +112,14 @@ public sealed class RuleBodyDescriber
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
             return await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException && ex is not PredicateCompilationException)
+        catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                                   && ex is not PredicateCompilationException)
         {
             // A reference-table read fault must not turn a plan read into a 500: the description is an extra, so it is
-            // refused (logged, metered, type only) and the caller serves the plan without it.
+            // refused (logged with the exception type, metered by reason) and the caller serves the plan without it. Only the
+            // CALLER's cancellation propagates; a timeout-style TaskCanceledException is a fault like any other.
             return Refused(RuleDescriptionRefusalReason.LookupReadFailed,
-                "A lookup name could not be read, so the rule cannot be described right now.");
+                "A lookup name could not be read, so the rule cannot be described right now.", ex);
         }
         catch (PredicateCompilationException ex)
         {
@@ -126,9 +128,12 @@ public sealed class RuleBodyDescriber
         }
     }
 
-    private RuleDescriptionResult Refused(string reason, string message)
+    private RuleDescriptionResult Refused(string reason, string message, Exception? fault = null)
     {
-        _logger.LogWarning(OntologyWriterEvents.RuleDescriptionRefused, "Rule description refused (reason={Reason}).", reason);
+        // The exception TYPE only, never its message (it can echo row content). Not a metric dimension: the metric stays
+        // bounded by reason.
+        _logger.LogWarning(OntologyWriterEvents.RuleDescriptionRefused,
+            "Rule description refused (reason={Reason}, exceptionType={ExceptionType}).", reason, fault?.GetType().Name ?? "none");
         OntologyWriterTelemetry.RecordRuleDescriptionRefused(reason);
         return new RuleDescriptionResult(null, message);
     }

@@ -86,6 +86,32 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
+    public void AnExcludeNamingAnUnknownCode_FailsCatalogConstruction_NotSilently()
+    {
+        DecisionActionDefinition Action(string code, params string[] excludes) =>
+            new(code, code, DecisionLane.Decide, false, null, [], [], excludes, DecisionRecordClass.Judgement);
+
+        var typo = () => DecisionActionCatalog.Mutualize([Action("a", "b-typo"), Action("b")]);
+        var fine = DecisionActionCatalog.Mutualize([Action("a", "b"), Action("b")]);
+
+        typo.Should().Throw<InvalidOperationException>().WithMessage("*'a' excludes 'b-typo'*not a declared action*");
+        fine.Single(x => x.Code == "b").Excludes.Should().Equal("a");
+    }
+
+    [Fact]
+    public void TheResponsePairsAreMutual_RecordTheResponseWithReminderAndExtend()
+    {
+        DecisionActionCatalog.TryGet("record-the-response", out var record).Should().BeTrue();
+        DecisionActionCatalog.TryGet("extend-response-date", out var extend).Should().BeTrue();
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+
+        record.Excludes.Should().BeEquivalentTo("send-reminder", "extend-response-date");
+        extend.Excludes.Should().Equal("record-the-response");
+        reminder.Excludes.Should().Equal("record-the-response");
+        DecisionActionCatalog.FirstConflict(["extend-response-date", "send-reminder"]).Should().BeNull("those two are compatible");
+    }
+
+    [Fact]
     public void RecordTheResponse_OffersTheD58ResponseValues()
     {
         DecisionActionCatalog.TryGet("record-the-response", out var record).Should().BeTrue();
@@ -394,6 +420,25 @@ public class DecisionActionCatalogTests
     public async Task ADeniedRead_ForAValidTokenWithNoDataverseUser_IsTheSingleCallerUnresolved_D29()
     {
         var users = Users(signal: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+
+        (await Access(users).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+    }
+
+    [Theory]
+    [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
+    [InlineData(500, DataverseUserClientErrorCodes.ServiceError)]
+    public async Task ADeniedRead_WhenTheIdentityCheckIsThrottledOrFaults_IsTheUniformNotFound_NotACallerUnresolved(int status, string code)
+    {
+        var users = Users(signal: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(status, code));
+
+        (await Access(users).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Fact]
+    public async Task ADeniedRead_WhenTheIdentityCheckHasATransientOboFailure_IsStillCallerUnresolved()
+    {
+        // The existing user-context / OBO codes keep their meaning: the caller cannot be identified.
+        var users = Users(signal: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed));
 
         (await Access(users).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
     }
