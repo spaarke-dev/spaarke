@@ -757,7 +757,20 @@ public sealed class AssignedAccessMaterializer
             var modified = IsModified(ours, row);
 
             // ── Task 141 link appeared: the contact is an internal user — convert grant → share ──
-            if (target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive)
+            // GitHub #1410 / owner round 82 ("the parent permissions control"): the record is not flagged secure, but it may be
+            // filed under a secure matter or project whose No Access list governs it. A walled user is NOT converted (the
+            // grant is left exactly as it is, and converts once the wall lifts); a check that cannot be completed is a fault
+            // (reported, the run red) and nothing is converted this pass.
+            var convertWall = target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive
+                ? await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    run.Logical, run.RootId, target.SystemUserId!.Value, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false)
+                : null;
+            if (convertWall?.Outcome == SecureShareWallOutcome.Unverifiable)
+            {
+                DenyListFault(run, subject, "the conversion of its grant to a share", detail: convertWall.Fault);
+            }
+
+            if (convertWall is not null && !convertWall.RefusesShare)
             {
                 var written = await WriteShareAsync(run, subject, target.SystemUserId!.Value, ct).ConfigureAwait(false);
                 if (written is not { } mask)
@@ -839,8 +852,9 @@ public sealed class AssignedAccessMaterializer
             // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks. Task 158
             // final round (main-session round 58 item 1): on a work assignment or project filed under a secure record the
             // enforcer also removes it for a person on that PARENT's list, so the parents' lists are asked too — the guard's
-            // one entry point, as the suggestion below asks it.
-            if (flags.IsSecure)
+            // one entry point, as the suggestion below asks it. GitHub #1410 / owner round 82: asked WHATEVER the record's flag
+            // — the enforcer also removes it on a not-yet-secure record filed under a walled secure parent (the guard answers
+            // NotSecure for a record with no secure parent, which falls through to the operator's removal as before).
             {
                 var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                     run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
@@ -1127,11 +1141,12 @@ public sealed class AssignedAccessMaterializer
 
         var restoring = live.Any(r => r.State == AssignedAccessState.Skipped && r.Reason == AssignedAccessReason.RemovedByNoAccess);
 
-        if (flags.IsSecure)
         {
             // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
             // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
-            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            // parent's No Access list too — the guard's one entry point for the record and its parents. GitHub #1410 / owner
+            // round 82: asked WHATEVER the record's flag (a not-yet-secure record filed under a walled secure parent is
+            // governed by that parent's list); the guard answers NotSecure for a record with no secure parent.
             var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                 run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
@@ -1146,15 +1161,15 @@ public sealed class AssignedAccessMaterializer
                 // Task 142 r4 (owner round 13 item 5): a fault, not a wall — nothing shared or suggested (fail closed), and
                 // the run FAILS like the deny-list fault (counted, logged, the job red). The ledger keeps what it said, so a
                 // share 143's enforcer removed is still restored once the check reads again.
-                DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault);
+                DenyListFault(run, subject, restoring || !flags.IsSecure ? "its share" : "its suggestion", detail: wall.Fault);
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccessUnverifiable, user)
                     .ConfigureAwait(false);
                 return;
             }
 
-            if (!restoring)
+            if (flags.IsSecure && !restoring)
             {
-                // Owner answer A3: suggest, do not share.
+                // Owner answer A3: suggest, do not share (secure records only).
                 await EnsureRowsAsync(run, subject, byField,
                     new AssignedAccessLedgerWrite(AssignedAccessState.PendingConfirmation, null, null, user), ct).ConfigureAwait(false);
                 run.Entry(subject, fields, user, AssignedAccessState.PendingConfirmation, null, AssignedAccessAction.Ledger);

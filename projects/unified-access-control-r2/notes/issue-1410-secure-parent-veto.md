@@ -112,3 +112,26 @@ The other construction sites (12) pass `AccessibleRecordSetTestFactory.NoFilingE
 - Update Access (`EnforceForRecordAsync`) on the not-yet-secure record removes the share.
 
 **Seeding proof:** with the gate restored, all 4 tests fail (55 others pass).
+
+## F2 (verifier pass 2): the Assigned-To materializer, the same ruling
+
+The problem, with P1 in place: a not-yet-secure (or Refused or Failed) work assignment sits under a walled secure matter.
+1. The materializer shared the assignee without asking the matter's list (it asked only when `flags.IsSecure`).
+2. The enforcer then removed that share.
+3. The materializer recorded the removal as an operator's (`Declined` / `RemovedOutOfBand`), so the share was never restored when the wall lifted.
+
+`AssignedAccessMaterializer` now asks `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(..., AsFlagged, ...)` WHATEVER the record's flag, at three places. The guard answers NotSecure for a record with no secure parent.
+- **The share-gone decision:** Walled → `RemovedByNoAccess`, which is restored once the wall lifts; Unverifiable → the existing fault path.
+- **`FreshShareAsync`:** Walled → `NoAccess` / `RemovedByNoAccess`; Unverifiable → the fault path. The A3 "suggest, don't share" branch is kept for secure records only.
+- **Grant → share conversion:** a walled user is NOT converted, and the grant is left as it is; Unverifiable reports a fault and converts nothing this pass.
+
+**Tests (`AssignedAccessParentWallTests`, 5):**
+- a walled assignee is never shared, and is shared once the wall lifts;
+- a share the enforcer removed is `RemovedByNoAccess` and is Restored;
+- with no secure parent, a removed share is still Declined (control);
+- an unreadable parent shares nothing and fails the run;
+- a grant is not converted for a walled user, and converts once the wall lifts.
+
+**Seeding proof:** with the pre-F2 materializer, 4 of the 5 fail; the control passes.
+
+**Cost:** the guard's parent walk now runs on each non-secure assignee share decision. That adds a few point reads per root per sync, never per candidate.
