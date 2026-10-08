@@ -115,8 +115,11 @@
  *   its menu is the unchanged Standard / Limited / Restricted list, so the
  *   secure display never rewrites the stored value.
  * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
- *   on a form whose table has no such column (the retired
- *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ *   on a form whose table has no such column; unbound → no pill. (Corrected for
+ *   task 173, owner round 81: `sprk_communication.sprk_accesspermission` is NOT
+ *   retired - on a child table the column is a display copy of the parent's
+ *   value, written by the BFF and locked on the form while the record has a
+ *   parent; no TrackingFieldTrio is placed on Communication.)
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
@@ -845,7 +848,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * Maps the bound record's raw `sprk_accesspermission` value (a root's own; on a To Do or Event the display copy of
+   * its parent's, task 173) AND its `sprk_issecure` flag (task 043, spec
    * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
    * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
    * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules

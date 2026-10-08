@@ -157,6 +157,7 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld ClearQueryFaults()
     {
         _failingTables.Clear();
+        _failingIdListReads.Clear();
         return this;
     }
 
@@ -170,6 +171,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
+
+    /// <summary>
+    /// Task 173: makes every read of ONE row through an id LIST (<c>id IN (…)</c>, the parent walk's batched read) throw.
+    /// Listings that do not name the row by id still answer. <see cref="ClearQueryFaults"/> clears it.
+    /// </summary>
+    public SecureChildShareWorld FailingIdListReadsOf(string table, Guid id)
+    {
+        _failingIdListReads.Add((table, id));
+        return this;
+    }
+
     /// <summary>
     /// Makes every PAGED query of one table report more rows to come, however many pages have been read (task 149 r2: a
     /// table larger than the synchronizer's page ceiling, without seeding a hundred thousand rows).
@@ -177,6 +190,18 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld EndlessPagesOf(string table)
     {
         _endlessTables.Add(table);
+        return this;
+    }
+
+    /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
+    public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
+
+    private readonly HashSet<Guid> _refusedAccessPermissionWrites = new();
+
+    /// <summary>Task 173: an Access Permission write to THIS row throws (recorded first).</summary>
+    public SecureChildShareWorld RefusingAccessPermissionWritesOf(Guid id)
+    {
+        _refusedAccessPermissionWrites.Add(id);
         return this;
     }
 
@@ -303,6 +328,18 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public void Update(string table, Guid id, Dictionary<string, object> fields)
     {
+        // Task 173: the inherited Access Permission pass writes ONE column, sprk_accesspermission.
+        if (fields.Count == 1 && fields.TryGetValue("sprk_accesspermission", out var level) && level is OptionSetValue option)
+        {
+            AccessPermissionWrites.Add((table, id, option.Value));
+            if (_refusedAccessPermissionWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the Access Permission write.");
+            if (!_rows.TryGetValue((table, id), out var target))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            target["sprk_accesspermission"] = option;
+            return;
+        }
+
         if (!fields.TryGetValue("ownerid", out var value) || value is not EntityReference owner || fields.Count != 1)
             throw new NotSupportedException($"The test world models owner updates only (got {string.Join(",", fields.Keys)}).");
 
@@ -419,6 +456,11 @@ internal sealed class SecureChildShareWorld
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
             throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
 
+        if (query.Criteria.Conditions.Any(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In
+                && c.Values.Any(v => v is Guid id && _failingIdListReads.Contains((query.EntityName, id)))))
+            throw new InvalidOperationException($"Test: a {query.EntityName} row in this id list cannot be read.");
+
         var matched = _rows.Values
             .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria))
             .OrderBy(r => r.Id)
@@ -509,6 +551,8 @@ internal sealed class SecureChildShareWorld
             // Task 147: the reconciliation job's recent-changes pass filters on modifiedon. A row with no modifiedon
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
+            // Task 173: the Access Permission sweep pages by id (rows are answered in id order, as Dataverse orders them).
+            ConditionOperator.GreaterThan => actual is Guid a && condition.Values.Single() is Guid after && a.CompareTo(after) > 0,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };
     }

@@ -714,6 +714,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             payload[$"{stampNavigation}@odata.bind"] = $"/{stamp.EntitySetName}({stamp.RecordId:D})";
         }
+
+        // (v) unified-access-control-r2 task 173 (owner round 81): the Access Permission inherited from the parents.
+        if (request.AccessPermission is { } accessPermission)
+            payload["sprk_accesspermission"] = accessPermission;
     }
 
     private static string? Truncate(string? value, int maxLength) =>

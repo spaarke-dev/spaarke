@@ -216,6 +216,64 @@ public class OfficeTodoRegardingContractTests
     }
 
     // ---------------------------------------------------------------------------------------------
+    // unified-access-control-r2 task 173 (owner round 81, #1423): the owner's UAT. A To Do created through the Word add-in
+    // on a document under a Restricted matter showed Standard; it now carries the matter's value in the create itself.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_OnADocumentUnderARestrictedMatter_IsCreatedRestricted()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+        var matterId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        factory.CarrierRows[("sprk_document", documentId)] = new Entity("sprk_document", documentId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", matterId),
+        };
+        factory.WalkRows[("sprk_document", documentId)] = factory.CarrierRows[("sprk_document", documentId)];
+        factory.WalkRows[("sprk_matter", matterId)] = new Entity("sprk_matter", matterId)
+        {
+            ["sprk_accesspermission"] = new OptionSetValue(100000002),
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Review the Restricted document",
+            DocumentId = documentId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entity = factory.CreatedEntities.Should().ContainSingle().Subject;
+        entity.GetAttributeValue<OptionSetValue>("sprk_accesspermission")!.Value.Should().Be(100000002,
+            "the To Do shows its matter's Restricted from the moment it exists (owner round 81)");
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WhenTheMatterCannotBeRead_IsStillCreated_WithoutAnAccessPermission()
+    {
+        // The value is display only: a parent the walk cannot read never fails the create, and no Standard is guessed.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+        var matterId = Guid.NewGuid();
+        factory.WalkRows[("sprk_project", Guid.NewGuid())] = new Entity("sprk_project"); // turns the column on; the matter read answers nothing
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Matter gone",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle().Which.Contains("sprk_accesspermission").Should().BeFalse();
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // unified-access-control-r2 task 156, verifier round 1 item 8: a CARRIER-only To Do (no record regarding) is filed
     // under its carrier (CoreAncestorResolver.ClassifyStampSource rule 5) — so it is BORN with the carrier's root, not
     // born stale (its first upload answered container_ancestor_stale until a re-stamp landed).
@@ -342,6 +400,13 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
     public HashSet<(string Entity, Guid Id)> CarrierFaults { get; } = new();
 
     /// <summary>
+    /// Task 173: the rows the inherited Access Permission walk reads by id (roots and intermediates, with their
+    /// <c>sprk_accesspermission</c>). Seeding any row turns the column on for every probed table; with none seeded the
+    /// environment has no such column and nothing is written (the pre-173 behaviour the other tests rely on).
+    /// </summary>
+    public Dictionary<(string Entity, Guid Id), Entity> WalkRows { get; } = new();
+
+    /// <summary>
     /// Task 083: the caller's resolved <c>systemuserid</c> (task 067's existing resolver). Loose by default —
     /// an unconfigured test leaves the caller Unresolved, matching the pre-083 behavior these tests already relied
     /// on (CreateTodo's owner-team resolution does not require it when a target is named).
@@ -391,6 +456,9 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
         "sprk_project",
     };
 
+    private static readonly IReadOnlySet<string> WithAccessPermission =
+        new HashSet<string>(ProbedColumns.Append("sprk_accesspermission"), StringComparer.OrdinalIgnoreCase);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -424,6 +492,22 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                             ? throw new TimeoutException($"Test: {entity} {id} timed out")
                             : CarrierRows.TryGetValue((entity, id), out var row) ? row : new Entity(entity, id));
             }
+            // Task 173: the parent walk's batched read (id IN (...)), answered from WalkRows for the tables seeded there.
+            dataverseMock
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => WalkRows.Keys.Any(k => k.Entity == q.EntityName)),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                {
+                    var ids = q.Criteria.Conditions
+                        .Where(c => c.AttributeName == q.EntityName + "id")
+                        .SelectMany(c => c.Values.OfType<Guid>())
+                        .ToHashSet();
+                    return new EntityCollection(WalkRows
+                        .Where(r => r.Key.Entity == q.EntityName && ids.Contains(r.Key.Id))
+                        .Select(r => r.Value)
+                        .ToList());
+                });
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
 
@@ -432,7 +516,7 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
             services.RemoveAll<CoreAncestorResolver>();
             services.AddSingleton(sp => new CoreAncestorResolver(
                 sp.GetRequiredService<IGenericEntityService>(),
-                (string _, CancellationToken _) => Task.FromResult(ProbedColumns),
+                (string _, CancellationToken _) => Task.FromResult(WalkRows.Count == 0 ? ProbedColumns : WithAccessPermission),
                 sp.GetRequiredService<ILogger<CoreAncestorResolver>>()));
 
             // Task 083: the caller's systemuserid (task 067) and task 141's user↔contact link, both doubled
