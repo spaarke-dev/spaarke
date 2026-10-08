@@ -400,8 +400,12 @@ export async function sendCommunication(
       throw SendCommunicationError.fromProblem(err.status, problemOf(err), err.message);
     }
     if (isAuthFailure(err)) {
-      const message = err instanceof Error && err.message ? err.message : 'HTTP 401';
-      throw new SendCommunicationError(401, 'HTTP_401', message);
+      // Hosts render `.detail` verbatim, so this is the user's sentence, not the auth library's.
+      throw new SendCommunicationError(
+        401,
+        'HTTP_401',
+        'Your sign-in has expired. Refresh the page and sign in again, then resend.'
+      );
     }
     throw err;
   }
