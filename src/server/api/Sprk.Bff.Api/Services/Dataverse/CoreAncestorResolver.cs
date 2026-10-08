@@ -740,7 +740,22 @@ public sealed class CoreAncestorResolver
         }
 
         var unstampable = ApplyStamps(child, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
-        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+
+        // Task 173 (owner round 81): the inherited Access Permission rides the same payload, from every filing parent the
+        // payload now names (the target, its stamps, and any carrier the writer set) — never Standard by default.
+        var inherited = await InheritedAccessPermissionAsync(
+            child.LogicalName,
+            ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
+            targetEntityLogicalName, targetRecordId, ct, self: child.Id).ConfigureAwait(false);
+        if (inherited is { } level)
+        {
+            child[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        }
+
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
     }
 
     /// <summary>
@@ -766,7 +781,21 @@ public sealed class CoreAncestorResolver
 
         var unstampable = ApplyStamps(
             fields, hostEntityLogicalName, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
-        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+
+        // Task 173 (owner round 81): see the Entity overload.
+        var inherited = await InheritedAccessPermissionAsync(
+            hostEntityLogicalName,
+            ParentLineage.ParentsIn(hostEntityLogicalName, c => fields.TryGetValue(c, out var v) ? v as EntityReference : null),
+            targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        if (inherited is { } level)
+        {
+            fields[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        }
+
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
     }
 
     /// <summary>
@@ -812,7 +841,204 @@ public sealed class CoreAncestorResolver
             }
         }
 
-        return new CoreAncestorStampOutcome(result.Status, stampable, unstampable, null);
+        // Task 173 (owner round 81): the caller emits it in its own payload shape, as it emits the stamps.
+        var inherited = await InheritedAccessPermissionAsync(
+            hostEntityLogicalName,
+            stampable.Select(s => (s.EntityType, s.RecordId)).ToList(),
+            targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+
+        return new CoreAncestorStampOutcome(result.Status, stampable, unstampable, null)
+        {
+            InheritedAccessPermission = inherited,
+        };
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): the Access Permission a row of <paramref name="hostEntityLogicalName"/> filed under
+    /// <paramref name="parents"/> takes from them (<see cref="InheritedAccessPermission"/>), or <see langword="null"/> when
+    /// it takes none — the host is not one of the four tables or lacks the column, the row names no parent (its own value
+    /// stands), or the parents could not be read (logged as a warning; nothing is written, and the reconcile job corrects
+    /// it within its cycle). Never throws (cancellation aside): the value is display-only, so it never fails a write.
+    /// </summary>
+    /// <remarks>
+    /// For a writer that UPDATES an existing row with a field dictionary it did not hand to
+    /// <see cref="StampAsync(IDictionary{string, object}, string, string, Guid, CancellationToken)"/> (the inbound association
+    /// engine, which adds regarding lookups and never clears one). The row's parents are what it holds AFTER the update: each
+    /// filing lookup from <paramref name="fields"/> when the update writes it, otherwise as stored on
+    /// <paramref name="existingRowId"/> — so an added parent never hides one the row already has.
+    /// </remarks>
+    public async Task<int?> ResolveInheritedAccessPermissionAsync(
+        string hostEntityLogicalName, IReadOnlyDictionary<string, object> fields, Guid existingRowId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        Entity? stored = null;
+        if (existingRowId != Guid.Empty)
+        {
+            try
+            {
+                // No read when the value could not be written anyway (the environment lacks the column).
+                if (!(await _columnProbe(hostEntityLogicalName, ct).ConfigureAwait(false)).Contains(InheritedAccessPermission.Column))
+                    return null;
+
+                var walk = new ParentLineageWalk(_entityService, _columnProbe, []);
+                var columns = await walk.FilingLookupsOfAsync(hostEntityLogicalName, ct).ConfigureAwait(false);
+                stored = columns.Count == 0
+                    ? new Entity(hostEntityLogicalName, existingRowId)
+                    : await _entityService.RetrieveAsync(hostEntityLogicalName, existingRowId, columns.ToArray(), ct)
+                        .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[INHERITED-ACCESS-PERMISSION] {Host} {Id}'s stored filing could not be read; its inherited Access " +
+                    "Permission is not written here, and the secure-child reconciliation job corrects it within its cycle.",
+                    hostEntityLogicalName, existingRowId);
+                return null;
+            }
+        }
+
+        var parents = ParentLineage.ParentsIn(hostEntityLogicalName, column =>
+            fields.TryGetValue(column, out var value) ? value as EntityReference : stored?.GetAttributeValue<EntityReference>(column));
+        return await InheritedAccessPermissionAsync(hostEntityLogicalName, parents, null, Guid.Empty, ct, self: existingRowId)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): set the inherited Access Permission on a payload from EVERY filing parent it names now —
+    /// for a writer that adds a parent after its <c>StampAsync</c> call (the Office To Do's carrier, set after the record
+    /// regarding was stamped). Leaves the payload as it is when the row is parentless or the parents cannot be decided.
+    /// Never throws (cancellation aside).
+    /// </summary>
+    public async Task<int?> ApplyInheritedAccessPermissionAsync(Entity child, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        var inherited = await InheritedAccessPermissionAsync(
+            child.LogicalName,
+            ParentLineage.ParentsIn(child.LogicalName, c => child.GetAttributeValue<EntityReference>(c)),
+            null, Guid.Empty, ct, self: child.Id).ConfigureAwait(false);
+        if (inherited is { } level)
+            child[InheritedAccessPermission.Column] = new OptionSetValue(level);
+        return inherited;
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): after a BFF write that created a row or changed what it is filed under, through a writer
+    /// whose payload did not pass through <c>StampAsync</c> (the client's generic create and re-file,
+    /// <c>/api/v1/child-records/{table}</c>), set the row's <c>sprk_accesspermission</c> to the value its parents give it,
+    /// when it differs. Reads the row as stored, so every filing parent counts. A parentless row is never written (its own
+    /// value stands). Never throws (cancellation aside): a failure is logged and the reconcile job corrects it within its
+    /// cycle.
+    /// </summary>
+    /// <returns>The value the row now holds from its parents, or <see langword="null"/> when it takes none or it could not
+    /// be decided.</returns>
+    public async Task<int?> RefreshInheritedAccessPermissionAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct = default)
+    {
+        var table = entityLogicalName?.Trim().ToLowerInvariant();
+        if (!InheritedAccessPermission.AppliesTo(table) || recordId == Guid.Empty)
+            return null;
+
+        try
+        {
+            var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
+            var columns = await walk.ColumnsForAsync(table!, ct).ConfigureAwait(false);
+            if (!columns.Contains(InheritedAccessPermission.Column))
+                return null; // the environment lacks the column (the schema script adds it)
+
+            var row = await _entityService.RetrieveAsync(table!, recordId, columns.ToArray(), ct).ConfigureAwait(false);
+            var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
+            if (parents.Count == 0)
+                return null;
+
+            var answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table!, recordId)).ConfigureAwait(false);
+            if (answer.Status != ParentTopsStatus.Found || answer.Value is not { } level)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
+                    "left as it is, and the secure-child reconciliation job looks at it again.", table, recordId, answer.Reason);
+                return null;
+            }
+
+            if (row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value != level)
+            {
+                await _entityService.UpdateAsync(table!, recordId,
+                    new Dictionary<string, object> { [InheritedAccessPermission.Column] = new OptionSetValue(level) }, ct)
+                    .ConfigureAwait(false);
+            }
+
+            return level;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission could not be set; the secure-child " +
+                "reconciliation job corrects it within its cycle.", table, recordId);
+            return null;
+        }
+    }
+
+    private async Task<int?> InheritedAccessPermissionAsync(
+        string hostEntityLogicalName,
+        IReadOnlyList<(string Table, Guid Id)> payloadParents,
+        string? targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct,
+        Guid self = default)
+    {
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        // The writer's target is a parent when the host can be filed under its table (a contact, an organization or a
+        // service request is not: the lineage says so).
+        var parents = payloadParents.ToList();
+        if (targetEntityLogicalName is not null && targetRecordId != Guid.Empty
+            && ParentLineage.CanBeFiledUnder(hostEntityLogicalName, targetEntityLogicalName))
+        {
+            parents.Add((targetEntityLogicalName, targetRecordId));
+        }
+
+        if (parents.Count == 0)
+            return null; // parentless: the row's own value is the user's (round 81)
+
+        try
+        {
+            var hostColumns = await _columnProbe(hostEntityLogicalName, ct).ConfigureAwait(false);
+            if (!hostColumns.Contains(InheritedAccessPermission.Column))
+            {
+                // Writing a column the environment lacks would fail the create; the schema script adds it.
+                _logger.LogWarning(
+                    "{Host} has no {Column} column in this environment; its inherited Access Permission is not written.",
+                    hostEntityLogicalName, InheritedAccessPermission.Column);
+                return null;
+            }
+
+            var walk = new ParentLineageWalk(_entityService, _columnProbe, [InheritedAccessPermission.Column]);
+            var answer = await InheritedAccessPermission.ResolveAsync(
+                walk, parents, ct, self == Guid.Empty ? null : (hostEntityLogicalName, self)).ConfigureAwait(false);
+            if (answer.Status == ParentTopsStatus.Found)
+                return answer.Value;
+
+            if (answer.Status == ParentTopsStatus.Undetermined)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] A {Host} filed under {Parents} is written without its inherited Access " +
+                    "Permission: {Reason}. The secure-child reconciliation job corrects it within its cycle.",
+                    hostEntityLogicalName, string.Join(", ", parents.Select(p => $"{p.Table} {p.Id:D}")), answer.Reason);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[INHERITED-ACCESS-PERMISSION] A {Host}'s inherited Access Permission could not be resolved; it is written " +
+                "without it, and the secure-child reconciliation job corrects it within its cycle.", hostEntityLogicalName);
+            return null;
+        }
     }
 
     private async Task<(CoreAncestorResult? Result, IReadOnlySet<string>? HostColumns, CoreAncestorStampOutcome? Failure)>
@@ -950,6 +1176,14 @@ public sealed record CoreAncestorStampOutcome(
 {
     /// <summary>True when the caller may proceed with the write.</summary>
     public bool Succeeded => Status != CoreAncestorStatus.Error;
+
+    /// <summary>
+    /// Task 173 (owner round 81): the <c>sprk_accesspermission</c> the host row takes from the records it is filed under —
+    /// already applied by <c>StampAsync</c>; a <c>DeriveForHostAsync</c> caller emits it in its own payload. <see langword="null"/>
+    /// when the row takes none (not a To Do / Event / Communication / Document, parentless, or undetermined): write
+    /// nothing then.
+    /// </summary>
+    public int? InheritedAccessPermission { get; init; }
 
     internal static CoreAncestorStampOutcome Failed(string error) =>
         new(CoreAncestorStatus.Error, [], [], error);

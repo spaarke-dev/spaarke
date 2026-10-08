@@ -2242,6 +2242,15 @@ public class OfficeService : IOfficeService
             }
         }
 
+        // Task 173 (owner round 81): the record regarding was stamped (and its Access Permission set) BEFORE the carriers were
+        // added, so with a record AND a carrier the value is computed again over every parent the To Do now names — the
+        // carrier's filing may be the more restrictive. A carrier-only To Do was already decided by its own stamp above.
+        if (entity.Contains("sprk_regardingrecordid")
+            && (entity.Contains("sprk_regardingdocument") || entity.Contains("sprk_regardingcommunication")))
+        {
+            await _coreAncestors.ApplyInheritedAccessPermissionAsync(entity, cancellationToken).ConfigureAwait(false);
+        }
+
         // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
         // never an individual. RECORD-FIRST — the To Do belongs with what it is filed against: the record regarding
         // first, then the document or email it was created from, and only when there is neither, the acting user.

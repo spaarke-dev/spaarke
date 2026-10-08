@@ -1184,21 +1184,36 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
-### `Retire-CommunicationAccessPermission.ps1`
-**Purpose:** Retires the dead `sprk_communication.sprk_accesspermission` column (owner decision Q6: a communication inherits its parent's Access Permission). Removes form, view and Copilot form-fill (`aiskillconfig`) references first, re-checks `RetrieveDependenciesForDelete`, then deletes the column and publishes. Refuses (exit 2) on any managed reference, any workflow/business rule, or a view that FILTERS on the column.
-**Usage:** 🔴 One-time (per environment); idempotent — a second run reports "nothing to do".
-**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 138)
+### `Set-DocumentAccessPermissionSchema.ps1`
+**Purpose:** Brings `sprk_document.sprk_accesspermission` into source (owner round 81): the column exists, is a Choice bound to the SAME global choice as the roots' Access Permission, and ships in `SpaarkeCore` (membership decided through `scripts/common/DataverseSolutionMembership.ps1`). `-Apply` creates the column when absent (or adds it to the solution); it never alters an existing one (`COLUMN_MISMATCH` refuses).
+**Usage:** 🟡 Per environment, before `Set-InheritedAccessPermissionFormLock.ps1`; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-02 — **dry run only** against `spaarkedev1` (plan: delete 1 unmanaged FormFillFieldOptOut `aiskillconfig`, then the column; no form/view/workflow references). **No `-Apply` has been run** — that is the operator's manual gate (task 138 criterion 16e).
+**Last Used:** 2026-10-08 — `-SelfTest` PASS; `-Verify` PASS against `spaarkedev1` (the owner added the column live; it ships in SpaarkeCore with its table).
 
 **Command:**
 ```powershell
-# Dry run (default) — zero writes; prints the plan.
-.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+.\Set-DocumentAccessPermissionSchema.ps1 -Verify      # read-only (exit 0 / 1)
+.\Set-DocumentAccessPermissionSchema.ps1              # dry run
+.\Set-DocumentAccessPermissionSchema.ps1 -Apply       # operator only
+```
 
-# Perform the retirement (operator only).
-.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+### `Set-InheritedAccessPermissionFormLock.ps1`
+**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Additive string insertions proven by a parse check; snapshot before every write.
+**Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-08 — `-SelfTest` PASS; dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
+
+**Command:**
+```powershell
+.\Set-InheritedAccessPermissionFormLock.ps1 -SelfTest   # offline fixtures
+.\Set-InheritedAccessPermissionFormLock.ps1             # dry run
+.\Set-InheritedAccessPermissionFormLock.ps1 -Apply      # operator only: snapshot, PATCH, publish, read back
+.\Set-InheritedAccessPermissionFormLock.ps1 -Verify     # read-only (exit 0 / 1)
+.\Set-InheritedAccessPermissionFormLock.ps1 -RestoreFrom .\accesspermission-lock-snapshot-<stamp>.json
 ```
 
 ### `Set-SecureRecordOwnerRolePrivileges.ps1`
