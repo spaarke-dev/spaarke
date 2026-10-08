@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-018: restore notification playbooks (FetchXML id lists, Condition operands, item templates, Due Soon nodes, scheduler failure handling) — own PR + dev node updates</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Every notification playbook in dev has failed silently since at least 2026-07-11; BFF executor + scheduler code, live Dataverse node data, membership scope (access-adjacent).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR. Rebases the repo playbook JSONs on PR #1413 (task 068) if that merges first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,dataverse,jobs,bug,separate-pr,uac</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Make the seven notification playbooks deliver again, correctly scoped, and make it impossible for this class of failure to be silent again. Implement owner decisions D-77, D-78, D-79 and D-80 exactly as the investigation recommends.</prompt>
+  <role>SPAARKE senior backend engineer. The investigation is the specification; verify each of its claims against the code before you change it.</role>
+  <goal>On spaarkedev1, every notification playbook runs successfully for every user, with no failed runs in telemetry. Each one notifies exactly the records its repo definition designs. That includes matter-membership scope where designed, with the roles confirmed by uac-r2. A whole-playbook failure is now an Error that alerts and retries.</goal>
+
+  <context>
+    <background>The full evidence, with file:line references, node ids, queries and telemetry, is in projects/spaarke-ontology-platform-r1/notes/iss-018-fetchxml-list-rendering-investigation.md. READ IT FIRST.
+Summary:
+(1) {{joinIds x.ids}} renders value="a,b,c" in a FetchXML `in` condition. Dataverse rejects it (0x80040203) on both the Web API and SDK paths, and also when the list is empty. This breaks New Work Assignments and Matter Activity.
+(2) R7 Wave 11 (commit 967fbfdde) made a Condition node's `left` render as a JSON number, but ConditionExpression.Left is typed string, so every Condition node fails validation. This breaks Tasks Overdue, New Events, New Documents and New Emails.
+(3) A pre-render pass blanks Create Notification's {{item.*}} templates before the per-item loop (INFERRED, never reached).
+(4) Tasks Due Soon's node configs were overwritten with empty canvas stubs on 2026-06-30.
+(5) The scheduler logs a Warning, reports success and advances sprk_lastrundate when every user fails.
+Owner decisions (2026-10-08): D-77 (fix design), D-78 (scheduler), D-79 (restore membership scope everywhere the repo designs it, extending D-76) and D-80 (auditing on sprk_playbooknode in dev).</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-77: GUID-only Handlebars helper that emits one &lt;value&gt; child per id. An EMPTY list must select nothing (e.g. a single Guid.Empty value), never error. One shape check (rejects comma-valued in / not-in / between and other invalid list shapes) used by: the executor (fails loudly, naming the node), a repo test that renders EVERY repo playbook and validates it, and a deploy lint in the playbook deploy script. ConditionExpression.Left accepts numbers (ResolveOperand already handles them). Stop the early render of item.* templates so the per-item loop renders them. Rebuild the Due Soon nodes from the repo definition. Update all seven repo notification-*.json files. Delete or fix the stale Dataverse simulator and the tests that assert the comma form.</constraint>
+    <constraint source="owner">D-78: when every user's run of a playbook fails, the scheduler logs an Error, marks the run Failed, raises an alert (use the existing alerting/telemetry mechanism; do not invent a new channel without saying so) and does NOT advance sprk_lastrundate, so the next tick retries. Partial failure (some users) is logged per user and does not block the others. Test both.</constraint>
+    <constraint source="owner">D-79 / D-76: restore the matter-membership scope on every live node the repo designs that way (documents, emails, events, overdue tasks), but ONLY after the BFF fix is deployed to dev. Before you change roles, post the membership roles used (live: owner, assignedAttorney, assignedParalegal vs the repo's "people" targeting) on issue #1355 for unified-access-control-r2 to confirm, and follow their answer. Record before/after FetchXML for every node and read each back.</constraint>
+    <constraint source="owner">D-80: turn on Dataverse entity auditing for sprk_playbooknode in spaarkedev1 (org-level auditing must already be on; check, do not change org settings without reporting). Record the change.</constraint>
+    <constraint source="project">Code goes in a NEW worktree off origin/master (git worktree add C:\wts-120 -b fix/notification-playbooks-iss018 origin/master) and its own PR to master; do not merge. PR #1413 (task 068) also edits notification-tasks-overdue.json and notification-tasks-due-soon.json: if it has merged when you start, base on it; if not, keep your JSON edits minimal and expect to rebase. BFF hygiene per root CLAUDE.md section 10 (publish size vs fresh master from short paths, file counts, CVE); component justification (section 11) for any new helper or check. Never use --no-verify or bare git stash. You cannot write .claude/ (ADR-034 line ~94 still prescribes joinIds; report the exact amendment text and the main session applies it).</constraint>
+    <constraint source="project">Dev data changes (node configs, auditing) are approved by D-77/D-79/D-80 for spaarkedev1 ONLY. No solution export/import; no tenant-wide publish (no PublishAllXml, no pac solution import --publish-changes). Test rows are prefixed zz-120- and deleted afterwards. The dev BFF deploy needed before the live proof is a separate owner approval: when the PR is green and reviewed, STOP and report so the main session asks the owner.</constraint>
+    <constraint source="project">No parking (owner rule, project CLAUDE.md section 3): every further defect you find is fixed in this task or reported to the main session for a task in this project; do not file "next-round" issues as a destination.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the investigation report, ADR-034, the notification spine architecture doc (docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md) and the executor/scheduler code it cites.</step>
+    <step order="1">Post the membership-roles question on #1355 (D-79) so uac-r2 can answer while you build.</step>
+    <step order="2">Implement D-77 and D-78 with tests (unit; render-every-repo-playbook-and-validate; opt-in live test gated like the existing live tests). Mutation-check the key ones.</step>
+    <step order="3">Update the seven repo playbook JSONs (helper, membership scope as designed, roles per uac-r2's answer) and the deploy lint.</step>
+    <step order="4">Full BFF suite once, ArchTests built explicitly, publish size. Open the PR; CI fully green. STOP and report for review + the owner's dev-deploy approval.</step>
+    <step order="5">After the dev deploy (separate approval): turn on auditing (D-80); update every live node to the repo definition (Due Soon rebuilt); prove each playbook live with zz-120- rows for one member and one non-member recipient; read telemetry for successful runs; delete test rows.</step>
+    <step order="6">Record per-environment steps (other environments need the same node updates after their BFF deploy).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A rendered `in` condition with N ids yields N &lt;value&gt; children; with 0 ids it selects nothing and does not error; a comma-valued in/not-in/between is rejected by the executor, the repo test and the deploy lint (each proven to fail on the old form).</criterion>
+    <criterion testable="true">A Condition node whose left operand renders as a number validates and evaluates; item.* templates render per item (title and regardingId non-empty in a test).</criterion>
+    <criterion testable="true">When every user fails, the scheduler logs Error, marks Failed, alerts, and sprk_lastrundate is unchanged; a partial failure does not block other users (tests).</criterion>
+    <criterion testable="true">After the dev deploy, each of the seven playbooks completes successfully for every user in a scheduled run (telemetry query recorded), a member-matter record is notified to a member, a non-member's is not; zz-120- rows deleted.</criterion>
+    <criterion testable="true">Every live node equals its repo definition apart from description text (programmatic diff recorded); auditing is on for sprk_playbooknode.</criterion>
+    <criterion testable="true">Negative: no comma-valued `in` remains in any repo playbook or live node; no other playbook or node changed beyond the seven; no tenant-wide publish.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the main session on owner decisions D-77..D-80 after the ISS-018 investigation (#1452). Owning domain: notification spine / daily-update-service; this project owns the fix (no parking).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

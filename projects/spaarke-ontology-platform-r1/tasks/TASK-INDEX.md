@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **97 tasks** across 14 phases (49 ✅ · 1 🔄 · 46 🔲 · 1 cancelled; updated 2026-10-08)
+> (spec §9) · **98 tasks** across 14 phases (49 ✅ · 2 🔄 · 46 🔲 · 1 cancelled; updated 2026-10-08)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -281,6 +281,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 098 | [`sprk_event` date columns: UserLocal → Date Only, own PR](098-event-date-columns-date-only-own-pr.poml) | FULL | **opus**/high | 097 | I2 | Owner 2026-10-05: switch `CanChangeDateTimeBehavior` on, convert six columns to Date Only (one-way), UTC conversion, hand-correct 5 values; record for `SPRKDOCINTELLIGENCE`; code PR after #1302  — **Dataverse part done in dev 2026-10-06**: six columns Date Only, conversion job Succeeded, 120/120 values on the intended day (5 hand-corrected); procedure in `docs/data-model/sprk_event-date-columns.md`. Dev side-effect: ribbon/EventsPage complete now 400 and several readers show the previous day — being fixed in the same PR |
 | ✅ [done] 106 | [`sprk_todo` date columns → Date Only, own PR](106-todo-date-columns-date-only-own-pr.poml) | FULL | **opus**/high | 098 | I2 | **D-41** (found by 024): To Do due dates are UTC timestamps of local midnight; convert like 098 (inventory first, evidence, fix readers/writers, per-env procedure). **031 depends on it** (per-item today, D-25) |
 | 🔲 [open] 068 | [D-63: remaining `sprk_finalduedate` readers → `sprk_duedate` (playbook, VisualHost card, CalendarVisual), own PR](068-finalduedate-readers-to-duedate.poml) | FULL | sonnet/high | 098 | E | **D-63** (owner 2026-10-07): final due date informational everywhere; live playbook node "Query Overdue Tasks" change approved |
+| 🔄 [wip] 120 | [ISS-018: restore the notification playbooks (id lists, Condition operands, item templates, Due Soon, scheduler)](120-notification-playbooks-iss018-fix.poml) | FULL | **opus**/high | — | F | **D-77..D-80**: no notification has been delivered in dev since at least 2026-07-11 (#1452). Own PR; dev deploy needs separate owner approval |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 
