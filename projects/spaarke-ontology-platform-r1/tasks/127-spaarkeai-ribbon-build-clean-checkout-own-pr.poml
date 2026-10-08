@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-014 (#1412): the SpaarkeAi build (ribbon step) fails in a clean checkout, so the Deploy SpaarkeAi workflow fails on every master push — own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Build/CI change on the Console's deploy path (root-cause debugging).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield build root-cause with a reproducible failure.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; only SpaarkeAi build scripts / package.json and the workflow file.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd,build,bug,separate-pr</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make `npm run build` in src/solutions/SpaarkeAi succeed in a clean checkout and in the Deploy SpaarkeAi workflow. Its last step, build:ribbon (scripts/build-ribbon.mjs, esbuild), cannot resolve react / @fluentui/* / @spaarke/sdap-client imported from the shared packages' source.</prompt>
+  <role>SPAARKE build engineer. Fix the cause, not the symptom: do not mark real dependencies external unless the ribbon really loads them from the host.</role>
+  <goal>The workflow's Build job passes on master; a clean worktree builds SpaarkeAi (HTML and ribbon bundles) with only the documented install steps; the ribbon bundle's behaviour is unchanged.</goal>
+
+  <context>
+    <background>#1412: Deploy SpaarkeAi fails at "Build (vite single-file)" on every master push since 2026-10-05 (last success 2026-10-04, run 37207309533; failing runs include 37814325754 at 73d3b970e): `Ribbon build failed ... 540 errors`, each `Could not resolve "react"` / `"@fluentui/react-components"` / ... from src/client/shared/Spaarke.UI.Components/src/components/**. deploy-log.md (D-75) saw the same locally in a clean worktree: build:ribbon fails with `@spaarke/sdap-client` unresolved; the HTML artifact is produced before that step. Likely cause (unverified): the ribbon entry now pulls shared-package SOURCE (a recent import change) and the job installs node_modules only for SpaarkeAi, so bare imports from the shared tree have nowhere to resolve. Find the commit between 37207309533's head and the first failing run that changed the ribbon's import graph.
+Consequence of fixing it: the workflow deploys master's Console to spaarkedev1 automatically on every qualifying master push (its designed behaviour, paused since 2026-10-05). Task 114's deploy and any dev verification must account for that.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/scripts/build-ribbon.mjs</file>
+      <file role="modify">src/solutions/SpaarkeAi/package.json (only if a dependency or script is the cause)</file>
+      <file role="modify">.github/workflows/deploy-spaarke-ai.yml (only if the install step is the cause)</file>
+      <file role="read">src/solutions/SpaarkeAi/vite.config.ts (how the HTML build resolves the same imports)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Root cause first: bisect the ribbon's import graph between the last green and first red runs and name the commit. Fix the narrowest layer (the ribbon entry's imports, esbuild resolution matching vite's, or the workflow install). Do not disable, skip or soften the ribbon step, and do not mark packages external unless the ribbon command script genuinely gets them from the host page (prove it).</constraint>
+    <constraint source="owner">Owner approval required before MERGE (the owner merges anyway): the first green master run deploys the Console to spaarkedev1 automatically; state that in the PR and in the report. Do not dispatch the workflow manually.</constraint>
+    <constraint source="project">The workflow is a ci-workflows hot path (projects/INDEX.md): run /conflict-check and note it in the PR. NEW worktree off origin/master (git worktree add C:\wts-127 -b fix/spaarkeai-ribbon-build-127 origin/master); own PR; do not merge. Install with npm install --legacy-peer-deps --no-audit --no-fund. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor.</step>
+    <step order="1">Reproduce in a clean worktree exactly as the workflow does; capture the first errors.</step>
+    <step order="2">Bisect to the causing commit; explain why vite resolves the imports and esbuild does not.</step>
+    <step order="3">Fix; rebuild clean; diff the ribbon bundle's exported globals against the last good build (behaviour unchanged).</step>
+    <step order="4">Run the Build job's exact commands (checkout, install, npm run build, bundle smoke checks) in a clean worktree; never dispatch the workflow (any dispatch can reach a deploy job). PR with CI green; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">In a clean worktree, `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` in src/solutions/SpaarkeAi exits 0 and produces dist/spaarkeai.html and the ribbon bundle(s).</criterion>
+    <criterion testable="true">The causing commit and mechanism are named in the PR; the fix addresses that mechanism.</criterion>
+    <criterion testable="true">The ribbon bundle exposes the same Sprk.SpaarkeAi globals as the last good build; bundle size delta recorded.</criterion>
+    <criterion testable="true">The Build job's commands, including its bundle smoke checks, pass in a clean worktree of the PR branch (log in the PR); PR open, CI green; Closes #1412. The first master run after the owner merges is checked and its result recorded.</criterion>
+    <criterion testable="true">Negative: the ribbon step is not skipped, disabled or made non-fatal; no manual workflow dispatch; no deploy to any environment from this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Also fixes the local clean-worktree build:ribbon failure noted in deploy-log.md (D-75).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

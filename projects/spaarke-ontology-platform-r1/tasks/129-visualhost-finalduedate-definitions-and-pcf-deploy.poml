@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="129" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-63 completion: move Dataverse chart/view/grid definitions off sprk_finalduedate, and deploy VisualHost PCF 1.4.39 (task 068) to dev without a tenant-wide publish</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable (inventory + build); data changes and the import need owner approval</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dev data changes to shared view/chart definitions plus a PCF solution import into a shared environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only inventory, mechanical FetchXML edits and a scripted deploy with trip-wires.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Imports a solution into spaarkedev1; never concurrent with another deploy (111, 114, 120, 121, 122).</parallel-reason>
+    <deps>068</deps>
+    <tags>dataverse,deploy,pcf,frontend</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Finish owner decision D-63 ("sprk_finalduedate is informational everywhere") in Dataverse data, which task 068 did not touch, and get 068's VisualHost code (PCF 1.4.39, merged in PR #1413 as 885d0c5f9) live on spaarkedev1.</prompt>
+  <role>SPAARKE engineer. Inventory first; change only what judges or orders by the final due date; never publish tenant-wide.</role>
+  <goal>(1) A complete read-only inventory of every Dataverse definition in spaarkedev1 that filters or orders by sprk_finalduedate; (2) after owner approval, each one judges and orders by sprk_duedate instead, read back; (3) VisualHost 1.4.39 is imported and its due-date card and CalendarVisual verified live by a human; (4) the per-environment steps recorded.</goal>
+
+  <context>
+    <background>Known affected (coordinator, 2026-10-08; PR #1413 body "Not changed"; notes/065-finalduedate-readers.md): the VisualHost "TASKS &amp; EVENTS" calendar, and the Due Date Card List's "All Tasks Open 7 Days" view, which uses sprk_finalduedate next-seven-days / olderthan-x-days. Places to search: sprk_chartdefinition (its FetchXML / config columns), savedquery (system views), userquery (personal views: inventory and report only; never edit another user's view), sprk_gridconfiguration (sprk_configjson / referenced saved queries). Notification playbook nodes (sprk_playbooknode) are OUT of scope here: tasks 068 and 120 own them.
+VisualHost: PR #1413 bumped the manifest to 1.4.39 but Solution/bundle.js is still 1.4.38 (PR body); src/client/pcf/VisualHost/Solution/pack.ps1 builds VisualHostSolution_v1.4.39.zip. Build with scripts/Invoke-PcfBuildProd.ps1 (npm run build:prod; pcf-scripts exits 0 on failure, judge by output).
+No tenant-wide publish: import WITHOUT --publish-changes, then PublishXml for exactly that solution's components. Use projects/spaarke-ontology-platform-r1/notes/scoped-solution-import.md from task 121 if it exists; otherwise apply the same path and record whether the custom control serves 1.4.39 without any publish.</background>
+    <relevant-files>
+      <file role="read">projects/spaarke-ontology-platform-r1/notes/065-finalduedate-readers.md; PR #1413 body (gh pr view 1413)</file>
+      <file role="read">.claude/skills/pcf-deploy/SKILL.md (except its --publish-changes step)</file>
+      <file role="read">scripts/Invoke-PcfBuildProd.ps1; src/client/pcf/VisualHost/Solution/pack.ps1</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/deploy-log.md; notes/129-finalduedate-definitions.md (new: inventory and before/after)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Dev data change: owner approval required before editing any chart definition, saved query or grid configuration. Present the inventory with, per row: id, name, owning solution, current FetchXML fragment, the exact replacement, and who sees it. D-63 decided the direction; the approval covers the concrete row list.</constraint>
+    <constraint source="owner">Deploy: owner approval required before the VisualHost solution import. No PublishAllXml, no `pac solution import --publish-changes`, no `pac solution publish-all`; if only a publish-all would work, STOP and escalate.</constraint>
+    <constraint source="project">Edit rules: replace sprk_finalduedate with sprk_duedate in conditions and orderings only; keep operators (next-seven-days, olderthan-x-days, etc.), the rest of the FetchXML and any displayed column (showing the final date as a column is informational and stays). If a replacement changes meaning beyond the date column (e.g. an OR of both dates), show it to the owner explicitly. Publish only the affected entity/visualizations (PublishXml), never tenant-wide. Record before/after for each row and read each back.</constraint>
+    <constraint source="project">No code change is expected. If the inventory finds a code reader still judging by the final date, report it for a task (no parking). Test data prefixed zz-129-, deleted afterwards, confirmed by query. Never use --no-verify or bare git stash; never commit secrets. You cannot write .claude/ (report pcf-deploy amendment text if 121 has not).</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the relevant files.</step>
+    <step order="1">Inventory (read-only) every sprk_chartdefinition, savedquery, userquery and sprk_gridconfiguration in spaarkedev1 whose FetchXML or JSON filters or orders by sprk_finalduedate; write notes/129-finalduedate-definitions.md.</step>
+    <step order="2">Build VisualHost: Invoke-PcfBuildProd.ps1 then pack.ps1; confirm the packed bundle reports 1.4.39 and contains the 068 change (selectDueDate; CalendarVisual default sprk_duedate).</step>
+    <step order="3">STOP: report the inventory with proposed replacements and the deploy commands to the main session for owner approval.</step>
+    <step order="4">After approval: edit each approved row, PublishXml for exactly those components, read back.</step>
+    <step order="5">After approval: import VisualHostSolution_v1.4.39.zip without --publish-changes; publish only its components; read back the control version.</step>
+    <step order="6">Live check by a human (checklist in deploy-log.md if the session has no browser): with zz-129- events (one due in 3 days with final due already past; one overdue by due date with final due in the future), the due-date card shows sprk_duedate and its overdue state; the TASKS &amp; EVENTS calendar places each on its sprk_duedate; the "All Tasks Open 7 Days" list shows the first and not by its final date. Delete the rows.</step>
+    <step order="7">Record per-environment steps (each row edit and the import) in deploy-log.md and notes/129-finalduedate-definitions.md.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="VisualHost due-date card and calendar by sprk_duedate">
+      <steps>
+        <step>Open the record/workspace hosting the Due Date Card List and the TASKS &amp; EVENTS calendar with the zz-129- events</step>
+      </steps>
+      <expected>Each event appears and is judged by sprk_duedate; the rescheduled one is not overdue; the overdue one is.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat in dark mode</step>
+      </steps>
+      <expected>Card and calendar are themed.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/129-finalduedate-definitions.md lists every chart definition, saved query, personal view and grid configuration in spaarkedev1 that filters or orders by sprk_finalduedate, with the query used to find them.</criterion>
+    <criterion testable="true">After approval, every approved row filters and orders by sprk_duedate (before/after recorded, read back); personal views are reported to their owners, not edited.</criterion>
+    <criterion testable="true">VisualHost 1.4.39 (bundle containing the 068 change) is imported in spaarkedev1, the control version read back, and the live checklist passed by a human or handed to the owner; zz-129- rows: 0 remain.</criterion>
+    <criterion testable="true">Per-environment steps are recorded for every change.</criterion>
+    <criterion testable="true">Negative: no row edited and no import run without a recorded owner approval; no tenant-wide publish; no playbook node touched; no displayed final-due-date column removed; no environment other than spaarkedev1.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A definition belongs to another project's solution and that project is mid-change on it: STOP and ask before editing.</trigger>
+    <trigger>The import fails or a component can only be published by a publish-all: STOP and escalate.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-08 by the no-parking sweep on the coordinator's request (D-63 data readers; #1413 merged undeployed).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

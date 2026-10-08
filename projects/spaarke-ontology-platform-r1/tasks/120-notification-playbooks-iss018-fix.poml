@@ -58,6 +58,7 @@ Owner decisions (2026-10-08): D-77 (fix design), D-78 (scheduler), D-79 (restore
     <criterion testable="true">When every user fails, the scheduler logs Error, marks Failed, alerts, and sprk_lastrundate is unchanged; a partial failure does not block other users (tests).</criterion>
     <criterion testable="true">After the dev deploy, each of the seven playbooks completes successfully for every user in a scheduled run (telemetry query recorded), a member-matter record is notified to a member, a non-member's is not; zz-120- rows deleted.</criterion>
     <criterion testable="true">Every live node equals its repo definition apart from description text (programmatic diff recorded); auditing is on for sprk_playbooknode.</criterion>
+    <criterion testable="true">ADDED 2026-10-08 (coordinator): each live node's description text states what its query actually does (filters, scope, ordering) and matches its repo copy; in particular the overdue-tasks node no longer claims a matter condition it does not have (or regains that condition per D-76/D-79 and says so). Before/after description text recorded per node.</criterion>
     <criterion testable="true">Negative: no comma-valued `in` remains in any repo playbook or live node; no other playbook or node changed beyond the seven; no tenant-wide publish.</criterion>
   </acceptance-criteria>
 

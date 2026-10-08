@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Client test-harness repairs, own PR: Daily Briefing cleanGuid mock (#1416), SmartTodo jest key (#1417), WorkspaceLayoutWizard stale selectors (#1388), SemanticSearchControl jest (#1392)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** and test config in four packages (CLAUDE.md section 8: code-review + adr-check regardless).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Four independent, diagnosed test-infrastructure fixes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; test files and jest config only. SemanticSearchControl: rebase after PR #1415 (task 111) if it merges first.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing,client,bug,separate-pr</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Four client test suites are red or silently mis-configured on master. Make each one test the real behaviour again, without changing production code unless a test exposes a real production defect (then stop and report it).</prompt>
+  <role>SPAARKE front-end engineer. A test that cannot fail, or cannot run, is worse than none.</role>
+  <goal>On master + this PR: the four packages' jest runs pass, every previously failing test either passes against current behaviour or is rewritten/deleted with an ADR-038 reason, and no test passes only because it exercises a mock of the code under test.</goal>
+
+  <context>
+    <background>
+#1416: src/client/shared/Spaarke.DailyBriefing.Components/test/emailShareDraft.test.ts:34 fails; the package mock test/__mocks__/spaarke-ui-components.tsx:166 defines cleanGuid as identity, the real one strips braces.
+#1417: src/solutions/SmartTodo/jest.config.cjs:16 uses setupFilesAfterEach (not a Jest option; Jest warns "Unknown option"), so jest.setup.cjs never loads; the key is setupFilesAfterEnv.
+#1388: src/solutions/WorkspaceLayoutWizard: 14 tests fail in src/__tests__/rowHeight.test.tsx (looks for data-testid row-height-dropdown-*; ArrangeStep.tsx:901 now renders row-height-dropdown-popover-*) and sectionInstanceAdvanced.test.tsx (advanced-accordion-* no longer rendered), after the 2026-07-03 R2 UAT rework (708f18bb75, 803c77ace1).
+#1392: src/client/pcf/SemanticSearchControl: 9 of 11 suites fail: component suites cannot load `scheduler` (React 16 peer under jest); hook suites (useFilters, useInfiniteScroll, useSemanticSearch, useSemanticSearch.searchIndexName) and resolveSearchIndexNameAsync are stale; resolveSearchIndexNameAsync needs generated/ManifestTypes (build output: run scripts/Invoke-PcfBuildProd.ps1 first). Repro commands are in each issue.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/test/__mocks__/spaarke-ui-components.tsx</file>
+      <file role="modify">src/solutions/SmartTodo/jest.config.cjs</file>
+      <file role="modify">src/solutions/WorkspaceLayoutWizard/src/__tests__/rowHeight.test.tsx, sectionInstanceAdvanced.test.tsx</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl/jest.config.js, jest.setup.ts, package.json (devDependency only), SemanticSearchControl/**/__tests__/*</file>
+      <file role="read">docs/adr/ADR-038-testing-strategy.md, docs/standards/TEST-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: test files, jest config and test-only devDependencies in the four packages. Production source changes are out of scope; if a test reveals a production defect, STOP for that suite and report it (it becomes a task) instead of bending the test.</constraint>
+    <constraint source="project">#1416: the mock must use the real cleanGuid (import the real implementation, or map that export to the real module), not a hand-written copy. #1417: after the rename, run the suite; fix any test that relied on the setup not loading. #1388 and #1392: update each test to the current UI/hook contract, or delete and rewrite it under ADR-038 build-vs-maintain; record the decision per test file in the PR body. Never skip (.skip / xit) a failing test to get green.</constraint>
+    <constraint source="project">NEW worktree off origin/master (git worktree add C:\wts-128 -b fix/client-test-harness-128 origin/master); own PR; do not merge. Install with npm install --legacy-peer-deps --no-audit --no-fund. PCF build via scripts/Invoke-PcfBuildProd.ps1 (judge by output). If PR #1415 (task 111, SemanticSearchControl) is open, do not bump the PCF version and expect to rebase. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read ADR-038 and TEST-ARCHITECTURE.</step>
+    <step order="1">Reproduce each issue on origin/master; record counts.</step>
+    <step order="2">Fix #1416 and #1417; run both packages.</step>
+    <step order="3">Fix #1388 and #1392 per test file (update vs rewrite vs delete, with reason).</step>
+    <step order="4">Run all four packages' suites; code-review and adr-check (testing tag); PR with before/after counts; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Daily Briefing: emailShareDraft.test.ts passes using the real cleanGuid; the package suite has no failures.</criterion>
+    <criterion testable="true">SmartTodo: jest prints no "Unknown option" warning, jest.setup.cjs is loaded (a test relying on it passes), and the suite has no failures.</criterion>
+    <criterion testable="true">WorkspaceLayoutWizard and SemanticSearchControl: jest has no failing or unloadable suite; each changed or deleted test file has its ADR-038 reason in the PR body; the FR-02 row-height and FR-03 Advanced-panel behaviours each keep at least one assertion against the current UI.</criterion>
+    <criterion testable="true">PR open against master with before/after counts per package; Closes #1416, #1417, #1388, #1392.</criterion>
+    <criterion testable="true">Negative: no production source file changed; no test skipped; no PCF version bump. Cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). #1416/#1417 were filed by task 106 (ISS-015, ISS-016); #1388/#1392 by task 056.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-017 (#1447): GridOverviewHandler resolves {{today}} as the calling user's day (D-25), own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code change (.cs) in an AI tool handler.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One call-site change copying an existing helper call (EventCompletionDate.cs).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; only GridOverviewHandler.cs and its tests.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,bug,separate-pr</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>GridOverviewHandler substitutes {{today}}, {{today+N}} and {{today-N}} in a grid's saved FetchXML with the UTC date. Make it the calling user's date per D-25, using the shared DataverseUserTimeZone helper.</prompt>
+  <role>SPAARKE backend engineer.</role>
+  <goal>For a caller whose Dataverse time zone is Eastern, at 20:30 local, {{today}} renders as that local date, not tomorrow; a caller whose zone cannot be read gets the UTC date and one logged reason (helper behaviour); nothing else about the tool changes.</goal>
+
+  <context>
+    <background>#1447 (found by the review of PR #1429, task 106). src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GridOverviewHandler.cs:214 on master: `var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);`. D-25: "today" is the user's local day (assignee then owner then UTC for items; here the caller). The helper is src/server/shared/Spaarke.Dataverse/DataverseUserTimeZone.cs (TodayForUserAsync(entities, systemUserId, now, ct) returns (Today, FallbackReason)). Copy its use in src/server/api/Sprk.Bff.Api/Api/Events/EventCompletionDate.cs:~61. Exposure today: none of the 22 live grid configurations in spaarkedev1 uses {{today}} (per the issue); verify.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GridOverviewHandler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventCompletionDate.cs</file>
+      <file role="modify">the GridOverviewHandler unit tests under tests/unit/Sprk.Bff.Api.Tests</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: only the today computation in GridOverviewHandler (and the dependency it needs to resolve the caller's systemuserid and read usersettings the way EventCompletionDate does). Keep the injected TimeProvider as the clock. Do not change the token grammar, FetchXML normalization, or the result shape. Section 11: no new service; reuse DataverseUserTimeZone.</constraint>
+    <constraint source="project">NEW worktree off origin/master (git worktree add C:\wts-124 -b fix/grid-overview-today-124 origin/master); own PR; do not merge. BFF hygiene: publish size vs fresh master from short paths, file counts, no new CVE; /conflict-check before the PR. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the files above.</step>
+    <step order="1">Resolve the caller's systemuserid on the handler's existing path and compute today with the helper.</step>
+    <step order="2">Tests with a fake clock at 2026-10-08T00:30Z and an Eastern caller ({{today}} = 2026-10-07; {{today+1}} = 2026-10-08), a UTC fallback caller, and the unchanged no-token case.</step>
+    <step order="3">Read-only spaarkedev1: count grid configurations whose saved query uses a today token; record it in the PR.</step>
+    <step order="4">Full BFF suite once (run_in_background), ArchTests built explicitly, publish size; PR with CI green; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">For an Eastern caller at 20:30 local, {{today}}, {{today+N}} and {{today-N}} render from the local date (test fails on the old code).</criterion>
+    <criterion testable="true">A caller whose time zone cannot be read gets the UTC date and the helper's fallback reason is logged once; the tool still succeeds.</criterion>
+    <criterion testable="true">A saved query with no today token is executed unchanged; FetchXML normalization and result shape are unchanged (existing tests pass without assertion edits).</criterion>
+    <criterion testable="true">PR open against master with CI green, publish-size delta and the live grid-configuration count in its body; Closes #1447.</criterion>
+    <criterion testable="true">Negative: no client-supplied date is accepted; no other handler changed. Cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

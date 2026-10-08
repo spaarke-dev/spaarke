@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="125" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-001 (#1048): reconcile the drifted AI action mirrors (suggest-followups, create-task-from-email, propose-field-updates) with spaarkedev1 and settle the Create_Task_From_Email 400s</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable (diagnosis); any Dataverse write needs owner approval</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a live AI action's runtime prompt/schema (Dataverse data read by the BFF at runtime).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Diagnosis with a ready deployer and dry-run; the decision is the owner's.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only three sprk_analysisaction rows and possibly their repo mirrors; no other task edits them.</parallel-reason>
+    <deps>none</deps>
+    <tags>ai,dataverse,bug,jps</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Three sprk_analysisaction rows in spaarkedev1 differ from their repo mirrors, and the BFF builds model requests from the live rows. Establish, per action, which side is the intended contract, find whether the drift causes the Create_Task_From_Email HTTP 400s, and with owner approval make live and repo agree.</prompt>
+  <role>SPAARKE AI engineer. A mirror is right only if its history says so; prove which side is current before deploying either.</role>
+  <goal>For suggest-followups, create-task-from-email and propose-field-updates: a recorded verdict (repo authoritative / live authoritative / merge), and after owner approval, Deploy-ActionMirrors.ps1 -DryRun reports UNCHANGED for all three; the response_format 400s are explained and, if caused by the schema, gone.</goal>
+
+  <context>
+    <background>defer-issues.md ISS-001 and #1048. Exposed by the Deploy-ActionMirrors.ps1 fix in PR #1032: suggest-followups' repo sprk_systemprompt is 1,058 characters longer than live and sprk_description differs by 75; create-task-from-email and propose-field-updates differ in sprk_outputschemajson (indented vs compact, possibly more). App Insights showed `HTTP 400 invalid_request_error ... response_format 'Create_Task_From_Email' ... Missing 'dueDate'` (2026-09-29 18:59-19:09): the live schema may lack dueDate in `required` (strict structured output needs every property listed). Same failure class as the compose-r8 incident in the deployer's header.
+Entry points: `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-ActionMirrors.ps1 -Filter 'NAME' -DryRun`; infra/dataverse/actions/*.action.json; KQL `exceptions | where timestamp > ago(30d) | where outerMessage contains "response_format"` (appId 6a76b012-46d9-412f-b4ab-4905658a9559). The communication / email project (email-communication-intelligence-r2) owns these capabilities.</background>
+    <relevant-files>
+      <file role="read">scripts/Deploy-ActionMirrors.ps1</file>
+      <file role="read">infra/dataverse/actions/suggest-followups.action.json, create-task-from-email.action.json, propose-field-updates.action.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Dev data change: owner approval required before any write to a sprk_analysisaction row (the deployer without -DryRun). Present per action: the semantic diff, git history of the mirror (who changed it, in which PR, and whether that PR's capability was validated), the live row's modifiedon/modifiedby, and the recommendation. If the owning project is active, ask it on its issue/PR first and record the answer.</constraint>
+    <constraint source="project">Diagnosis is read-only: dry-run, App Insights queries, Dataverse reads. If the 400s come from the live create-task-from-email schema, say so with the failing request shape; if from code, name the file:line and fix it in an own PR (worktree off origin/master, do not merge) or report it for a task.</constraint>
+    <constraint source="project">If the repo mirror is the stale side, the fix is a repo PR updating the mirror from live (own worktree off origin/master, own PR, do not merge), not a Dataverse write. Never use --no-verify or bare git stash; never commit secrets. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor.</step>
+    <step order="1">Dry-run the deployer for each of the three actions; produce semantic diffs (normalize JSON formatting before comparing schemas).</step>
+    <step order="2">Git history of each mirror file and the deployer; live row modifiedon/modifiedby; App Insights 400s over the last 30 days with counts by day.</step>
+    <step order="3">Verdict per action; STOP and report to the main session for owner approval.</step>
+    <step order="4">After approval: apply exactly the approved direction (deploy the mirror, or PR the repo); read back; dry-run reports UNCHANGED.</step>
+    <step order="5">After a create-task-from-email schema change: run one real extraction through the BFF route on a zz-125- test email (with owner approval) and confirm no response_format 400; delete test data.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A notes file (notes/125-action-mirror-drift.md) records, per action, the semantic diff, the history evidence and the verdict.</criterion>
+    <criterion testable="true">The response_format 400s are attributed to a cause with evidence (request shape vs live schema), and the count since the fix is zero or the remaining cause is filed as a task.</criterion>
+    <criterion testable="true">After the approved change, Deploy-ActionMirrors.ps1 -DryRun reports UNCHANGED for all three actions.</criterion>
+    <criterion testable="true">Negative: no sprk_analysisaction row was written without a recorded owner approval; no action other than the three was changed; no zz-125- data remains.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Neither side is clearly current (both edited independently): STOP; the merge is the owning project's call.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Closes #1048.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

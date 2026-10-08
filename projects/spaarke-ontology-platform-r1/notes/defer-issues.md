@@ -26,6 +26,7 @@
 | **Filed** | 2026-10-02 |
 | **Source** | Owner decision 2026-10-02 during ontology-platform-r1 design review (item A) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1095 |
+| **Task** | None — deferred by explicit owner decision (2026-10-02; concurrency with 37 SpaarkeAi worktrees); stays deferred under D-81 |
 
 **Description**
 
@@ -59,6 +60,7 @@ regenerates them.
 | **Filed** | 2026-09-30 |
 | **Source** | Exposed by the `Deploy-ActionMirrors.ps1` fix in PR #1032 — with the deployer working, `-Filter '*' -DryRun` reports drift it previously could not see |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1048 |
+| **Task** | [125](../tasks/125-action-mirror-drift-suggest-followups-create-task.poml) (no-parking sweep 2026-10-08) |
 
 **Description**
 
@@ -110,6 +112,7 @@ cause of the observed 400s — if so that is a real defect, not formatting drift
 | **Filed** | 2026-09-30 |
 | **Source** | Noted while verifying the taxonomy mechanism for `design.md` §4 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1049 |
+| **Task** | [123](../tasks/123-triage-category-resolution-and-choices-visibility.poml) (counter added by 072 on this branch; 123 covers the remaining ActionRunner paths + alert) |
 
 **Description**
 
@@ -156,6 +159,7 @@ fatal — NFR-04 is deliberate, and a hard failure would take the whole enrichme
 | **Filed** | 2026-09-30 |
 | **Source** | Found while fixing `TaskActionCore`'s missing `statuscode` (PR #1032) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1050 |
+| **Task** | [060](../tasks/060-iss003-stranded-draft-events.poml) — done (D-74) |
 
 **Description**
 
@@ -198,6 +202,7 @@ fix ships.
 | **Filed** | 2026-10-03 |
 | **Source** | Task 080 (six-hazards cleanup), escalated per root CLAUDE.md §6.5 rather than guessed |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1112 |
+| **Task** | [086](../tasks/086-dead-code-own-pr.poml) — done (PR #1120 deleted it; issue closed) |
 
 **Description**
 
@@ -235,6 +240,7 @@ once chosen.
 | **Filed** | 2026-10-03 |
 | **Source** | Task 080 (six-hazards cleanup) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1113 |
+| **Task** | [086](../tasks/086-dead-code-own-pr.poml) — done (PR #1120 deleted both; issue closed) |
 
 **Description**
 
@@ -270,6 +276,7 @@ unreachable, delete `useKeyboardShortcuts.ts` + `PageChrome/CommandBar.tsx` + it
 | **Filed** | 2026-10-07 |
 | **Source** | Stream C2, task 047 live describe of `sprk_workassignment` (its solution list) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1385 (closed, completed) |
+| **Task** | [069](../tasks/069-d60-solution-hygiene.poml) — done |
 
 **Description**
 
@@ -305,6 +312,7 @@ foreign table it picked up with rcb 0.
 | **Filed** | 2026-10-07 |
 | **Source** | Stream C2, follow-up to PR #1391 (D-68) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1399 |
+| **Task** | [126](../tasks/126-appendto-business-owned-lookup-targets-uac.poml) (uac-r2 picks the rule on #1355) |
 
 **Description**
 
@@ -334,6 +342,7 @@ unit; choosing that rule is uac-r2's access-model call, and getting it wrong ove
 | **Filed** | 2026-10-08 |
 | **Source** | Independent re-check of PR #1359 (task 098) final round, K1/K2 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1402 (filed as ISS-011, renumbered: task 112 took ISS-011/012) |
+| **Task** | [106](../tasks/106-todo-date-columns-date-only-own-pr.poml) — done (PR #1429; issue closed) |
 
 **Description**: test code only. `CreateAnalysisAsync` in the 097 live leg returns `created[^1]` (an event id) when
 Dataverse omits `OData-EntityId`, leaking the analysis row; the Briefing leg's find-by-name + register-for-cleanup
@@ -353,6 +362,8 @@ pattern should be copied. The "found by name" message also counts every register
 
 Filed 2026-10-08 by the task 106 author; reported to the owner.
 
+**Task** (no-parking sweep 2026-10-08): ISS-014 → [127](../tasks/127-spaarkeai-ribbon-build-clean-checkout-own-pr.poml) · ISS-015, ISS-016 → [128](../tasks/128-client-test-harness-repairs-own-pr.poml)
+
 ---
 
 ## Deferred scope
@@ -370,6 +381,7 @@ listed as D-6/D-7 were pulled INTO scope rather than deferred.)*
 | **Filed** | 2026-10-07 (task 057) |
 | **Source** | D-50; `notes/v4-prototype-vs-solution.md` #8; `notes/v4-reconciliation.md` H-5 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1381 |
+| **Task** | None — deferred by explicit owner decision D-50; stays deferred under D-81 |
 
 Not built in R1: per-source freshness (sources, last sync, cadence) and the landing columns `sourcesystem` /
 `sourceid` / `sourceetag` / `sourceasof` (spec section 2.1). R1 renders a null fact as Missing (`EvidenceLine`).
@@ -395,6 +407,7 @@ Not built in R1: per-source freshness (sources, last sync, cadence) and the land
 | **Filed** | 2026-10-07 |
 | **Source** | Independent review of task 072 (stream D) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1387 |
+| **Task** | [123](../tasks/123-triage-category-resolution-and-choices-visibility.poml) |
 
 **Description**
 
@@ -422,6 +435,7 @@ classifier is meant never to see it (spec `mvp-technical-spec.md:956`).
 | **Filed** | 2026-10-08 |
 | **Source** | Task 112 review (found in passing; pre-existing) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1420 |
+| **Task** | [113](../tasks/113-migrate-remaining-wizards-in-app.poml) (amended 2026-10-08) |
 
 **Description**
 
@@ -447,6 +461,7 @@ does; wire it in both hosts.
 | **Filed** | 2026-10-08 |
 | **Source** | Task 112 (outside its file scope) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1421 |
+| **Task** | [113](../tasks/113-migrate-remaining-wizards-in-app.poml) (amended 2026-10-08) |
 
 **Description**
 
@@ -462,3 +477,39 @@ the host is mounted.
 **Related**: task 112, D-26
 
 ---
+
+---
+
+### ISS-017 — `GridOverviewHandler` resolves `{{today}}` in UTC (D-25)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Filed** | 2026-10-08 (independent review of PR #1429, task 106) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1447 |
+| **Task** | [124](../tasks/124-grid-overview-today-user-local-own-pr.poml) |
+
+`GridOverviewHandler.cs:214` computes today as the UTC date; D-25 wants the caller's day. No live grid uses `{{today}}` yet.
+
+---
+
+### ISS-018 — Notification playbooks fail in dev (FetchXML id lists, Condition operands, Due Soon stubs, silent scheduler)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — fix in progress |
+| **Filed** | 2026-10-08 (task 068) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1452 |
+| **Task** | [120](../tasks/120-notification-playbooks-iss018-fix.poml) (D-77..D-80) |
+
+Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetchxml-list-rendering-investigation.md).
+
+---
+
+### Issues filed without an ISS number (tasks 056, 111)
+
+| GitHub | What | Task |
+|---|---|---|
+| [#1388](https://github.com/spaarke-dev/spaarke/issues/1388) | WorkspaceLayoutWizard: 14 jest tests fail on master (stale test ids) | [128](../tasks/128-client-test-harness-repairs-own-pr.poml) |
+| [#1392](https://github.com/spaarke-dev/spaarke/issues/1392) | SemanticSearchControl PCF: jest red (9 of 11 suites) | [128](../tasks/128-client-test-harness-repairs-own-pr.poml) |
+| [#1428](https://github.com/spaarke-dev/spaarke/issues/1428) | External SPA hand-off (056 wizard + 106 To Do changes undeployed) | [122](../tasks/122-external-spa-dev-deploy.poml) — replaces the hand-off (D-81) |

@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy the in-app wizard migration and verify on dev</title>
     <phase>5b Modal system (D-26)</phase>
-    <gate>111, 113 complete</gate>
+    <gate>111, 113, 121 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment of the Console and Legal Workspace code pages to a shared environment.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
-    <deps>111, 113</deps>
+    <deps>111, 113, 121</deps>
     <tags>deploy,frontend,modal</tags>
     <estimated-effort>0.5-1 day</estimated-effort>
   </metadata>
@@ -34,6 +34,8 @@
     <constraint source="project">Scope: MERGE MASTER FIRST and confirm 0 behind.</constraint>
     <constraint source="project">Scope: Vite solutions install with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
     <constraint source="project">Scope: verify on real dev, never a mock; test each wizard from the Console full page and from the Console opened as an Xrm dialog; test each ribbon entry once.</constraint>
+    <constraint source="owner">ADDED 2026-10-08 (D-81, no-parking sweep): NO tenant-wide publish (no PublishAllXml, no pac solution import --publish-changes, no pac solution publish-all). "LegalWorkspace" is not a separate deploy target if task 121 confirms it is compiled into the Console (sprk_spaarkeai, via embedded LegalWorkspaceApp; the standalone sprk_corporateworkspace is retired): then deploying SpaarkeAi with Deploy-SpaarkeAi.ps1 (PublishXml for that web resource only) ships it. Follow task 121's recorded path (notes/scoped-solution-import.md) for anything that is a solution import. The deploy itself needs owner approval unless an owner decision for it is recorded.</constraint>
+    <constraint source="project">ADDED 2026-10-08: once task 127 (#1412) merges, the Deploy SpaarkeAi workflow deploys master's Console to spaarkedev1 automatically on every qualifying master push. Check `gh run list --workflow deploy-spaarke-ai.yml` before deploying and record which build is live; do not race the workflow. Tasks 113's #1420/#1421 fixes are verified here too (Assign Work reports its record to Quick Start; the create-project widget opens in-app).</constraint>
   </constraints>
 
   <knowledge>

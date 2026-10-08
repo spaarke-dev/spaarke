@@ -1,7 +1,10 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **98 tasks** across 14 phases (49 ✅ · 2 🔄 · 46 🔲 · 1 cancelled; updated 2026-10-08)
+> (spec §9) · **107 tasks** across 14 phases (50 ✅ · 2 🔄 · 54 🔲 · 1 cancelled; updated 2026-10-08)
+> **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
+> **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
+> descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -231,8 +234,8 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 056 | [WizardShell: characterization tests, re-base on SprkModal, v4 props, delete WizardModal](056-wizardshell-rebase-on-sprkmodal.poml) | FULL | **opus**/high | 110 | — | Modal note P1-P3. Embedded markup must not move |
 | 🔲 [open] 111 | [**Deploy** + regression of non-embedded WizardShell consumers](111-wizard-consumer-regression-and-deploy.poml) | FULL | sonnet/high | 056 | — | Modal note P4; SemanticSearchControl PCF last (`build:prod`) |
 | 🔄 [wip] 112 | [Migrate Create wizards off `navigateTo` (in-app host)](112-migrate-create-wizards-in-app.poml) | FULL | **opus**/high | 056 | — | [PR #1422](https://github.com/spaarke-dev/spaarke/pull/1422) **open, awaiting owner merge** (head `0b2ec81bc`). `InAppWizardHost` mounted in the Console; bundle +3,584 B. Filed #1420, #1421 |
-| 🔲 [open] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout |
-| 🔲 [open] 114 | [**Deploy** the in-app wizard migration](114-deploy-in-app-wizard-migration.poml) | FULL | sonnet/high | 111, 113 | — | Verify all nine in-app on dev, full page and in an Xrm dialog |
+| 🔲 [open] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout. **+ #1421** (create-project widget) **+ #1420** (Work Assignment completion) (no-parking sweep) |
+| 🔲 [open] 114 | [**Deploy** the in-app wizard migration](114-deploy-in-app-wizard-migration.poml) | FULL | sonnet/high | 111, 113, 121 | — | Verify all nine in-app on dev, full page and in an Xrm dialog |
 
 ### Phase 6 — Do lane and Briefing fold-in
 
@@ -282,6 +285,15 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 106 | [`sprk_todo` date columns → Date Only, own PR](106-todo-date-columns-date-only-own-pr.poml) | FULL | **opus**/high | 098 | I2 | **D-41** (found by 024): To Do due dates are UTC timestamps of local midnight; convert like 098 (inventory first, evidence, fix readers/writers, per-env procedure). **031 depends on it** (per-item today, D-25) |
 | ✅ [done] 068 | [D-63: remaining `sprk_finalduedate` readers → `sprk_duedate` (playbook, VisualHost card, CalendarVisual), own PR](068-finalduedate-readers-to-duedate.poml) | FULL | sonnet/high | 098 | E | **D-63** (owner 2026-10-07): final due date informational everywhere; live playbook node "Query Overdue Tasks" change approved |
 | 🔄 [wip] 120 | [ISS-018: restore the notification playbooks (id lists, Condition operands, item templates, Due Soon, scheduler)](120-notification-playbooks-iss018-fix.poml) | FULL | **opus**/high | — | F | **D-77..D-80**: no notification has been delivered in dev since at least 2026-07-11 (#1452). Own PR; dev deploy needs separate owner approval |
+| 🔲 [open] 121 | [D-81: LegalWorkspace 106 date filters live on dev with no tenant-wide publish; settle the LW deploy path + scoped solution import](121-legalworkspace-deploy-without-tenant-publish.poml) | FULL | sonnet/high | — | — | Fact-finding first: LW source is compiled into the Console (`sprk_corporateworkspace` retired; the Custom Page's PCF source is gone), so D-75 may already have shipped it. Script fix = own PR. **Import: owner approval required.** 114 depends on it |
+| 🔲 [open] 122 | [D-81: external SPA dev deploy (Static Web App) with 056/098/106/111; close #1428](122-external-spa-dev-deploy.poml) | FULL | sonnet/high | — | — | Target is SWA `green-dune-…` via `deploy-external-spa.yml` (CIAM values non-secret, in the workflow + `config/environments.json`); last run 07:11Z predates 056/106. **Dispatch: owner approval required** (ship list) |
+| 🔲 [open] 123 | [ISS-010 #1387 triage category honours enabled/active; ISS-002 #1049 every $choices degrade path counted + Error](123-triage-category-resolution-and-choices-visibility.poml) | FULL | sonnet/high | — | J | **Branch** (builds on 072's `AdditionalFilterFor` + `ChoicesResolutionTelemetry`). **Alert rule: owner approval required** |
+| 🔲 [open] 124 | [ISS-017 #1447 GridOverviewHandler `{{today}}` = caller's day (D-25), own PR](124-grid-overview-today-user-local-own-pr.poml) | FULL | sonnet/high | — | J | Reuse `DataverseUserTimeZone` (copy `EventCompletionDate.cs`) |
+| 🔲 [open] 125 | [ISS-001 #1048 drifted AI action mirrors + `Create_Task_From_Email` 400s](125-action-mirror-drift-suggest-followups-create-task.poml) | FULL | sonnet/high | — | J | Diagnosis read-only; **any `sprk_analysisaction` write: owner approval required** |
+| 🔲 [open] 126 | [ISS-009 #1399 G5 AppendTo for business-owned lookup targets (uac-r2's rule), own PR](126-appendto-business-owned-lookup-targets-uac.poml) | FULL | **opus**/high | — | — | Gate: #1391 merged + uac-r2 names the rule on #1355; same file as 048 · **[uac]** |
+| 🔲 [open] 127 | [ISS-014 #1412 SpaarkeAi ribbon build fails in a clean checkout (Deploy SpaarkeAi red on master), own PR](127-spaarkeai-ribbon-build-clean-checkout-own-pr.poml) | FULL | sonnet/**xhigh** | — | J | Once merged, master pushes auto-deploy the Console to dev again (owner told before merge) |
+| 🔲 [open] 128 | [Client test-harness repairs, own PR: #1416, #1417, #1388, #1392](128-client-test-harness-repairs-own-pr.poml) | FULL | sonnet/high | — | J | Test files/config only; rebase SemanticSearchControl after #1415 |
+| 🔲 [open] 129 | [D-63 completion: chart/view/grid definitions off `sprk_finalduedate` + deploy VisualHost 1.4.39 (068) without tenant-wide publish](129-visualhost-finalduedate-definitions-and-pcf-deploy.poml) | FULL | sonnet/high | 068 | — | Inventory read-only; **row edits and the import: owner approval required** |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 
@@ -330,6 +342,7 @@ build** before dispatching the next — `dotnet build src/server/api/Sprk.Bff.Ap
 | **I** | 084, 085, 086, 087, 088, 089 | none | own worktrees | ❌ no | Cleanup unrelated to ontology, each in **its own worktree and PR** off master |
 | **I2** | 091 … 098, 099 | after wave I | own worktrees | ❌ no | Own-PR work; 099 is one line |
 | **R** | 065, 067 | 098 (067 also 081) | Briefing collector vs SmartTodo scorer | ❌ no (2 tasks) | Separate packages |
+| **J** | 123, 124, 125, 127, 128 | none | separate files; 123 on this branch, the rest own worktrees | ❌ no | No-parking repairs (D-81); independent surfaces |
 
 **Can start now, outside any wave**: 007 (serial, schema), **079** (refusals before 008's Secure Record Owner edit), 110 (main session), 099, 026 once 024 lands.
 
@@ -340,7 +353,7 @@ or the same launcher files): 036/038/043/044/046/100/101/103/104 (route census) 
 **Never parallel** — `parallel-safe: false`: **003**, **110** (`.claude/` paths, main session only) · **021** (the
 risk item, serial by choice) · **007**, **030**, **031**, **039**, **032**, **043**, **051**, **056**, **058**, **059**, **061**,
 **064**, **070**, **074**, **090**, **101**, **104**, **113** (each is a prerequisite others attach to, or shares files)
-· **035**, **055**, **111**, **114**, **049** (deploy or privilege change on a shared environment) · **105** (main
+· **035**, **055**, **111**, **114**, **049**, **121**, **122**, **129** (deploy or privilege change on a shared environment) · **126** (same file as 048 and #1391) · **105** (main
 session with the owner).
 
 > **On `/goal` waves**: the Haiku evaluator is a **stopping-condition check, not a quality gate**. A met
