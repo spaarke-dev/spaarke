@@ -42,3 +42,10 @@ The alternative is to drop `webApplicationInfo` from the customer package if the
 
 After the change, the owner re-runs the deployment in the test tenant and we test Outlook and Word on the web as
 Ralph, then desktop once Business Standard is assigned.
+
+**Addendum (2026-10-07, after your commit `cbee69b68`).** We saw the new production app
+`1958aec2-0218-495e-8e3c-37133e9b8357` "Spaarke Office Add-in (Production)". It is also single-tenant, so the
+production package will hit the same AADSTS700016 in every customer's tenant. The recommendation applies to both apps:
+`c1258e2d` (dev, for this test) and `1958aec2` (production, before the first customer installs it). Provisioning now
+pre-authorizes `1958aec2` on every customer BFF (Worker Bicep default; it was `c1258e2d` before). `c1258e2d` stays
+pre-authorized only on the dev BFF.

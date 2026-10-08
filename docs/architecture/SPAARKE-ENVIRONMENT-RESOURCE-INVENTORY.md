@@ -128,7 +128,7 @@ T228 lands.
 |---|---|---|---|---|---|
 | Container | Resource group | Dedicated | `rg-spaarke-{customerId}-prod` (`customer.bicep:135`) | H2a | ✅ |
 | Identity | User-assigned managed identity (bound to both App Service slots; T5 fix) | Dedicated | `mi-spaarke-{customerId}-prod` (`:214`) | H2a | ✅ |
-| Identity | BFF Entra app registration (D-13) + FIC `spaarke-uami-trust`; SPA redirect = the customer's Dataverse origin; shared clients (Office add-in) pre-authorized on `user_impersonation` | Dedicated | `spaarke-bff-api-{customerId}` | **H3** | ✅ task 222; client access T240a; an existing registration is adopted only if nobody but the control plane can act as it |
+| Identity | BFF Entra app registration (D-13) + FIC `spaarke-uami-trust`; SPA redirect = the customer's Dataverse origin; shared clients (production Office add-in `1958aec2…`) pre-authorized on `user_impersonation` | Dedicated | `spaarke-bff-api-{customerId}` | **H3** | ✅ task 222; client access T240a; an existing registration is adopted only if nobody but the control plane can act as it |
 | Identity | App role `Provisioning.KeylessProof` on that registration, assigned to the L2 Worker identity (Model 1) | Dedicated | role id `528b7c40-41f6-4dbe-aaf0-9e6d1a622f4b` (`KeylessProofContract`) | **H3** | ✅ task 230b — lets H13 call the stamp BFF's keyless proof |
 | Secrets | Key Vault (RBAC, soft-delete 90d, purge protection) | Dedicated | `sprk-{customerId}-prod-kv`, capped at 24 chars (`:150`) | H2a; **H4** populates | ✅ |
 | Observability | Log Analytics + App Insights | Dedicated | `sprk-{customerId}-prod-logs` / `-insights` (`:174-177`) | H2a (`modules/monitoring.bicep`) | ✅ |
@@ -226,7 +226,7 @@ permissions in Entra (Exchange adds the two together). Owner decisions D24–D26
 
 | Resource | Deployment | Naming | Created by | Status vs target |
 |---|---|---|---|---|
-| Outlook + Word add-in manifests | Shared | Outlook `id c1258e2d-1688-49d2-ac99-a7485ebd9995` ([`manifest.json`](../../src/client/office-addins/outlook/manifest.json)) | `scripts/Deploy-OfficeAddins.ps1` (not per customer) | ⚠️ see note below |
+| Outlook + Word add-in manifests | Shared | Dev client app `c1258e2d-1688-49d2-ac99-a7485ebd9995` (dev BFF only); production client app "Spaarke Office Add-in (Production)" `1958aec2-0218-495e-8e3c-37133e9b8357` (word-add-in-r1, 2026-10-07; single tenant; pre-authorized on every customer BFF by H3) ([`manifest.json`](../../src/client/office-addins/outlook/manifest.json)) | `scripts/Deploy-OfficeAddins.ps1` (not per customer) | ⚠️ see note below |
 | Add-in hosting (Static Web App) | Shared | Dev: `spaarke-office-addins` (RG `spe-infrastructure-westus2`). Prod: `swa-spaarke-office-addins-prod` (RG `rg-spaarke-shared-prod`, Standard, created 2026-10-07; custom domain `addins.spaarke.com`; no content deployed yet) | `Deploy-OfficeAddins.ps1` | ✅ dev / ⚠️ prod empty |
 | External Access SPA + Teams tab hosting (Static Web App) | Shared | Dev: `swa-spaarke-external-spa-dev` (RG `rg-spaarke-dev`). Prod: `swa-spaarke-external-spa-prod` (RG `rg-spaarke-shared-prod`, Standard, created 2026-10-07; custom domain `external.spaarke.com`; no content deployed yet) | spaarke-SPA-external-access-platform-r3 | ✅ dev / ⚠️ prod empty |
 | Teams app package + hosting | Shared | Teams `id 23610794-67de-4e6c-be61-ff80cc8cbe7f`; external-spa SWA | M365 Agents Toolkit / external-spa deploy | ⚠️ see note below |

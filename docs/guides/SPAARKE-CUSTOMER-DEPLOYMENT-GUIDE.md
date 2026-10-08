@@ -974,7 +974,8 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   (`https://spaarke-{customerId}[-{environmentName}].crm[N].dynamics.com`, from intake `dataverseEnvUrl` — the code pages
   sign in through this registration with `redirectUri = window.location.origin`), and `api.preAuthorizedApplications` =
   exactly the platform's shared clients on `user_impersonation` (`EntraAppRegOptions__PreAuthorizedClientAppIds__N`, set by
-  the Worker Bicep parameter `preAuthorizedClientAppIds`; default the Office add-in `c1258e2d…`). A manual extra redirect
+  the Worker Bicep parameter `preAuthorizedClientAppIds`; default the **production** Office add-in `1958aec2…` "Spaarke Office Add-in (Production)"; the dev add-in
+  `c1258e2d…` calls only the dev BFF and is never pre-authorized on a customer stamp). A manual extra redirect
   or pre-authorization is removed on the next run.
 - **adopts an existing registration only when it is provably the control plane's** (T240a review): refused when more
   than one app has the name, when it holds a client secret or certificate, when it carries a federated credential H3 did
@@ -982,7 +983,7 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   `spaarke-bff-api-{customerId}` is predictable, and an adopted registration gets the stamp's FIC and Dataverse admin.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
-their OWN app registrations (the add-in: `c1258e2d…` "Spaarke Office Add-in"), so `brk-multihub://<host>` and
+their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
 `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).

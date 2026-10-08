@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14874674764225281401"
+      "templateHash": "13619861304231825758"
     }
   },
   "parameters": {
@@ -120,10 +120,10 @@
     "preAuthorizedClientAppIds": {
       "type": "array",
       "defaultValue": [
-        "c1258e2d-1688-49d2-ac99-a7485ebd9995"
+        "1958aec2-0218-495e-8e3c-37133e9b8357"
       ],
       "metadata": {
-        "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the shared Office add-in client; the Teams client joins when it exists (T240c)."
+        "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c)."
       }
     },
     "customerRunGuardEnabled": {
@@ -1564,7 +1564,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2507025047034401311"
+              "templateHash": "845271668656563014"
             }
           },
           "parameters": {
@@ -1733,10 +1733,10 @@
             "preAuthorizedClientAppIds": {
               "type": "array",
               "defaultValue": [
-                "c1258e2d-1688-49d2-ac99-a7485ebd9995"
+                "1958aec2-0218-495e-8e3c-37133e9b8357"
               ],
               "metadata": {
-                "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the shared Office add-in client (Spaarke Office Add-in). The Teams client joins when it exists (T240c)."
+                "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c)."
               }
             },
             "tags": {

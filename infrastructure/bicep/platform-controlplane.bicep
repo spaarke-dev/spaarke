@@ -184,9 +184,9 @@ param redisEndpoint string
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
 
-@description('Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the shared Office add-in client; the Teams client joins when it exists (T240c).')
+@description('Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c).')
 param preAuthorizedClientAppIds array = [
-  'c1258e2d-1688-49d2-ac99-a7485ebd9995'
+  '1958aec2-0218-495e-8e3c-37133e9b8357'
 ]
 
 
