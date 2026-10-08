@@ -894,6 +894,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [contactWalledOrgs, setContactWalledOrgs] = React.useState<Map<string, string>>(new Map());
   const [orgWallCheck, setOrgWallCheck] = React.useState<'notNeeded' | 'done' | 'notChecked'>('notNeeded');
 
+  // Verifier F4-a: the record the modal shows NOW (an in-flight answer is checked against it), and the number of the
+  // latest load (an older load's results are dropped).
+  const currentRecordIdRef = React.useRef(recordId);
+  currentRecordIdRef.current = recordId;
+  const loadSeqRef = React.useRef(0);
+
   /** GETs a relative BFF path via the host `authenticatedFetch` and returns
    * the parsed JSON body. Throws {@link AccessGrantModalApiError} on a non-OK
    * response (task-024 finding M8) instead of reading the failure body as a
@@ -972,13 +978,21 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     try {
       const res = await authenticatedFetch(buildNoAccessPath(recordType, recordId), { method: 'GET' });
       if (res.status !== 200) return { kind: 'error' };
-      return parseNoAccessResponse(await res.json(), recordId);
+      // The echo is checked against the record shown NOW, not the one this request was sent for: the modal stays
+      // mounted while the form rebinds, so an answer for the previous record must never be accepted.
+      return parseNoAccessResponse(await res.json(), currentRecordIdRef.current);
     } catch {
       return { kind: 'error' };
     }
   }, [authenticatedFetch, recordType, recordId]);
 
   const loadData = React.useCallback(async () => {
+    // Task 067 (verifier F4-a): loads can overlap — the modal stays mounted while the host form rebinds to another
+    // record, and every grant/revoke reloads. Only the LATEST load may write state; an older one that resolves later
+    // is dropped whole (grants, shares, candidates and the No Access List alike), and cannot clear `loading` while the
+    // newer one runs.
+    const seq = ++loadSeqRef.current;
+    const isCurrent = () => seq === loadSeqRef.current;
     setLoading(true);
     setNotice(null);
     try {
@@ -996,7 +1010,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           // soft to an empty list so the rest of the modal still loads.
           fetchUserShares().catch(err => {
             const deny = classifyAccessFailure(err);
-            if (deny) setAccessDenyState(deny);
+            if (deny && isCurrent()) setAccessDenyState(deny);
             return [] as IAccessGrantRecord[];
           }),
           // Secure-record owner/BU (task 065, design.md §6) — optional; a host
@@ -1008,6 +1022,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           // Task 067: the No Access List. Never rejects (its failure is the section's own error state).
           fetchNoAccess(),
         ]);
+      if (!isCurrent()) return;
       // Union standing + user-share rows into Current Access, deduped by
       // contactId — an explicit per-record `sprk_externalrecordaccess` grant
       // (which carries an accessRecordId and IS revocable) wins over a
@@ -1035,6 +1050,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 contactIds,
                 Array.from(walls.organizations.keys())
               );
+              if (!isCurrent()) return;
               for (const m of memberships) {
                 const orgName = walls.organizations.get(cleanGuid(m.organizationId));
                 if (orgName) walledOrgs.set(cleanGuid(m.contactId), orgName);
@@ -1042,6 +1058,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               orgCheck = 'done';
             } catch {
               // Unmarked rows plus a visible "could not be checked" note — never a silent "not walled".
+              if (!isCurrent()) return;
             }
           }
         }
@@ -1063,13 +1080,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setAssignedEntries(assignedList);
       setSecureOwnerInfo(ownerInfo);
     } catch {
+      if (!isCurrent()) return;
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
       setContactWalledOrgs(new Map());
       setOrgWallCheck('notNeeded');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [
     fetchCandidates,
@@ -1099,6 +1117,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setContactWalledOrgs(new Map());
       setOrgWallCheck('notNeeded');
       void loadData();
+    } else {
+      // Closed (or no longer permitted): any load still in flight belongs to a session that has ended.
+      loadSeqRef.current += 1;
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2194,10 +2215,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         })
                       )}
                       {noAccessState.kind === 'list' && noAccessState.truncated && (
-                        <Text className={styles.rowMeta}>
-                          More entries cover this record than are listed here (the first {noAccessState.entries.length}{' '}
-                          are shown).
-                        </Text>
+                        // Verifier F4-b: markers come only from the listed entries, so with a truncated list a row
+                        // walled by an unlisted entry would read as active. Say so, as the org check does.
+                        <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
+                          <MessageBarBody>
+                            More entries cover this record than are listed here (the first{' '}
+                            {noAccessState.entries.length} are shown). Current Access rows are marked from the listed
+                            entries only, so someone walled off by an entry not shown here may still appear without the
+                            No Access marker.
+                          </MessageBarBody>
+                        </MessageBar>
                       )}
                       {orgWallCheck === 'notChecked' && (
                         <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>

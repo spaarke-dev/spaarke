@@ -53,12 +53,12 @@ No new endpoint, column, package or DI registration. No BFF change.
 
 ## Tests
 
-- New `AccessGrantModal.noAccess.test.tsx`: 40 tests (route and canonical id; full entry rendering; read-only; truncated;
+- New `AccessGrantModal.noAccess.test.tsx`: 45 tests (40 at first pass, +5 for the verifier fixes) (route and canonical id; full entry rendering; read-only; truncated;
   empty; `notShown` hidden; no request without Write; 10 error shapes; contact / user / organization / org-membership
   veto; not-in-force, undetermined and malformed entries never veto; membership read failure and absence; Restricted,
   Secure, Limited, Standard cancellation; veto beats cancellation and looks different; every level dropdown offers only
   View Only / Collaborate / Full Access; dark theme; helper unit tests).
-- Modal + TrackingFieldTrio suites: 9 + 1 suites, 189 tests, all pass.
+- Modal + TrackingFieldTrio suites: 10 suites, 194 tests, all pass.
 - Full `@spaarke/ui-components` jest: 4097 passed, 1 failed (`buildDynamicWorkspaceConfig.test.ts`, pre-existing, #1345).
 - PCF `npm run build:prod` via `scripts/Invoke-PcfBuildProd.ps1`: succeeded; `bundle.js` 1,017,260 bytes (993 KiB),
   was 1,006,789 (+10.5 KB). `pcf-scripts lint` clean.
@@ -67,14 +67,33 @@ No new endpoint, column, package or DI registration. No BFF change.
 
 - **K4** A row reached through a secure parent is labelled with the parent's type ("the secure matter this record is
   filed under"), not its name: 064's contract returns only `coveredRecordType` / `coveredRecordId`.
-- **K2** When the host could not read the Secure flag it passes `limited` (fail closed), so cancelled rows say "this
-  record is Limited" though the record may be Standard and unread. Display only; it overstates the cancellation, and
-  the server decides.
+- **K2** When the host cannot read the Secure flag, and the Access Permission value does not say Limited or Restricted
+  (it is Standard, unset, or the pill is unbound), the host passes `limited` (fail closed) and cancelled rows say "this
+  record is Limited". For a record that is really Standard this OVERSTATES the cancellation (organization and standing
+  rows shown as "No effect"). For a record that is really Restricted but whose value the host does not have, it
+  UNDERSTATES it: named contact grants show as active. Display only; the server decides access in both cases.
 - **K4** Cancellation is styled from the record's OWN Secure flag. A filed child whose secure parent governs it (round
   82) but whose own flag is still false shows organization/standing rows as active; the walls of that parent are
   shown correctly (064's `inForce`).
 - **K4** A user wall marks the user's share row, not a contact row of that user's work contact (the contract matches
   by subject id only).
+
+## Verifier pass 1 fixes (2026-10-08)
+
+- **F4-a, overlapping loads.** The modal stays mounted while the host form rebinds, and every grant or revoke reloads,
+  so an older load could resolve last and show another record's No Access List (e.g. "No one is on this record's No
+  Access List" on a walled record) or its grants. `loadData` now numbers its loads: only the latest writes state,
+  an older one is dropped whole and cannot clear `loading`, and closing the modal retires any load in flight. The
+  No Access echo is checked against the record shown NOW (a ref), not the one the request was sent for. This also
+  fixes the same pre-existing race for grants, shares, candidates and suggestions. Tests: rebind between opens with
+  either answer landing first; rebind while open; a wrong echo.
+- **F4-b, truncated list.** Markers come only from the listed entries, so with more than 100 entries a row walled by
+  an unlisted one would read as active. The truncation line is now a warning that says Current Access rows are marked
+  from the listed entries only.
+- Found in passing, **K4** (pre-existing): if the host rebinds the record while the modal is OPEN, the modal does not
+  reload (its load effect keys on `open`), so Current Access keeps the earlier record's rows until reopened; the No
+  Access List now shows its error state in that case. The PCF host re-initializes on form navigation, so no realistic
+  trigger is known.
 
 ## Live gates (session D, after the 1.0.40 import)
 

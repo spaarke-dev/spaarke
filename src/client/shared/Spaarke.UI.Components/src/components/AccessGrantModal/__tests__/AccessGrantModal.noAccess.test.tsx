@@ -256,10 +256,28 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
     expect(s.queryAllByRole('combobox')).toHaveLength(0);
   });
 
-  it('says "more entries exist" for a truncated list', async () => {
-    renderModal(makeProps({ noAccess: async () => jsonResponse(noAccessBody([entry({})], 'truncated')) }));
+  it('warns, for a truncated list, that Current Access rows are marked from the listed entries only', async () => {
+    // Betty is walled by an entry beyond the first 100: her row cannot be marked, and the section must say so.
+    renderModal(
+      makeProps({
+        grants: [CONTACT_GRANT, CONTACT_B_GRANT],
+        noAccess: async () => jsonResponse(noAccessBody([entry({})], 'truncated')),
+      })
+    );
     const section = await noAccessSection();
-    expect(within(section).getByText(/More entries cover this record than are listed here/)).toBeInTheDocument();
+    const warning = within(section).getByText(/More entries cover this record than are listed here/);
+    expect(warning).toHaveTextContent('the first 1 are shown');
+    expect(warning).toHaveTextContent('Current Access rows are marked from the listed entries only');
+    // Warning style, like the organization "could not be checked" note (a MessageBar, not a meta line).
+    expect(warning.closest('.fui-MessageBar')).not.toBeNull();
+    expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('vetoed');
+    expect(currentAccessRow('Betty Bystander').getAttribute('data-access-state')).toBe('active');
+  });
+
+  it('a complete list carries no "marked from the listed entries only" warning', async () => {
+    renderModal(makeProps({ noAccess: async () => jsonResponse(noAccessBody([entry({})])) }));
+    const section = await noAccessSection();
+    expect(within(section).queryByText(/marked from the listed entries only/)).not.toBeInTheDocument();
   });
 
   it('says nobody is listed only for a complete, empty list', async () => {
@@ -600,5 +618,130 @@ describe('noAccess helpers', () => {
     const index = buildVetoIndex([entry({ inForce: null }), entry({ entryId: 'x', subjectId: CONTACT_B_ID })]);
     expect(vetoFor(CONTACT_GRANT, 'contact', index, new Map())).toBeNull();
     expect(vetoFor(CONTACT_B_GRANT, 'contact', index, new Map())).not.toBeNull();
+  });
+});
+
+/** A promise whose resolution the test controls. */
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>(r => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('AccessGrantModal — overlapping loads never show another record (verifier F4-a)', () => {
+  const RECORD_A = 'eeeeeeee-0000-0000-0000-00000000000a';
+  const RECORD_B = 'eeeeeeee-0000-0000-0000-00000000000b';
+  const PERSON_A: IAccessGrantRecord = { ...CONTACT_B_GRANT, accessRecordId: 'grant-a', fullName: 'Alpha Person' };
+  const PERSON_B: IAccessGrantRecord = { ...CONTACT_GRANT, accessRecordId: 'grant-b', fullName: 'Bravo Person' };
+
+  /** One modal whose loads for A and B the test resolves in any order; the host rebinds A → B between opens. */
+  function setup() {
+    const noAccessA = deferred<Response>();
+    const noAccessB = deferred<Response>();
+    const grantsA = deferred<IAccessGrantRecord[]>();
+    const grantsB = deferred<IAccessGrantRecord[]>();
+    let current = RECORD_A;
+    const authenticatedFetch = jest.fn(async (url: string) => {
+      if (url.includes(`/${RECORD_A}/no-access`)) return noAccessA.promise;
+      if (url.includes(`/${RECORD_B}/no-access`)) return noAccessB.promise;
+      if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
+      if (url.includes('/assigned-access')) return jsonResponse({ entries: [] });
+      return jsonResponse({});
+    });
+    // Like the host's fetchExistingGrants, it reads the record bound at call time.
+    const fetchExistingGrants = jest.fn(() => (current === RECORD_A ? grantsA.promise : grantsB.promise));
+    const props = (recordId: string, open: boolean): IAccessGrantModalProps =>
+      makeProps({
+        overrides: {
+          recordId,
+          open,
+          fetchExistingGrants,
+          authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+        },
+      });
+    const view = renderModal(props(RECORD_A, true));
+    const rebindToB = () => {
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <AccessGrantModal {...props(RECORD_A, false)} />
+        </FluentProvider>
+      );
+      current = RECORD_B;
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <AccessGrantModal {...props(RECORD_B, true)} />
+        </FluentProvider>
+      );
+    };
+    // The host rebinds while the modal stays open (no close/reopen, so no new load starts).
+    const rebindWhileOpen = () => {
+      current = RECORD_B;
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <AccessGrantModal {...props(RECORD_B, true)} />
+        </FluentProvider>
+      );
+    };
+    return { noAccessA, noAccessB, grantsA, grantsB, rebindToB, rebindWhileOpen };
+  }
+
+  const wallOnBravo = (recordId: string) =>
+    jsonResponse({ ...noAccessBody([entry({ subjectName: 'Bravo Person' })]), recordId });
+  const emptyListFor = (recordId: string) => jsonResponse(noAccessBody([], 'complete', recordId));
+
+  it("an answer for A arriving after B's is dropped: B keeps its own walls and rows", async () => {
+    const t = setup();
+    t.rebindToB();
+    t.noAccessB.resolve(wallOnBravo(RECORD_B));
+    t.grantsB.resolve([PERSON_B]);
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access')).toBeInTheDocument();
+
+    // A's load lands last: "nobody is listed" and A's grant row must not replace B's.
+    t.noAccessA.resolve(emptyListFor(RECORD_A));
+    t.grantsA.resolve([PERSON_A]);
+    await new Promise(r => setTimeout(r, 20));
+    expect(within(await noAccessSection()).queryByText(/No one is on/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Alpha Person')).not.toBeInTheDocument();
+    expect(currentAccessRow('Bravo Person').getAttribute('data-access-state')).toBe('vetoed');
+  });
+
+  it("an older load finishing first neither shows A's data nor ends B's loading state", async () => {
+    const t = setup();
+    t.rebindToB();
+    t.noAccessA.resolve(emptyListFor(RECORD_A));
+    t.grantsA.resolve([PERSON_A]);
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.getByText('Loading access data…')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha Person')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'No Access List' })).not.toBeInTheDocument();
+
+    t.noAccessB.resolve(wallOnBravo(RECORD_B));
+    t.grantsB.resolve([PERSON_B]);
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha Person')).not.toBeInTheDocument();
+  });
+
+  it("A's answer arriving after the modal was rebound to B while open is checked against B: an error, not A's list", async () => {
+    const t = setup();
+    t.rebindWhileOpen();
+    t.noAccessA.resolve(emptyListFor(RECORD_A));
+    t.grantsA.resolve([PERSON_A]);
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access List unavailable')).toBeInTheDocument();
+    expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
+  });
+
+  it("B's request answered with A's body (wrong echo) is an error, never A's list", async () => {
+    const t = setup();
+    t.rebindToB();
+    t.noAccessB.resolve(emptyListFor(RECORD_A));
+    t.grantsB.resolve([PERSON_B]);
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access List unavailable')).toBeInTheDocument();
+    expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
   });
 });
