@@ -404,7 +404,7 @@ public sealed class EventRoutesLiveTests
             _out.WriteLine($"ExternalDataService.CreateEventAsync(sprk_duedate 2026-10-21T00:00:00.000Z) -> id={ext.SprkEventid} sprk_duedate={ext.SprkDuedate}");
             ext.SprkDuedate.Should().Be("2026-10-21");
             (await ReadDatesAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
-            (await external.GetEventsAsync(projectId)).Single(e => e.SprkEventid == ext.SprkEventid)
+            (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid)
                 .SprkDuedate.Should().Be("2026-10-21");
         }
         finally
