@@ -1,5 +1,7 @@
-# Deletes the 21 empty test SPE containers left by the 2026-10-06 dev live gates (owner rounds 68 + 72).
-# Re-checked 2026-10-06: no project, matter, work assignment, business unit, document or sprk_container row references any of them.
+# Deletes the 23 test SPE containers left by the 2026-10-06/07/08 dev live gates (owner rounds 68 + 72; 2 added by the 2026-10-08 gatesA run).
+# Re-checked 2026-10-08 (gatesA gate 0): no row in any of the 23 container-id columns (project, matter, work assignment, business unit,
+# document container + drive id, sprk_container, communication, attachment, event, invoice, budget, organization, ...) references any of them.
+# 20 of the first 21 read 200 'active' via Graph as the owning app; b!HBRbo... answers 400 'Invalid hostname for this tenancy' (expect SKIPPED).
 # Run as a SharePoint administrator. Deleted containers go to the deleted-container collection (restorable ~93 days).
 # Requires: Install-Module Microsoft.Online.SharePoint.PowerShell (Windows PowerShell 5.1, or pwsh with -UseWindowsPowerShell).
 param([switch]$WhatIfOnly)
@@ -25,7 +27,9 @@ $ids = @(
   'b!UoL_Ekv0hE6Ak89yNAKEcBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
   'b!7zUY_IuXrUKb3492YsfnVhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
   'b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
-  'b!6BMp2UkK50GCP66tPeRxURG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN'
+  'b!6BMp2UkK50GCP66tPeRxURG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',
+  'b!R6QrqcsZ_02U89YmOYM8qBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate 163b secure matter (deleted)
+  'b!juvuYNOcskGRJ96iMUBTeRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN'   # 2026-10-08 gate 166d secure project (deleted)
 )
 foreach ($id in $ids) {
   try {
