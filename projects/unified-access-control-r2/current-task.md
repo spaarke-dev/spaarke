@@ -10,7 +10,7 @@
 |---|---|
 | **Task** | Batch 5. Done: 101. On dev, waiting on owner checks: 154, 105. **113** (PR #1406): both verifier passes clean; doc-only fixes in progress, then merge. **064** (PR #1411): pass 2 found one F3 (ReadCoverageAsync drops the secure-parent path for an entry also listed directly, so an org wall on a not-yet-secure filed child reads doesNotApply); **exec064 fixing**. **#1410 fix**: PR #1419 open (batched secure-ancestor walk in the read veto; suites green, +0.012 MB); **verifier pass 1 running** (owner round 82: parent permissions control; the not-yet-secure filed child gap is an F to fix in #1419). Next: 153, 067 → 099 → 036 (ADR-034 path B approved; fold in #1414) → 090. |
 | **Agents running (background, notify on completion)** | `exec113`: doc/comment F4s on #1406; reports a commit. `exec064`: pass-2 F3 fix on #1411 (re-check the fix diff + callers only, then merge). `verify1410a`: pass 1 on #1419 (fixes go to `fix1410`, resumable). Expect a textual conflict with task 036 in `AccessibleRecordSetService.cs` (constructor + veto). Idle and resumable through SendMessage: `exec154`, `exec105`, `exec101`. |
-| **Next Action** | (1) **113:** on exec113's report, re-check its fix diff, then merge #1406 on Router green and deploy the BFF. (2) **064:** on exec064's report, re-check the F3 fix diff and its callers; merge #1411 on Router green and deploy the BFF. #1406 and #1411 both carry the same one-line master compile fix (`EventRoutesLiveTests.cs:407`), so the second merge may need a trivial rebase. (3) **#1410 / PR #1419:** pass 1 running; fixes via `fix1410`; then pass 2, merge and deploy. Sequence it against #1411, since both touch No Access coverage. (4) Start **153** and **067**; both consume 064's route (contract in `notes/phase4-access-report-contract.md`, on master after #1411). (5) If the owner confirms, run `task-create` for the **child access-permission task** (round 81 below). |
+| **Next Action** | (1) **113:** on exec113's report, re-check its fix diff, then merge #1406 on Router green and deploy the BFF. (2) **064:** on exec064's report, re-check the F3 fix diff and its callers; merge #1411 on Router green and deploy the BFF. #1406 and #1411 both carry the same one-line master compile fix (`EventRoutesLiveTests.cs:407`), so the second merge may need a trivial rebase. (3) **#1410 / PR #1419:** pass 1 running; fixes via `fix1410`; then pass 2, merge and deploy. Sequence it against #1411, since both touch No Access coverage. (4) Start **153** and **067**; both consume 064's route (contract in `notes/phase4-access-report-contract.md`, on master after #1411). (5) **173** (child access permission, #1423) is authored and startable: run it through task-execute after 064/#1419 land (opus, high). |
 
 ## Merge / deploy procedure (current practice)
 - **Merge job:** wait for `Router` = pass, with no failing check, for up to 150 × 20 s. Router reports only after Tier 2.
@@ -31,7 +31,7 @@
   - `ExternalAccess__Reconciliation__WritesEnabled=true`;
   - `Communication__OwnershipHoldAlertUserIds__0` = ralph.schroeder@spaarke.com.
 
-## Round 81 (2026-10-08), owner direction; record it in the decisions log on confirmation
+## Round 81 (2026-10-08): RECORDED (rounds 81 and 82 in the decisions log); task 173 / #1423 created
 - **Children with a parent inherit:** To Do, Event, Communication and Document take the parent's `sprk_accesspermission`. The owner added `sprk_accesspermission` (the global choice) to `sprk_document` LIVE; it is not yet in source.
 - **Children without a parent:** they keep their own value.
 - **Control:** on these child records, but not the TrackingFieldTrio on Communication (email).
@@ -40,7 +40,7 @@
   - the server writes the parent's value into the child on create and re-file;
   - the 2-minute reconcile keeps it in step;
   - the field is locked with "inherited from X" when the record has a parent, and editable when it has none;
-  - for a parentless record: **record only, no new enforcement**. The owner has not yet confirmed this.
+  - for a parentless record: **record only, no new enforcement**. Owner CONFIRMED 2026-10-08 ("BUT in future we might need to revisit").
 - **Peer report (spaarkeai-word-add-in-r1, 2026-10-08, relayed by the owner):** "To Do created on a restricted document shows Standard". Traced `POST /api/office/todo` → `OfficeService.CreateTodoAsync` (`Services/Office/OfficeService.cs:2067`).
   - **Ownership is correct:** `_coreAncestors.StampAsync` fails closed, and `ResolveTodoOwnerTeamAsync` → `_ownershipResolver.ResolveOwnerAsync` applies secure-if-any.
   - **No BFF path writes `sprk_todo.sprk_accesspermission`** (Office, the wizard, `ChildRecordEndpoints.cs`), so it stays at the default Standard.
@@ -55,7 +55,6 @@
   - 154: checklist (a)–(p) in `notes/task-154-no-access-management-forms.md`, plus the left-nav item;
   - the 171/114 UI checks.
 - **Decisions:**
-  - (a) Round 81: confirm the parentless "record only" rule and the plan.
   - (b) No Access record picker: recommended follow-up is RegardingResolver in "link only" mode plus `sprk_objectrecordname`.
   - (c) 101: keep overdue shares in View 2; Granted By beside Created By.
   - (d) 105: OK to seed 250 test documents on dev for the live gate?
