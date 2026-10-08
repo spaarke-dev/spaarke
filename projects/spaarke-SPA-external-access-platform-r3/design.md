@@ -49,10 +49,15 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   tab serves only Dataverse-licensed users (internal / B2B-guest, workforce plane). **CIAM external
   contacts are browser-only** — a CIAM account cannot sign into Teams, so there is no Teams parity to
   deliver for the external-contact plane.
+- G6. Granted users can **send a communication message on a record they can access** (compose + send from
+  the detail surface), with the send **Tier-2-enforced** (only on records in the caller's accessible set).
+  *(Owner decision 2026-10-08, option (b) — adds a scoped write path; see C6.)*
 
 **Non-goals (this release)**
-- Ask Legal assistant (FR-26 preview). E-signature. In-portal record **editing** (partners stay read-only;
-  intake creates service requests, it does not edit core records). New identity planes.
+- Ask Legal assistant (FR-26 preview). E-signature. In-portal **core-record editing** — partners do not
+  edit Matter/Project/WA/etc. fields. The only sanctioned writes are: intake → `sprk_servicerequest` (C2),
+  and **sending a communication message** regarding an accessible record (C6, G6) — a communication activity
+  *on* a record, not an edit *of* the record. New identity planes.
 - **External contacts (CIAM) inside the Teams tab** — not possible / not planned (§4.6); contacts use the
   browser SPA only.
 - **Model 2 (dedicated per-customer tenant) workforce auth** — out of scope for now; R3 targets **Model 1**
@@ -108,6 +113,26 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   backend doubles as the client). Workforce authority = **Spaarke's tenant** (Model 1), not `/organizations`.
 - **Not in scope**: external-contact Teams parity (CIAM can't sign into Teams — §4.6).
 
+### C6 — Communication message send (G6) — owner decision 2026-10-08, option (b)
+- **What**: from the C1 detail surface, a granted user composes and **sends** a communication message
+  regarding the open record (creates an outbound `sprk_communication` with the record as its regarding
+  parent, and sends it). Pairs with C1's message **read** section — read + send on the same thread.
+- **Reuse (verify in spec)**: the BFF communication send pipeline (`Services/Communication/CommunicationService.cs`
+  and its outbound path); shared compose UI in `@spaarke/ui-components` (`NewThreadModal`, `EmailComposer`) —
+  **both internal-plane today**, so they are donors to extend, not drop-in; the ADR-024 regarding model for
+  the record link; the C1 message read path for the thread view.
+- **New**: an **external-plane communication write endpoint** (BFF) with **Tier-2 auth-on-send** — the regarding
+  record MUST be in the caller's accessible set (`IAccessibleRecordSetService.IsRecordAccessibleAsync`,
+  fail-closed), for both planes; compose UI wired into the Xrm-free external host (`SprkModal`/`WizardModal`
+  presets, ADR-050). Sender identity stamped from the resolved principal (contact or systemuser), never from
+  client input.
+- **Open for spec**: recipients model (send to the record's other members vs. free addressing — recommend
+  **record members only**, which keeps send inside the Tier-2 boundary), attachments (recommend defer), and
+  whether a contact's message goes out by email or posts to the thread only.
+- **Gates**: **BFF-touching** → §8 Placement Justification + net10 (§4.5). For **external contacts** on a
+  provisioned customer, the write lands on that customer's stamp → **gated on 240d** (§4.6), same as C1/C3.
+  Buildable + testable on **dev now** (dev BFF serves both planes).
+
 ## 4.5 Build-environment prerequisite — .NET 10 (BINDING for any BFF build/deploy)
 
 > **As of 2026-08-14, `master` and the dev App Service runtime are .NET 10.** A net8 BFF deploy to the
@@ -116,9 +141,9 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
 > the standing rule for any future divergence.
 
 **Scope of impact:**
-- **C3 only** touches the BFF (`Sprk.Bff.Api`) → C3 is gated on net10-readiness.
-- **C1 / C2 / C4 / C5** are client-only (`external-spa` Vite; `npm run build`, never `dotnet`) →
-  **unaffected**; safe to build on the current tree.
+- **C3, C6, and C1's message read path** touch the BFF (`Sprk.Bff.Api`) → gated on net10-readiness.
+- **C1 (fields/docs/invoices/events) / C2 / C4 / C5** are client-only (`external-spa` Vite; `npm run build`,
+  never `dotnet`) → **unaffected**; safe to build on the current tree.
 
 **Gate (run before the first C3 BFF build/deploy, NOT before):**
 1. `dotnet --list-sdks` → confirm a `10.0.1xx` entry (machine has `10.0.101`; restart stale shells if not visible).
@@ -167,15 +192,22 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
 | Workforce / internal (incl. **B2B-guest** licensed) | Entra, **Spaarke tenant** (Model 1) | ✅ yes | directory endpoint (group membership) |
 | **CIAM external contact** (outside counsel) | `spaarkeextid` local account | ❌ browser-only | invitation / deep-link scoped (see below) |
 
-### R3-side actions (each a live action — confirm with owner first)
-- **A1.** Produce a **prod Teams appPackage** (own manifest + prod Teams app registration); dev stays `green-dune`.
-- **A2.** Update the manifest origin references + SPA redirect URIs to `external.spaarke.com`; set
+### R3-side actions (owner-approved 2026-10-08; each still owner-gated at execution)
+- **A1.** ✅ Produce a **prod Teams appPackage** (own manifest + prod Teams app registration). **Dev stays
+  `green-dune`** — confirmed: the dev SWA is `swa-spaarke-external-spa-dev` @
+  `green-dune-0c4f1221e.7.azurestaticapps.net` (manifest `staticTabs`/`validDomains`; t240 F12). Prod is the
+  new `swa-spaarke-external-spa-prod` @ `external.spaarke.com`.
+- **A2.** ✅ Update the manifest origin references + SPA redirect URIs to `external.spaarke.com`; set
   `webApplicationInfo.id` to the **dedicated Spaarke Teams client app** (owner creates it; send its client id
   to provisioning). Keep the dev origin in CORS during transition.
-- **A3.** Code: drop the `acquireBffTokenViaTeamsSso` fallback branch (NAA-only); set workforce `authority`
+- **A3.** ✅ Code: drop the `acquireBffTokenViaTeamsSso` fallback branch (NAA-only); set workforce `authority`
   to Spaarke's tenant (Model 1). Confirm the **supported Teams-host matrix all speak NAA** before removing
-  the fallback (flag to provisioning if any host lacks it).
-- **A4.** Deploy the production build to `swa-spaarke-external-spa-prod` once the origin is live.
+  the fallback (flag to provisioning if any host lacks it). **Coordinate with `spaarkeai-word-add-in-r1`**
+  on the Spaarke-tenant auth fix they already shipped: the add-in passes `TENANT_ID` so `@spaarke/auth`
+  targets Spaarke's tenant instead of `/organizations` (t240 F4); R3's `authority` override on the
+  standalone-MSAL module (`workforceAuthorityConfig({authority})` / `TeamsWorkforceAuthConfig.authority`) is
+  the equivalent seam — reuse their resolved pattern/values, don't re-derive.
+- **A4.** ✅ Deploy the production build to `swa-spaarke-external-spa-prod` once the origin is live.
 
 ### 240d co-design (external contacts on stamps) — R3 positions
 Provisioning task 240d closes the gap that **no stamp can serve CIAM today** (no `Ciam:*` settings; the CIAM
@@ -196,8 +228,8 @@ C2 external submission, C3 in-portal notify) on provisioned customers.** R3's po
 
 ### Sequencing implication for the spec
 - **C4 (grid columns)** and the **non-auth UI of C1/C2/C5** are independent of the platform work — can proceed.
-- **C1/C2/C3 for workforce users** are largely stamp-agnostic (Model-1 Spaarke-tenant authority aside).
-- **C1/C2/C3 for external contacts** depend on **240d** — they cannot ship to a provisioned customer until
+- **C1/C2/C3/C6 for workforce users** are largely stamp-agnostic (Model-1 Spaarke-tenant authority aside).
+- **C1/C2/C3/C6 for external contacts** depend on **240d** — they cannot ship to a provisioned customer until
   stamps serve CIAM. This split is a natural wave boundary for the plan.
 
 ## 5. ADR touchpoints (anticipated)
@@ -213,18 +245,56 @@ C2 external submission, C3 in-portal notify) on provisioned customers.** R3's po
 3. ~~**Notification channel (6A)**~~ — ✅ **RESOLVED (2026-08-12): email (portal deep-link) + in-portal.**
    In-portal surface is net-new to the external host (see C3). *Still needed: exact deep-link target +
    email/in-portal copy.*
-4. **Grid columns (C4)** — ⬜ **STILL OPEN.** Provide the desired column set per tab (Projects / Matters /
-   Work Assignments / Documents / Invoices / Service Requests). Blocks C4 estimation.
-5. **Scope boundary** — 6A: ✅ **R3** (owner, 2026-08-12). C4 timing: ⬜ **still open** — R3 or an
-   immediate config-only change ahead of R3?
+4. ~~**Grid columns (C4)**~~ — ✅ **RESOLVED (2026-10-08): parameterize.** C4 proceeds as a task whose
+   **input is the owner's per-tab column list** (Projects / Matters / Work Assignments / Documents /
+   Invoices / Service Requests), supplied before the C4 task executes. Does not block spec conversion.
+5. **Scope boundary** — 6A: ✅ **R3** (owner, 2026-08-12). C4 timing: ✅ **RESOLVED (2026-10-08): C4 inside
+   R3 as an early, independent task** (pure `sprk_gridconfiguration` data, no code, parallel with C1).
+6. ~~**Messages — view vs. send**~~ — ✅ **RESOLVED (2026-10-08): option (b), send.** Users may compose and
+   send a communication message on an accessible record → new **C6** (external-plane write path,
+   Tier-2 auth-on-send). Sub-decisions (recipients, attachments, email-vs-thread) are left to the spec
+   with recommended defaults in C6.
 
 ## 7. Draft success criteria
-- A partner opens a granted Matter/Project/WA/Document/Invoice into a read-only detail surface (Tier-2
-  enforced) in both SPA and Teams.
+- A **partner (CIAM, browser)** opens a granted Matter/Project/WA/Document/Invoice into a read-only detail
+  surface (fields + docs/invoices + messages + events/tasks; Tier-2 enforced). A **workforce user** does the
+  same in **both** the browser and the Teams tab (Teams parity is workforce-only — §4.6).
 - Each quick-start card opens its intake wizard; submitting creates a `sprk_servicerequest` visible in the
   Service Requests tab.
-- Adding an onboarded contact to a new record sends them a portal-linked notification.
+- Adding an onboarded contact to a new record sends them a portal-linked notification (email + in-portal).
+- A granted user sends a message on a record they can access and it appears in that record's thread; a
+  send against a record **outside** their accessible set is **denied** (negative Tier-2 case).
 - Grid columns match the owner-approved spec.
+
+> **Dev vs. provisioned-customer scope note**: every criterion is achievable **on dev today** (the dev
+> single BFF serves both the workforce and CIAM planes). The §4.6 / 240d dependency gates only when the
+> external-contact (CIAM) criteria ship to a **provisioned customer stamp** — not R3's build/validate on dev.
+
+## 8. Placement Justification + hot-path declaration (CLAUDE.md §10 — BINDING)
+
+**C3, C6, and C1's message read path are the BFF-touching pieces.** Per CLAUDE.md §10 / §11, each BFF
+addition states its placement:
+
+| Addition | New or extend? | Placement justification (three-question) | Cost-of-doing-nothing |
+|---|---|---|---|
+| Subsequent-grant **email** notification | **Extend** existing `invite-and-grant` + BFF email sender | Existing sender already mails first-onboarding; this reuses it on the `/grant` path | An onboarded contact added to a later record is never told (R2 UAT 6A) |
+| **In-portal notification** read endpoint (external plane) | **New** — `Spaarke.Notifications` is server/internal-plane; no external-plane read path exists | Cannot extend internal-plane; external plane needs its own Tier-2-checked read | Contacts/workforce have no in-portal notice surface in the SPA |
+| **Message** read path for C1 detail (external plane) | **New** — `CommunicationsWorkspaceWidget` is internal-plane only | Same: external plane needs its own Tier-2-checked message read | The detail surface cannot show messages (a G1 requirement) |
+| **Message send** endpoint for C6 (external plane) | **Extend** the existing communication send pipeline (`CommunicationService`) behind a **new** external-plane endpoint | The send pipeline exists; what's missing is an external-plane entry point with Tier-2 auth-on-send — extend the pipeline, don't fork it | A granted user cannot send a message on a record (G6) |
+
+All new BFF surface routes through per-endpoint authz filters (ADR-008) and the §11 reuse rule; publish-size
+delta + no-new-HIGH-CVE + `tests/unit/Sprk.Bff.Api.Tests/` coverage are mandatory on each C3 task. **Build
+prereq**: net10 (§4.5). **Multi-backend**: for external contacts these endpoints must be stamp-served (§4.6 / 240d).
+
+```xml
+<hot-path-declaration>
+  <bff>Y</bff>                 <!-- C3 notify + in-portal read; C1 message read; C6 message send -->
+  <spaarke-ai>N</spaarke-ai>   <!-- external-spa, not src/solutions/SpaarkeAi -->
+  <ci-workflows>N</ci-workflows>
+  <skill-directives>N</skill-directives>
+  <root-claude-md>N</root-claude-md>
+</hot-path-declaration>
+```
 
 ---
 
