@@ -874,6 +874,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
     ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)
     ///   sprk_keyvaultname        ← run.InterStepState.KeyVaultName (H2a output — the CUSTOMER vault)
+    ///   sprk_bffappid            ← run.InterStepState.BffAppRegId (H3 output — the customer BFF app registration;
+    ///                              T257: the Copilot agent render builds its scope api://{id}/user_impersonation from it)
     ///   sprk_containertypeid     ← run.Parameters.NonSecret["containerTypeId"] (intake — the
     ///                              container type pre-exists per environment; no handler
     ///                              produces it, so InterStepState.ContainerTypeId is NOT read)
@@ -915,6 +917,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         AddValueIfPresent(columns, interStep?.ResourceGroupName, "sprk_resourcegroupname");
         AddValueIfPresent(columns, interStep?.AppServiceName, "sprk_appservicename");
         AddValueIfPresent(columns, interStep?.KeyVaultName, "sprk_keyvaultname");
+        // T257: the per-customer Copilot agent package is rendered from the registry row; the BFF app id lives only here.
+        AddValueIfPresent(columns, interStep?.BffAppRegId, "sprk_bffappid");
 
         return columns;
 

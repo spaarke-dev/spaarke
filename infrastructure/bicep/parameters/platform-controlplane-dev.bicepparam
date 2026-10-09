@@ -116,6 +116,15 @@ param customerRunGuardEnabled = true
 param requireSecretFreeIdentity = true
 
 // ============================================================================
+// COPILOT AGENT CLIENT (T257)
+// ============================================================================
+
+// The shared "Spaarke Copilot Agent" client (public, PKCE, no secret). Empty until the operator creates it
+// (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); then set its application (client) id here and redeploy, and H3
+// pre-authorizes it on every customer BFF app it provisions or reconciles from then on.
+param copilotAgentClientAppId = ''
+
+// ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
 // Points the Worker sitecontainer at the platform ACR image built by

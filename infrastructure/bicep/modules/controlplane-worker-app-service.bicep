@@ -204,6 +204,9 @@ param preAuthorizedClientAppIds array = [
   '1958aec2-0218-495e-8e3c-37133e9b8357'
 ]
 
+@description('Client id of the shared Spaarke Copilot Agent app (T257; secret-free public client, PKCE). When set it is appended to preAuthorizedClientAppIds, so H3 pre-authorizes it on every customer BFF app for user_impersonation. Empty (default): not added -- the app does not exist until the operator creates it. Must be a GUID: H3 rejects every run on a malformed entry (appreg-preauthorized-client-invalid).')
+param copilotAgentClientAppId string = ''
+
 @description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives.')
 @minLength(1)
 param ciamTenantIds array
@@ -227,14 +230,17 @@ var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerType
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
 ]))
 
+// T257: the shared Copilot agent client joins the platform's pre-authorized clients once the operator has created it.
+var effectivePreAuthorizedClientAppIds = concat(preAuthorizedClientAppIds, empty(copilotAgentClientAppId) ? [] : [copilotAgentClientAppId])
+
 // T240a: H3's platform settings. SpaarkeTenantId is the federated-credential issuer for Model 1 stamps
 // (profile spaarke-hosted-model2): without it every Model 1 run fails at H3's FIC step. The control plane
 // is deployed in Spaarke's own tenant, so the deployment's tenant is that value.
 var entraAppRegSettings = concat([
   { name: 'EntraAppRegOptions__SpaarkeTenantId', value: tenant().tenantId }
-], map(range(0, length(preAuthorizedClientAppIds)), i => {
+], map(range(0, length(effectivePreAuthorizedClientAppIds)), i => {
   name: 'EntraAppRegOptions__PreAuthorizedClientAppIds__${i}'
-  value: preAuthorizedClientAppIds[i]
+  value: effectivePreAuthorizedClientAppIds[i]
 }))
 
 // ============================================================================

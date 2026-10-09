@@ -523,13 +523,17 @@ Enumerated `gateStates` + `interStepState` shapes per `design.md` §6.2.
 
 ### 4.5 Registry extension — `sprk_dataverseenvironment`
 
-12 new columns added by this project (see FR-26 / design.md §6.1):
+Columns added by this project (FR-26 / design.md §6.1 — the 12 v3.3 columns, then T225b and T257):
 
 - `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_provisionedon`
 - `sprk_currentrunid` (I5 concurrency serialization)
 - `sprk_tenancymodel` (Choice) — `0` = `Model1` (stamp in Spaarke's tenant), `1` = `Model2` (stamp in the customer's tenant). Task 224 renamed the labels from `Model1Shared` / `Model2Dedicated` and kept the values. D-12 §6 had asked for a migration instead of a relabel; no registry row carried a tenancy value when the relabel landed (checked 2026-10-07), so nothing needed migrating
 - `sprk_tenantid` (populated from H0.5 or run params)
 - `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` (§14A upgrade compat)
+- `sprk_credentialmode` (T225b secret-free marker, written by H4)
+- `sprk_bffappid` (T257: the customer BFF app registration id; H13 promotes it from H3's output) and `sprk_copilotauthconfigid` (T257: the customer's Copilot agent auth config id; the operator writes it at the post-Ready Copilot gate, §7.12)
+
+All of them are added by `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1` (idempotent; prereq PRQ-E-14 checks them). Run it **before** deploying any control-plane build that carries the T257 H13 (it promotes `sprk_bffappid`); otherwise Dataverse rejects H13's whole promoted-columns PATCH and the registry goes stale.
 
 ---
 
@@ -1310,15 +1314,143 @@ Three DAG-parallel sub-steps:
 
 **`sprk_dataverseenvironment.Setup Status` transitions to `Ready` only if H13 exits 0.**
 
-### 7.11 Phase 11 — Secure-record environment setup (operator; before the customer is told the environment is ready)
+### 7.11 Phase 11 — Secure-record environment setup (H7b; the operator verifies it before telling the customer the environment is ready)
 
-Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration no handler
-creates: the `Secure Record` business unit (holding no users and **no container**), the named `Secure Record Owners` team, the
-`Secure Record Owner` role and its privileges, role depth, and field security on `sprk_issecure`. Until it is done the BFF
-refuses to make any record secure (fail closed). Follow [`SECURE-PROJECT-ENVIRONMENT-SETUP.md`](./SECURE-PROJECT-ENVIRONMENT-SETUP.md)
-for this environment — it is the one source for the steps and their scripts — and treat **its §7 verification checklist as
-the gate**: do not report the environment as secure-record ready until every item passes. The containers are not part of
-this phase: the BFF creates each secure record's container when the record is made secure (task 227g).
+Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
+no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
+- the `Secure Record` business unit, which holds no users and **no container**;
+- the named, memberless `Secure Record Owners` team;
+- the `Secure Record Owner` role, created inside that unit, with the Read-at-Basic set in
+  `config/secure-record-owner-role.json`, on that team only;
+- the BFF-managed field-security memberships;
+- the contact identity-link memberships;
+- a check that `sprk_noaccessentry` is readable.
+
+An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
+stops the run.
+
+The operator's part is **verification**. Run the **§7 verification checklist** of
+[`SECURE-PROJECT-ENVIRONMENT-SETUP.md`](./SECURE-PROJECT-ENVIRONMENT-SETUP.md) against this environment, and do not
+report it as secure-record ready until every item passes. While anything is missing, the BFF refuses to make a record
+secure (it fails closed). The containers are not part of this phase: the BFF creates each secure record's container
+when the record is made secure (task 227g).
+
+### 7.12 Phase 12 — Per-customer Copilot agent (operator, then the customer's IT; after Ready)
+
+Each customer gets its own Microsoft Copilot agent, "Spaarke AI", bound to that customer's BFF only (owner, §9 Q2,
+2026-09-28). The owner accepted the design on 2026-10-09:
+[`t257-copilot-agent-design.md`](../../projects/customer-provisioning-orchestration-r1/notes/t257-copilot-agent-design.md)
+§3 and §5.
+
+**Where it runs.** The customer's IT installs the agent in the customer's **home** tenant, the same way they install
+the Word and Outlook add-ins. Model 1 users are guests in Spaarke's tenant, and Microsoft documents no way for a guest
+to use an agent from the tenant where they are a guest. **Never publish a customer's agent in Spaarke's own catalog.**
+That catalog holds only the agents for Spaarke's own environments (`scripts/Deploy-CopilotAgent.ps1`).
+
+**How it reaches only that customer's BFF:**
+- The agent signs the user in to **Spaarke's** tenant. This is the same guest identity the add-ins use (`tid` =
+  Spaarke, `acct` = 1).
+- Sign-in uses OAuth 2.0 + PKCE through one shared client app, "Spaarke Copilot Agent". It is a public client with no
+  secret.
+- The client gets a token for `api://{customerBffAppId}/user_impersonation`. H3 pre-authorizes the client on every
+  customer BFF app, so no user sees a consent prompt.
+- Each customer has its own **auth config**, which binds that scope and the BFF's base URL. A package can't reach
+  another customer's BFF.
+- What the user sees is decided by the stamp's Dataverse roles, as for every other client.
+
+The package has no `permissions`, `webApplicationInfo`, bot or knowledge capability. As a result:
+- it needs no Copilot licence and no metering, so users with a Microsoft 365 plan that includes Copilot Chat can use
+  it;
+- updates install without a consent prompt.
+
+**One-time platform setup (operator, Spaarke's tenant).** Each step is a live action and needs the owner's OK.
+
+1. **Create the client app "Spaarke Copilot Agent"** in the Entra admin center:
+   - single tenant (Spaarke);
+   - platform **Single-page application**, redirect URI `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`;
+   - **no client secret and no certificate** (ADR-028 A4; the project's no-secret rule);
+   - API permissions: Microsoft Graph delegated `openid`, `profile` and `offline_access`, then **Grant admin consent**.
+     `az ad app permission admin-consent` fails for this (see the project gotchas).
+   - Add **no** permission for any customer BFF: H3's pre-authorization covers it.
+   - If the first live test hits `AADSTS9002327` (cross-origin SPA redemption), add the same redirect under "Mobile and
+     desktop applications" and remove the SPA one (design §2, item 3a).
+2. **Add the registry columns** on the admin environment:
+   `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain <admin env host>`. The script is idempotent
+   and adds `sprk_bffappid` and `sprk_copilotauthconfigid`.
+   - Do this **before any** control-plane deploy that carries the T257 H13 (step 3, or any later L2 release). H13
+     promotes `sprk_bffappid`, and Dataverse rejects the whole promoted-columns PATCH if the column is missing.
+   - Prereq PRQ-E-14 checks all three columns before every run.
+3. **Add its id to the control plane.** Set `param copilotAgentClientAppId = '<application id>'` in
+   `infrastructure/bicep/parameters/platform-controlplane-{env}.bicepparam`. Then redeploy the control plane
+   (`scripts/provisioning/Deploy-ControlPlane.ps1`).
+   - The Worker then emits the client as the next `EntraAppRegOptions__PreAuthorizedClientAppIds__N`, and every H3 run
+     pre-authorizes it.
+   - A stamp provisioned **before** this redeploy gets the client on its next run, because H3 reconciles the list
+     exactly.
+4. **Publish the template.** Run `publish-copilot-agent-template.yml` on `master` with `publish: true`. It writes
+   `copilot-agent-template-{version}.zip` and `copilot-agent-template-latest.json` to `provisioning-artifacts`.
+
+**Per customer (after `Setup Status = Ready`; the `/provision-environment` post-Ready Copilot gate):**
+
+5. **Check the pre-authorization (read-only).**
+   `az ad app show --id <bffAppRegId> --query "api.preAuthorizedApplications[].appId"` must list the Spaarke Copilot
+   Agent client id.
+6. **Create the customer's auth config.** This is a delegated step under the operator's own Microsoft 365 sign-in; no
+   API exists for it yet (design §2, item 2). In the Teams developer portal, go to Tools → OAuth client registration →
+   **New** and set:
+   - registration name `spaarke-copilot-{customerId}`. If one with that name already exists, reuse it; never create a
+     second one;
+   - base URL: the customer's BFF, `https://{sprk_appservicename}.azurewebsites.net`;
+   - "Restrict usage by org": **Any Microsoft 365 organization**, because the agent runs in the customer's tenant;
+   - "Restrict usage by app": **Any Teams app**. The first live test (design §3, step 8) tries restricting it to the
+     customer's derived manifest id;
+   - client id: the Spaarke Copilot Agent client id. **Leave the client secret empty**;
+   - authorization endpoint `https://login.microsoftonline.com/{SpaarkeTenantId}/oauth2/v2.0/authorize`;
+   - token and refresh endpoints `https://login.microsoftonline.com/{SpaarkeTenantId}/oauth2/v2.0/token`;
+   - scope `api://{bffAppRegId}/user_impersonation offline_access`;
+   - PKCE **on**.
+
+   Save, then copy the **OAuth client registration ID**. With the Agents Toolkit the same values go through
+   `oauth/register` (`isPKCEEnabled: true`, `targetAudience: AnyTenant`, `applicableToApps: AnyApp`, no
+   `clientSecret`).
+7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
+   with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
+   it from the row.
+   - If the row has no `sprk_bffappid`, set it in the same PATCH. This happens for a stamp that reached Ready before
+     T257, or when H13's promoted-columns PATCH failed. The value is the run's `interStepState.bffAppRegId`, or the
+     `appId` of the stamp's BFF app registration.
+   - Without it, the render refuses the row, and `-AllActive` skips the row and exits non-zero.
+8. **Render the package.** Everything here is read-only except the local file it writes.
+   - Download `copilot-agent-template-latest.json` and the template it names (`az storage blob download --auth-mode login`).
+   - Run:
+
+     ```powershell
+     scripts/copilot-agent/Render-CopilotAgentPackage.ps1 -TemplatePath <zip> -TemplateManifestPath <latest.json> `
+         -OutputFolder <folder> -CustomerId <customerId> -AdminEnvironmentUrl <admin env URL>
+     ```
+
+   - The result is `spaarke-copilot-{customerId}-{version}.zip`. Its manifest id is UUIDv5 of the customerId, so every
+     version updates the same app in the customer's catalog.
+9. **Send the package to the customer's IT** with
+   [`COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md`](COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md). They upload it in **their**
+   Microsoft 365 admin center (Agents → Upload custom agent) and assign it to the staff they invited as guests.
+10. **Verify** with one invited guest:
+    - The guest opens Copilot in their home tenant → Spaarke AI → "What are my overdue tasks?" → signs in.
+    - The BFF log shows `tid` = Spaarke, `acct` = 1, `azp` = the Spaarke Copilot Agent client and `aud` = this
+      customer's BFF app.
+    - Record the result in `runs/{runId}.md`.
+
+**Releases.** Change the agent only when its instructions or its OpenAPI surface change; tool behaviour lives in the
+BFF.
+1. Bump `version` in `src/solutions/CopilotAgent/appPackage/manifest.json`.
+2. Merge, then publish the template.
+3. Render for every active, Ready customer: `Render-CopilotAgentPackage.ps1 -AllActive -AdminEnvironmentUrl <admin env URL> ...`.
+4. Send each package to that customer's IT. Users get the update without a prompt.
+
+**Decommission.**
+1. The customer's IT removes the app.
+2. The operator deletes the auth config in the Teams developer portal, which is the only place to delete one.
+3. The registry row is deactivated, never deleted.
 
 ---
 
@@ -1787,6 +1919,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | PCF controls (build + push workflow) | [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md) |
 | AI Document Intelligence module | [`AI-DEPLOYMENT-GUIDE.md`](AI-DEPLOYMENT-GUIDE.md) |
 | Email / Communication Service | [`COMMUNICATION-DEPLOYMENT-GUIDE.md`](COMMUNICATION-DEPLOYMENT-GUIDE.md) |
+| Per-customer Copilot agent (T257) | §7.12 above; for the customer's IT: [`COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md`](COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md) |
 | M365 Copilot integration | [`M365-COPILOT-DEPLOYMENT-GUIDE.md`](M365-COPILOT-DEPLOYMENT-GUIDE.md) |
 | Declarative agent | [`DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md`](DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md) |
 | Office add-ins | [`office-addins-deployment-checklist.md`](office-addins-deployment-checklist.md) |

@@ -199,7 +199,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
 | PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4) |
-| PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault |
+| PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault; without `sprk_bffappid` H13's promoted-columns PATCH is rejected (registry stale) |
 
 ### Once-per-customer (9 active + 2 retired, besides the subscription entries above)
 

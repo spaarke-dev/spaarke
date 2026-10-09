@@ -102,6 +102,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                               (admin uploads to the org catalog)     │
 │  deploy-external-spa.yml   — deploy the external SPA to an SWA       │
 │  publish-dataverse-solutions-manifest.yml — release-time only        │
+│  publish-copilot-agent-template.yml — release-time only (T257)       │
 └────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -133,7 +134,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-teams-app.yml` | Manual dispatch | n/a | N/A (builds, packages, publishes an artifact — not a live deploy) |
 | `deploy-external-spa.yml` | Manual dispatch | n/a | N/A (deploy) |
 | `publish-provisioning-arm-artifacts.yml` | Push to `master` (bicep paths), dispatch | n/a | N/A (publish) |
-| `publish-dataverse-solutions-manifest.yml` | Manual dispatch (release-time only) | n/a | N/A (publish) |
+| `publish-dataverse-solutions-manifest.yml` | Manual dispatch (release-time); PR dry run on the SpaarkeMaster source | n/a | N/A (publish) |
+| `publish-copilot-agent-template.yml` | Manual dispatch (release-time); PR dry run on the Copilot agent source | n/a | N/A (publish) |
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
 | `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
@@ -163,7 +165,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
 | `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
-| `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads. ⚠️ Cannot succeed on a clean checkout; being replaced by a pack-from-git SpaarkeMaster publish (customer-provisioning-orchestration-r1 T218d) |
+| `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time); PR dry run | Packs SpaarkeMaster managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, checks both, and publishes them with the `dataverse-solutions-latest.json` manifest H6 reads (T218d) |
+| `publish-copilot-agent-template.yml` | Publish Copilot Agent Template | Manual publish (release-time); PR dry run | Builds the per-customer Copilot agent template from `src/solutions/CopilotAgent`, renders a sample, validates it against Microsoft's schemas, and publishes it with `copilot-agent-template-latest.json` (T257) |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
 | `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
@@ -631,9 +634,15 @@ Installs the `az bicep` CLI, compiles `customer.bicep` to flattened ARM JSON (it
 
 #### `publish-dataverse-solutions-manifest.yml` — Publish Dataverse Solutions Manifest
 
-**Triggers**: `workflow_dispatch` only (release-time; deliberately **no** `push` trigger — a push runner has never built the solution ZIPs, so an earlier `push: master` trigger failed on every solution change)
+**Triggers**: `workflow_dispatch` (input `publish`, default false = dry run); `pull_request` on `src/dataverse/solutions/SpaarkeMaster/**`, `scripts/solution-authoring/SpaarkePackageScope.psm1` and the workflow itself (dry run only)
 
-Locates all 8 canonical managed-solution ZIPs under `src/solutions/<Folder>/{bin/Release,bin/Debug,.,out}/*.zip` (fails if any of the 8 is missing — it refuses to publish a partial manifest), reads each ZIP's `solution.xml` version, uploads the ZIPs, and publishes `dataverse-solutions-latest.json` (the exact blob name `SolutionArtifactManifestOptions` resolves) plus a versioned copy. **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`. This workflow does **not** build/pack the ZIPs, so it cannot succeed on a clean checkout. ⚠️ **Being replaced** (ADR-027 §4, amended 2026-10-07; T218d): one package, SpaarkeMaster, packed managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster/` and published with a two-blob manifest — see [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md).
+Packs SpaarkeMaster managed + unmanaged from the committed source `src/dataverse/solutions/SpaarkeMaster` with the pac CLI, checks both zips (name, version, managed flag, no environment-variable values) and the source (no missing dependency on `solution="Active"`), writes the manifest with `New-SpaarkeMasterManifest`, and keeps everything as a run artifact. Only a manual run on `master` with `publish: true` uploads the versioned zips, a versioned manifest, the rollback pointer `dataverse-solutions-latest.previous.json` and the new `dataverse-solutions-latest.json` that H6 reads (T218d; ADR-027 §3-§4 amended 2026-10-07). A version publishes once. Runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md). **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`.
+
+#### `publish-copilot-agent-template.yml` — Publish Copilot Agent Template
+
+**Triggers**: `workflow_dispatch` (input `publish`, default false = dry run); `pull_request` on `src/solutions/CopilotAgent/**`, `scripts/copilot-agent/**`, `tests/scripts/CopilotAgentPackage.Tests.ps1` and the workflow itself (dry run only)
+
+Runs the package's Pester tests, then builds the per-customer Copilot agent template from `src/solutions/CopilotAgent` (`New-CopilotAgentTemplate` — refuses permissions, `webApplicationInfo`, a bot, a knowledge capability, hard-coded tenant/app/reference ids, or schema versions other than manifest v1.30 / DA v1.8 / plugin v2.4). It writes `copilot-agent-template-latest.json` with `New-CopilotAgentTemplateManifest`, renders a sample package and validates it against Microsoft's published JSON schemas (`scripts/copilot-agent/test_rendered_package.py`). Only a manual run on `master` with `publish: true` uploads the versioned template, a versioned manifest, the rollback pointer and the new latest manifest. A version publishes once (bump `version` in `appPackage/manifest.json`). The operator renders each customer's package from it (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`; [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12). **Secrets/vars**: as above.
 
 ### Legacy Pipeline (superseded, pending deletion)
 
@@ -1056,7 +1065,7 @@ stages until task 249, 2026-10-02 retired them.)*
 | Workflow | Secret / Variable |
 |---|---|
 | `build-provisioning-sidecar.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `SIDECAR_ACR_LOGIN_SERVER` |
-| `publish-provisioning-arm-artifacts.yml`, `publish-dataverse-solutions-manifest.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
+| `publish-provisioning-arm-artifacts.yml`, `publish-dataverse-solutions-manifest.yml`, `publish-copilot-agent-template.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
 
 ### Nightly Health — Graph App-Role Parity (currently unconfigured)
 
