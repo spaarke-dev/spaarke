@@ -3,8 +3,8 @@
   <metadata>
     <title>Register sprk_signal and sprk_decisionrecord as secure children; Signal writer takes its owner from the resolver</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
-    <gate>007, 008, 079 complete; uac-r2 batch 4 deployed in dev</gate>
-    <status>blocked</status>
+    <gate>007, 008, 079 complete; uac-r2 batch 4 deployed in dev. CODE MERGED to master 2026-10-09 (#1390, c45cb4719, uac-r2 approved, owner said merge when green); remaining: D-67 deploy master BFF to dev, then the live gate (expect the recent-changes reconcile to re-own existing Signals/Decision Records under Secure roots within ~2 min, D-113)</gate>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: changes who owns and who can read Signals and Decision Records on Secure matters, edits two files another project owns, and adds an ownership path to the writer.</rigor-reason>
     <model-tier>opus</model-tier>

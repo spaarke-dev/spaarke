@@ -3,8 +3,8 @@
   <metadata>
     <title>D-83: remove tenant-wide publish repo-wide; one scoped "import, then publish only the imported components" procedure for scripts and deploy skills</title>
     <phase>8 Remaining cleanup and repairs</phase>
-    <gate>startable</gate>
-    <status>not-started</status>
+    <gate>startable. CODE + skill amendments MERGED to master 2026-10-09 (#1467 script, #1542 skills ba2f222cc); remaining: the live proof, run on the D-112 full E2E dev deploy</gate>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes every Dataverse deploy path in the repo (scripts + shared skills used by all projects); a wrong scoped publish leaves components unpublished.</rigor-reason>
     <model-tier>sonnet</model-tier>

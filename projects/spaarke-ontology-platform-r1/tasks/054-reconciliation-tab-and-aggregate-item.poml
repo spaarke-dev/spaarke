@@ -4,7 +4,7 @@
     <title>Mount reconciliation as a Console tab plus one aggregate Work Item</title>
     <phase>5 The worklist surface</phase>
     <gate>051, 057 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One registration file plus a computed count; the surface itself already exists.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,6 +117,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-29. design.md section 5.1 and decision 29. Amended 2026-10-07 per reconciliation B.2 row 054, W-11, and #18/#36.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1531 merged into docs/ontology-platform-design (4245e605f) after independent review + 2 rounds. Reconciliation tab + aggregate item; count from the Needs Review grid config; placement moved to 059, misresolution to 034. Documented, not fixed (D-106): F-45.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
