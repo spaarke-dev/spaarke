@@ -3,7 +3,7 @@
   <metadata>
     <title>Indexing recovers a document's parent record when the request has none, so documents moved by secure transitions (and Office/Compose saves) stay findable in record-scoped search and RAG (closes #1510)</title>
     <phase>Session 28 — UAC defect remediation (owner decision 2026-10-09: "fix now in uac-r2")</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code change in the BFF indexing job; modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
