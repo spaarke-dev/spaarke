@@ -120,6 +120,68 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ((IValueHttpResult)result).Value.Should().BeEquivalentTo(new { id });
     }
 
+    // ── An ORGANIZATION-OWNED lookup target (the ADR-024 record-type catalog every resolver payload binds). Live,
+    //    RetrievePrincipalAccess refuses such a table (400 0x80040800), so before this fix every wizard payload carrying
+    //    sprk_RegardingRecordType was answered "not found" — for every caller, a System Administrator included (measured on
+    //    spaarkedev1 2026-10-07 through this route: the same to-do is 201 without the lookup, 404 with it). ──────────────
+
+    private static readonly Guid RecordTypeMatter = Guid.Parse("a2470000-0000-4000-8000-0000000000c1");
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated_WhenTheCallerHoldsItsAppendToPrivilege()
+    {
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Bind(_appCreates.Should().ContainSingle().Subject.Fields, "sprk_RegardingRecordType@odata.bind")
+            .Should().Be($"/sprk_recordtype_refs({RecordTypeMatter:D})");
+    }
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_WithoutItsAppendToPrivilege_IsTheUniform404_AndNothingIsCreated()
+    {
+        _user.Held.Remove("prvAppendTosprk_recordtype_ref");
+
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AToDoBindingARecordTypeRowThatDoesNotExist_IsTheSame404_AndNothingIsCreated()
+    {
+        _user.InvisibleRows.Add(RecordTypeMatter);
+
+        var missing = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+        _user.InvisibleRows.Clear();
+        _user.Held.Remove("prvAppendTosprk_recordtype_ref");
+        var denied = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        (Status(missing), ReasonCode(missing), Detail(missing)).Should().Be((Status(denied), ReasonCode(denied), Detail(denied)),
+            "a missing reference row and one the caller may not append to answer alike");
+        Status(missing).Should().Be(StatusCodes.Status404NotFound);
+        _appCreates.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ChildCreate_AToDoUnderAnOrdinaryMatter_IsOwnedByThatMattersBusinessUnitTeam()
     {
