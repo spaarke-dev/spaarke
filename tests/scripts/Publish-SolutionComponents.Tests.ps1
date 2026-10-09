@@ -192,9 +192,9 @@ Describe 'component type knowledge' {
 }
 
 Describe 'allow-list' {
-    It 'contains exactly the three skill paths and the one archived history file (change this test deliberately to add or remove one)' {
+    It 'contains exactly the one archived history file; the three deploy skills were amended (task 130, 2026-10-09) and are linted (change this test deliberately to add or remove one)' {
         $lines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'publish-lint-allowlist.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' } | ForEach-Object { ($_ -split "`t")[0].Trim() })
-        $lines | Sort-Object | Should -Be @('.claude/archive/2026-10-07/modules/pcf.CLAUDE.md', '.claude/skills/dataverse-deploy/SKILL.md', '.claude/skills/pcf-deploy/SKILL.md', '.claude/skills/ribbon-edit/SKILL.md')
+        $lines | Sort-Object | Should -Be @('.claude/archive/2026-10-07/modules/pcf.CLAUDE.md')
     }
 }
 
