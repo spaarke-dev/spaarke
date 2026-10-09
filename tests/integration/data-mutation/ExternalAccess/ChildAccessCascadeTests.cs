@@ -479,6 +479,16 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         (await gate.CheckAsync("sprk_matter", matter, withOthers, CancellationToken.None))
             .Should().BeNull("a matter has no access record; its writes are not this gate's");
 
+        // Fix round 2 (K3): the secure flag, either value, on update or create, is refused the same way.
+        foreach (var flag in new[] { true, false })
+        {
+            var setsFlag = new[] { new KeyValuePair<string, object?>("sprk_issecure", flag) };
+            (await gate.CheckAsync("sprk_workassignment", workAssignment, setsFlag, CancellationToken.None))!
+                .RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+            (await gate.PlanCreateAsync("sprk_project", setsFlag, Creator, CancellationToken.None))
+                .Refusal!.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+        }
+
         var run = await _job.RunAsync();
 
         run.Success.Should().BeTrue(run.ErrorMessage);
@@ -488,23 +498,40 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
-    /// F1-1 item 4 (empty fails closed): a work assignment secured through its matter BEFORE access records existed (none on
-    /// the row) stays secure when the matter is un-secured through the route — the empty record is read by the backfill rule,
-    /// which never loosens — and the cascade records the Secure as its own. Its F3 holder can still remove it (its parent is
-    /// ordinary now).
+    /// Fix round 2 (K1, round 87 item 1 for data from before the deploy): a work assignment secured through its matter BEFORE
+    /// access records existed (none on the row) is recorded as INHERITED by the matter's own <c>/unsecure-project</c> before the
+    /// matter's flag is cleared — so it follows the matter out in the same call.
     /// </summary>
     [Fact]
-    public async Task AnEmptyAccessRecord_NeverLoosens_WhenTheParentIsUnsecured()
+    public async Task AChildSecuredBeforeTheDeploy_IsRecordedAsInheritedBeforeItsParentIsUnsecured_AndFollowsIt()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecureFiledWorkAssignment(_fixture, workAssignment, matter);
-        SetPermission("sprk_workassignment", workAssignment, Restricted);
 
         var response = await PostAsync(UnsecureRoute, new { recordType = "matter", recordId = matter });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.IsSecureOf(matter).Should().BeFalse();
+        World.AccessRecordWrites.Should().Contain(w => w.Id == workAssignment, "recorded before the matter stopped being secure");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("its Secure was the matter's: it follows it out");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureChildShareWorld.GeneralTeam);
+    }
+
+    /// <summary>
+    /// F1-1 item 4 (empty never loosens): a work assignment secured through its matter before access records existed, whose
+    /// matter was un-secured OUTSIDE the BFF before the job first saw it, stays secure — the backfill rule never loosens — and
+    /// the job records the Secure as its own. Its F3 holder can still remove it (its parent is ordinary).
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyAccessRecord_NeverLoosens_WhenTheParentWasUnsecuredOutsideTheBff()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter);
+        SecureFiledWorkAssignment(_fixture, workAssignment, matter);
+        SetPermission("sprk_workassignment", workAssignment, Restricted);
+
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
         _fixture.IsSecureOf(workAssignment).Should().BeTrue("no access record: nothing it holds is taken away");
         _fixture.OwningTeamOf(workAssignment).Should().Be(SecureTeam);
         PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted);
@@ -536,35 +563,138 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
-    /// F1-1 items 1 and 4 (an FLS read loss): the BFF can still WRITE the secured column but no longer READ it, so every record
-    /// reads empty. Nothing is loosened (a work assignment whose record says "inherited" stays secure under its now-ordinary
-    /// matter), the write is read back and found empty, the run FAILS naming <c>access_record_hidden</c>, and the rest of the
-    /// pass writes no further access record (no churn).
+    /// F1 (fix round 2) + F4: field security hides the column from the BFF (it can WRITE it but not READ it), so every record
+    /// reads EMPTY, and the platform does not vouch for the BFF's read either. Nothing is decided on such a read: no record is
+    /// overwritten by the backfill rule's guess — not one whose record says "inherited" under a now-ordinary matter, and not
+    /// one whose Secure is its OWN under a secure matter — nothing is written at all, and the run fails naming
+    /// <c>access_record_hidden</c>. The inline path (the secure matter's own <c>/unsecure-project</c>: its records-below step
+    /// and its cascade) writes nothing either, and the child stays secure.
     /// </summary>
     [Fact]
-    public async Task AnAccessRecordTheBffCannotRead_LoosensNothing_FailsTheRun_AndStopsWritingRecords()
+    public async Task AnAccessRecordTheBffCannotRead_IsNeverOverwritten_NothingIsWritten_AndTheRunFails()
     {
-        var (matter, first, second) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        OrdinaryMatter(matter);
-        foreach (var id in new[] { first, second })
-        {
-            SecureFiledWorkAssignment(_fixture, id, matter);
-            SeedRecord("sprk_workassignment", id, floorSecure: true, Standard, ownSecure: false, ownPermission: null, ("sprk_matter", matter));
-        }
+        var (ordinary, secure, inherited, own) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(ordinary);
+        SecureFiledWorkAssignment(_fixture, inherited, ordinary);
+        SeedRecord("sprk_workassignment", inherited, floorSecure: true, Standard, ownSecure: false, ownPermission: null, ("sprk_matter", ordinary));
+        SecureMatter(_fixture, secure);
+        SecureFiledWorkAssignment(_fixture, own, secure);
+        SetPermission("sprk_workassignment", own, Restricted);
+        SeedRecord("sprk_workassignment", own, floorSecure: true, Standard, ownSecure: true, ownPermission: Restricted, ("sprk_matter", secure));
+        var recordsBefore = new[] { inherited, own }.ToDictionary(id => id, id => World.ValueOf<string>("sprk_workassignment", id, AccessInheritance.Column));
 
         World.HidesAccessRecords = true;
         var run = await _job.RunAsync();
 
         run.Success.Should().BeFalse();
         run.ErrorMessage.Should().Contain(SecureRootInheritance.ReasonMarkerHidden);
+        var unsecure = await PostAsync(UnsecureRoute, new { recordType = "matter", recordId = secure });
+        unsecure.StatusCode.Should().Be(HttpStatusCode.OK, await unsecure.Content.ReadAsStringAsync());
+
+        foreach (var id in new[] { inherited, own })
+        {
+            _fixture.IsSecureOf(id).Should().BeTrue("an unreadable record is never decided on");
+            _fixture.OwningTeamOf(id).Should().Be(SecureTeam);
+            World.ValueOf<string>("sprk_workassignment", id, AccessInheritance.Column).Should().Be(recordsBefore[id],
+                "the stored record is never overwritten by a guess");
+        }
+
+        PermissionOf("sprk_workassignment", own).Should().Be(Restricted);
+        World.AccessRecordWrites.Should().BeEmpty("nothing is written over an empty read the BFF cannot vouch for");
+        World.AccessPermissionWrites.Should().BeEmpty();
+        _fixture.Updates.Should().NotContain(u => u.RecordId == inherited || u.RecordId == own);
+    }
+
+    /// <summary>
+    /// F4, round 2: the platform says the BFF may read the column, but reads come back EMPTY. The first record written (a
+    /// project raised to its matter's Restricted) reads back empty, so the run stops trusting records: the work assignment
+    /// filed under that project — which round 1 and round 2 (the project changed) would both revisit — is never written, its
+    /// own Secure record is kept, and the run fails naming <c>access_record_hidden</c>.
+    /// </summary>
+    [Fact]
+    public async Task OnceARecordReadsBackEmpty_NeitherRoundWritesAnotherRecord()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Restricted);
+        _fixture.SeedProject(project, isSecure: false);
+        FilePair(_fixture, "sprk_project", project, matter, RecordTypeRef(_fixture, "sprk_matter"));
+        SetPermission("sprk_project", project, Standard);
+        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: SecureTeam, containerId: $"b!wa-{workAssignment:N}", isSecure: true);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", project));
+        SetPermission("sprk_workassignment", workAssignment, Restricted);
+        SeedRecord("sprk_workassignment", workAssignment, floorSecure: false, Standard, ownSecure: true, ownPermission: Restricted,
+            ("sprk_project", project));
+        var before = World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column);
+
+        World.HidesAccessRecords = true;
+        _fixture.AccessRecordReadableByProfile = true;
+        _fixture.BffIsSystemAdministrator = true; // the platform vouches for the read; the reads still come back empty
+        using var scope = _fixture.Services.CreateScope();
+        var pass = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsPassAsync("trace-175r2", null, 25, 500, CancellationToken.None);
+
+        pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
+        pass.Problems.Should().Contain(p => p.Contains(SecureRootInheritance.ReasonMarkerHidden));
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == workAssignment);
+        World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column).Should().Be(before);
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Fix round 2 (K2): <c>sprk_accessinheritance</c> is not field-secured (anyone with Write could have forged a record), so
+    /// no record is trusted: the job follows nothing — a work assignment whose record says "inherited" under a now-ordinary
+    /// matter stays secure — writes nothing and fails naming <c>access_record_not_secured</c>; a parent's own un-secure leaves
+    /// the record below it secure too.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheColumnIsNotFieldSecured_NoAccessRecordIsTrusted_NothingIsFollowed_AndTheRunFails()
+    {
+        var (ordinary, secure, first, second) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(ordinary);
+        SecureFiledWorkAssignment(_fixture, first, ordinary);
+        SeedRecord("sprk_workassignment", first, floorSecure: true, Standard, ownSecure: false, ownPermission: null, ("sprk_matter", ordinary));
+        SecureMatter(_fixture, secure);
+        SecureFiledWorkAssignment(_fixture, second, secure);
+        SeedRecord("sprk_workassignment", second, floorSecure: true, Standard, ownSecure: false, ownPermission: null, ("sprk_matter", secure));
+
+        _fixture.AccessRecordColumnSecured = false;
+        var run = await _job.RunAsync();
+        var unsecure = await PostAsync(UnsecureRoute, new { recordType = "matter", recordId = secure });
+
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Contain(SecureRootInheritance.ReasonAccessRecordUnsecured);
+        unsecure.StatusCode.Should().Be(HttpStatusCode.OK, await unsecure.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(secure).Should().BeFalse("the matter's own un-secure is its F3 holder's act");
         foreach (var id in new[] { first, second })
         {
-            _fixture.IsSecureOf(id).Should().BeTrue("an unreadable record is never read as 'inherited'");
+            _fixture.IsSecureOf(id).Should().BeTrue("an untrusted record is never followed");
             _fixture.OwningTeamOf(id).Should().Be(SecureTeam);
         }
 
-        World.AccessRecordWrites.Should().ContainSingle("after one write reads back empty, the pass writes no more");
-        _fixture.Updates.Should().NotContain(u => u.RecordId == first || u.RecordId == second);
+        World.AccessRecordWrites.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Fix round 2 (K1, the job): a record about to be recorded as INHERITED secure (no record yet, secure, under a secure
+    /// matter) is written before any other record-only write — with room for one write, it is the one written.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_RecordsAnInheritedSecureFirst()
+    {
+        var (matter, parentless, inheritedSecure) = (Guid.NewGuid(),
+            Guid.Parse("00000000-0000-0000-0000-000000000175"), Guid.Parse("ffffffff-0000-0000-0000-000000000175"));
+        SecureMatter(_fixture, matter);
+        SecureFiledWorkAssignment(_fixture, inheritedSecure, matter);
+        _fixture.SeedWorkAssignment(parentless, isSecure: false);
+
+        using var scope = _fixture.Services.CreateScope();
+        var pass = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsPassAsync("trace-175k1", null, 25, maxRecordWrites: 1, CancellationToken.None);
+
+        pass.Deferred.Should().Be(1);
+        RecordOf("sprk_workassignment", inheritedSecure).Should().NotBeNull("the inherited secure is recorded first");
+        RecordOf("sprk_workassignment", inheritedSecure)!.OwnSecure.Should().BeFalse();
+        RecordOf("sprk_workassignment", parentless).Should().BeNull("deferred to the next run");
     }
 
     /// <summary>

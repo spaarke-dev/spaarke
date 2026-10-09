@@ -568,6 +568,14 @@ public static class UnsecureProjectEndpoint
                 ("parentRecordType", parentLabel), ("parentRecordId", secureParent.Id), ("parentName", secureParent.Name));
         }
 
+        // ── Step 1.6 (task 175 fix round 2, K1): what is filed below is recorded BEFORE this record stops being secure ──
+        //
+        // A work assignment or project below it with no access record yet (secured before task 175's deploy) gets one now,
+        // while this record is still secure: a Secure it holds through this record is recorded as INHERITED, so it follows
+        // this record out in the cascade after Step 5. Best effort; a record not reached stays secure (never loosened).
+        if (SecureRootInheritance.IsParent(root.LogicalName))
+            await relatedRoots.RecordBelowBeforeUnsecureAsync(root.LogicalName, recordId, traceId, ct);
+
         // ── Step 2: Resolve the new owner ────────────────────────────────────
         //
         // A caller: the request's nominee, else configuration, else the caller (a user). The cascade: the team it was given.

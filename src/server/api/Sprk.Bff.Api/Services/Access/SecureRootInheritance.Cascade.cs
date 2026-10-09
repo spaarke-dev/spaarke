@@ -148,6 +148,12 @@ public sealed record FollowParentsPass
     public IReadOnlyList<object> Changes { get; init; } = Array.Empty<object>();
 
     /// <summary>
+    /// Task 175 fix round 2: why no access record could be trusted in this run (the column is not field-secured, K2; or the
+    /// BFF's read of it is not proven while records read empty, F1) — the run fails; null when they were trusted.
+    /// </summary>
+    public string? Untrusted { get; init; }
+
+    /// <summary>
     /// Nothing is left that a run can do. Undetermined records are reported, not counted here (task 173's precedent): a record
     /// whose filing cannot be decided is left at its current state, which enforcement already treats as secure and Restricted
     /// (task 174, fail closed); counting it would keep the job failed on every run for one bad row.
@@ -159,12 +165,28 @@ public sealed record FollowParentsPass
 /// Task 175 (rounds 84 / 87): the refusal for a change that would make a work assignment or project LOOSER than the floor its
 /// parents set — removing a Secure designation that comes from a secure parent, or an Access Permission below the parents'.
 /// Tightening is never refused. One code for every surface that refuses it: <c>/unsecure-project</c> and a BFF write of
-/// <c>sprk_accesspermission</c> / <c>sprk_issecure</c> (<see cref="SecureRootInheritance.CheckRefileAsync"/>).
+/// <c>sprk_accesspermission</c> (<see cref="SecureRootInheritance.CheckRefileAsync"/>). A generic write of <c>sprk_issecure</c>
+/// is refused outright (<see cref="SecureFlagReasonCode"/>, fix round 2).
 /// </summary>
 public static class AccessFollowsParent
 {
     /// <summary>The named 409 reason code.</summary>
     public const string ReasonCode = "sdap.access.access_follows_parent";
+
+    /// <summary>
+    /// Task 175 fix round 2 (K3): a caller-supplied write of <c>sprk_issecure</c> on a work assignment or project through a
+    /// generic BFF writer (the chat / playbook update and create tools, the output orchestrator, the field-mapping push, the
+    /// Office create) is refused: only the transition endpoints (<c>/provision-project</c>, <c>/unsecure-project</c>, with
+    /// F3 and their isolation steps) and the cascade set it.
+    /// </summary>
+    public const string SecureFlagReasonCode = "sdap.access.secure_flag_transition_only";
+
+    /// <summary>The secure flag's column.</summary>
+    internal const string SecureFlagColumn = "sprk_issecure";
+
+    /// <summary>True when a write key names <c>sprk_issecure</c> (any spelling a BFF writer uses).</summary>
+    internal static bool NamesSecureFlag(IEnumerable<KeyValuePair<string, object?>> writes) =>
+        writes.Any(w => string.Equals(SecureRootInheritance.NormalizeColumn(w.Key), SecureFlagColumn, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The columns whose floor a record's parents set (round 87).</summary>
     internal static readonly IReadOnlySet<string> LockedColumns =
@@ -351,6 +373,13 @@ public sealed partial class SecureRootInheritance
     /// fixed (<c>scripts/Set-AccessInheritanceSchema.ps1 -Verify</c>); the rest of the pass writes no further access record.
     /// </summary>
     internal const string ReasonMarkerHidden = "sdap.inherit.access_record_hidden";
+
+    /// <summary>
+    /// <c>sprk_accessinheritance</c> is NOT field-secured (or its metadata cannot be read) — task 175 fix round 2, K2: a user
+    /// could have written any record, so none is trusted; every record is undetermined (nothing loosened, nothing written) and
+    /// the run fails until <c>scripts/Set-AccessInheritanceSchema.ps1 -Apply</c> secures it.
+    /// </summary>
+    internal const string ReasonAccessRecordUnsecured = "sdap.inherit.access_record_not_secured";
 
     /// <summary>The record's own <c>sprk_issecure</c> is EMPTY (task 175): neither secured nor un-secured on a guess.</summary>
     internal const string ReasonOwnFlagEmpty = "sdap.inherit.own_flag_empty";
@@ -578,6 +607,19 @@ public sealed partial class SecureRootInheritance
         if (own is null)
             return new FollowParentsResult(logical, recordId, FollowParentsOutcome.NotFound);
 
+        // Task 175 fix round 2 (F1, K2): a record is decided only on an access record that can be trusted — the column is
+        // field-secured, and an EMPTY one is read as "not written yet" only once the BFF's read of the column is proven.
+        // Otherwise nothing is written: an unreadable record must never be overwritten by the backfill rule's guess.
+        if (await AccessRecordDistrustAsync(own.Marker, ct).ConfigureAwait(false) is { } distrust)
+        {
+            _logger.LogWarning("[FOLLOW-PARENT] {Table} {RecordId}: {Detail} ({Code}); nothing was written.",
+                logical, recordId, distrust.Detail, distrust.Code);
+            return new FollowParentsResult(logical, recordId, FollowParentsOutcome.Undetermined)
+            {
+                ReasonCode = distrust.Code, Detail = distrust.Detail, PermissionFrom = own.Permission, IsSecureAfter = own.Secure != false,
+            };
+        }
+
         var ancestry = await ReadSecureParentsAsync(_dataverse, _logger, logical, recordId, ct, _recordTypes, MaxFilingDepth)
             .ConfigureAwait(false);
         var d = Decide(own.Secure, own.Permission, own.Marker, ancestry, ownSecureSetNow);
@@ -734,6 +776,30 @@ public sealed partial class SecureRootInheritance
     {
         var listed = await ListRecordsAsync(ct).ConfigureAwait(false);
 
+        // Task 175 fix round 2 (K2): no access record is trusted while the column is not field-secured.
+        if (!await AccessRecordColumnSecuredAsync(ct).ConfigureAwait(false))
+        {
+            _logger.LogError("[FOLLOW-PARENT] {Column} is not field-secured (or its metadata could not be read): no access record is " +
+                "trusted, nothing is followed this run ({Code}).", AccessInheritance.Column, ReasonAccessRecordUnsecured);
+            return new FollowParentsPass
+            {
+                Listed = listed.Count,
+                Undetermined = listed.Count,
+                Untrusted = ReasonAccessRecordUnsecured,
+                Problems = new[]
+                {
+                    $"{AccessInheritance.Column} is not field-secured, so no access record is trusted and nothing was followed " +
+                    $"({ReasonAccessRecordUnsecured}; run scripts/Set-AccessInheritanceSchema.ps1 -Apply, then -Verify)",
+                },
+            };
+        }
+
+        // F1: an EMPTY record is read as "not written yet" only once the BFF's read of the column is proven.
+        if (listed.Any(r => !string.IsNullOrEmpty(r.Marker)))
+            _accessRecordReadable = true; // a non-empty record read proves the BFF reads the column
+        var readable = !listed.Any(r => string.IsNullOrEmpty(r.Marker)) || await AccessRecordReadableAsync(ct).ConfigureAwait(false);
+        var unproven = 0;
+
         int parentless = 0, inStep = 0, unsecured = 0, permissions = 0, markers = 0, undetermined = 0, notCompleted = 0, deferred = 0, conflicts = 0;
         int unsecuresTried = 0, writesTried = 0;
         var markerHidden = false;
@@ -743,7 +809,7 @@ public sealed partial class SecureRootInheritance
         var seen = new HashSet<(string, Guid)>();
 
         // Round 1: the batched decision over every record; follow only those with something to write.
-        var needs = new List<(ListedRecord Row, bool Unsecure, bool RecordOnly)>();
+        var needs = new List<(ListedRecord Row, bool Unsecure, bool RecordOnly, bool InheritedSecureFirst)>();
         foreach (var group in listed.GroupBy(r => r.Table))
         {
             var answers = await ReadSecureParentsOfManyAsync(_dataverse, _logger, group.Key, group.Select(r => r.Id).ToList(), ct,
@@ -751,10 +817,19 @@ public sealed partial class SecureRootInheritance
             foreach (var row in group)
             {
                 seen.Add((row.Table, row.Id));
+                if (!readable && string.IsNullOrEmpty(row.Marker))
+                {
+                    unproven++; // never decided on an empty read the BFF cannot vouch for (F1): nothing written
+                    continue;
+                }
+
                 var d = Decide(row.Secure, row.Permission, row.Marker, answers[row.Id]);
                 if (d.NeedsWrite)
                 {
-                    needs.Add((row, d.Unsecure, !d.Tighten && !d.Unsecure && !d.Loosen));
+                    // K1: a record about to be recorded as INHERITED secure (no record yet, secure, under a secure floor) is
+                    // written before any other record-only write, so that a later un-secure of its parent finds it recorded.
+                    needs.Add((row, d.Unsecure, !d.Tighten && !d.Unsecure && !d.Loosen,
+                        string.IsNullOrEmpty(row.Marker) && row.Secure == true && answers[row.Id].HasSecureParent));
                     continue;
                 }
 
@@ -775,15 +850,22 @@ public sealed partial class SecureRootInheritance
         }
 
         // The un-secures in a fixed order resumed after the cursor; then the rest (projects before work assignments).
+        if (unproven > 0)
+        {
+            undetermined += unproven;
+            Problem($"{unproven} record(s) read an EMPTY {AccessInheritance.Column} and the BFF's read of the column could not be " +
+                $"proven, so nothing was written to them ({ReasonMarkerHidden}; run scripts/Set-AccessInheritanceSchema.ps1 -Verify)");
+        }
+
         var unsecureOrder = needs.Where(n => n.Unsecure).Select(n => n.Row)
             .OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
-        var recordOnly = needs.Where(n => n.RecordOnly).Select(n => (n.Row.Table, n.Row.Id)).ToHashSet();
         var start = unsecureResumeAfter is { } after ? unsecureOrder.FindIndex(r => CompareKeys((r.Table, r.Id), after) > 0) : 0;
         if (start < 0)
             start = 0;
         var ordered = unsecureOrder.Skip(start).Concat(unsecureOrder.Take(start)).Select(r => (Row: r, Unsecure: true))
-            .Concat(needs.Where(n => !n.Unsecure).Select(n => (Row: n.Row, Unsecure: false))
-                .OrderBy(n => n.Row.Table, StringComparer.Ordinal).ThenBy(n => n.Row.Id))
+            .Concat(needs.Where(n => !n.Unsecure)
+                .OrderByDescending(n => n.InheritedSecureFirst).ThenBy(n => n.Row.Table, StringComparer.Ordinal).ThenBy(n => n.Row.Id)
+                .Select(n => (Row: n.Row, Unsecure: false)))
             .ToList();
 
         var changedParents = new List<(string Table, Guid Id)>();
@@ -796,9 +878,9 @@ public sealed partial class SecureRootInheritance
                 continue;
             }
 
-            // Field security hides the access record from the BFF (a write read back empty): writing more of them only
-            // churns - every one would read back empty again. The values themselves are still raised; nothing is loosened.
-            if (markerHidden && recordOnly.Contains((row.Table, row.Id)))
+            // Field security hides the access record from the BFF (a write read back empty): no record read in this run can be
+            // trusted any more, so nothing further is followed (fix round 2: every write, not just record-only ones).
+            if (markerHidden)
             {
                 hidden++;
                 continue;
@@ -815,13 +897,6 @@ public sealed partial class SecureRootInheritance
             }
 
             Tally(await FollowParentsAsync(row.Table, row.Id, traceId, ct).ConfigureAwait(false), counted: false);
-        }
-
-        if (hidden > 0)
-        {
-            notCompleted += hidden;
-            Problem($"{hidden} more access record(s) were not written: {AccessInheritance.Column} reads back empty to the BFF " +
-                $"({ReasonMarkerHidden}; run scripts/Set-AccessInheritanceSchema.ps1 -Verify)");
         }
 
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
@@ -844,6 +919,12 @@ public sealed partial class SecureRootInheritance
             changedParents = new List<(string Table, Guid Id)>();
             foreach (var root in below.Where(r => r.Confirmed))
             {
+                if (markerHidden)
+                {
+                    hidden++; // fix round 2: round 2 stops too once a record read back empty
+                    continue;
+                }
+
                 // Any of them may un-secure, so the un-secure bound is checked before each (verifier d) and counted after.
                 if (unsecuresTried >= maxUnsecures || writesTried >= maxRecordWrites)
                 {
@@ -860,8 +941,16 @@ public sealed partial class SecureRootInheritance
             }
         }
 
+        if (hidden > 0)
+        {
+            notCompleted += hidden;
+            Problem($"{hidden} more record(s) were not followed: {AccessInheritance.Column} reads back empty to the BFF " +
+                $"({ReasonMarkerHidden}; run scripts/Set-AccessInheritanceSchema.ps1 -Verify)");
+        }
+
         return new FollowParentsPass
         {
+            Untrusted = markerHidden || unproven > 0 ? ReasonMarkerHidden : null,
             Listed = listed.Count,
             Parentless = parentless,
             InStep = inStep,
@@ -1102,6 +1191,7 @@ public sealed partial class SecureRootInheritance
             var back = await ReadOwnAccessAsync(logical, recordId, ct).ConfigureAwait(false);
             if (string.IsNullOrEmpty(back?.Marker))
             {
+                _accessRecordReadable = false;
                 _logger.LogError("[FOLLOW-PARENT] {Table} {RecordId}: its {Column} was written but reads back empty - field-level " +
                     "security hides it from the BFF. Nothing is loosened until it can be read.", logical, recordId, AccessInheritance.Column);
                 return ColumnWrite.ReadsBackEmpty;
@@ -1117,6 +1207,179 @@ public sealed partial class SecureRootInheritance
         }
     }
 
+    /// <summary>
+    /// Task 175 fix round 2 (K1, owner round 87 item 1 for records secured before this deploy): BEFORE a matter or project's
+    /// flag is cleared, every work assignment and project filed below it that has NO access record yet gets one by the backfill
+    /// rule, decided while the parent is still secure — so a Secure it holds through that parent is recorded as INHERITED and
+    /// follows the parent out in the cascade after. At most <see cref="MaxInlineCascade"/> records; best effort (never throws):
+    /// a record not reached stays secure (the backfill rule never loosens) and is reported.
+    /// </summary>
+    public async Task<int> RecordBelowBeforeUnsecureAsync(string parentTable, Guid parentId, string traceId, CancellationToken ct)
+    {
+        if (!IsParent(parentTable))
+            return 0;
+
+        var recorded = 0;
+        try
+        {
+            var walk = await ListFiledRootsBelowAsync(_dataverse, _logger, new[] { (parentTable.Trim().ToLowerInvariant(), parentId) }, ct, _recordTypes)
+                .ConfigureAwait(false);
+            var examined = 0;
+            foreach (var root in walk.Roots.Where(r => r.Confirmed))
+            {
+                if (examined++ >= MaxInlineCascade)
+                    break;
+                var own = await ReadOwnAccessAsync(root.Table, root.Id, ct).ConfigureAwait(false);
+                if (own is null || !string.IsNullOrEmpty(own.Marker))
+                    continue;
+                var follow = await FollowParentsAsync(root.Table, root.Id, traceId, ct).ConfigureAwait(false);
+                if (follow.MarkerWritten)
+                    recorded++;
+                else if (!follow.IsComplete || follow.Outcome == FollowParentsOutcome.Undetermined)
+                    _logger.LogWarning("[FOLLOW-PARENT] {Table} {RecordId}: its access record was not written before {ParentTable} {ParentId} " +
+                        "was un-secured ({Code}); it stays secure (the backfill rule never loosens).", root.Table, root.Id, parentTable, parentId,
+                        follow.ReasonCode);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[FOLLOW-PARENT] The records below {Table} {Id} could not all be recorded before its un-secure; any " +
+                "not recorded stays secure.", parentTable, parentId);
+        }
+
+        _logger.LogInformation("[FOLLOW-PARENT] Below {Table} {Id}: {Recorded} access record(s) written before its un-secure. TraceId={TraceId}",
+            parentTable, parentId, recorded, traceId);
+        return recorded;
+    }
+
+    // ── Task 175 fix round 2: whether access records can be trusted (cached for this scope: one job pass, one request) ──
+
+    private bool? _accessRecordColumnSecured;
+    private bool? _accessRecordReadable;
+
+    /// <summary>Why no access record (or this EMPTY one) can be trusted, or null when it can.</summary>
+    private async Task<(string Code, string Detail)?> AccessRecordDistrustAsync(string? marker, CancellationToken ct)
+    {
+        if (!await AccessRecordColumnSecuredAsync(ct).ConfigureAwait(false))
+            return (ReasonAccessRecordUnsecured, $"{AccessInheritance.Column} is not field-secured, so no access record is trusted");
+        if (string.IsNullOrEmpty(marker) && !await AccessRecordReadableAsync(ct).ConfigureAwait(false))
+            return (ReasonMarkerHidden, $"its {AccessInheritance.Column} reads empty and the BFF's read of that column could not be proven");
+        return null;
+    }
+
+    /// <summary>
+    /// K2: the column's metadata says <c>IsSecured</c> on both tables. Anything else — not secured, missing, unreadable — is
+    /// false (fail closed). Asked once per scope.
+    /// </summary>
+    private async Task<bool> AccessRecordColumnSecuredAsync(CancellationToken ct)
+    {
+        if (_accessRecordColumnSecured is { } known)
+            return known;
+        try
+        {
+            foreach (var table in new[] { WorkAssignment, Project })
+            {
+                var rows = await _webApi.QueryAsync<AttributeSecurityRow>(
+                    $"EntityDefinitions(LogicalName='{table}')/Attributes", $"LogicalName eq '{AccessInheritance.Column}'", "IsSecured",
+                    cancellationToken: ct).ConfigureAwait(false);
+                if (rows is not { Count: 1 } || rows[0].IsSecured != true)
+                {
+                    _logger.LogError("[FOLLOW-PARENT] {Table}.{Column} is not field-secured ({Found} definition(s)).", table,
+                        AccessInheritance.Column, rows?.Count ?? 0);
+                    return (_accessRecordColumnSecured = false).Value;
+                }
+            }
+
+            return (_accessRecordColumnSecured = true).Value;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[FOLLOW-PARENT] Whether {Column} is field-secured could not be read; no access record is trusted.",
+                AccessInheritance.Column);
+            return (_accessRecordColumnSecured = false).Value;
+        }
+    }
+
+    /// <summary>
+    /// F1: the BFF's own read of the column is PROVEN — a non-empty record read back in this scope, or the BFF application user
+    /// holds the System Administrator role, or a field security profile it is a member of grants Read on the column on both
+    /// tables. Anything else, a fault included, is unproven (fail closed). Asked at most once per scope.
+    /// </summary>
+    private async Task<bool> AccessRecordReadableAsync(CancellationToken ct)
+    {
+        if (_accessRecordReadable is { } known)
+            return known;
+        try
+        {
+            var me = (await _webApi.QueryAsync<SystemUserIdRow>("systemusers", "Microsoft.Dynamics.CRM.EqualUserId(PropertyName='systemuserid')",
+                "systemuserid", cancellationToken: ct).ConfigureAwait(false)).SingleOrDefault()?.SystemUserId;
+            if (me is not { } user || user == Guid.Empty)
+                return Unproven("the BFF's own user could not be read");
+
+            var admin = await _webApi.QueryAsync<RoleIdRow>($"systemusers({user})/systemuserroles_association",
+                "name eq 'System Administrator'", "roleid", cancellationToken: ct).ConfigureAwait(false);
+            if (admin.Count > 0)
+                return (_accessRecordReadable = true).Value;
+
+            var profiles = (await _webApi.QueryAsync<ProfileIdRow>($"systemusers({user})/systemuserprofiles_association", null,
+                "fieldsecurityprofileid", cancellationToken: ct).ConfigureAwait(false))
+                .Select(p => p.FieldSecurityProfileId).Where(id => id != Guid.Empty).Distinct().ToList();
+            if (profiles.Count == 0)
+                return Unproven("the BFF's user is in no field security profile");
+
+            var grants = await _webApi.QueryAsync<FieldPermissionRow>("fieldpermissions",
+                $"attributelogicalname eq '{AccessInheritance.Column}' and canread eq 4 and (" +
+                string.Join(" or ", profiles.Select(p => $"_fieldsecurityprofileid_value eq {p}")) + ")",
+                "entityname", cancellationToken: ct).ConfigureAwait(false);
+            var tables = grants.Select(g => g.EntityName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return tables.Contains(WorkAssignment) && tables.Contains(Project)
+                ? (_accessRecordReadable = true).Value
+                : Unproven("no field security profile of the BFF's user grants Read on the column on both tables");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[FOLLOW-PARENT] Whether the BFF can read {Column} could not be established.", AccessInheritance.Column);
+            return (_accessRecordReadable = false).Value;
+        }
+
+        bool Unproven(string why)
+        {
+            _logger.LogError("[FOLLOW-PARENT] The BFF's read of {Column} is not proven: {Why}. No EMPTY access record is overwritten.",
+                AccessInheritance.Column, why);
+            return (_accessRecordReadable = false).Value;
+        }
+    }
+
+    private sealed class AttributeSecurityRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("IsSecured")]
+        public bool? IsSecured { get; set; }
+    }
+
+    private sealed class SystemUserIdRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("systemuserid")]
+        public Guid SystemUserId { get; set; }
+    }
+
+    private sealed class RoleIdRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("roleid")]
+        public Guid RoleId { get; set; }
+    }
+
+    private sealed class ProfileIdRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("fieldsecurityprofileid")]
+        public Guid FieldSecurityProfileId { get; set; }
+    }
+
+    private sealed class FieldPermissionRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("entityname")]
+        public string? EntityName { get; set; }
+    }
+
     /// <summary>A record's own Secure flag, Access Permission and access record (null: it does not exist). A fault propagates.</summary>
     private sealed record OwnAccess(bool? Secure, int? Permission, string? Marker);
 
@@ -1126,9 +1389,12 @@ public sealed partial class SecureRootInheritance
         query.TopCount = 1;
         query.Criteria.AddCondition(logical + "id", ConditionOperator.Equal, recordId);
         var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return row is null
-            ? null
-            : new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row), row.GetAttributeValue<string>(AccessInheritance.Column));
+        if (row is null)
+            return null;
+        var marker = row.GetAttributeValue<string>(AccessInheritance.Column);
+        if (!string.IsNullOrEmpty(marker))
+            _accessRecordReadable = true; // a non-empty record read back proves the BFF reads the column (fix round 2, F1)
+        return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row), marker);
     }
 
     private static int? PermissionOfRow(Entity row) =>

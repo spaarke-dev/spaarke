@@ -482,6 +482,25 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
+    /// <summary>
+    /// Task 175 fix round 2 (K2): what the column metadata says about <c>sprk_accessinheritance</c>'s field security (both
+    /// tables). False: the cascade trusts no access record.
+    /// </summary>
+    public bool AccessRecordColumnSecured { get; set; } = true;
+
+    /// <summary>
+    /// Task 175 fix round 2 (F1): whether the BFF application user holds READ on <c>sprk_accessinheritance</c> through a field
+    /// security profile (the platform answer the cascade asks before writing over an EMPTY read). Also false whenever the
+    /// child world hides the column (an FLS read loss).
+    /// </summary>
+    public bool AccessRecordReadableByProfile { get; set; } = true;
+
+    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role.</summary>
+    public bool BffIsSystemAdministrator { get; set; }
+
+    /// <summary>The BFF application user's systemuserid in this fixture.</summary>
+    public static readonly Guid BffApplicationUserId = Guid.Parse("0000b175-0000-0000-0000-00000000bff1");
+
     // ── Task 133 c1 (owner round 10 item 4): the rows an owner move of a root cascades to ──
 
     /// <summary>
@@ -680,6 +699,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
+        AccessRecordColumnSecured = true;
+        AccessRecordReadableByProfile = true;
+        BffIsSystemAdministrator = false;
         OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
         Grants.Clear();
@@ -1233,6 +1255,30 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         RejectUnknownColumns(entitySet, select);
 
         var payload = new List<Dictionary<string, object?>>();
+
+        // Task 175 fix round 2: the access record's trust checks (K2 column metadata; F1 the BFF's own read of it).
+        if (entitySet.StartsWith("EntityDefinitions(", StringComparison.Ordinal) && entitySet.EndsWith("/Attributes", StringComparison.Ordinal))
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["IsSecured"] = AccessRecordColumnSecured } });
+        if (entitySet == "systemusers" && filter is not null && filter.Contains("EqualUserId", StringComparison.Ordinal))
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["systemuserid"] = BffApplicationUserId } });
+        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserroles_association")
+        {
+            return JsonSerializer.Serialize(BffIsSystemAdministrator
+                ? new[] { new Dictionary<string, object?> { ["roleid"] = Guid.Parse("0000b175-0000-0000-0000-0000000005a1") } }
+                : Array.Empty<Dictionary<string, object?>>());
+        }
+        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserprofiles_association")
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d") } });
+        if (entitySet == "fieldpermissions")
+        {
+            return JsonSerializer.Serialize(AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
+                ? new[]
+                {
+                    new Dictionary<string, object?> { ["entityname"] = "sprk_workassignment" },
+                    new Dictionary<string, object?> { ["entityname"] = "sprk_project" },
+                }
+                : Array.Empty<Dictionary<string, object?>>());
+        }
 
         switch (entitySet)
         {

@@ -213,6 +213,13 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
             traceId, unsecureAfter, MaxUnsecuresPerRun, MaxRecordWritesPerRun, cancellationToken).ConfigureAwait(false);
         lock (_cursorGate)
             _unsecureCursor = follow.UnsecureResumeAfter;
+        if (follow.Untrusted is { } untrusted)
+        {
+            // Task 175 fix round 2: access records could not be trusted (the column is not field-secured, or the BFF's read
+            // of it is not proven) — nothing was followed on them; the run fails until the schema script fixes it.
+            incomplete.Add($"access records not trusted ({untrusted}): {string.Join("; ", follow.Problems.Take(5))}");
+        }
+
         if (follow.NotCompleted > 0)
         {
             incomplete.Add($"{follow.NotCompleted} filed record(s) not brought into step with their parents (left at the more " +
@@ -288,6 +295,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     permissionsChanged = follow.PermissionsChanged,
                     accessRecordsWritten = follow.MarkersWritten,
                     changedConcurrently = follow.Conflicts,
+                    untrusted = follow.Untrusted,
                     undetermined = follow.Undetermined,
                     notCompleted = follow.NotCompleted,
                     deferred = follow.Deferred,

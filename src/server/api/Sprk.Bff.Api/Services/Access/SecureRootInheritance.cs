@@ -488,6 +488,11 @@ public sealed partial class SecureRootInheritance
     /// <param name="writes">The columns the write sets, by any spelling a BFF writer uses: the logical name, or the
     /// navigation property with <c>@odata.bind</c>; values as <see cref="EntityReference"/>, <see cref="Guid"/>, a bind path
     /// (<c>/sprk_matters(…)</c>), a GUID string, or <c>null</c> for a clear.</param>
+    /// <summary>Task 175 fix round 2 (K3): the refusal text for a generic write of <c>sprk_issecure</c>.</summary>
+    internal const string SecureFlagRefusalText =
+        "sprk_issecure is set only by Make Secure and Remove Secure (and, for a record filed under a secure record, by Spaarke " +
+        "following its parent), so it was not written";
+
     public async Task<RecordOwnerResolution?> CheckRefileAsync(
         string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct)
     {
@@ -501,6 +506,11 @@ public sealed partial class SecureRootInheritance
         if (AccessInheritance.IsNamedIn(materialized))
             return Refusal(AccessInheritance.ServerOnlyReasonCode,
                 $"{AccessInheritance.Column} is written only by Spaarke (it records what is set on the record and what is inherited), so it was not written");
+
+        // Task 175 fix round 2 (K3): the secure flag is set only by the transitions (F3 and their isolation steps) and the
+        // cascade — never by a generic writer, whatever the value.
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText);
 
         List<FilingWrite> filingWrites;
         try
@@ -833,6 +843,8 @@ public sealed partial class SecureRootInheritance
         if (AccessInheritance.IsNamedIn(materialized))
             return SecureRootCreatePlan.Refused(Refusal(AccessInheritance.ServerOnlyReasonCode,
                 $"{AccessInheritance.Column} is written only by Spaarke, so the {noun} was not created"));
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText));
 
         List<FilingWrite> filingWrites;
         try

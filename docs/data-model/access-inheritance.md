@@ -75,6 +75,20 @@ and an empty read-back fails the job run (`sdap.inherit.access_record_hidden`) a
 A record that is not valid JSON is reported (`sdap.inherit.access_record_unreadable`), loosens nothing and is not
 overwritten.
 
+## When a record is trusted (fix round 2)
+
+- **The column must be field-secured.** Before trusting any record, the cascade reads the column's metadata (`IsSecured`
+  on both tables), once per job pass or request. If the column is not secured, or the metadata cannot be read, no record
+  is trusted: every record is undetermined, nothing is written, and the job run fails with
+  `sdap.inherit.access_record_not_secured`.
+- **An EMPTY record is decided on only once the BFF's read is proven.** Proof, once per job pass or request, is any one of:
+  - a non-empty record read in the same pass or request;
+  - the BFF user holds the System Administrator role;
+  - one of its field security profiles grants Read on the column on both tables.
+
+  Without proof, the record is undetermined (`access_record_hidden`) and nothing is written. An empty read the BFF cannot
+  vouch for may hide a real record, so the backfill rule's guess must never overwrite it.
+
 ## Backfill (existing rows)
 
 None by script. A record secured by inheritance gets its record at once (inherited). The first time the job (every 5
@@ -83,8 +97,10 @@ backfill rule against the current floor and writes the column:
 - a value EQUAL to the floor is inherited;
 - a value STRICTER than the floor is set on the record.
 
-A parentless record's values are all its own. So does a record whose parent was un-secured before the job first saw it:
-it stays secure (fail closed), and its F3 holder can remove the designation, as on a parentless record.
+A parentless record's values are all its own. A matter or project's own `/unsecure-project` first records every record
+below it that has no record yet, while it is still secure. Those records are recorded as inherited and follow it out. A
+record whose parent was un-secured outside the BFF before the job first saw it stays secure (fail closed), and its F3 holder
+can remove the designation, as on a parentless record.
 
 ## Writers and readers
 

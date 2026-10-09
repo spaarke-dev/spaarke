@@ -174,6 +174,17 @@ existing in-process job (ADR-036/052). No package, endpoint, job or timer. One D
 | (d) | round-2 un-secures did not count against `MaxUnsecuresPerRun` | checked before and counted after each round-2 follow | `UnsecuresInTheLaterRounds_CountAgainstTheRunsBound` |
 | (e) | a failed record write was counted as in step | reported (`access_record_not_written`), `notCompleted`, the run fails | `AnAccessRecordThatCannotBeWritten_IsReportedAsAProblem` |
 
+## Fix round 2 (final verifier pass 2 on `37113c322`: F1 + F4, K1-K4)
+
+| Item | What was wrong | Fix | Test |
+|---|---|---|---|
+| **F1** | A record the BFF can WRITE but not READ read EMPTY; the concurrency check saw empty = empty and the backfill rule's guess overwrote the real record. Once read came back, a hand-secured child could be un-secured without F3. | Nothing is decided on, and nothing written over, an EMPTY read until the BFF's read of the column is PROVEN in this scope (one job pass, one request), cached: a non-empty record read in the scope; or the BFF user holds System Administrator; or a field security profile it is a member of grants Read on the column on both tables (`EqualUserId` -> `systemuserroles_association` / `systemuserprofiles_association` -> `fieldpermissions`). Unproven: `access_record_hidden`, Undetermined, nothing written. This applies to every path because it sits in `FollowParentsAsync`: the job's round 1 (checked up front over the listing) and round 2, the parent's records-below step and cascade, Make Secure, re-files, and task 158's secure path. A read-back that comes back empty flips the cache to unproven and stops both rounds. | `AnAccessRecordTheBffCannotRead_IsNeverOverwritten_NothingIsWritten_AndTheRunFails`; seeding check: the guard forced to "readable" turns it red |
+| **F4** | The FLS test did not cover an own-secure record, round 2 or an inline path | The test now has an inherited record under an ordinary matter AND an own-secure record under a secure matter. It asserts both stored records are unchanged and nothing is written (no record, Access Permission or owner write), through the job and through the secure matter's own `/unsecure-project`. A second test covers round 2 (`OnceARecordReadsBackEmpty_NeitherRoundWritesAnotherRecord`). | those two |
+| **K1** | Children secured before the deploy stayed secure for good when their parent was un-secured (round 87 item 1 gap) | `/unsecure-project` Step 1.6 (`RecordBelowBeforeUnsecureAsync`): before the parent's flag is cleared, every record below it with no access record gets one by the backfill rule while the parent is still secure, so it is recorded as inherited and follows in the cascade (best effort, at most 50; one not reached stays secure). The job writes inherited-secure backfills before any other record-only write. | `AChildSecuredBeforeTheDeploy_IsRecordedAsInheritedBeforeItsParentIsUnsecured_AndFollowsIt` (seeding check: step removed, red), `TheJob_RecordsAnInheritedSecureFirst` |
+| **K2** | The cascade trusted records without knowing the column was secured | Before trusting any record, the column's metadata must say `IsSecured` on both tables (cached per scope; a fault = not secured). Otherwise every record is Undetermined (`sdap.inherit.access_record_not_secured`), nothing is written and the job run fails (`followParents.untrusted`). | `WhenTheColumnIsNotFieldSecured_NoAccessRecordIsTrusted_NothingIsFollowed_AndTheRunFails` |
+| **K3** | `CheckRefileAsync` let `sprk_issecure` (true or false) through the app-only generic writers, skipping F3 and the provisioning / un-secure steps | The gate (`SecureRootFilingGate.CheckAsync` / `PlanCreateAsync`, and `CheckRefileAsync` / `PlanCreateAsync`) refuses any caller-supplied `sprk_issecure` write on a work assignment or project: `sdap.access.secure_flag_transition_only`. Only `/provision-project`, `/unsecure-project` and the cascade set it, and they write it directly, not through the gate. | `UpdateHandler_ASecureFlagWrite_IsRefused_AndNothingIsWritten` (true and false), `ActionCore_ASecureFlagWrite_IsRefused_AndNothingIsWritten`, `FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing`; gate update and create in the forged-record test |
+| **K4** | A parent re-secured between the child's Step 1.5 re-check and its flag clear | Left as a documented K (below). | - |
+
 ## Decisions and interpretations
 - **Access Permission vs F3 (O-5, answered: "same as today").** Round 87 item 4 says removing extra strictness needs F3. On a
   parentless record today only removing Secure is F3-gated; the Access Permission is edited on the form with Write
@@ -246,7 +257,17 @@ New and changed tests, by area:
 | No read-back after a record write (fix round) | `AnAccessRecordTheBffCannotRead_…` |
 | Round-2 un-secures not counted (fix d) | `UnsecuresInTheLaterRounds_CountAgainstTheRunsBound` |
 
-### Suite results (2026-10-09, fix round, rebased on `c8a87d818`)
+### Suite results, fix round 2 (2026-10-09)
+- `tests/unit/Sprk.Bff.Api.Tests`: 19,110 passed, 3 failed, 54 skipped on the contended machine. The 3 were AI spend-limit,
+  workspace AI summary and document email contract tests; they pass when re-run on their own (6 passed). The task-175
+  classes: `ChildAccessCascadeTests` 26, writer tests incl. K3, all pass.
+- `tests/Spaarke.ArchTests`: 841 passed. `Sprk.Bff.Api.IntegrationTests`: 87 passed, 5 skipped.
+- `Set-AccessInheritanceSchema.ps1 -SelfTest`: 26 checks PASS.
+- Seeding checks (reverted): the readability guard forced to "readable" turns the FLS test red; removing Step 1.6 turns the
+  K1 test red.
+- Publish: 38,156,084 B zipped (192 files) vs master `e78c47149` 38,110,531 B: **+45,553 B (+0.05 MB)**.
+
+### Suite results (2026-10-09, fix round 1, rebased on `c8a87d818`)
 - `tests/unit/Sprk.Bff.Api.Tests`: 19,098 passed, 7 failed, 54 skipped in the full run on a contended machine (other
   sessions' test hosts at 6-7 GB each); the 7 (Compose, RAG, health-header and agreement seam tests, none touching this
   task's code) all pass when re-run on their own (34 passed). Every task-175 class passes.
@@ -264,6 +285,13 @@ New and changed tests, by area:
 - `dotnet list package --vulnerable --include-transitive`: none (no package added).
 
 ## Known limits
+- **K2 (K4 of fix round 2):** a parent RE-SECURED between a cascaded child's Step 1.5 re-check (its parents are no longer
+  secure) and the child's flag clear: the child is un-secured although its parent is secure again. The next job run secures
+  it again (task 158's securing loop), and every BFF surface already treats it as secure through the parent meanwhile
+  (task 174's effective rule).
+- **K2 (fix round 2, F1):** the readability proof's data branch accepts any non-empty record read in the scope. Field
+  security can also be granted per record (field sharing); a BFF that reads one record through such a share but not the
+  column in general would pass that branch. The deploy grants the column through the writer profile only (`-Verify`).
 - **K2 (fix c):** the concurrency check is re-read-and-compare just before the write, not a row-version (`If-Match`) write:
   the app-only `IGenericEntityService` the cascade writes through has no conditional update. A user edit landing in the
   milliseconds between that re-read and the write can still be overwritten; the stored value is then never below the floor

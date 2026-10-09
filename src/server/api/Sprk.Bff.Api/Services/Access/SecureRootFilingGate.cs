@@ -52,6 +52,12 @@ public sealed class SecureRootFilingGate
                 $"{AccessInheritance.Column} is written only by Spaarke, so it was not written");
         }
 
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+        {
+            // Task 175 fix round 2 (K3): the secure flag is the transitions' and the cascade's alone, whatever the host.
+            return RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode, SecureRootInheritance.SecureFlagRefusalText);
+        }
+
         var filing = SecureRootInheritance.FilingColumnsOf(table.Trim().ToLowerInvariant());
         // Task 175 (owner round 84): a write of sprk_accesspermission / sprk_issecure on an existing record is checked too —
         // refused when the record has a parent (its access follows it).
@@ -96,6 +102,13 @@ public sealed class SecureRootFilingGate
             // Task 175 fix round (verifier F1-1): refused whatever the host — the access record is the cascade's alone.
             return SecureRootCreatePlan.Refused(RecordOwnerResolution.Refused(AccessInheritance.ServerOnlyReasonCode,
                 $"{AccessInheritance.Column} is written only by Spaarke, so it was not created"));
+        }
+
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+        {
+            // Task 175 fix round 2 (K3): a create never carries the secure flag — a secure create is planned here, not asked.
+            return SecureRootCreatePlan.Refused(RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode,
+                SecureRootInheritance.SecureFlagRefusalText));
         }
 
         if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
