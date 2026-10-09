@@ -478,7 +478,7 @@ IF task touches 4+ files in INDEPENDENT modules AND the per-module work is subst
      - Files where one imports from another → MUST serialize
 
   3. DELEGATE to subagents:
-     - Use the **Agent tool** with subagent_type="general-purpose"
+     - Use the **Agent tool** with subagent_type="implementer" (Sonnet/high), or pass `model` chosen per `.claude/constraints/agent-cost.md` — a launch with no model is refused by the `PreToolUse` hook
      - Send ONE message with MULTIPLE Agent tool calls for parallel work
      - Each subagent handles one module/component
      - Provide each subagent with:

@@ -1146,7 +1146,7 @@ every read that carries a value — and in-memory doubles that serialize the sha
 **What happens.** Every tool step of an agent re-sends its whole context. In early October 2026, five parallel projects ran fan-outs: 65–92% of 6,500–19,000 model calls a day came from sub-agents, averaging ~300k tokens of context per call. Most ran on Opus, because `settings.json` sets `"model": "opus"` and sub-agents inherit it. Estimated spend rose from $60–240 a day to $1,100–2,600. About two-thirds of the sub-agent cost was cache writes, because each new agent writes its context once. An agent resumed after its 5-minute cache expired writes its whole context again: in one session, 96 of 138 large writes came after a 5–60 minute pause. The same parallelism exhausted Windows memory. Bash fork failed with `0xC000012D` (commit limit) and Claude Code exited with `0xC0000409`.
 
 **Rule.** `.claude/constraints/agent-cost.md`:
-- sub-agents default to Sonnet;
+- every agent states the model and effort chosen for its work;
 - one top-tier independent review per change set;
 - small, scoped agents;
 - a fresh short-brief agent rather than resuming an idle one;
@@ -1154,7 +1154,7 @@ every read that carries a value — and in-memory doubles that serialize the sha
 - compact main sessions at 400k.
 
 **Enforced by:** `.claude/settings.json`:
-- `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`;
+- a `PreToolUse` hook (`scripts/quality/require-agent-model.py`) that refuses an agent launch naming no model, so the session chooses one per the model table, superseding the brief `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default (owner 2026-10-09: no arbitrary default);
 - `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`;
 - `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`;
 - `workflowSizeGuideline: small`;
