@@ -117,7 +117,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
   `CallerRecordAccessProbe`, the route ledger (`RouteAuthorizationGuardTests.Ledger.cs`), ADR-034, ADR-003's
   `ExternalCallerContext`. Before an access-touching task: fetch master, re-read those files and name them in the
   completion record; check uac-r2's open PRs; reuse their mechanisms; their files change only through their review;
-  if their code invalidates the plan, stop and escalate. **Channel: issue #1355** (their sessions hold cross-session messages; use the issue). Open with them (2026-10-07):
+  if their code invalidates the plan, stop and escalate. **Channel: issue #1355 AND a SendMessage to their session** (`spaarke-wt-unified-access-control-r2-*`, via ListAgents): as of 2026-10-09 #1355 comments do not reach their session on their own, and their session accepts cross-session messages. D-113 records their answers on 039/#1391/044/046/048/126. Open with them (2026-10-07):
   review **PR #1390** (039 lineage + role config) and **PR #1391** (org-owned AppendTo fix in `OwnedChildWrite`); name
   **one canonical work-assignment create path** (`RecordCreationService` vs `OwnedChildWrite`, D-65 — 046 waits); agree
   the **move of the write core out of `Services/Ai`** (D-66, task 048). Their binding conditions: register only lookup
