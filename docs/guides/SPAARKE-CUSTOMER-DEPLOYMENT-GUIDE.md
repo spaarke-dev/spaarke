@@ -146,7 +146,7 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 |---|---|---|
 | Customer ID | `acme` — the customerId standard: 3-8 lowercase letters and digits, starting with a letter ([naming convention](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)) | Assigned once at customer intake; abbreviate longer names (`northwind` → `nwind`) |
 | Customer display name | "Acme Legal Services" | Customer intake |
-| The customer's own subscription ID | `2ff9ee48-...` | **The operator creates it** (prereqs.yaml PRQ-S-00) and grants the L2 identity **Owner** on it (PRQ-S-04, `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Required at intake for every model; nothing defaults it (T228) |
+| The customer's own subscription ID | `2ff9ee48-...` | **The operator creates it** (prereqs.yaml PRQ-S-00), places it in the `spaarke-customers` management group (PRQ-S-06 — the common customer policy, ADR-027; `scripts/provisioning/Deploy-ManagementGroups.ps1`) and grants the L2 identity **Owner** on it (PRQ-S-04, `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Required at intake for every model; nothing defaults it (T228) |
 | The customer's Dataverse environment URL | `https://spaarke-acme.crm.dynamics.com/` | **The operator creates it** (PRQ-C-09) with domain `spaarke-{customerId}` (or `spaarke-{customerId}-{environmentName}`) and adds the L2 Worker identity as a System Administrator application user. Required at intake (`dataverseEnvUrl`); H5 adopts it (T228) |
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
@@ -163,6 +163,14 @@ Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline t
 - **Azure subscription vCPU quota** — verify per SKU per region
 - **The customer's subscription and Dataverse environment** — created by the operator before the run (PRQ-S-00, PRQ-S-04,
   PRQ-C-09; T228). L2 creates neither — the former environment-creation rate limit no longer applies
+- **Management groups + common customer policy** — one-time per tenant (ADR-027, T262): `spaarke-environments` →
+  `spaarke-customers` (`infrastructure/bicep/management-groups.bicep`) with `infrastructure/bicep/customer-policy.bicep`
+  assigned at `spaarke-customers` (built-in definitions, Audit / DoNotEnforce — it reports, never blocks a deployment).
+  `pwsh scripts/provisioning/Deploy-ManagementGroups.ps1` prints the plan; `-Apply` creates, assigns and moves
+  (needs Owner — or Contributor + User Access Administrator — at `/`; see the script's REQUIRED ACCESS). Each new
+  customer subscription then joins `spaarke-customers` before its first run (PRQ-S-06):
+  `az account management-group subscription add --name spaarke-customers --subscription <id>` (management-group write on
+  `spaarke-customers` + Owner on the subscription — no tenant-level right)
 - **SPE container type + owning app** — one-time per container type, not per customer: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) (owning app with a federated credential trusting the L2 Worker UAMI — no certificate, no secret; `Spaarke Model 1` exists since 2026-10-03). H0's `SpeOwnerCredential` check refuses the run until it is in place; there is no 24 h wait
 - **Exchange admin app** — one-time per tenant, not per customer: §4.2.1 (`Spaarke Exchange Admin`, a federated credential trusting the L2 Worker UAMI — no certificate, no secret — plus a narrowed Exchange role). H14a and H13 T4 report "not configured" until it is in place
 - **Customer admin consent (Model 2)** — one-time customer action captured by H0.5
