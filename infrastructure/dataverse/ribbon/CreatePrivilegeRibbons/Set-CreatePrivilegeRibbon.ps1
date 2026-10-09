@@ -37,9 +37,12 @@
                  read back by script, so -Verify passes it and prints a manual check
                  (Visible = DataSourceInfo(<table>, DataSourceInfo.CreatePermission));
       UNRULED  - shown to every user: -Verify FAILS.
-    -Apply does NOT change an appaction. A Power Fx rule is authored in the command designer (the formula is compiled
-    into a component library .msapp that no supported API writes), and hiding or deleting a customisation someone made
-    is an owner decision. See README "Modern commands".
+    A Power Fx rule is authored in the command designer (the formula is compiled into a component library .msapp that
+    no supported API writes), so -Apply cannot add one. Hiding or deleting a customisation someone made is an owner
+    decision: -Apply hides EXACTLY the appactions listed in create-launchers.json "hideAppActions" (by appactionid; the
+    row's uniquename must match and it must be unmanaged and call a launcher, else nothing is written), sets
+    hidden = true, publishes the app (PublishXml, appmodules) and reads the row back. It changes no other appaction.
+    The dry run prints the planned hide. Owner decision 2026-10-09: hide the Matter Management "New Document".
 
     Never run -Apply at the same time as another ribbon import into the same tables (Set-AccessRibbon.ps1,
     Deploy-SecureChildNewCommands.ps1): each one exports, merges and re-imports the whole ribbon of a table, so two
@@ -140,7 +143,7 @@ function Get-LiveCommandIds([xml] $ribbon) {
 
 # The unmanaged, active MODERN commands (appaction) that call a launcher, with their visibility state.
 function Get-CreateAppActions([string] $token) {
-    $select = 'uniquename,buttonlabeltext,contextvalue,onclickeventjavascriptfunctionname,hidden,visibilitytype,' +
+    $select = 'appactionid,uniquename,buttonlabeltext,contextvalue,onclickeventjavascriptfunctionname,hidden,visibilitytype,' +
         'visibilityformulacomponentlibrary,visibilityformulafunctionname,modifiedon'
     $filter = [uri]::EscapeDataString('ismanaged eq false and statecode eq 0 and onclickeventjavascriptfunctionname ne null')
     $uri = "appactions?`$select=$select&`$filter=$filter"
@@ -158,9 +161,32 @@ function Get-CreateAppActions([string] $token) {
         elseif ($a.visibilitytype -eq 1 -and $a.visibilityformulafunctionname) { 'formula' }
         else { 'UNRULED' }
         [pscustomobject] @{
-            UniqueName = $a.uniquename; Label = $a.buttonlabeltext; Context = $a.contextvalue; Function = $function
+            Id = $a.appactionid; UniqueName = $a.uniquename; Label = $a.buttonlabeltext; Context = $a.contextvalue; Function = $function
             Table = $launchers[$function]; State = $state; Modified = $a.modifiedon
             Formula = "$($a.visibilityformulacomponentlibrary)/$($a.visibilityformulafunctionname)"
+        }
+    }
+}
+
+# The owner-decided hides (create-launchers.json hideAppActions), each checked against the live row. Returns objects
+# with Id, UniqueName, AppModuleId, Hidden, Problem (a reason it must not be written; empty when it may be).
+function Get-PlannedAppActionHides([string] $token) {
+    foreach ($h in @($config.hideAppActions)) {
+        if (-not $h) { continue }
+        $row = $null
+        try {
+            $row = Invoke-Dv ("appactions($($h.appactionid))?`$select=uniquename,ismanaged,hidden,statecode," +
+                'onclickeventjavascriptfunctionname,_appmoduleid_value') $token
+        }
+        catch { }
+        $problem = if (-not $row) { 'not found' }
+        elseif ($row.uniquename -ne $h.uniquename) { "uniquename is '$($row.uniquename)', expected '$($h.uniquename)'" }
+        elseif ($row.ismanaged) { 'managed (not ours to change)' }
+        elseif (-not $launchers.ContainsKey($row.onclickeventjavascriptfunctionname)) { "calls '$($row.onclickeventjavascriptfunctionname)', not a create launcher" }
+        else { '' }
+        [pscustomobject] @{
+            Id = $h.appactionid; UniqueName = $h.uniquename; AppModuleId = $(if ($row) { $row._appmoduleid_value } else { $null })
+            Hidden = [bool] ($row -and $row.hidden); Problem = $problem
         }
     }
 }
@@ -273,14 +299,20 @@ if (-not $Apply) {
                 Write-Host ("  {0,-22} {1,-48} -> {2,-22} {3}" -f $table, $c.Command, $c.Table, $(if ($c.Ruled) { 'ruled' } else { 'NOT ruled yet' }))
             }
         }
-        Write-Host 'Live create MODERN commands (appaction, unmanaged, active; read-only) - -Apply does not change these:'
+        Write-Host 'Live create MODERN commands (appaction, unmanaged, active; read-only):'
         $appActions = @(Get-CreateAppActions $token)
         if ($appActions.Count -eq 0) { Write-Host '  (none)' }
         foreach ($a in $appActions) {
             Write-Host ("  {0,-22} '{1}' {2} -> {3}  {4} (modified {5})" -f $a.Context, $a.Label, $a.UniqueName, $a.Table, $a.State, $a.Modified)
         }
+        Write-Host 'Planned -Apply hides (create-launchers.json hideAppActions; owner decision):'
+        foreach ($h in @(Get-PlannedAppActionHides $token)) {
+            $plan = if ($h.Problem) { "REFUSED: $($h.Problem)" } elseif ($h.Hidden) { 'already hidden (no write)' } else { 'WILL SET hidden = true, publish the app, read back' }
+            Write-Host "  $($h.Id) $($h.UniqueName): $plan"
+            if ($h.Problem) { $missing += "hideAppActions $($h.Id): $($h.Problem)" }
+        }
     }
-    if ($missing.Count -gt 0) { Write-Host "DRY RUN FAILED: $($missing.Count) checked-in command(s) or rule definition(s) missing the Create privilege rule." -ForegroundColor Red; exit 1 }
+    if ($missing.Count -gt 0) { Write-Host "DRY RUN FAILED: $($missing.Count) problem(s) - a checked-in command or rule definition missing the Create privilege rule, or a hideAppActions entry that does not match the live row (see above)." -ForegroundColor Red; exit 1 }
     Write-Host 'DRY RUN PASSED: every checked-in create command carries its Create privilege rule.' -ForegroundColor Green
     exit 0
 }
@@ -303,9 +335,15 @@ foreach ($table in $hosts) {
 $beforePath = Join-Path $WorkDir 'before.json'
 $beforeByTable | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $beforePath -Encoding utf8
 Write-Host "Recorded the live before-list: $beforePath. Tables with live create commands: $(@($liveCreateTables) -join ', ')"
+$plannedHides = @(Get-PlannedAppActionHides $token)
+foreach ($h in $plannedHides) {
+    if ($h.Problem) { throw "hideAppActions $($h.Id) ($($h.UniqueName)): $($h.Problem). Nothing was written." }
+}
+$hideIds = @($plannedHides | ForEach-Object Id)
 foreach ($a in @(Get-CreateAppActions $token | Where-Object State -eq 'UNRULED')) {
-    Write-Host ("Modern command '$($a.Label)' ($($a.UniqueName)) creates $($a.Table) and is shown to every user. -Apply does " +
-        "not change it (owner decision, README 'Modern commands'); the verify below FAILS on it until it is resolved.") -ForegroundColor Yellow
+    if ($hideIds -contains $a.Id) { continue }
+    Write-Host ("Modern command '$($a.Label)' ($($a.UniqueName)) creates $($a.Table), is shown to every user and is not in " +
+        "hideAppActions: -Apply does not change it; the verify below FAILS on it (owner decision needed).") -ForegroundColor Yellow
 }
 
 # 2. Export every solution FIRST and check each export against the environment. Nothing is imported unless all pass.
@@ -349,6 +387,23 @@ foreach ($solution in $unpackedBySolution.Keys) {
     if ($LASTEXITCODE -ne 0) { throw "pac solution pack $solution failed ($LASTEXITCODE)." }
     & $pacExe solution import --environment $EnvironmentUrl --path $packed --publish-changes
     if ($LASTEXITCODE -ne 0) { throw "pac solution import $solution failed ($LASTEXITCODE). Solutions before it in -Solutions were imported; re-run -Apply (idempotent)." }
+}
+
+# 4b. The owner-decided appaction hides: PATCH hidden = true, publish the app, read the row back.
+foreach ($h in $plannedHides) {
+    if ($h.Hidden) { Write-Host "appaction $($h.UniqueName): already hidden"; continue }
+    $writeHeaders = @{
+        Authorization = "Bearer $token"; Accept = 'application/json'; 'Content-Type' = 'application/json'
+        'OData-Version' = '4.0'; 'OData-MaxVersion' = '4.0'; 'If-Match' = '*'
+    }
+    Invoke-RestMethod -Method Patch -Uri "$EnvironmentUrl/api/data/v9.2/appactions($($h.Id))" -Headers $writeHeaders `
+        -Body '{"hidden":true}' | Out-Null
+    $publish = @{ ParameterXml = "<importexportxml><appmodules><appmodule>$($h.AppModuleId)</appmodule></appmodules></importexportxml>" } |
+        ConvertTo-Json
+    Invoke-RestMethod -Method Post -Uri "$EnvironmentUrl/api/data/v9.2/PublishXml" -Headers $writeHeaders -Body $publish | Out-Null
+    $back = Invoke-Dv "appactions($($h.Id))?`$select=hidden,uniquename" $token
+    if (-not $back.hidden) { throw "appaction $($h.UniqueName): hidden did not read back as true after the PATCH." }
+    Write-Host "appaction $($h.UniqueName): hidden = true (read back), app $($h.AppModuleId) published" -ForegroundColor Green
 }
 
 # 5. Verify, retrying while the effective ribbon catches up with the publish.

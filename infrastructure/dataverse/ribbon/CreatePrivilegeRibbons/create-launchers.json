@@ -29,6 +29,13 @@
     "Spaarke.SecureChild.Ribbon.newChild": "Already carries the platform's Mscrm.CreateSelectedEntityPermission (task 147).",
     "XrmCore.Commands.Open.addNewFromSubGridStandard": "The platform's own subgrid New; the platform rules it (Mscrm.CreateSelectedEntityPermission)."
   },
+  "hideAppActions": [
+    {
+      "appactionid": "ffbd45bf-8c9d-48db-b433-c3c09e6577de",
+      "uniquename": "sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1",
+      "decision": "Owner, 2026-10-09 (task 180 fix round): hide this modern \"New Document\" (Matter Management, sprk_document main grid). The classic \"+New Document\" (sprk.Document.NewUpload.Grid.Command, same launcher, same grid) stays and carries the Create privilege rule."
+    }
+  ],
   "hosts": [
     "sprk_matter",
     "sprk_project",

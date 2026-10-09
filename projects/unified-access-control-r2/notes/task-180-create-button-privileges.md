@@ -53,7 +53,7 @@ wizards had only `FormStateRule Existing`.
 
 | # | App / surface | Modern command | Launcher | Creates | State |
 |---|---|---|---|---|---|
-| 13a | Matter Management, sprk_document main grid | "New Document" — `sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1` (appactionid `ffbd45bf-8c9d-48db-b433-c3c09e6577de`; unmanaged, visible, `visibilitytype` None; made in the command designer, last modified 2026-10-06 by Ralph Schroeder) | `Spaarke_UploadDocumentsStandalone` (`sprk_subgrid_commands`) | sprk_document | **UNRULED** — `-Verify` FAILS on it |
+| 13a | Matter Management, sprk_document main grid | "New Document" — `sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1` (appactionid `ffbd45bf-8c9d-48db-b433-c3c09e6577de`; unmanaged, visible, `visibilitytype` None; made in the command designer, last modified 2026-10-06 by Ralph Schroeder) | `Spaarke_UploadDocumentsStandalone` (`sprk_subgrid_commands`) | sprk_document | UNRULED today. **Owner 2026-10-09: HIDE it** — `-Apply` sets `hidden = true` (step 4b), then `-Verify` passes it |
 
 The first inventory missed it: an appaction is not ribbon XML, so `RetrieveEntityRibbon` (and everything built on it) does
 not return it. The dry run with `-EnvironmentUrl` and `-Verify` now also read every unmanaged, active appaction whose
@@ -80,6 +80,18 @@ custom appaction at a RibbonDiff rule. So `-Apply` does not touch it, and nothin
 4. Leave it: a read-only user keeps seeing "New Document" on that grid, and `-Verify` keeps failing.
 
 Recommendation: 2, or 1 if the modern button is wanted. It duplicates the classic button that `-Apply` rules.
+
+**Owner decision (2026-10-09, relayed by the coordinator): option 2, HIDE it.**
+- The appaction is listed in `create-launchers.json` `hideAppActions` (by appactionid `ffbd45bf-8c9d-48db-b433-c3c09e6577de`
+  and uniquename).
+- The `-Apply` hide, in order:
+  1. Refuses, writing nothing, unless the live row has that uniquename, is unmanaged and calls a launcher.
+  2. Sets `hidden = true` on that one row only (step 4b, after the ribbon imports).
+  3. Publishes the Matter Management app (`PublishXml`, appmodules).
+  4. Reads `hidden` back and throws if it is not true.
+- The dry run prints the planned hide.
+- `-Verify` counts a hidden create appaction as ruled.
+- Nothing was changed live by this task; the hide runs at gate G180-1.
 
 ### In the repo, not deployed on dev — ruled in source so a later deploy carries it
 
@@ -152,8 +164,8 @@ Stale exports (verifier K1/K2, fixed): every importer of these tables now refuse
 - `Deploy-SecureChildNewCommands.ps1` still takes a caller-supplied export, but one taken before this task's import
   can no longer strip the `sprk.CreatePrivilege.*` rules.
 - `Set-AccessRibbon.ps1` exports fresh itself.
-- The modern "New Document" (13a) is not changed by any step below: `-Verify` (step 4) fails on it until the owner
-  picks an option.
+- The modern "New Document" (13a) is hidden by step 3 (`-Apply`, owner decision 2026-10-09). The dry run (step 2)
+  shows the planned hide.
 
 ```powershell
 cd infrastructure/dataverse/ribbon/CreatePrivilegeRibbons
@@ -173,6 +185,14 @@ present.
 Live gate G180-2 (after step 4, main session): a read-only test role (Create removed on matter, project, work
 assignment, event, to do, document, analysis) sees no custom create command on the Matter, Project and Work Assignment
 forms and home grids. Summarize Files and Find Similar still show. A Spaarke Basic User still sees them all.
+
+## Coordinator answers to the open questions (2026-10-09)
+
+1. Summarize Files stays unruled: it creates nothing itself.
+2. sprk_analysis is the right table for Playbook Library.
+3. No CI check for `create-launchers.json`: the dry run is the guard.
+4. The never-deployed repo buttons stay as they are, filed as #1521 for the owning projects. These are the 10 Create To
+   Do snippets, the Project/Event form wizard buttons, New Playbook, Add Memo and + Add KPI.
 
 ## Dev evidence (read-only, 2026-10-09)
 

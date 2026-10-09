@@ -57,7 +57,7 @@ pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dyn
     -BeforeList <WorkDir printed by -Apply>/before.json                                       # 4. read-only, re-runnable
 ```
 
-## Modern commands (appaction) — not ruled by `-Apply`
+## Modern commands (appaction)
 
 A command built in the modern command designer is an `appaction` row, not ribbon XML: `RetrieveEntityRibbon` does not
 return it and RibbonDiff cannot rule it. The dry run (with `-EnvironmentUrl`) and `-Verify` therefore also read the
@@ -69,13 +69,20 @@ A Create-privilege rule for a modern command is a Power Fx **Visible** formula,
 is authored in the command designer and compiled into the app's command component library (a canvas `.msapp`); the
 appaction only points at it (`visibilitytype` = Formula, `visibilityformulacomponentlibrary`,
 `visibilityformulafunctionname`). No supported API writes or reads that formula, so `-Apply` cannot set it and `-Verify`
-can only see THAT a formula is set (it then prints a manual check). `-Apply` never changes an appaction.
+can only see THAT a formula is set (it then prints a manual check). The only appaction change `-Apply` makes is the
+owner-decided hide list, `hideAppActions` in `create-launchers.json`:
+1. For each listed appactionid, it checks the live row's uniquename, that the row is unmanaged and that it calls a
+   launcher. If any check fails, nothing is written.
+2. It sets `hidden = true`, publishes the app and reads the row back.
+
+The dry run prints the plan, and `-Verify` counts a hidden create appaction as ruled.
 
 Live on spaarkedev1 (2026-10-09): one such command — **"New Document"**
 (`sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1`, Matter Management app,
 sprk_document main grid, `Spaarke_UploadDocumentsStandalone` in `sprk_subgrid_commands`, visibility None, last modified
 2026-10-06). The classic "+New Document" (`sprk.Document.NewUpload.Grid.Command`, same launcher, same grid) carries the
-rule after `-Apply`. Options (owner decision, open question in the task notes):
+rule after `-Apply`. **Owner decision 2026-10-09: option 2 (hide).** It is in `hideAppActions`, so `-Apply` hides it.
+The options that were considered:
 
 1. Author the Visible formula in the command designer (Matter Management → Documents main grid → New Document →
    Visibility "Show on condition from formula" → `DataSourceInfo(Documents, DataSourceInfo.CreatePermission)`), publish,
