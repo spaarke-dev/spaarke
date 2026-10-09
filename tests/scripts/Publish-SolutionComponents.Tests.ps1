@@ -478,6 +478,30 @@ Describe 'extras: one printed form, validated on entry (round-6 F4/K5)' {
         $err | Should -Not -Match 'resume'
         $script:Rest | Should -Be 0
     }
+    It 'the full-import path (-ZipPath) passes both extras on to Invoke-ScopedSolutionImport (K6)' {
+        # Run a COPY of the real script next to a stub lib: the stub loads the real module, then replaces the two functions that
+        # reach Dataverse/pac with recorders. The script text under test is unchanged.
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ("iss-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $dir 'lib') | Out-Null
+        try {
+            Copy-Item -LiteralPath $script:ScriptPath -Destination (Join-Path $dir 'Import-SolutionScoped.ps1')
+            $real = Join-Path $script:RepoRoot 'scripts' 'lib' 'Publish-SolutionComponents.ps1'
+            Set-Content -LiteralPath (Join-Path $dir 'lib' 'Publish-SolutionComponents.ps1') -Value @(
+                ". '$real'",
+                'function Get-DataverseApiContext { @{ Api = ''https://x/api/data/v9.2''; Headers = @{} } }',
+                'function Invoke-ScopedSolutionImport { param($EnvironmentUrl, $ZipPath, $SolutionUniqueName, $PacExe, $ImportArgs, $Context, $ExtraWebResources, $ExtraEntities, [switch]$IncludeControlHostEntities, [switch]$AllowWorkflows)',
+                '  [pscustomobject]@{ Zip = $ZipPath; Webs = @($ExtraWebResources); Ents = @($ExtraEntities) } | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:ISS_RECORD }')
+            $zip = Join-Path $dir 'a.zip'; Set-Content -LiteralPath $zip -Value 'x'
+            $env:ISS_RECORD = Join-Path $dir 'recorded.json'
+            $out = & pwsh -NoProfile -File (Join-Path $dir 'Import-SolutionScoped.ps1') -EnvironmentUrl https://x -SolutionUniqueName S -ZipPath $zip `
+                -ExtraWebResources '22222222-2222-2222-2222-222222222222,33333333-3333-3333-3333-333333333333' -ExtraEntities 'sprk_event,sprk_todo' 2>&1
+            $LASTEXITCODE | Should -Be 0
+            Test-Path -LiteralPath $env:ISS_RECORD | Should -BeTrue
+            $r = Get-Content -LiteralPath $env:ISS_RECORD -Raw | ConvertFrom-Json
+            @($r.Webs) | Should -Be @('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333')
+            @($r.Ents) | Should -Be @('sprk_event', 'sprk_todo')
+        } finally { Remove-Item Env:\ISS_RECORD -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'ConvertTo-ExtraList normalises braces and case and removes duplicates' {
         @(ConvertTo-ExtraList -Values @('{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') -Kind WebResource) | Should -Be @('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
     }
