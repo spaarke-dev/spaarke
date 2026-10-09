@@ -135,7 +135,7 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
-### ISS-008 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
 
 | Field | Value |
 |---|---|
@@ -143,7 +143,7 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 | **Urgency** | before T186 (server-side creates of secure children; #1081) |
 | **Filed** | 2026-10-08 (T256) |
 | **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
-| **GitHub Issue** | to be filed by the main session (the T256 worktree agent makes no GitHub writes) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
 
 **Description**
 

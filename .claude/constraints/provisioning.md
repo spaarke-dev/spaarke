@@ -89,7 +89,7 @@ Report absolute + delta in task notes / PR description. See `.claude/constraints
 ## Handler registration completeness — BINDING per ADR-032 + `.claude/patterns/provisioning/handler-registration-completeness.md`
 
 - Every new `IProvisioningHandler` touches five places: `HandlerIds.cs` (const + `Dispatchable`), the handler class, its concrete + dependency registrations, the keyed forwarder in `HandlerDispatchRegistrationModule.cs`, and `DagAdvancer.HandlerDependencies`. Missing the forwarder → the Worker dead-letters the message as `NoHandler`; a missing dependency → `HandlerResolutionFailed`; a missing DAG entry → the reconciler never dispatches it.
-- `HandlerRegistrationCompletenessTests` and the HANDLER-12 parity test in `DagAdvancerTests` MUST pass on every PR (currently 20 dispatchable ids — T226 retired H4-shared on 2026-09-30; adding a handler → 21).
+- `HandlerRegistrationCompletenessTests` and the HANDLER-12 parity test in `DagAdvancerTests` MUST pass on every PR (currently 21 dispatchable ids — T226 retired H4-shared on 2026-09-30; T256 added H7b on 2026-10-08; adding a handler → 22).
 - Handler contract: `IProvisioningHandler.HandleAsync(HandlerEnvelope, CancellationToken)` returns `HandlerResult` — closed: `Success(IdempotencyKey)` or `Failure(FailureClass, RejectionCode, Diagnostic)`; `FailureClass` = Resumable | RetryableWithCleanup | QuarantineRequired | SuccessfulButDrifted (design §4C).
 - Feature-gated handlers follow ADR-032 P1/P2/P3 — null-impl UNCONDITIONAL outside the gate; real-impl CONDITIONAL inside. Last-write-wins for the same key resolves correctly at runtime.
 
@@ -162,7 +162,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **The environment must be named for the customer**: domain `spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}` — `DataverseEnvironmentUrlRule`, applied at POST /api/runs and again by H5. It is the guard against adopting another customer's environment (all Model 1 environments share Spaarke's tenant). Reject, never repair.
 - **H1 refuses a subscription that is not the customer's alone**: outside the run's tenant, or holding another `rg-spaarke-{otherId}-*` group (`SubscriptionDedication`) — before it writes anything.
 - **H5 adopts, never creates**: URL rule → `GET /WhoAmI` as the L2 Worker identity (401/403 → Resumable `worker-not-app-user`; the operator adds that identity as a System Administrator application user, PRQ-C-09).
-- **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7 sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7.
+- **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7/H7b sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7. H7b ← H6; H9 ← H3, H4b, H6, H7b; H13 ← H14, H7b (T256).
 - **The L2 identity holds Owner on each customer subscription** (owner decision 2026-10-06 — customer.bicep writes role assignments): granted by the operator with `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04). It is never deployed on the platform subscription, and L2 never grants itself access to a subscription.
 
 ## Model 1 users — B2B guests, environment security group, pay-as-you-go (BINDING — owner D2 + 2026-10-07; T232)
@@ -215,6 +215,15 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - H9 waits for H6 (the BFF never starts against an older schema). H13 records `sprk_solutionversion` =
   `SpaarkeMaster {version} ({managed|unmanaged})` — the package type on the registry row.
 - Environment-variable **values** never ship in the package (H7 writes them).
+
+## Secure Record setup — H7b (BINDING, T256 / unified-access-control-r2 INCOMING-145)
+
+- H7b creates per environment what no package can carry: the `Secure Record` unit (direct child of the root, no users), the memberless Owner team `Secure Record Owners`, and the `Secure Record Owner` role IN that unit with exactly `config/secure-record-owner-role.json` (Read at Basic; linked into L2, never copied). Never put the role in SpaarkeMaster or the root unit (`secure_setup.role_is_replica`).
+- Read-then-write: every refusal precedes the first write; the §5.4 strip follows every grant; a second run writes nothing. QuarantineRequired only for owner decisions (users in the unit, team members, wrong parent, root default team at Deep/Global, a stray field writer or sprk_issecure writer).
+- Field-security profiles, the `sprk_issecure` lock and `sprk_noaccessentry` ship in SpaarkeMaster; H7b verifies them and adds only memberships. H9 waits for H7b: no BFF reaches an environment without `sprk_noaccessentry`.
+- Names: unit and role from the file, team = the BFF's compiled `SecureRecord:OwnerTeamName` default. A `SecureRecord__` manifest key needs ONE run parameter feeding H4b and H7b (`SecureRecordOwnerRoleSetParityTests` fails until then).
+- Dry run: intake `secureRecordSetupDryRun` = `true` | `false` (exact); it stops the run at H7b with `secure_setup.dry_run` and the plan in gate `h7b-secure-setup-plan`.
+- Open (ISS-010 / #1486, before T186): guests created by H11 in the ROOT unit with Spaarke Basic User (Deep read) can read every secure record until the customer business unit (INCOMING-145 §6 T1/T3/T5) is built.
 
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 

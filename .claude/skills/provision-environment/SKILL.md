@@ -610,6 +610,7 @@ if ($BatchIntakeFile) {
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
+  $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -866,6 +867,18 @@ environment that already holds the other type, so on an UPGRADE run send the typ
 ```powershell
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType") -and "$solutionPackageType" -cnotin @('managed','unmanaged')) {
   Write-Error "❌ solutionPackageType must be managed or unmanaged (exact case), or omitted for managed."; exit 1
+}
+```
+
+#### 1b-sexies. `secureRecordSetupDryRun` (OPTIONAL — T256)
+
+Do not ask. `true` only when the operator asks to see what H7b (Secure Record setup) would change: H7b reads everything,
+writes nothing, records the plan in gate `h7b-secure-setup-plan`, and the run stops at H7b with `secure_setup.dry_run`
+(Failed — expected). Apply with a new run without it.
+
+```powershell
+if ($null -ne $secureRecordSetupDryRun -and $secureRecordSetupDryRun -isnot [bool]) {
+  Write-Error "❌ secureRecordSetupDryRun must be true or false, or omitted."; exit 1
 }
 ```
 
@@ -1590,6 +1603,11 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
   $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
 }
+# T256 — the H7b dry run (Step 1b-sexies): sent only when true; absent = apply. Exact lower case — L2 refuses anything
+# else with 400 secure_setup.dry_run_invalid.
+if ($secureRecordSetupDryRun -eq $true) {
+  $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
+}
 $body = $runRequest | ConvertTo-Json -Depth 5
 
 $response = Invoke-RestMethod `
@@ -1668,7 +1686,7 @@ The run's `status` field transitions through the actual enum values — NOT the 
 | `Running` | Handlers actively executing per the reconciler DAG | Poll; update TodoWrite; apply EXEC-05 liveness nudge if stuck |
 | `WaitingOnGate` | Handler paused pending external condition (H0.5 admin consent, H1 quota, H8 SPE replication) | See Step 5 (manual gate handling) |
 | `Completed` | All handlers completed + H13 acceptance passed | See Step 6 (completion handoff) |
-| `Failed` | Handler failed with `Retryable*` or `Resumable` class per §4C rollback taxonomy | Present failure + `POST /api/runs/{id}/resume?customerId=` option to operator |
+| `Failed` | Handler failed with `Retryable*` or `Resumable` class per §4C rollback taxonomy. `Failed` with rejection `secure_setup.dry_run` is the expected end of a dry run: show the `plan` from gate `h7b-secure-setup-plan` and stop; never resume it (resume repeats the dry run). | Present failure + `POST /api/runs/{id}/resume?customerId=` option to operator |
 | `Cancelled` | Operator called `POST /api/runs/{id}/cancel`; sprk_currentrunid released (EXEC-07 fix) | Report cancellation; no auto-restart |
 | `Quarantined` | Handler failed with `QuarantineRequired` class | HARD STOP; require `POST /api/runs/{id}/clear-quarantine?customerId=` with reason + audit trail |
 
