@@ -48,15 +48,35 @@ public sealed class LookupChoicesResolver
     /// classifier (mvp-technical-spec.md section on enabled/disabled). Deliberately NOT global: an entity without
     /// the column would 400, and that 400 is swallowed into an empty enum.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> AdditionalFilters =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, (string Column, bool Value)[]> AdditionalRowConditions =
+        new Dictionary<string, (string Column, bool Value)[]>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sprk_triagecategory"] = "sprk_enabled eq true",
+            ["sprk_triagecategory"] = [("sprk_enabled", true)],
         };
 
-    /// <summary>The extra row predicate for <paramref name="entityLogicalName"/>, or null.</summary>
+    /// <summary>The extra row predicate for <paramref name="entityLogicalName"/> in OData form, or null.</summary>
     public static string? AdditionalFilterFor(string entityLogicalName) =>
-        AdditionalFilters.TryGetValue(entityLogicalName, out var f) ? f : null;
+        AdditionalRowConditions.TryGetValue(entityLogicalName, out var conditions)
+            ? string.Join(" and ", conditions.Select(c => $"{c.Column} eq {(c.Value ? "true" : "false")}"))
+            : null;
+
+    /// <summary>
+    /// Adds to <paramref name="criteria"/> the SAME row predicate the <c>$choices</c> read applies to
+    /// <paramref name="entityLogicalName"/>: active (<c>statecode = 0</c>) plus the per-taxonomy extra conditions
+    /// (the QueryExpression form of <see cref="AdditionalFilterFor"/>, from the one definition above). Anything that
+    /// resolves a name the classifier emitted back to a row must use this, so a row the classifier was never offered
+    /// (inactive, or disabled) can never be saved.
+    /// </summary>
+    public static void AddOfferedRowPredicate(Microsoft.Xrm.Sdk.Query.FilterExpression criteria, string entityLogicalName)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+        criteria.AddCondition("statecode", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, 0);
+        if (AdditionalRowConditions.TryGetValue(entityLogicalName, out var conditions))
+        {
+            foreach (var (column, value) in conditions)
+                criteria.AddCondition(column, Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, value);
+        }
+    }
 
     /// <summary>
     /// Lookup taxonomies that carry authored classifier guidance: entity logical name to guidance column.
