@@ -113,6 +113,11 @@ When creating a new Architecture Decision Record:
 □ 11. VERIFY consistency
    Run: grep for ADR number across all .claude/ and CLAUDE.md files
    Ensure: All references use correct paths
+
+□ 12. ENFORCE each MUST / MUST NOT (Checklist G)
+   For every rule the ADR adds, record "Enforced by: <type | lint rule | ArchTest | hook |
+   permission | prose — reason>" in the concise ADR. Build the mechanism in the same change
+   when it is cheap; otherwise file it.
 ```
 
 ### Checklist B: New Constraint File
@@ -274,8 +279,54 @@ When modifying the main instruction file:
    (Claude Code ≥ 2.1.283) after the change.
 
 □ 6. RUN consistency check
-   Grep for old paths that might have been left behind
+   Grep for old paths that might have been left behind, and run
+   pwsh -File scripts/quality/Test-InstructionPaths.ps1 (every path named in an instruction
+   file must exist; it also runs in CI Tier 2)
 ```
+
+### Checklist G: New rule, lesson or guard (the enforcement ladder — root CLAUDE.md §16)
+
+When an ADR, constraint, FAILURE-MODES entry, code-review finding, project directive, or a bug fix
+whose cause is a repeatable pattern (task-execute Step 9.5 rule 6) creates a rule agents must follow:
+
+```
+□ 1. PICK the strongest mechanism that works, in this order:
+   a. TYPE the compiler checks — make the misuse unrepresentable (e.g. a return type that
+      cannot be non-OK, a branded id type, a required parameter)
+   b. LINT rule — ESLint / Roslyn analyzer / PSScriptAnalyzer. scripts/quality/post-edit-lint.sh
+      returns findings to the agent after each Edit/Write (additionalContext; best-effort within
+      its 4 s linter timeout) and CI runs the linters too
+   c. ARCHTEST / source-scan guard — tests/Spaarke.ArchTests/** (e.g. CredentialGuardTests,
+      ProblemDetailsContentTypeGuardTests — in flight, PR #1427). Runs in CI, and in the Stop-hook
+      quality gate when .cs files changed
+   d. HOOK or PERMISSION rule — .claude/settings.json (PreToolUse/PostToolUse hook; `ask` rule).
+      Only for narrow, fast (< 5 s), zero-false-positive checks; `ask` over `deny` for policies
+      that change over time
+   e. PROSE — only with a one-line reason a–d cannot express it
+   Pick what fits in this change. If the strongest mechanism is more than a small addition, write
+   "Enforced by: prose — <mechanism> planned, #<issue>" and file it; never hold the change for a guard.
+
+□ 2. RECORD it with the rule: "Enforced by: <mechanism, file>". The prose then shrinks to a
+   pointer ("if X fires, read Y") instead of restating the rule.
+
+□ 3. PROVE the guard: a must-fire control (a seeded violation it catches) and a must-not-fire
+   control (the sanctioned shape it accepts). A guard nobody has seen fail may never fire —
+   the instruction-path check silently skipped every src/ path until its must-fire test ran.
+   If a control cannot be seeded in the same change, say so in the Enforced-by line rather than
+   skipping the guard.
+
+□ 4. RATCHET when it finds existing violations: record them in a baseline file; new violations
+   fail, known ones are reported and worked down (pattern: scripts/quality/Test-InstructionPaths.ps1
+   + instruction-paths.baseline.txt). Never block every project on day one.
+
+□ 5. FIX THE CLASS: search for other instances of the pattern that created the rule
+   (task-execute Step 9.5 rule 6) — fix, guard or list them.
+```
+
+Examples in this repo: secret-bearing credentials → `CredentialGuardTests` (ArchTest); BFF error
+content type → `ProblemDetailsContentTypeGuardTests` (ArchTest, in flight: PR #1427); dead instruction paths →
+`Test-InstructionPaths.ps1` (CI, ratcheted); shared git stash → `ask` permission rule;
+`authenticatedFetch` throws → `isApiError`/`problemOf` helpers (in flight: PR #1451), an `OkResponse` return type planned.
 
 ---
 

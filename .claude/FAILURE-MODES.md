@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-10-08 (added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -53,6 +53,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
+- [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
 
 ---
 
@@ -1121,5 +1122,18 @@ every read that carries a value — and in-memory doubles that serialize the sha
 **What happens.** A cache key carries a version constant so a deploy can retire entries whose meaning changed. A test that asserts `CacheVersion.Should().Be(N)` passes on the day it is written, then fails on the next change that legitimately bumps the version. That makes a correct bump look like a regression. In task 172, `AccessCacheFaultCachingTests` pinned the membership resolver cache version at exactly 5, and the needed bump to 6 failed it.
 
 **Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
+
+---
+
+### G-18: `git stash pop` in one worktree applies ANOTHER session's stash
+
+> **Added 2026-10-08** by the module-CLAUDE.md / procedure-calibration work. **Class**: shared mutable state between parallel agents.
+
+**What happens.** The stash stack lives in the shared `.git` directory, so every worktree and every session sees one stack. A session that pushes its own stash and then pops "the top" can get a stash another session pushed in between. On 2026-10-08 a verification agent's before/after script did exactly that: its `pop` applied the customer-provisioning session's stash (seven files) into the agent's worktree and removed it from the list. Nothing was lost only because that session had already committed the same work. The stash list showed hundreds of dropped stashes from four parallel projects that week.
+
+**Rule.**
+- Agents and workflow scripts never use `git stash`. To set changes aside, copy files or make a temporary WIP commit on your own branch.
+- A human session that must stash uses `git stash push -u -m "<unique-tag>"`, records the SHA, restores with `git stash apply <sha>`, and drops its own entry by tag.
+- **Enforced by:** `permissions.ask` on `git stash pop/apply/drop/clear` (`.claude/settings.json`, root §16) — the human confirms each one.
 
 ---
