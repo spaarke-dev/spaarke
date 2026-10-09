@@ -187,8 +187,16 @@ export interface SaveFlowContext {
   saveTarget?: SaveTarget;
   /** Host type (outlook or word) */
   hostType: HostType;
-  /** Current item ID (email or document) */
+  /**
+   * Current item ID. For an email this is the Exchange item id (`item.itemId`), sent as `email.exchangeItemId` — it is
+   * NOT the RFC Message-ID (see {@link internetMessageId}). For a Word document, its URL.
+   */
   itemId?: string;
+  /**
+   * Task 121: the email's RFC 5322 Message-ID (`Office.context.mailbox.item.internetMessageId`), sent as
+   * `email.internetMessageId`. Outlook read mode only — a compose item has none until it is sent.
+   */
+  internetMessageId?: string;
   /** Display name of the current item */
   itemName?: string;
   /** Custom document name (overrides itemName if provided) */
@@ -1084,9 +1092,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             body: captured?.body,
             isBodyHtml: true,
             ...(captured ? { attachments: captured.attachments } : {}),
-            // Still sent: the server's idempotency key and the communication record use it, and it is the Graph
-            // fallback's lookup key when no content was captured.
-            internetMessageId: context.itemId,
+            // Task 121: the RFC Message-ID, exactly as Quick Save sends it. The server stores it on the .eml
+            // (Message-ID header, sprk_emailmessageid), keys the communication record and its idempotency on it, and
+            // links the save to the communication that captured the same email. Absent when Office gives none (a
+            // compose item). Before task 121 the pane sent the Exchange item id HERE.
+            ...(context.internetMessageId ? { internetMessageId: context.internetMessageId } : {}),
+            // Task 121: the Exchange item id, in its own field — the server's Graph fallback fetches the email by it
+            // when no content was captured.
+            ...(context.itemId ? { exchangeItemId: context.itemId } : {}),
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
           };
         } else if (contentType === 'Document') {

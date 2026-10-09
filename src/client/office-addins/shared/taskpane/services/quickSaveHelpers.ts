@@ -30,7 +30,10 @@ export interface QuickSaveRecipient {
 
 /** The email context the ribbon command reads from Office.js before quick-saving. */
 export interface QuickSaveEmailContext {
+  /** `item.internetMessageId` — the RFC 5322 Message-ID. */
   internetMessageId: string;
+  /** Task 121: `item.itemId` — the Exchange item id, the server's Graph-fallback key. */
+  exchangeItemId?: string;
   subject: string;
   senderEmail?: string;
   senderName?: string;
@@ -60,6 +63,11 @@ export interface OfficeSaveRequestBody {
     /** Task 046 (b): always true here; the ribbon files under the email's own subject and never takes a typed name. */
     isNameSystemDerived: true;
     internetMessageId: string;
+    /**
+     * Task 121: the Exchange item id, in its own field — what the server's Graph fallback fetches the email by when no
+     * content was read here. `internetMessageId` (the RFC id) cannot address a message in Graph.
+     */
+    exchangeItemId?: string;
     /** Undefined = "all" (server rule); with a capture, the names of the attachments actually sent. */
     selectedAttachmentFileNames: string[] | undefined;
   };
@@ -119,6 +127,7 @@ export function buildEmailSaveRequest(
       isBodyHtml: true,
       ...(content ? { attachments: content.attachments } : {}),
       internetMessageId: context.internetMessageId,
+      ...(context.exchangeItemId ? { exchangeItemId: context.exchangeItemId } : {}),
       selectedAttachmentFileNames: content?.selectedAttachmentFileNames,
     },
     idempotencyKey,

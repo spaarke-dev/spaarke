@@ -72,7 +72,16 @@ public sealed class EmailUploadCaptureService
     /// failure is swallowed + logged so the caller's save always completes. Returns the canonical communication
     /// id (new or reconciled) when a record was created/matched; null otherwise.
     /// </summary>
-    public async Task<Guid?> CaptureAsync(SaveRequest request, string? userId, CancellationToken ct)
+    public async Task<Guid?> CaptureAsync(SaveRequest request, string? userId, CancellationToken ct) =>
+        (await CaptureWithOutcomeAsync(request, userId, ct))?.CommunicationId;
+
+    /// <summary>
+    /// <see cref="CaptureAsync"/>, also saying whether the email reconciled to a communication that ALREADY existed, with
+    /// the association decision evaluated for this save (spaarkeai-word-add-in-r1 task 121). A reconciled row keeps its
+    /// association here; the Office save decides whether that row may now be filed to the save's record
+    /// (<see cref="Office.ReconciledEmailFiling"/>, owner decision 2026-10-09).
+    /// </summary>
+    public async Task<EmailCaptureOutcome?> CaptureWithOutcomeAsync(SaveRequest request, string? userId, CancellationToken ct)
     {
         // Only emails become intelligence-bearing communications; attachment/document saves stay archive-only.
         if (request.ContentType != SaveContentType.Email || request.Email is null)
@@ -175,7 +184,7 @@ public sealed class EmailUploadCaptureService
                     "Upload email reconciled to existing canonical communication {CommunicationId} " +
                     "(internet-message-id match); skipping re-association (single dedup authority).",
                     communicationId);
-                return communicationId;
+                return new EmailCaptureOutcome(communicationId, ReconciledToExisting: true, decision);
             }
 
             // ── Association: apply the decision evaluated above to the row just created with its owner — only when it
@@ -217,7 +226,7 @@ public sealed class EmailUploadCaptureService
                 "InternetMessageId: {InternetMessageId}, User: {UserId}",
                 communicationId, email.InternetMessageId, userId);
 
-            return communicationId;
+            return new EmailCaptureOutcome(communicationId, ReconciledToExisting: false, decision);
         }
         catch (Exception ex)
         {
@@ -386,3 +395,11 @@ public sealed class EmailUploadCaptureService
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
 }
+
+/// <summary>
+/// What <see cref="EmailUploadCaptureService.CaptureWithOutcomeAsync"/> produced (spaarkeai-word-add-in-r1 task 121): the
+/// canonical communication, whether it ALREADY existed (the save reconciled to it on the Message-ID alternate key, so this
+/// capture wrote nothing to it), and the association decision evaluated for this save — the save's own record as the
+/// caller-supplied regarding (rung 0).
+/// </summary>
+public sealed record EmailCaptureOutcome(Guid CommunicationId, bool ReconciledToExisting, AssociationDecision Decision);
