@@ -135,48 +135,38 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
-### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
 
 | Field | Value |
 |---|---|
-| **Status** | Open — needs an owner decision (placement + one new input) |
-| **Urgency** | before T186 (server-side creates of secure children; #1081) |
-| **Filed** | 2026-10-08 (T256) |
-| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
+| **Status** | Open — needs an owner decision (a BFF route + its authorization) |
+| **Urgency** | before T186 Ready (the census is run by hand until then) |
+| **Filed** | 2026-10-09 (T259) |
+| **Source** | T259 step 5 (ISS-010's H13 half) |
+| **GitHub Issue** | (not filed — T259 ran with no live action; the main session files it) |
 
 **Description**
 
-§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
-business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
-parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
-parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
-built, because each needs a decision or an input that does not exist:
-- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
-  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
-- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
-  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
-  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
-  (a business-unit change removes a user's roles) is not a safe repair.
-- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
-  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
-  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
-  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
-  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
-  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
-  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
-  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
-  is run and acted on.
+The census exists only as a BFF scheduled job: `SecureRecordIsolationCensusJob` (`secure-record-isolation-census`, every
+15 min, read-only; its run's `ResultJson.status` is `isolated` | `findings` | `inert` | `error`). It is reachable only
+through the generic admin routes `POST /api/admin/jobs/{jobId}/trigger` (202, async) and `GET /api/admin/jobs/{jobId}/status`
+(`recentRuns[].resultJson`), both behind `RequireAuthorization("SystemAdmin")` — an `Admin` or `SystemAdmin` app role
+(`AuthorizationModule`). A stamp's BFF app registration (H3) defines exactly one app role, `Provisioning.KeylessProof`,
+assigned to the L2 Worker identity only; it defines no `Admin`/`SystemAdmin` role. So H13, signing in as the L2 Worker,
+gets 403, and no run can prove isolation before Ready — the owner's 2026-10-09 goal ("a run cannot reach Ready unless the
+census says isolated") is unmet. Granting L2 an `Admin` role would be far wider than needed: the same policy guards job
+enable/disable and trigger of every job, RAG index writes/deletes, membership admin and record-matching admin.
 
 **Suggested fix (one recommendation)**
 
-Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
-root before it creates the two application users IN it with System Administrator (T3), and records the unit id
-(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
-checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
-`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
-void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
-after H11 and treat any human reaching the Secure Record unit as a stop.
+A read-only, synchronous BFF route beside the keyless proof: `POST /api/platform/secure-record-isolation-census`, behind
+the existing `KeylessProofAuthorizationFilter` (app-only token of this tenant for this API holding the L2-only
+`Provisioning.KeylessProof` role — no new role, no H3 change), returning `{status, verdict, findings}` from the SAME code
+the job runs (move the job's census read + `SecureBuRoleDepthAssertion.Evaluate` into one shared method; the job keeps its
+schedule). L2: H13 calls it with the keyless proof's token acquisition and fails unless `status == "isolated"` (new code,
+e.g. `h13-secure-isolation-not-isolated`, carrying the findings). §11: existing = the job + admin routes (async, admin-only;
+widening them to L2 grants every job's controls); cost of doing nothing = H13 cannot gate Ready on isolation. Needs the
+owner's OK (BFF surface + authorization, CLAUDE.md §6/§10) and a BFF publish-size check.
 
 ---
 
@@ -304,6 +294,70 @@ run) and either rebuild the callback there or remove the BFF endpoint, `HmacSign
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — task 259 (owner decision 2026-10-09): T1/T3/T5 built and H7b checks T1/T3; the H13 census step is split out as **ISS-014** (H13 cannot call the census with the stamp's identity) |
+| **Urgency** | before T186 (server-side creates of secure children; #1081) |
+| **Filed** | 2026-10-08 (T256) |
+| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
+
+**Description**
+
+§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
+business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
+parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
+parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
+built, because each needs a decision or an input that does not exist:
+- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
+  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
+- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
+  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
+  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
+  (a business-unit change removes a user's roles) is not a safe repair.
+- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
+  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
+  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
+  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
+  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
+  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
+  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
+  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
+  is run and acted on.
+
+**Suggested fix (one recommendation)**
+
+Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
+root before it creates the two application users IN it with System Administrator (T3), and records the unit id
+(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
+checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
+`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
+void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
+after H11 and treat any human reaching the Secure Record unit as a stop.
+
+**Resolution (task 259, 2026-10-09)**
+
+Owner decision 2026-10-09 (binding): "for secure records, only users (systemusers, guest systemusers or contact users)
+explicitly granted access should have access; guest users are added to the root customer business unit NOT added to the
+secure business unit (no users are added to the secure business unit)." The "root customer business unit" is the
+customer's own unit directly under the Dataverse root (not the root itself — Deep at the root reaches Secure Record).
+- Intake: the existing `displayName` (T237) is carried into the run — required at POST /api/runs
+  (`CustomerBusinessUnitIntake`: 1–160 chars, no control character, no leading/trailing whitespace, never `Secure Record`;
+  `h10-customer-display-name-required` / `-invalid`). No new key (coordinator correction, §11 reuse).
+- H10 (T1/T3): finds or creates the customer unit directly under the root (`h10-customer-bu-wrong-parent` Quarantine,
+  `h10-customer-bu-ambiguous`), records `InterStepState.CustomerBusinessUnitId` (`[ProducedBy(H10)]`), creates both App
+  Users IN it with the unit's System Administrator copy; an App User elsewhere → Quarantine
+  `h10-app-user-in-foreign-business-unit`, never moved.
+- H11 (T5): resolves the guest roles in the customer unit; moves a guest Dataverse added to the ROOT into the customer
+  unit (PATCH + read-back) before any role; a guest in any other unit → Quarantine `userprov-guest-in-foreign-business-unit`.
+- H7b: `secure_setup.customer_bu_missing` / `secure_setup.customer_bu_wrong_parent` / `secure_setup.app_user_outside_customer_bu`
+  (all Quarantine); S2 already refuses any user in the Secure Record unit. Procedure version 3.
+- Not done here: H13 requiring the census → ISS-014. Until it lands, T186's runbook runs the census by hand after H11.
+
+---
 
 ### ISS-005 — Deploy-Release Phase 3 imports a 9-solution list that does not exist
 

@@ -63,6 +63,7 @@ public sealed class H11UserProvisioningHandlerTests
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string GroupId = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
     private const string EnvUrl = "https://spaarke-acme.crm.dynamics.com/";
+    private static readonly Guid CustomerUnitId = Guid.Parse("dddddddd-3333-3333-3333-333333333333");   // T259 (H10)
 
     private const string NativeUsersJson =
         "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@acme.com\",\"companyName\":\"Acme\"}," +
@@ -156,6 +157,51 @@ public sealed class H11UserProvisioningHandlerTests
         writer.Requests.Should().OnlyContain(r => r.RoleIds.SequenceEqual(new[] { FakeGuestUserWriter.RoleId }));
         repo.LastWrittenRun!.InterStepState.ProvisionedUsers!.Select(u => u.DataverseSystemUserId)
             .Should().Equal("sysuser-guestid-Ada", "sysuser-guestid-Grace");
+
+        // T259 (ISS-010): every guest is placed in the customer's unit and holds that unit's roles — never the root's.
+        writer.Requests.Should().OnlyContain(r => r.BusinessUnitId == CustomerUnitId);
+        writer.ResolvedUnits.Should().Equal(CustomerUnitId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task T259_WithoutH10sCustomerUnit_IsRefusedBeforeAnyInvitation(string? unit)
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        run.InterStepState.CustomerBusinessUnitId = unit;
+        var invitations = FakeInvitationClient.Success();
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified(), guestUserWriter: writer);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.MissingCustomerBusinessUnit);
+        invitations.CallCount.Should().Be(0);
+        writer.ResolvedUnits.Should().BeEmpty();
+        writer.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T259_AGuestAlreadyInAForeignUnit_QuarantinesTheRun_NeverMoved()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var repo = new FakeRepository(run, "e");
+        var secureUnit = Guid.NewGuid();
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(),
+            FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.InForeignBusinessUnit("sysuser-x", secureUnit)));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H11Rejections.GuestInForeignBusinessUnit);
+        failure.Diagnostic.Should().Contain(secureUnit.ToString()).And.Contain("entry 1").And.NotContain("ada@customer.com");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
     [Fact]
@@ -761,6 +807,7 @@ public sealed class H11UserProvisioningHandlerTests
             Profile = "spaarke-hosted-model2",
         };
         run.InterStepState.DataverseEnvUrl = EnvUrl;   // H5's output (H5 → H10 → H11)
+        run.InterStepState.CustomerBusinessUnitId = CustomerUnitId.ToString("D");   // T259: H10's output
         if (securityGroupId is not null)
         {
             run.Parameters.NonSecret[H11UserProvisioningHandler.EnvironmentSecurityGroupIdParameterKey] = securityGroupId;
@@ -919,6 +966,7 @@ public sealed class H11UserProvisioningHandlerTests
         private readonly GuestRoleResolution _roles;
         public List<DataverseGuestUserRequest> Requests { get; } = [];
         public List<IReadOnlyList<string>> ResolvedRoleNames { get; } = [];
+        public List<Guid> ResolvedUnits { get; } = [];
 
         private FakeGuestUserWriter(
             Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> behavior, GuestAccessOutcome guestAccess,
@@ -937,9 +985,10 @@ public sealed class H11UserProvisioningHandlerTests
             => new(_ => outcome, new GuestAccessOutcome.Allowed(), new GuestRoleResolution.Resolved([RoleId]));
 
         public Task<GuestRoleResolution> ResolveRolesAsync(
-            string environmentUrl, string tenantId, IReadOnlyList<string> roleNames, CancellationToken ct)
+            string environmentUrl, string tenantId, Guid businessUnitId, IReadOnlyList<string> roleNames, CancellationToken ct)
         {
             ResolvedRoleNames.Add(roleNames);
+            ResolvedUnits.Add(businessUnitId);
             return Task.FromResult(_roles);
         }
 

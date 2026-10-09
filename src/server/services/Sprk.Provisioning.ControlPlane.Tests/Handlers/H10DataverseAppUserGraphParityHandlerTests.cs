@@ -45,6 +45,13 @@
 //   AC-16 L2GraphAppRolesRegistry (REAL, not faked) enumerates all 15 roles
 //         with non-null AppRoleId + the well-known Graph resource appId
 //         (14 per r1 task 005 + 1 added by task 144 -- H11 verification).
+//   T259 (ISS-010, owner 2026-10-09): the customer unit is resolved before any
+//         App User and both App Users are requested IN it; its id lands in
+//         InterStepState.CustomerBusinessUnitId; a unit not under the root and
+//         an App User found in another unit are QuarantineRequired (nothing
+//         moved); an ambiguous name, a read fault, and a missing/invalid
+//         displayName (incl. the Secure Record unit's name) are Resumable with
+//         no write.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -70,6 +77,8 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com";
     private const string BffSystemUserId = "bbbbbbbb-1111-1111-1111-111111111111";
     private const string UamiSystemUserId = "cccccccc-2222-2222-2222-222222222222";
+    private const string CustomerName = "Acme Corporation";
+    private static readonly Guid CustomerUnitId = Guid.Parse("dddddddd-3333-3333-3333-333333333333");
 
     private static readonly IReadOnlyList<GraphAppRoleEntry> ThreeRoleFixture = new[]
     {
@@ -109,6 +118,10 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             .WhoseValue.Status.Should().Be(GateState.Verified);
 
         creator.CallCount.Should().Be(2, "both BFF app-reg and UAMI App Users are registered");
+        creator.UnitNames.Should().Equal(CustomerName);
+        creator.Requests.Should().OnlyContain(r => r.BusinessUnitId == CustomerUnitId,
+            "T259: both App Users are created IN the customer's unit, never the root");
+        repo.LastWrittenRun.InterStepState.CustomerBusinessUnitId.Should().Be(CustomerUnitId.ToString("D"));
         creator.Requests.Select(r => r.ApplicationId).Should().Contain(new[] { BffAppRegId, UamiClientId });
 
         // auth-v4 §10.4 (punch row A41) — the UAMI row's azureactivedirectoryobjectid
@@ -469,6 +482,120 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         roles.Select(r => r.AppRoleId).Should().OnlyHaveUniqueItems("no two roles share an AppRoleId GUID");
     }
 
+    // ---------- T259 customer business unit (ISS-010) ----------
+
+    [Fact]
+    public async Task T259_CustomerUnitUnderAnotherParent_IsQuarantined_AndNoAppUserIsRegistered()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-t259a");
+        var creator = FakeCreator.Success(unit: new CustomerBusinessUnitOutcome.WrongParent(CustomerUnitId, Guid.NewGuid(), Guid.NewGuid()));
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.CustomerBusinessUnitWrongParent);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        creator.CallCount.Should().Be(0, "no App User is created before the customer unit is right");
+    }
+
+    [Fact]
+    public async Task T259_TheRootCarryingTheCustomersName_IsQuarantined()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t259b");
+        var creator = FakeCreator.Success(unit: new CustomerBusinessUnitOutcome.WrongParent(CustomerUnitId, null, CustomerUnitId));
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.RejectionCode.Should().Be(H10Rejections.CustomerBusinessUnitWrongParent);
+        failure.Diagnostic.Should().Contain("it is the root");
+        creator.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("ambiguous")]
+    [InlineData("failure")]
+    public async Task T259_AmbiguousOrUnreadableCustomerUnit_IsResumable_AndNoAppUserIsRegistered(string kind)
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t259c");
+        CustomerBusinessUnitOutcome unit = kind == "ambiguous"
+            ? new CustomerBusinessUnitOutcome.Ambiguous(2)
+            : new CustomerBusinessUnitOutcome.Failure("GET businessunits failed: 503");
+        var creator = FakeCreator.Success(unit: unit);
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(kind == "ambiguous"
+            ? H10Rejections.CustomerBusinessUnitAmbiguous
+            : H10Rejections.CustomerBusinessUnitFailed);
+        creator.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(BffAppRegId)]
+    [InlineData(UamiClientId)]
+    public async Task T259_AnAppUserAlreadyInAnotherUnit_IsQuarantined_NeverMoved(string applicationId)
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t259d");
+        var root = Guid.NewGuid();
+        var creator = FakeCreator.ForeignUnitFor(applicationId, root);
+        var granter = FakeGranter.Success(3);
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), granter,
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.AppUserInForeignBusinessUnit);
+        failure.Diagnostic.Should().Contain(root.ToString()).And.Contain("never moves");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.InterStepState.CustomerBusinessUnitId.Should().BeNull("H10 did not complete");
+        granter.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(null, H10Rejections.CustomerDisplayNameRequired)]
+    [InlineData("   ", H10Rejections.CustomerDisplayNameRequired)]
+    [InlineData("Secure Record", H10Rejections.CustomerDisplayNameInvalid)]
+    [InlineData("secure record", H10Rejections.CustomerDisplayNameInvalid)]
+    [InlineData(" Acme", H10Rejections.CustomerDisplayNameInvalid)]
+    [InlineData("Acme\u0007", H10Rejections.CustomerDisplayNameInvalid)]
+    public async Task T259_MissingOrUnusableDisplayName_IsResumable_BeforeAnyDataverseCall(string? name, string code)
+    {
+        var run = BuildRun();
+        if (name is null)
+        {
+            run.Parameters.NonSecret.Remove(IntakeParameterCatalog.DisplayName);
+        }
+        else
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.DisplayName] = System.Text.RegularExpressions.Regex.Unescape(name);
+        }
+        var repo = new FakeRepository(run, etag: "etag-t259e");
+        var creator = FakeCreator.Success();
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(code);
+        creator.UnitNames.Should().BeEmpty();
+        creator.CallCount.Should().Be(0);
+    }
+
     // ---------- helpers ----------
 
     private static H10DataverseAppUserGraphParityHandler BuildHandler(
@@ -509,6 +636,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         {
             run.Parameters.NonSecret[H10DataverseAppUserGraphParityHandler.TenantIdParameterKey] = TenantId;
         }
+        run.Parameters.NonSecret[IntakeParameterCatalog.DisplayName] = CustomerName;   // T259
         run.InterStepState.BffAppRegId = BffAppRegId;
         run.InterStepState.MiClientId = UamiClientId;
         run.InterStepState.MiObjectId = UamiObjectId;
@@ -547,15 +675,35 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     private sealed class FakeCreator : IDataverseAppUserCreator
     {
         private readonly Func<DataverseAppUserCreationRequest, DataverseAppUserCreationOutcome> _behavior;
+        private readonly CustomerBusinessUnitOutcome _unit;
         public int CallCount { get; private set; }
         public List<DataverseAppUserCreationRequest> Requests { get; } = new();
+        public List<string> UnitNames { get; } = new();
 
-        private FakeCreator(Func<DataverseAppUserCreationRequest, DataverseAppUserCreationOutcome> behavior)
-            => _behavior = behavior;
+        private FakeCreator(
+            Func<DataverseAppUserCreationRequest, DataverseAppUserCreationOutcome> behavior, CustomerBusinessUnitOutcome? unit = null)
+        {
+            _behavior = behavior;
+            _unit = unit ?? new CustomerBusinessUnitOutcome.Success(CustomerUnitId, Created: true);
+        }
 
-        public static FakeCreator Success() => new(req => req.ApplicationId == BffAppRegId
+        public static FakeCreator Success(CustomerBusinessUnitOutcome? unit = null) => new(req => req.ApplicationId == BffAppRegId
             ? new DataverseAppUserCreationOutcome.Success(BffSystemUserId)
-            : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId));
+            : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId), unit);
+
+        public static FakeCreator ForeignUnitFor(string applicationId, Guid unit) => new(req =>
+            req.ApplicationId == applicationId
+                ? new DataverseAppUserCreationOutcome.InForeignBusinessUnit(Guid.NewGuid().ToString(), unit)
+                : req.ApplicationId == BffAppRegId
+                    ? new DataverseAppUserCreationOutcome.Success(BffSystemUserId)
+                    : new DataverseAppUserCreationOutcome.Success(UamiSystemUserId));
+
+        public Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
+            string environmentUrl, string tenantId, string name, CancellationToken ct)
+        {
+            UnitNames.Add(name);
+            return Task.FromResult(_unit);
+        }
 
         public static FakeCreator FailForApplicationId(string applicationId, string diagnostic) => new(req =>
             req.ApplicationId == applicationId

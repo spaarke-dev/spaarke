@@ -7,6 +7,11 @@
 // (success with the resulting systemuserid, or a diagnostic failure) return
 // typed results; only unexpected infrastructure faults should throw.
 //
+// T259 (ISS-010 / #1486, owner 2026-10-09): the App Users are CREATED in the customer's own business unit (a direct
+// child of the root, sibling of the Secure Record unit), which EnsureCustomerBusinessUnitAsync finds or creates first.
+// §11 — existing: H7b's ISecureRecordSetupDataverse reads/creates business units, but it signs in as the BFF app
+// registration, which becomes an application user only in THIS step; extending H10's own seam is the reuse path.
+//
 // SPEC / DESIGN references:
 //   - spec.md FR-13 (H10 acceptance) + §9.3 Dataverse Security table row:
 //     "UAMI service principal (by UAMI app ID) | System Administrator | Root".
@@ -32,13 +37,47 @@ public abstract record DataverseAppUserCreationOutcome
 
     /// <summary>Registration failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
     public sealed record Failure(string Diagnostic) : DataverseAppUserCreationOutcome;
+
+    /// <summary>
+    /// T259: the App User already exists in <paramref name="BusinessUnitId"/>, not the requested unit. Nothing was written
+    /// — a business-unit change strips every role of the user, so it is never moved here.
+    /// </summary>
+    public sealed record InForeignBusinessUnit(string SystemUserId, Guid BusinessUnitId) : DataverseAppUserCreationOutcome;
+}
+
+/// <summary>Result of <see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/> (T259).</summary>
+public abstract record CustomerBusinessUnitOutcome
+{
+    private CustomerBusinessUnitOutcome() { }
+
+    /// <summary>The unit exists directly under the root (<paramref name="Created"/>: by this call).</summary>
+    public sealed record Success(Guid BusinessUnitId, bool Created) : CustomerBusinessUnitOutcome;
+
+    /// <summary>More than one unit carries the name. Nothing was written.</summary>
+    public sealed record Ambiguous(int Count) : CustomerBusinessUnitOutcome;
+
+    /// <summary>
+    /// The one unit carrying the name is not a direct child of the root (<paramref name="ParentId"/> null: it IS the root).
+    /// Nothing was written.
+    /// </summary>
+    public sealed record WrongParent(Guid BusinessUnitId, Guid? ParentId, Guid RootBusinessUnitId) : CustomerBusinessUnitOutcome;
+
+    /// <summary>A read or the create failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
+    public sealed record Failure(string Diagnostic) : CustomerBusinessUnitOutcome;
 }
 
 /// <summary>Request to ensure one Dataverse Application User exists with a given security role.</summary>
 /// <param name="EnvironmentUrl">Target Dataverse environment URL.</param>
 /// <param name="TenantId">Target Entra tenant id (§4D I1 — mandatory, no default).</param>
 /// <param name="ApplicationId">The Entra application (client) ID to register as the App User's <c>applicationid</c>.</param>
-/// <param name="SecurityRoleName">Security role name to ensure is associated (e.g. "System Administrator").</param>
+/// <param name="SecurityRoleName">
+/// Security role name to ensure is associated (e.g. "System Administrator") — the copy of that role IN
+/// <paramref name="BusinessUnitId"/> (Dataverse assigns a user only roles of the user's own unit).
+/// </param>
+/// <param name="BusinessUnitId">
+/// T259: the customer's business unit (<see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/>). A new App
+/// User is CREATED in it; an existing one elsewhere is <see cref="DataverseAppUserCreationOutcome.InForeignBusinessUnit"/>.
+/// </param>
 /// <param name="AzureActiveDirectoryObjectId">
 /// OPTIONAL explicit value for the App User row's <c>azureactivedirectoryobjectid</c> field.
 /// Null (default) leaves Dataverse to auto-resolve the field from <paramref name="ApplicationId"/> —
@@ -61,6 +100,7 @@ public sealed record DataverseAppUserCreationRequest(
     string TenantId,
     string ApplicationId,
     string SecurityRoleName,
+    Guid BusinessUnitId,
     string? AzureActiveDirectoryObjectId = null);
 
 /// <summary>
@@ -81,5 +121,15 @@ public interface IDataverseAppUserCreator
     /// </summary>
     Task<DataverseAppUserCreationOutcome> EnsureAppUserAsync(
         DataverseAppUserCreationRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// T259 (ISS-010, INCOMING-145 §6 T1): finds the business unit named <paramref name="name"/> directly under the root,
+    /// or creates it there. Read-then-write: an ambiguous name or a unit of that name under another parent writes nothing.
+    /// </summary>
+    Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
+        string environmentUrl,
+        string tenantId,
+        string name,
         CancellationToken cancellationToken);
 }
