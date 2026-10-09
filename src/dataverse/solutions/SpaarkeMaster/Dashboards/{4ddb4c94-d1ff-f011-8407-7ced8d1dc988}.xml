@@ -1,0 +1,341 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Dashboard xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <LocalizedNames>
+    <LocalizedName description="Documents" languagecode="1033" />
+  </LocalizedNames>
+  <FormId>{4ddb4c94-d1ff-f011-8407-7ced8d1dc988}</FormId>
+  <IsCustomizable>1</IsCustomizable>
+  <IsDefault>0</IsDefault>
+  <FormXml>
+    <forms type="dashboard">
+      <form>
+        <tabs>
+          <tab showlabel="true" verticallayout="true" id="{aac4d58a-4663-4ed4-88a2-e6abb4b61360}">
+            <labels>
+              <label description="Tab" languagecode="1033" />
+            </labels>
+            <columns>
+              <column width="100%">
+                <sections>
+                  <section showlabel="false" showbar="false" columns="1111" id="{ca4b536c-297b-4fa4-92a6-ad085e4c6821}">
+                    <labels>
+                      <label description="Section" languagecode="1033" />
+                    </labels>
+                    <rows>
+                      <row>
+                        <cell colspan="1" rowspan="9" showlabel="false" id="{5a4e210c-1755-4592-83ee-aa2a76caa60a}" auto="false">
+                          <labels>
+                            <label description="Document" languagecode="1033" />
+                          </labels>
+                          <control id="Componentbdab7a5" uniqueid="{c76e3aab-baca-c2c0-6a79-61a2339d4b2a}" classid="{E7A81278-8635-4d9e-8D4D-59480B391C5B}" indicationOfSubgrid="true">
+                            <parameters>
+                              <TargetEntityType>sprk_document</TargetEntityType>
+                              <ChartGridMode>Chart</ChartGridMode>
+                              <EnableQuickFind>false</EnableQuickFind>
+                              <EnableViewPicker>false</EnableViewPicker>
+                              <EnableJumpBar>false</EnableJumpBar>
+                              <RecordsPerPage>7</RecordsPerPage>
+                              <HeaderColorCode />
+                              <ViewId>{82D75343-F530-4743-AC74-C2D13E83B1C0}</ViewId>
+                              <IsUserView>false</IsUserView>
+                              <ViewIds />
+                              <AutoExpand>Fixed</AutoExpand>
+                              <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                              <IsUserChart>false</IsUserChart>
+                              <EnableChartPicker>false</EnableChartPicker>
+                              <RelationshipName />
+                            </parameters>
+                          </control>
+                        </cell>
+                        <cell colspan="1" rowspan="9" showlabel="false" id="{89ae10f2-5d44-4717-b2b2-d59c5acbe723}" auto="false">
+                          <labels>
+                            <label description="Document" languagecode="1033" />
+                          </labels>
+                          <control id="Component3433aa0" uniqueid="{ce2dcab8-4976-d94c-a46c-788a57324275}" classid="{E7A81278-8635-4d9e-8D4D-59480B391C5B}" indicationOfSubgrid="true">
+                            <parameters>
+                              <TargetEntityType>sprk_document</TargetEntityType>
+                              <ChartGridMode>Chart</ChartGridMode>
+                              <EnableQuickFind>false</EnableQuickFind>
+                              <EnableViewPicker>false</EnableViewPicker>
+                              <EnableJumpBar>false</EnableJumpBar>
+                              <RecordsPerPage>7</RecordsPerPage>
+                              <HeaderColorCode />
+                              <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                              <IsUserView>false</IsUserView>
+                              <ViewIds />
+                              <AutoExpand>Fixed</AutoExpand>
+                              <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                              <IsUserChart>false</IsUserChart>
+                              <EnableChartPicker>false</EnableChartPicker>
+                              <RelationshipName />
+                            </parameters>
+                          </control>
+                        </cell>
+                        <cell colspan="1" rowspan="9" showlabel="false" id="{852cc107-e6c0-4f76-8f73-ab2515b174be}" auto="false">
+                          <labels>
+                            <label description="Document" languagecode="1033" />
+                          </labels>
+                          <control id="Componentc0afd69" uniqueid="{b9d5c9d2-ee2b-1582-aa34-01a43320d030}" classid="{E7A81278-8635-4d9e-8D4D-59480B391C5B}" indicationOfSubgrid="true">
+                            <parameters>
+                              <TargetEntityType>sprk_document</TargetEntityType>
+                              <ChartGridMode>Chart</ChartGridMode>
+                              <EnableQuickFind>false</EnableQuickFind>
+                              <EnableViewPicker>false</EnableViewPicker>
+                              <EnableJumpBar>false</EnableJumpBar>
+                              <RecordsPerPage>7</RecordsPerPage>
+                              <HeaderColorCode />
+                              <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                              <IsUserView>false</IsUserView>
+                              <ViewIds />
+                              <AutoExpand>Fixed</AutoExpand>
+                              <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                              <IsUserChart>false</IsUserChart>
+                              <EnableChartPicker>false</EnableChartPicker>
+                              <RelationshipName />
+                            </parameters>
+                          </control>
+                        </cell>
+                        <cell colspan="1" rowspan="9" showlabel="false" id="{48b13b9a-74e9-4888-b6a9-7bada8a627fc}" auto="false">
+                          <labels>
+                            <label description="Document" languagecode="1033" />
+                          </labels>
+                          <control id="Component6e28e5a" uniqueid="{0eaa08d7-4486-4d78-c273-858b311a32d3}" classid="{E7A81278-8635-4d9e-8D4D-59480B391C5B}" indicationOfSubgrid="true">
+                            <parameters>
+                              <TargetEntityType>sprk_document</TargetEntityType>
+                              <ChartGridMode>Chart</ChartGridMode>
+                              <EnableQuickFind>false</EnableQuickFind>
+                              <EnableViewPicker>false</EnableViewPicker>
+                              <EnableJumpBar>false</EnableJumpBar>
+                              <RecordsPerPage>7</RecordsPerPage>
+                              <HeaderColorCode />
+                              <ViewId>{82D75343-F530-4743-AC74-C2D13E83B1C0}</ViewId>
+                              <IsUserView>false</IsUserView>
+                              <ViewIds />
+                              <AutoExpand>Fixed</AutoExpand>
+                              <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                              <IsUserChart>false</IsUserChart>
+                              <EnableChartPicker>false</EnableChartPicker>
+                              <RelationshipName />
+                            </parameters>
+                          </control>
+                        </cell>
+                      </row>
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                    </rows>
+                  </section>
+                </sections>
+              </column>
+            </columns>
+          </tab>
+          <tab showlabel="true" verticallayout="true" id="{1bac50d9-0ea3-4b86-bb02-db0c8c9b7e98}">
+            <labels>
+              <label description="Tab" languagecode="1033" />
+            </labels>
+            <columns>
+              <column width="100%">
+                <sections>
+                  <section showlabel="false" showbar="false" columns="1111" id="{dcc56027-c5a4-41e2-af77-2611c0074f91}">
+                    <labels>
+                      <label description="Section" languagecode="1033" />
+                    </labels>
+                    <rows>
+                      <row>
+                        <cell colspan="4" rowspan="12" showlabel="false" id="{d72db305-d446-4914-a4c9-d3fc4a58c153}" auto="false">
+                          <labels>
+                            <label description="Documents" languagecode="1033" />
+                          </labels>
+                          <control id="Component11a859e" uniqueid="{519d37ba-b917-1675-9547-6ab0bb54c5d1}" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" indicationOfSubgrid="true">
+                            <parameters>
+                              <TargetEntityType>sprk_document</TargetEntityType>
+                              <ChartGridMode>Grid</ChartGridMode>
+                              <EnableQuickFind>true</EnableQuickFind>
+                              <EnableViewPicker>true</EnableViewPicker>
+                              <EnableJumpBar>true</EnableJumpBar>
+                              <RecordsPerPage>8</RecordsPerPage>
+                              <HeaderColorCode>#F3F3F3</HeaderColorCode>
+                              <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                              <IsUserView>false</IsUserView>
+                              <ViewIds />
+                              <AutoExpand>Fixed</AutoExpand>
+                              <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                              <IsUserChart>false</IsUserChart>
+                              <EnableChartPicker>false</EnableChartPicker>
+                              <RelationshipName />
+                            </parameters>
+                          </control>
+                        </cell>
+                      </row>
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                      <row />
+                    </rows>
+                  </section>
+                </sections>
+              </column>
+            </columns>
+          </tab>
+        </tabs>
+        <controlDescriptions>
+          <controlDescription forControl="{519d37ba-b917-1675-9547-6ab0bb54c5d1}">
+            <customControl id="{E7A81278-8635-4d9e-8D4D-59480B391C5B}">
+              <parameters>
+                <TargetEntityType>sprk_document</TargetEntityType>
+                <ChartGridMode>Grid</ChartGridMode>
+                <EnableQuickFind>true</EnableQuickFind>
+                <EnableViewPicker>true</EnableViewPicker>
+                <EnableJumpBar>true</EnableJumpBar>
+                <RecordsPerPage>8</RecordsPerPage>
+                <HeaderColorCode>#F3F3F3</HeaderColorCode>
+                <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                <IsUserView>false</IsUserView>
+                <ViewIds />
+                <AutoExpand>Fixed</AutoExpand>
+                <VisualizationId>{A1AC5510-D1FF-F011-8407-7CED8D1DC988}</VisualizationId>
+                <IsUserChart>false</IsUserChart>
+                <EnableChartPicker>false</EnableChartPicker>
+                <RelationshipName />
+              </parameters>
+            </customControl>
+            <customControl formFactor="0" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                  <columnsDefaultView />
+                  <IsUserView>false</IsUserView>
+                  <TargetEntityType>sprk_document</TargetEntityType>
+                  <EnableViewPicker>true</EnableViewPicker>
+                  <FilteredViewIds />
+                </data-set>
+                <EnableEditing static="true" type="Enum">no</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+            <customControl formFactor="1" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                  <columnsDefaultView />
+                  <IsUserView>false</IsUserView>
+                  <TargetEntityType>sprk_document</TargetEntityType>
+                  <EnableViewPicker>true</EnableViewPicker>
+                  <FilteredViewIds />
+                </data-set>
+                <EnableEditing static="true" type="Enum">no</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+            <customControl formFactor="2" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                  <columnsDefaultView />
+                  <IsUserView>false</IsUserView>
+                  <TargetEntityType>sprk_document</TargetEntityType>
+                  <EnableViewPicker>true</EnableViewPicker>
+                  <FilteredViewIds />
+                </data-set>
+                <EnableEditing static="true" type="Enum">no</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+          </controlDescription>
+        </controlDescriptions>
+      </form>
+    </forms>
+  </FormXml>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsTabletEnabled>0</IsTabletEnabled>
+</Dashboard>

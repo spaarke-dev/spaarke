@@ -1,7 +1,7 @@
 # U-CB-1 — Column Removal or Type Change (Customer Communication Template)
 
 > **Purpose**: Plain-text operator-facing template to notify a customer that an upcoming Spaarke solution upgrade will remove a column (or coerce a column's type) on a `sprk_*` Dataverse entity.
-> **Applies when**: `--allow-destructive` flag is set for a `Deploy-DataverseSolutions.ps1` upgrade AND the target solution's changeset includes a column drop or breaking type change on a `sprk_*` entity.
+> **Applies when**: an upgrade of SpaarkeMaster (provisioning H6, or `Import-SpaarkeMasterPackage.ps1` for Spaarke's own environments) removes or retypes a `sprk_*` column. A **managed** upgrade deletes every component dropped from the package (ADR-027 §4), so the release note's list of removed components (runbook step 6) is the trigger. *(Corrected 2026-10-08, T218f: the former `Deploy-DataverseSolutions.ps1 --allow-destructive` flag never existed; the script is retired.)*
 > **Owner**: Spaarke Platform Operations (release manager for the affected environment).
 > **Delivery format**: Plain-text markdown — copy into the operator's chosen channel (email / customer portal / Slack / etc.). No HTML, no branded styling, no attached logos. Operator adapts wording per channel norms.
 > **Related**: `../version-compatibility-matrix.md` · `../../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (Upgrade — U-CB flow) · `projects/customer-provisioning-orchestration-r1/design.md` §14A.4 U-CB-1
@@ -22,7 +22,7 @@ Spaarke is preparing a solution upgrade for your environment (`{customerName}` /
 You are receiving this notice because ALL of the following are true for the upcoming release `{targetSolutionVersion}`:
 
 - The upgrade includes a `sprk_*` column drop OR breaking type change (U-CB-1 class per Spaarke design §14A.4).
-- Spaarke's release procedure requires the operator to invoke `Deploy-DataverseSolutions.ps1` with the `--allow-destructive` flag; the flag is NEVER set silently.
+- Spaarke's release procedure lists every removed component in the release note and requires your sign-off before the upgrade run; a removal never ships silently.
 - Your environment's Setup Status is currently `Ready` and eligible for the upgrade wave.
 
 ## 3. Customer impact

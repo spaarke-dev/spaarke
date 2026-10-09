@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{d96c3a10-6f24-f111-88b4-7c1e5247f7c3}</WebResourceId>
+  <Name>sprk_/icons/entity/outputtypes.svg</Name>
+  <DisplayName>sprk_outputtypes Icon</DisplayName>
+  <Description>Fluent UI icon: Tag20Regular - Output types — classification for output formats</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentityoutputtypessvgD96C3A10-6F24-F111-88B4-7C1E5247F7C3</FileName>
+</WebResource>

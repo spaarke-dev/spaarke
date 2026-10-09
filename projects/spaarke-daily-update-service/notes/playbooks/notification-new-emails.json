@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-004",
     "name": "New Emails on Matters",
-    "description": "Notifies users when new emails (sprk_communication records with sprk_communicationtype = Email/100000000) have been received on their assigned matters since the last check. Resolves matter memberships via the LookupUserMembership node (ADR-034 / R3 FR-1C.2 / A1 defect remediation) and filters inbound communications by those matter IDs within the configurable timeWindow parameter. Uses Spaarke custom sprk_communication entity (NOT OOB email activity).",
+    "description": "Notifies the user of new emails (sprk_communication records with sprk_communicationtype = Email/100000000) created in the last 24 hours by someone else on their matters (resolved by the LookupUserMembership node, ADR-034), on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_communication entity (NOT OOB email activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -44,6 +44,7 @@
     {
       "name": "Start",
       "nodeType": "Control",
+      "executorType": 33,
       "actionType": null,
       "canvasType": "start",
       "outputVariable": "start",
@@ -60,6 +61,7 @@
     {
       "name": "Lookup My Matters",
       "nodeType": "Workflow",
+      "executorType": 52,
       "actionType": 52,
       "canvasType": "lookupUserMembership",
       "outputVariable": "myMatters",
@@ -71,12 +73,13 @@
         "entityType": "sprk_matter",
         "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids)."
       }
     },
     {
       "name": "Query New Emails",
       "nodeType": "Workflow",
+      "executorType": 51,
       "actionType": 51,
       "canvasType": "queryDataverse",
       "outputVariable": "newEmails",
@@ -87,16 +90,17 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_communication",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_communication\"><attribute name=\"sprk_subject\"/><attribute name=\"sprk_from\"/><attribute name=\"sprk_to\"/><attribute name=\"sprk_receiveddate\"/><attribute name=\"createdon\"/><attribute name=\"sprk_communicationid\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_communicationtype\" operator=\"eq\" value=\"100000000\"/><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_receiveddate\" descending=\"true\"/><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_communication\"><attribute name=\"sprk_subject\"/><attribute name=\"sprk_from\"/><attribute name=\"sprk_to\"/><attribute name=\"sprk_receiveddate\"/><attribute name=\"createdon\"/><attribute name=\"sprk_communicationid\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_communicationtype\" operator=\"eq\" value=\"100000000\"/><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_receiveddate\" descending=\"true\"/><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "New sprk_communication records (type=Email 100000000, createdby != current user, createdon in last {{timeWindowHours}}, default 24h) where EITHER (a) sprk_regardingmatter is in the user's myMatters.ids membership set [LookupUserMembership branch], OR (b) the email owner is the current user, OR (c) the sprk_regardingmatter owner is the current user. Sort: sprk_receiveddate desc, createdon desc tiebreaker."
+        "description": "sprk_communication rows of type Email (sprk_communicationtype 100000000) created in the last 24 hours (timeWindowHours; the scheduler passes 24) by someone other than the user, where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the communication's own owner is the user. Ordered by sprk_receiveddate descending, then createdon descending; at most 50."
       }
     },
     {
       "name": "Has New Emails?",
       "nodeType": "Control",
+      "executorType": 30,
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewEmails",
@@ -117,6 +121,7 @@
     {
       "name": "Create Notification",
       "nodeType": "Workflow",
+      "executorType": 50,
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
@@ -148,7 +153,7 @@
           "sourceModifiedOn": "{{item.createdon}}",
           "sourceOwningUser": "{{item.ownerid}}",
           "viaMatterId": "{{item.sprk_regardingmatter}}",
-          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
           "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {

@@ -17,7 +17,7 @@
  */
 
 import { createCodePageAuthInitializer, type CodePageAuthInitializer } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, waitForConfig } from "../config/runtimeConfig";
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId as getConfiguredTenantId, waitForConfig } from "../config/runtimeConfig";
 
 let _initializer: CodePageAuthInitializer | null = null;
 
@@ -35,10 +35,11 @@ function getInitializer(): CodePageAuthInitializer {
   if (!_initializer) {
     _initializer = createCodePageAuthInitializer({
       clientId: getMsalClientId(),
+      // The environment's tenant (sprk_TenantId, via runtime config) — a tenant-specific authority is required
+      // for B2B guests (#1453). The library validates it and ignores an invalid value.
+      tenantId: getConfiguredTenantId(),
       bffBaseUrl: getBffBaseUrl(),
       bffApiScope: getBffOAuthScope(),
-      // Omit tenantId → factory falls back to Xrm (preserves the EmailPage
-      // precedent for standalone code pages).
       proactiveRefresh: false, // Short-lived dialog / standalone tab
       // Suppress the involuntary acquireTokenPopup on load (ADR-028 INV-5): the
       // user is already authenticated in the host MDA session, so ssoSilent

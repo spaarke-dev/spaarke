@@ -9,6 +9,7 @@ using Polly;
 using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Resilience;
+using Sprk.Bff.Api.Services.Ai.Metering;
 using ResilenceCircuitState = Sprk.Bff.Api.Infrastructure.Resilience.CircuitState;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -47,6 +48,7 @@ public class OpenAiClient : IOpenAiClient
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly ResiliencePipeline _circuitBreaker;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry? _aiTelemetry;
+    private readonly AiSpendLimit? _spendLimit;
 
     // Circuit breaker configuration (Task 072)
     private const int FailureThreshold = 5;       // Open after 5 failures
@@ -59,12 +61,17 @@ public class OpenAiClient : IOpenAiClient
         ILogger<OpenAiClient> logger,
         ICircuitBreakerRegistry? circuitRegistry = null,
         Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null,
-        Azure.Core.TokenCredential? managedIdentityCredential = null)
+        Azure.Core.TokenCredential? managedIdentityCredential = null,
+        AiSpendLimit? spendLimit = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
         _aiTelemetry = aiTelemetry;
+        // Task 254: the stamp's optional OpenAI spend limit. Task 077 wired its predecessor here and a later merge of
+        // master dropped it silently — AiSpendLimitSeamTests now fails if any public method skips the check, and
+        // AiSpendLimitContractTests if the DI container stops supplying it.
+        _spendLimit = spendLimit;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         // Raise the per-attempt network timeout above the SDK default (100s). The Reasoning tier
@@ -174,6 +181,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -215,15 +223,26 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
 
-        await foreach (var update in streamingResult.WithCancellation(cancellationToken))
+        // Task 254: the SDK requests usage on streams; it rides the final update. Recorded in finally so a stream the
+        // caller abandons still counts what it consumed.
+        ChatTokenUsage? streamUsage = null;
+        try
         {
-            foreach (var contentPart in update.ContentUpdate)
+            await foreach (var update in streamingResult.WithCancellation(cancellationToken))
             {
-                if (!string.IsNullOrEmpty(contentPart.Text))
+                streamUsage = update.Usage ?? streamUsage;
+                foreach (var contentPart in update.ContentUpdate)
                 {
-                    yield return contentPart.Text;
+                    if (!string.IsNullOrEmpty(contentPart.Text))
+                    {
+                        yield return contentPart.Text;
+                    }
                 }
             }
+        }
+        finally
+        {
+            RecordExecutorTokenUsage(streamUsage, deploymentName);
         }
 
         _logger.LogDebug("Streaming completion finished for model {Model}", deploymentName);
@@ -245,6 +264,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -272,6 +292,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messages, chatOptions, ct);
             }, cancellationToken);
 
+            RecordExecutorTokenUsage(response.Value.Usage, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text ?? string.Empty;
 
             _logger.LogDebug(
@@ -309,6 +330,7 @@ public class OpenAiClient : IOpenAiClient
         string mediaType,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = _options.ImageSummarizeModel ?? _options.SummarizeModel;
         var chatClient = _client.GetChatClient(deploymentName);
 
@@ -353,15 +375,26 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
 
-        await foreach (var update in streamingResult.WithCancellation(cancellationToken))
+        // Task 254: the SDK requests usage on streams; it rides the final update. Recorded in finally so a stream the
+        // caller abandons still counts what it consumed.
+        ChatTokenUsage? streamUsage = null;
+        try
         {
-            foreach (var contentPart in update.ContentUpdate)
+            await foreach (var update in streamingResult.WithCancellation(cancellationToken))
             {
-                if (!string.IsNullOrEmpty(contentPart.Text))
+                streamUsage = update.Usage ?? streamUsage;
+                foreach (var contentPart in update.ContentUpdate)
                 {
-                    yield return contentPart.Text;
+                    if (!string.IsNullOrEmpty(contentPart.Text))
+                    {
+                        yield return contentPart.Text;
+                    }
                 }
             }
+        }
+        finally
+        {
+            RecordExecutorTokenUsage(streamUsage, deploymentName);
         }
 
         _logger.LogDebug("Vision streaming completion finished for model {Model}", deploymentName);
@@ -384,6 +417,7 @@ public class OpenAiClient : IOpenAiClient
         string mediaType,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = _options.ImageSummarizeModel ?? _options.SummarizeModel;
         var chatClient = _client.GetChatClient(deploymentName);
 
@@ -414,6 +448,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messages, chatOptions, ct);
             }, cancellationToken);
 
+            RecordExecutorTokenUsage(response.Value.Usage, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text ?? string.Empty;
 
             _logger.LogDebug(
@@ -451,6 +486,7 @@ public class OpenAiClient : IOpenAiClient
         int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.EmbeddingModel;
         var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
         var embeddingClient = _client.GetEmbeddingClient(deploymentName);
@@ -504,6 +540,7 @@ public class OpenAiClient : IOpenAiClient
         int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var textList = texts.ToList();
         var deploymentName = model ?? _options.EmbeddingModel;
         var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
@@ -564,6 +601,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -594,7 +632,7 @@ public class OpenAiClient : IOpenAiClient
             }, cancellationToken);
 
             var completion = response.Value;
-            RecordExecutorTokenUsage(completion, deploymentName);
+            RecordExecutorTokenUsage(completion.Usage, deploymentName);
 
             // Check if the model wants to call tools
             if (completion.FinishReason == ChatFinishReason.ToolCalls && completion.ToolCalls.Count > 0)
@@ -643,17 +681,18 @@ public class OpenAiClient : IOpenAiClient
     /// task 054). Tenant/user/entry-path attribution comes from the ambient
     /// <see cref="Telemetry.AiMeteringContext"/> scope set at the entry seams (Event /
     /// Click / Text / coded). Counts only — never content (NFR-07 / ADR-015). No-op when
-    /// telemetry is not injected (tests) or usage is absent.
+    /// usage is absent. Also adds the call's estimated cost to the stamp's month (task 254).
     /// </summary>
-    private void RecordExecutorTokenUsage(ChatCompletion completion, string deploymentName)
+    private void RecordExecutorTokenUsage(ChatTokenUsage? usage, string deploymentName)
     {
-        var usage = completion?.Usage;
-        if (usage is null || _aiTelemetry is null)
+        if (usage is null)
         {
             return;
         }
 
-        _aiTelemetry.RecordMeteredTokens(
+        _spendLimit?.RecordUsage(usage.InputTokenCount, usage.OutputTokenCount);
+
+        _aiTelemetry?.RecordMeteredTokens(
             tenantId: null,   // resolved from AiMeteringContext.Current
             userId: null,
             inputTokens: usage.InputTokenCount,
@@ -661,6 +700,14 @@ public class OpenAiClient : IOpenAiClient
             source: "executor",
             model: deploymentName);
     }
+
+    /// <summary>
+    /// Task 254: refuses the call (<see cref="AiSpendLimitExceededException"/>) when the stamp has reached its optional
+    /// monthly spend limit. Runs before any model call — embeddings included (checked, not counted: their price is a few
+    /// percent of a chat token's). A store failure lets the call through (<see cref="AiSpendLimit"/>).
+    /// </summary>
+    private ValueTask EnsureUnderSpendLimitAsync(CancellationToken cancellationToken)
+        => _spendLimit?.EnsureUnderLimitAsync(cancellationToken) ?? ValueTask.CompletedTask;
 
     /// <summary>
     /// JSON serializer options for deserializing structured completion responses.
@@ -690,6 +737,7 @@ public class OpenAiClient : IOpenAiClient
         string deploymentName,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -714,7 +762,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messageList, chatOptions, ct);
             }, cancellationToken);
 
-            RecordExecutorTokenUsage(response.Value, deploymentName);
+            RecordExecutorTokenUsage(response.Value.Usage, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text;
 
             if (string.IsNullOrEmpty(content))
@@ -827,6 +875,7 @@ public class OpenAiClient : IOpenAiClient
         float? temperature = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var isReasoning = IsReasoningDeployment(deploymentName, _options.ReasoningModel);
@@ -877,7 +926,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messages, chatOptions, ct);
             }, cancellationToken);
 
-            RecordExecutorTokenUsage(response.Value, deploymentName);
+            RecordExecutorTokenUsage(response.Value.Usage, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text;
 
             if (string.IsNullOrEmpty(content))
@@ -940,6 +989,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await EnsureUnderSpendLimitAsync(cancellationToken);
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -982,15 +1032,26 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
 
-        await foreach (var update in streamingResult.WithCancellation(cancellationToken))
+        // Task 254: the SDK requests usage on streams; it rides the final update. Recorded in finally so a stream the
+        // caller abandons still counts what it consumed.
+        ChatTokenUsage? streamUsage = null;
+        try
         {
-            foreach (var contentPart in update.ContentUpdate)
+            await foreach (var update in streamingResult.WithCancellation(cancellationToken))
             {
-                if (!string.IsNullOrEmpty(contentPart.Text))
+                streamUsage = update.Usage ?? streamUsage;
+                foreach (var contentPart in update.ContentUpdate)
                 {
-                    yield return contentPart.Text;
+                    if (!string.IsNullOrEmpty(contentPart.Text))
+                    {
+                        yield return contentPart.Text;
+                    }
                 }
             }
+        }
+        finally
+        {
+            RecordExecutorTokenUsage(streamUsage, deploymentName);
         }
 
         _logger.LogDebug(

@@ -299,6 +299,10 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
   const targetsRaw = attr?.Targets ?? attr?.targets;
   const targets = Array.isArray(targetsRaw) ? targetsRaw : undefined;
 
+  // Task 098: DateTime behaviour, from whichever shape the surface returns — Web API `DateTimeBehavior: { Value }`,
+  // a plain string, or the client API's numeric `Behavior` (1 UserLocal, 2 DateOnly, 3 TimeZoneIndependent).
+  const dateTimeBehavior = projectDateTimeBehavior(attr);
+
   return {
     attributeType,
     format,
@@ -307,7 +311,19 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
     isPrimaryId: attr?.IsPrimaryId === true || attr?.isPrimaryId === true || undefined,
     optionSet,
     targets,
+    ...(dateTimeBehavior ? { dateTimeBehavior } : {}),
   };
+}
+
+const DATE_TIME_BEHAVIOR_BY_CODE: Record<number, string> = { 1: 'UserLocal', 2: 'DateOnly', 3: 'TimeZoneIndependent' };
+
+/** A DateTime attribute's behaviour name, or `undefined` when the metadata does not carry it. */
+function projectDateTimeBehavior(attr: any): string | undefined {
+  const raw = attr?.DateTimeBehavior ?? attr?.dateTimeBehavior ?? attr?.Behavior ?? attr?.behavior;
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (typeof raw?.Value === 'string' && raw.Value.length > 0) return raw.Value;
+  if (typeof raw === 'number') return DATE_TIME_BEHAVIOR_BY_CODE[raw];
+  return undefined;
 }
 
 /**

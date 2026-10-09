@@ -106,6 +106,22 @@ public class DocumentFileAttachContractTests
         host.World.Updates.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Attach fix (F1): a BFF-uploaded file is attached for a caller whose principal carries ONLY the long-form oid / tenantid claims (production)")]
+    public async Task Attach_ABffUpload_WithLongFormClaimsOnly_Is200()
+    {
+        await using var host = await AttachHost.StartAsync(AccessRights.Read | AccessRights.Write, world =>
+            world.Items[(Relocation.CustomerA1Container, Relocation.Item)] = new SpeItemCreator(
+                "brief.docx", null, TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D"), 10));
+        // The binding exactly as the upload route records it for that principal: tenant and oid from the long forms.
+        await host.Rig.Attribution.RecordItemAsync(
+            AttachTestAuthHandler.LongFormTenant, Relocation.Creator, Relocation.CustomerA1Container, Relocation.Item);
+
+        var response = await host.PostAsync(Url, Body(), longFormClaims: true);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        host.World.Updates.Should().ContainSingle().Which.Fields["sprk_graphitemid"].Should().Be(Relocation.Item);
+    }
+
     [Theory]
     [InlineData(null, Relocation.Item)]
     [InlineData(Relocation.CustomerA1Container, "")]
@@ -193,11 +209,11 @@ public class DocumentFileAttachContractTests
             _client = _app.GetTestClient();
         }
 
-        public Task<HttpResponseMessage> PostAsync(string url, object body)
+        public Task<HttpResponseMessage> PostAsync(string url, object body, bool longFormClaims = false)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token");
-            request.Headers.Add(AttachTestAuthHandler.CallerHeader, "present");
+            request.Headers.Add(AttachTestAuthHandler.CallerHeader, longFormClaims ? AttachTestAuthHandler.LongForm : "present");
             return _client!.SendAsync(request);
         }
 
@@ -219,6 +235,12 @@ public sealed class AttachTestAuthHandler : AuthenticationHandler<Authentication
     public const string SchemeName = "DocumentAttachTest";
     public const string CallerHeader = "X-Test-Caller";
 
+    /// <summary><see cref="CallerHeader"/> value: authenticate with ONLY the long-form oid / tenantid claims (production).</summary>
+    public const string LongForm = "long-form";
+
+    /// <summary>The tenant the long-form principal carries.</summary>
+    public const string LongFormTenant = "17170000-0000-4000-8000-0000000000aa";
+
     public AttachTestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : base(options, logger, encoder)
     {
@@ -231,8 +253,16 @@ public sealed class AttachTestAuthHandler : AuthenticationHandler<Authentication
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        var identity = new ClaimsIdentity(
-            new[] { new Claim("oid", TestRecordContainerResolver.PointerWorldCreatorObjectId.ToString("D")) }, SchemeName);
+        var oid = TestRecordContainerResolver.PointerWorldCreatorObjectId.ToString("D");
+        var identity = Request.Headers[CallerHeader] == LongForm
+            ? new ClaimsIdentity(
+                new[]
+                {
+                    new Claim(Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ObjectIdSchemaClaim, oid),
+                    new Claim(Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.TenantIdSchemaClaim, LongFormTenant),
+                },
+                SchemeName)
+            : new ClaimsIdentity(new[] { new Claim("oid", oid) }, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 }

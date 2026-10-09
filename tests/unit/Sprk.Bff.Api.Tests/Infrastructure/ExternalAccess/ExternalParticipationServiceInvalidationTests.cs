@@ -228,7 +228,8 @@ public class ExternalParticipationServiceInvalidationTests
 
         private CountingState(HttpContextAccessor accessor)
             : base(new HttpClient(), Mock.Of<ITenantCache>(), configuration: null!, credential: null!, accessor,
-                   NullLogger<ExternalParticipationService>.Instance)
+                   NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
             => _accessor = accessor;
 
         public HttpContext? Context { set => _accessor.HttpContext = value; }
@@ -261,6 +262,7 @@ public class ExternalParticipationServiceInvalidationTests
             configuration: null!,
             credential: null!,
             accessor.Object,
-            NullLogger<ExternalParticipationService>.Instance);
+            NullLogger<ExternalParticipationService>.Instance,
+            filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
     }
 }

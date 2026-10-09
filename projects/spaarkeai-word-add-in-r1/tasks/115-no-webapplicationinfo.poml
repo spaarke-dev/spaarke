@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="115" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Customer-tenant deployment: remove webApplicationInfo from the unified package (AADSTS700016); package 1.1.2</title>
+    <phase>6 — cross-project request (2026-10-08)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the shipped package (manifests, packaging code, version) and tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/deployment-adjacent package change.</model-tier-reason>
+    <effort>high</effort>
+    <deps>078, 113</deps>
+    <tags>frontend, office-addins, auth, unit-test</tags>
+  </metadata>
+  <prompt>customer-provisioning-orchestration-r1, fourth message (2026-10-08, `notes/coordination/2026-10-08-to-word-add-in-r1-4.md` in that project): a customer tenant (test tenant deweycheatham, bc3aa7f4-…) could not deploy package 1.1.1 — AADSTS700016, the deployment's consent step asked for app c1258e2d, which is single-tenant. Owner decision 2026-10-08: remove webApplicationInfo (not make the app multi-tenant). Record: `notes/115-no-webapplicationinfo.md`.</prompt>
+  <goal>The unified package deploys in any customer tenant without consenting to a Spaarke app: no webApplicationInfo; the add-in app stays single-tenant.</goal>
+  <acceptance-criteria>
+    <criterion testable="true">Built package 1.1.2 has no webApplicationInfo and no 404 code.script entries; the merge refuses a source manifest that declares webApplicationInfo.</criterion>
+    <criterion testable="true">Gates: full add-in jest green; lint 0; typecheck 0 production; test debt not increased.</criterion>
+    <criterion testable="false">Live (owner): 1.1.2 deploys in the test tenant (Integrated apps) and in Spaarke's tenant; the guest's Diagnostics shows acct 1 — guest.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>The unified package (078).</existing>
+    <extension>Yes — an entry is removed; nothing added.</extension>
+    <cost-of-doing-nothing>No customer IT can deploy the add-in (provisioning's test).</cost-of-doing-nothing>
+  </justification>
+</task>

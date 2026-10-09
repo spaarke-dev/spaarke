@@ -1055,7 +1055,8 @@ components:
           type: string
         dueDate:
           type: string
-          format: date-time
+          format: date
+          description: Calendar date (YYYY-MM-DD), no time or time zone; show it as given.
         status:
           type: string
         assigneeName:
@@ -1076,7 +1077,8 @@ components:
           type: string
         dueDate:
           type: string
-          format: date-time
+          format: date
+          description: Calendar date (YYYY-MM-DD). A date-time is refused.
         matterId:
           type: string
           format: uuid

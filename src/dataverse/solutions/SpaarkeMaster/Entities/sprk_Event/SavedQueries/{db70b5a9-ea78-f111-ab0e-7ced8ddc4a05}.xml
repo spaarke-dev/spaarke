@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{db70b5a9-ea78-f111-ab0e-7ced8ddc4a05}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_eventname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_eventid">
+          <cell name="sprk_eventname" width="268" />
+          <cell name="sprk_regardingrecordname" width="100" />
+          <cell name="sprk_eventstatus" width="111" />
+          <cell name="sprk_duedate" width="100" />
+          <cell name="sprk_finalduedate" width="126" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical" distinct="true">
+        <entity name="sprk_event">
+          <attribute name="sprk_eventid" />
+          <attribute name="sprk_eventname" />
+          <attribute name="sprk_eventstatus" />
+          <attribute name="sprk_duedate" />
+          <attribute name="sprk_finalduedate" />
+          <attribute name="sprk_regardingrecordname" />
+          <order attribute="sprk_duedate" descending="true" />
+          <filter type="and">
+            <condition attribute="sprk_eventtype_ref" operator="eq" value="{e0043c4b-99ff-f011-8406-7c1e525abd8b}" uiname="Deadline" uitype="sprk_eventtype_ref" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Deadlines" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

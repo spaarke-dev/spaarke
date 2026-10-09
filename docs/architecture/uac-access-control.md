@@ -119,6 +119,37 @@ Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/Cal
 
 ---
 
+## A Filed Child's Access Follows Its Parent (owner round 84, task 174)
+
+**Rule (binding).** A work assignment or project that has a parent is enforced with its EFFECTIVE Secure flag and Access
+Permission: the most restrictive of its own `sprk_issecure` / `sprk_accesspermission` and those of every matter or
+project above it in the filing chain (secure-if-any; Restricted over Limited over Standard). A matter files under nothing
+and is unchanged. Task 175 makes the STORED values cascade and locks them on the child; until a stored value catches up
+(inheritance pending, Refused or Failed, or a cascade in flight) enforcement computes the value from the chain and fails
+closed.
+
+- **One walk.** `SecureRootInheritance.ReadSecureParentsAsync` / `ReadSecureParentsOfManyAsync` (#1410) climbs the chain
+  (bounded by `MaxFilingDepth`, cycle-safe) and reads each ancestor's Access Permission in the same parent read as its
+  Secure flag. `EffectiveRootFlags` folds that answer into the record's own `RootRecordFlags`.
+- **Where it applies.** The read path (`AccessibleRecordSetService`: direct-only cancellation, Restricted, the systemuser
+  plane's Restricted survivor — one walk per composition shared with the No Access veto) and every access caller of the
+  flag read through `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync`: the write-time grant policy, the
+  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the share-link refusal, the
+  Restricted share remover and the Assigned-To materializer. The No Access guard and enforcer treat a record with a secure
+  ancestor as secure (Q4's "secure" is the record or any filing ancestor, round 82).
+- **The contact plane honours a secure parent's No Access list (#1425).** The read-time contact veto and the write-time
+  grantee check ask every secure ancestor's list, each carrying its own referenced organizations, in the same deny-list
+  query.
+- **Fails closed.** An unreadable filing row, pair type or ancestor flag, an EMPTY ancestor flag, or a chain past the bound
+  makes the record `RootRecordFlags.Unreadable` (secure AND Restricted): removed on the read path, refused as "could not be
+  read" at grant time.
+- **Display.** Task 064's per-record read (`GET /api/v1/records/{table}/{id}/no-access`) reports the effective `secure`,
+  `accessPermission` and `inheritedFrom`; Manage Access gates and marks "No effect" from the stricter of those and the
+  record's stored values.
+- **Not routed (own values on purpose).** `/unshare-user`'s last-reader rule (S5) follows the stored ownership. Readers
+  outside the flag read (provisioning's creator rule, the secure-child share synchronizer's Restricted read, SPE container
+  membership, Office edit, the Restricted sweep) are task 175's: the stored cascade makes them right.
+
 ## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
 
 **The gate is Write.** `DelegationRuleFilter` admits a caller to every `/api/v1/external-access/*` route (grant, invite, share, revoke, `/can-manage-access`) only when the caller holds **Write** on the record, evaluated as the caller over OBO (owner decision B-14, retained). Share is never consulted by the gate, and the record's Access Permission / Secure flags do not change it — they govern WHICH grant types apply, at write time (task 138).
@@ -139,6 +170,7 @@ No level carries Assign. Collaborate and Full Access carry Share so a Write-hold
 - `ExternalAccessLevels.GrantCeilingFor` maps the rights to a ceiling over Read / Write / Delete only: Full Access iff Read+Write+Delete; Collaborate iff Read+Write; View Only iff Read; otherwise none (→ **403** `sdap.access.grant.caller_cannot_grant`). Create, Append, AppendTo and Share are not consulted (RetrievePrincipalAccess need not report CreateAccess on an existing record).
 - A request above the ceiling is **narrowed, not refused**: written at the ceiling, and the response says so (`grantedAccessLevel`, `narrowed: true`). `/share-user` intersects right by right (Dataverse's own rule) and reports its existing `narrowed` flag.
 - **Never silently lower.** When the request was narrowed and the grantee already holds more (a higher active grant row, or share rights the narrowed mask lacks), the write is refused with **409** `sdap.access.grant.would_lower_existing` — the grant upsert updates levels in place and ModifyAccess replaces rights, so without this a "Full Access please" capped to Collaborate would lower someone else's Full Access grant. An explicit request for a lower level (not narrowed) is a deliberate downgrade and is applied.
+- **A re-add over a lapsed grant is a SET (owner round 80, task 113).** On `/grant` and `/invite-and-grant` (the Manage Access re-adds send no date), a request with no expiry over a key on which no row still confers is restored at the PICKED level with today + 90; the 200 reports the level written. The ceiling, the contact-issuer expiry cap and never-lower still apply (a narrowed re-add over a lapsed HIGHER row is still 409 `would_lower_existing`). The Assigned-To rule does not opt in: a dateless request it sends over a lapsed key is refused and writes nothing.
 - **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.CheckGranteeNoAccessAsync` → `ResolveDenyVetoAsync`). The check answers a **tri-state** (task 142 r4, owner round 13 item 4): Allowed, Denied (an entry), or Unverifiable — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or referenced organizations, a fail-closed deny-list read). Unverifiable refuses too (fail closed), but as a fault — **503** `sdap.access.grant.no_access_unverifiable` — never absorbed into `grantee_denied`. The read path removes both (unchanged). The internal-user No Access list on `/share-user` is task 143's.
 
 **Where the checks live (WP-1).** The policy (task 138), ceiling, never-lower and No Access checks run inside the one grant-writing core, `GrantExternalAccessEndpoint.CreateGrantAsync`, which takes a REQUIRED `GrantCeiling`; `/invite-and-grant` runs the same `CheckGrantAsync` BEFORE onboarding (resolving an existing contact by email read-only), so a refusal leaves no Contact or CIAM account behind. The ArchTest `GrantCeilingGuardTests` pins that the core is the only writer of a grant's level and that every call supplies a ceiling. Assigned-To auto-grants (task 142) are uncapped Collaborate (owner rule 5) and supply their own named ceiling.

@@ -59,7 +59,7 @@ import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
-import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getApiBaseUrl, resolveSignInIdentity } from '../../shared/utils/environmentVariables';
 import { FindSimilarViewerDialog } from '@spaarke/ui-components/dist/components/FindSimilarViewer';
 import {
   DocumentEmailWizard,
@@ -481,9 +481,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
     const doAuth = async () => {
       const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
-      const clientAppId = manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
-      const bffAppId = manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      // Environment variables first, form properties only as a fallback (#1453 — shipped forms carry dev values).
+      const { tenantId, clientAppId, bffAppId } = await resolveSignInIdentity(webApi, {
+        tenantId: manifestTenantId,
+        clientAppId: manifestClientAppId,
+        bffAppId: manifestBffAppId,
+      });
 
       await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
 
@@ -1839,7 +1842,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.81 • Built 2026-08-26</Text>
+        <Text size={100}>v1.1.84 • Built 2026-10-09</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1890,7 +1893,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           full result set and the user had to prune in step 1; the
           bulk-toolbar Email button is now gated on `selectedIds.size
           > 0` so launching with zero selection is impossible.
-          v1.1.63 — `maxWidth='1280px'` + `height='85vh'` mirror the
+          `size="lg"` (1280px / 85vh) mirrors the
           FilePreviewDialog so the wizard footprint matches when
           stacked over an open preview (Item 3 + Item 2 combine: the
           preview stays open behind the wizard for both row-menu and
@@ -1915,15 +1918,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
-        // v1.1.63 — match the FilePreviewDialog footprint so the wizard
-        // doesn't feel mismatched when stacked over an open preview.
-        // FilePreviewDialog uses maxWidth='1280px' height='85vh' (see
-        // SemanticSearchControl/components/FilePreviewDialog.tsx
-        // styles.surface). Mirroring those values here removes the
-        // visual size jump UAT flagged when the wizard launches with
-        // the preview still open.
-        maxWidth="1280px"
-        height="85vh"
+        // Named `lg` size (1280px / 85vh) matches the FilePreviewDialog footprint so the wizard
+        // doesn't jump in size when stacked over an open preview (ontology task 111).
+        size="lg"
       />
 
       {/* Toaster — single instance per PCF surface (FR-DOC-02 bulk-action

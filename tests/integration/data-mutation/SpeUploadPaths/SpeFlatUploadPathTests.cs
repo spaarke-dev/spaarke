@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Office;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths;
 
@@ -91,9 +92,9 @@ public class SpeFlatUploadPathTests
     private static Mock<SpeFileStore> BuildSpeMock(FakeSpeDrive drive)
     {
         var gcf = Mock.Of<IGraphClientFactory>();
-        var containerOps = new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>());
-        var driveItemOps = new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>());
-        var uploadMgr = new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
+        var containerOps = new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>());
+        var driveItemOps = new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>());
+        var uploadMgr = new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
         var userOps = new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>());
 
         var speMock = new Mock<SpeFileStore>(MockBehavior.Loose, containerOps, driveItemOps, uploadMgr, userOps, null!);

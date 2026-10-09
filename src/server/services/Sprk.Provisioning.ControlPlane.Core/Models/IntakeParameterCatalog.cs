@@ -22,6 +22,8 @@
 // created. No known gaps remain (RunContextContractTests).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+
 namespace Sprk.Provisioning.ControlPlane.Models;
 
 /// <summary>One accepted intake key.</summary>
@@ -38,11 +40,28 @@ public static class IntakeParameterCatalog
     /// <summary>Entra tenant id — required at intake (§4D I1); read by every handler.</summary>
     public const string TenantId = "tenantId";
 
-    /// <summary>Azure subscription of the customer stamp — required at intake for Model 2 (ADR-027 D4).</summary>
+    /// <summary>
+    /// The customer's own Azure subscription — required at intake for every model, a GUID (ADR-027: one subscription per
+    /// customer; T228: the operator creates it, nothing defaults it).
+    /// </summary>
     public const string SubscriptionId = "subscriptionId";
 
-    /// <summary>SPE container-type id for the environment (spaarke-constants.yaml) — H4, H8, H13.</summary>
+    /// <summary>SPE container-type id for the environment (spaarke-constants.yaml) — required GUID (T228 / G19); H0, H4b, H8, H13.</summary>
     public const string ContainerTypeId = "containerTypeId";
+
+    /// <summary>
+    /// T228: URL of the Dataverse environment the operator created for this customer — required, checked by
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule"/> and stored in its canonical
+    /// form. H5 adopts it; nothing creates an environment.
+    /// </summary>
+    public const string DataverseEnvUrl = "dataverseEnvUrl";
+
+    /// <summary>
+    /// OPTIONAL monthly Azure OpenAI spend limit of the stamp in USD (task 254, owner G37). Absent = no limit (the default).
+    /// Rule: <see cref="Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule"/>. H4b writes
+    /// <c>AiSpendLimit__MonthlyLimitUsd</c> from it (PerEnvSourceCatalog <c>openai_monthly_limit_usd</c>).
+    /// </summary>
+    public const string OpenAiMonthlyLimitUsd = "openAiMonthlyLimitUsd";
 
     /// <summary>The customer stamp's environment segment — <c>customer.bicep</c> <c>environmentName</c>.</summary>
     public const string EnvironmentName = "environmentName";
@@ -53,6 +72,39 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string DefaultEnvironmentName = "prod";
 
+    /// <summary>
+    /// T218b — the Dataverse package type H6 imports: <see cref="ManagedSolutionPackage"/> (default) or
+    /// <see cref="UnmanagedSolutionPackage"/>. Managed by default; unmanaged only on explicit instruction (ADR-027 §3,
+    /// amended 2026-10-07, owner D8). Absent → the default is stored at CreateRun, so the run (and the registry row H13
+    /// writes) records the type actually used.
+    /// </summary>
+    public const string SolutionPackageType = "solutionPackageType";
+
+    /// <summary><see cref="SolutionPackageType"/> value for the managed package (the default).</summary>
+    public const string ManagedSolutionPackage = "managed";
+
+    /// <summary><see cref="SolutionPackageType"/> value for the unmanaged package (explicit instruction only).</summary>
+    public const string UnmanagedSolutionPackage = "unmanaged";
+
+    /// <summary>Values <see cref="SolutionPackageType"/> may take (exact case).</summary>
+    public static readonly IReadOnlySet<string> AllowedSolutionPackageTypes =
+        new HashSet<string>(StringComparer.Ordinal) { ManagedSolutionPackage, UnmanagedSolutionPackage };
+
+    /// <summary>
+    /// T256 — H7b dry run: <c>true</c> makes H7b (Secure Record setup) read everything, record its plan in the gate
+    /// evidence and write nothing; the run then stops at H7b. <c>false</c> or absent applies. Exact lower case; validated at
+    /// POST /api/runs by <c>SecureRecordSetupIntake</c>, the rule H7b applies.
+    /// </summary>
+    public const string SecureRecordSetupDryRun = "secureRecordSetupDryRun";
+
+    /// <summary>
+    /// Task 255 (INCOMING-141, UAC-r2 task 141) — the CUSTOMER's Entra tenant id(s) whose employees use the stamp: a JSON
+    /// array of GUID strings, required for every model; stored canonical. Rule:
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsRule"/> (POST /api/runs, H4b, H13).
+    /// H4b writes <c>WorkforceIdentity__CustomerTenantIds__N</c> on both slots; H13 T7 checks them.
+    /// </summary>
+    public const string CustomerWorkforceTenantIds = "customerWorkforceTenantIds";
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -60,8 +112,15 @@ public static class IntakeParameterCatalog
     public const string UsersJson = "usersJson";
 
     /// <summary>
-    /// H14a — the mail-enabled security group that scopes the Exchange ApplicationAccessPolicy (which mailboxes the
-    /// BFF app + UAMI may use). Created by the Exchange admin of the stamp's tenant (the customer's for Model 2,
+    /// H11 (task 232) — object id of the customer environment's security group (<c>sprk-{customerId}-users</c>),
+    /// created by the operator and set on the Dataverse environment before the run (prereqs.yaml <c>PRQ-C-10</c>).
+    /// Required for identityPreset <c>B2BGuest</c> (every Model 1 run); H11 adds each guest to it.
+    /// </summary>
+    public const string EnvironmentSecurityGroupId = "environmentSecurityGroupId";
+
+    /// <summary>
+    /// H14a — the mail-enabled security group that scopes the Exchange RBAC for Applications role assignments (which
+    /// mailboxes the stamp's managed identity may use; owner D26 replaced ApplicationAccessPolicy). Created by the Exchange admin of the stamp's tenant (the customer's for Model 2,
     /// Spaarke's for Model 1) before the run (prereqs.yaml <c>PRQ-C-08</c>; owner decision D14). Required.
     /// </summary>
     public const string ExchangePolicyScopeGroupId = "exchangePolicyScopeGroupId";
@@ -108,16 +167,19 @@ public static class IntakeParameterCatalog
     [
         // --- Sent by /provision-environment Step 4.0 -------------------------------
         new(TenantId, "Entra tenant id (§4D I1). Required at intake. Every handler."),
-        new(SubscriptionId, "Customer Azure subscription. Required at intake for Model 2. H0 probes, H1, H2a, H4, H4b, H9, H13, H14."),
-        new("region", "Primary Azure region (H0 quota probes) / Dataverse region (H5)."),
-        new("tier", "Cost tier (H0 envelope) / Dataverse environment SKU (H5)."),
-        new("estimatedMonthlyUsd", "H0 cost-envelope input."),
-        new("costEnvelopePolicy", "H0 cost-envelope policy (abortOnOverrun | warnAndProceed)."),
-        new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a)."),
-        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4 (SPE-ContainerTypeId secret), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
-        new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6). Required; validated at POST /api/runs (UserProvisioningIntake)."),
+        new(SubscriptionId, "The customer's own Azure subscription (GUID), created by the operator. Required at intake for every model (ADR-027, T228). H0 probes, H1, H2a, H4, H4b, H9, H13, H14."),
+        new(DataverseEnvUrl, "URL of the Dataverse environment the operator created (https://spaarke-{customerId}[-{environmentName}].crm[N].dynamics.com/). Required (T228); H5 adopts it."),
+        new("region", "Primary Azure region (H0 quota probes)."),
+        new(CostEnvelopeIntake.TierParameterKey, "Cost tier whose monthly ceiling H0 compares the estimate with: smb | enterprise | dedicated (budget classes for one dedicated stamp; T229). Required; validated at POST /api/runs (CostEnvelopeIntake)."),
+        new(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey, "Projected monthly Azure spend of the stamp in USD (invariant decimal ≥ 0). Required; validated at POST /api/runs (CostEnvelopeIntake); H0 refuses a run whose estimate exceeds its tier ceiling (T229)."),
+        new(OpenAiMonthlyLimitUsd, "OPTIONAL monthly Azure OpenAI spend limit of the stamp in USD (task 254, owner G37). Absent = no limit (the default). Validated at POST /api/runs (OpenAiMonthlyLimitRule); H4b writes AiSpendLimit__MonthlyLimitUsd on both slots only when present. Change or remove later with scripts/Set-AiSpendLimit.ps1."),
+        new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
+        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
+        new(CustomerWorkforceTenantIds, "T255 (INCOMING-141): JSON array of the CUSTOMER's Entra tenant id(s) whose employees use the stamp — Model 1: the customer's home tenant, never Spaarke's or the run's tenantId; Model 2: the customer's tenant. Required for every model; 1-10 distinct non-zero GUIDs, never a CIAM tenant (CustomerWorkforceTenantsRule, validated at POST /api/runs and stored canonical). H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots; H13 T7 checks them."),
+        new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6); a Model1 run takes only B2BGuest (owner D2, T232). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
-        new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange ApplicationAccessPolicy — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
+        new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),
+        new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange RBAC for Applications role assignments — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
         new(CommunicationGraphResource, "H14b: Graph subscription resource for the Communication module. At least one of this and emailGraphResource."),
         new(EmailGraphResource, "H14b: Graph subscription resource for the Email module. At least one of this and communicationGraphResource."),
         new(CommunicationDefaultMailbox, "H4: Communication module default mailbox address (KV Communication-DefaultMailbox). Required."),
@@ -127,10 +189,10 @@ public static class IntakeParameterCatalog
 
         // --- Stamp shape (defaults applied at CreateRun or in the handler) ----------
         new(EnvironmentName, "Customer stamp environment segment (dev | staging | prod). Absent → 'prod' stored at CreateRun. H2a, H2b, H4b."),
+        new(SolutionPackageType, "Dataverse package type H6 imports: managed | unmanaged. Absent → 'managed' stored at CreateRun (ADR-027 §3 amended 2026-10-07, owner D8: unmanaged only on explicit instruction). H6; H13 records it on the registry row (sprk_solutionversion)."),
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
-        new("dataverseDisplayName", "Dataverse environment display name (H5)."),
         new("speContainerDisplayName", "SPE root container display name (H8)."),
         new("healthCheckPath", "BFF health probe path (H9; default /healthz)."),
         new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json). H13 reads the deployed build from H9's output."),
@@ -145,10 +207,10 @@ public static class IntakeParameterCatalog
         new("ficOmitSecretNames", "H4: secret names to omit when the stamp is secret-free."),
 
         // --- H0 probe tuning ---------------------------------------------------------
-        new("minSlotsRequired", "H0 Dataverse capacity probe threshold."),
-        new("rateWindowHours", "H0 Dataverse environment-creation rate window."),
-        new("rateLimit", "H0 Dataverse environment-creation rate limit."),
         new("openaiPinFreshnessMinDays", "H0 OpenAI model-pin freshness threshold."),
+
+        // --- Secure Record setup (H7b) -------------------------------------------------
+        new(SecureRecordSetupDryRun, "H7b (T256): 'true' = dry run — H7b reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). 'false' or absent = apply. Validated at POST /api/runs (SecureRecordSetupIntake)."),
 
         // --- Dataverse environment-variable values (H7) -------------------------------
         new("msalClientId", "H7 env-var value: MSAL client id for code pages."),
@@ -171,6 +233,19 @@ public static class IntakeParameterCatalog
         return nonSecretParameters.TryGetValue(EnvironmentName, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : DefaultEnvironmentName;
+    }
+
+    /// <summary>
+    /// T218b: the run's package type — the stored <see cref="SolutionPackageType"/> value, or
+    /// <see cref="ManagedSolutionPackage"/> when absent (a run created before CreateRun stored the default). The value is
+    /// returned as stored; callers check it against <see cref="AllowedSolutionPackageTypes"/>.
+    /// </summary>
+    public static string ResolveSolutionPackageType(IDictionary<string, string> nonSecretParameters)
+    {
+        ArgumentNullException.ThrowIfNull(nonSecretParameters);
+        return nonSecretParameters.TryGetValue(SolutionPackageType, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : ManagedSolutionPackage;
     }
 
     /// <summary>True when <paramref name="key"/> is an accepted intake key (ordinal).</summary>

@@ -27,6 +27,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Xunit;
 using WorkerProgram = WorkerHost::Program;
 
@@ -47,6 +48,20 @@ public sealed class WorkerL2OwnedOptionsBootTests
     }
 
     [Theory]
+    [InlineData("ReservedTenants:SpaarkeTenantId", "*ReservedTenants:SpaarkeTenantId*")]
+    [InlineData("ReservedTenants:CiamTenantIds:0", "*ReservedTenants:CiamTenantIds:0*")]
+    public void BlankReservedTenant_FailsHostStart(string setting, string expectedMessage)
+    {
+        // T255: H4b and H13 refuse Spaarke's tenant and the CIAM tenant as customer workforce tenants — a Worker that
+        // does not know them must not start (the Api host registers the same options).
+        using var factory = new L2OptionsWorkerTestFactory(b => b.UseSetting(setting, " "));
+
+        var act = () => factory.Services;
+
+        act.Should().Throw<InvalidOperationException>().WithMessage(expectedMessage);
+    }
+
+    [Theory]
     [InlineData("ContainerTypeId")]
     [InlineData("OwnerAppId")]
     public void IncompleteSpeOwnerEntry_FailsHostStart(string blankSetting)
@@ -61,6 +76,35 @@ public sealed class WorkerL2OwnedOptionsBootTests
         var act = () => factory.Services;
 
         act.Should().Throw<InvalidOperationException>().WithMessage($"*ContainerTypeOwners:0*{blankSetting}*");
+    }
+
+    [Fact]
+    public void BlankGuestRoleName_FailsHostStart()
+    {
+        // T232: a blank role name would otherwise surface only in the first Model 1 run's H11, after H0–H10.
+        using var factory = new L2OptionsWorkerTestFactory(b =>
+        {
+            WithCompleteOwner(b);
+            b.UseSetting("H11UserProvisioningOptions:GuestSecurityRoleNames:0", " ");
+        });
+
+        var act = () => factory.Services;
+
+        act.Should().Throw<OptionsValidationException>().WithMessage("*GuestSecurityRoleNames*");
+    }
+
+    [Fact]
+    public void ConfiguredGuestRole_StartsHost_AndReplacesTheDefault()
+    {
+        using var factory = new L2OptionsWorkerTestFactory(b =>
+        {
+            WithCompleteOwner(b);
+            b.UseSetting("H11UserProvisioningOptions:GuestSecurityRoleNames:0", "Spaarke Guest");
+        });
+
+        var options = factory.Services.GetRequiredService<IOptions<H11UserProvisioningOptions>>().Value;
+
+        options.EffectiveGuestSecurityRoleNames.Should().Equal("Spaarke Guest");
     }
 
     [Fact]

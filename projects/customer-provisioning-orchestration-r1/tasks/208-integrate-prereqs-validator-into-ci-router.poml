@@ -4,7 +4,7 @@
     <title>Integrate provisioning-prereqs-validate workflow into ci-router.yml single-gate per FR-A01 (currently runs as parallel advisory check)</title>
     <phase>Post-Live-Fire remediation — CI governance</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.github/workflows/ci-router.yml` (ci-workflows hot-path per root CLAUDE.md §10) + `.github/workflows/ci-tier1-blocking.yml` + `.github/workflows/provisioning-prereqs-validate.yml`. Main-session-only per §3.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -68,4 +68,8 @@ Preserve parser parity: whatever runs in tier1 MUST invoke `scripts/provisioning
     <criterion>A test PR NOT touching `scripts/provisioning-prereqs/**` still passes `CI / Router` cleanly (no stuck-pending).</criterion>
     <criterion>The retired-or-retained decision on `provisioning-prereqs-validate.yml` is documented in the PR description with rationale.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-09">COMPLETED (SESSION 45, main session). ci-router.yml: classify emits `provisioning_prereqs` (scripts/provisioning-prereqs/**, .claude/skills/provision-environment/**, ci-router.yml itself); new router job `prereqs` runs validate.ps1 (powershell-yaml — parser parity kept) + the ajv-formats compile of intake.schema.json; router-result adjudicates it (`allowed-skips: tier1,prereqs`; alls-green v1.3.0 splits on commas and strips). The standalone advisory provisioning-prereqs-validate.yml is DELETED (retired, not retained: the router job now covers PR, push and merge_group, and a second check would be a parallel gate). DEVIATION from step 2 / AC2 (directional steps): the validator is a ROUTER job, not a Tier 1 step — `.claude/**` is documentation in classify, so a provision-environment-skill-only diff is docs_only and skips Tier 1 entirely; a Tier 1 step would never run for exactly the case the goal names. The router job is gated only on `provisioning_prereqs`, independent of docs_only. Docs: ci-cd-workflow.md (router section + removed the advisory rows), ci-cd skill table, provision-environment skill comment. Local: validate.ps1 exit 0 (40 prereqs); ajv compile valid. AC4/AC5 (live PR behaviour) are verified by this branch's next PR: it changes ci-router.yml, so `prereqs` runs; any PR without those paths shows it skipped and Router green.</note>
+  </notes>
 </task>

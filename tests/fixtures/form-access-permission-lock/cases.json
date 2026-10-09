@@ -1,0 +1,16 @@
+{
+  "description": "Set-InheritedAccessPermissionFormLock.ps1 -SelfTest (unified-access-control-r2 task 173). Each case: the fixture, whether the form is an -AddControlForms form, whether it is managed, the refusals expected (in order), the additions expected (in order) and whether the lock is complete after the transform. The locked, handler-disabled, no-access-permission and no-visible-tab fixtures are derived from the two base fixtures by one edit each.",
+  "cases": [
+    { "name": "To Do main form, TrackingFieldTrio pill bound", "fixture": "todo-main-tracking-trio.xml", "formId": "{eca59df4-1364-f111-ab0c-7ced8ddc4cc6}", "addControl": false, "managed": false, "refusals": [],
+      "added": ["OnLoad handler Spaarke.AccessPermissionInherited.onLoad", "form library sprk_accesspermission_inherited"], "complete": true },
+    { "name": "To Do main form already locked", "fixture": "todo-main-locked.xml", "formId": "{eca59df4-1364-f111-ab0c-7ced8ddc4cc6}", "addControl": false, "managed": false, "refusals": [], "added": [], "complete": true },
+    { "name": "Communication Message form, control added", "fixture": "communication-message-no-control.xml", "formId": "{b58ec3d8-0982-f111-8076-7ced8ddc4cc6}", "addControl": true, "managed": false, "refusals": [],
+      "added": ["control 'sprk_accesspermission' for sprk_accesspermission (section sprk_access_permission)", "OnLoad handler Spaarke.AccessPermissionInherited.onLoad", "form library sprk_accesspermission_inherited"], "complete": true },
+    { "name": "Event form, self-closing onload and empty formLibraries", "fixture": "event-control-selfclosing-onload.xml", "formId": "{eaf22dcb-9aff-f011-8406-7c1e525abd8b}", "addControl": false, "managed": false, "refusals": [],
+      "added": ["OnLoad handler Spaarke.AccessPermissionInherited.onLoad", "form library sprk_accesspermission_inherited"], "complete": true },
+    { "name": "A form that does not show the field is left alone", "fixture": "todo-main-without-access-permission.xml", "formId": "{4e86f611-89b5-4074-bf17-d41bf8dcfdca}", "addControl": false, "managed": false, "refusals": [], "added": [], "complete": false },
+    { "name": "Handler registered but disabled", "fixture": "todo-main-handler-disabled.xml", "formId": "{eca59df4-1364-f111-ab0c-7ced8ddc4cc6}", "addControl": false, "managed": false, "refusals": ["HANDLER_DISABLED"] },
+    { "name": "Managed form that needs the lock", "fixture": "todo-main-tracking-trio.xml", "formId": "{eca59df4-1364-f111-ab0c-7ced8ddc4cc6}", "addControl": false, "managed": true, "refusals": ["MANAGED_FORM"] },
+    { "name": "Control to add, no visible tab", "fixture": "communication-no-visible-tab.xml", "formId": "{b58ec3d8-0982-f111-8076-7ced8ddc4cc6}", "addControl": true, "managed": false, "refusals": ["NO_VISIBLE_TAB"] }
+  ]
+}

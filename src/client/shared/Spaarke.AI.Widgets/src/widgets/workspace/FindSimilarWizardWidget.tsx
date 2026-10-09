@@ -60,7 +60,7 @@ import { Button, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluent
 import { DocumentSearchRegular, OpenRegular } from '@fluentui/react-icons';
 // spaarke-modal-system P7 task 090 (FR-11/FR-18): reuse the hub's frame-walking
 // resolver + named size instead of a locally-duplicated copy of each.
-import { resolveXrmNavigation, OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { navigateToWebResourceSurfaceAsync } from '@spaarke/ui-components';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -152,23 +152,17 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Open the existing Find Similar Documents Code Page.
+ * Open the Find Similar Documents wizard.
  *
- * Mirrors the navigateTo pattern in
- * `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx`
- * (lines 294–299) so behavior is identical to the standalone LegalWorkspace
- * invocation path.
+ * Task 113 (ontology-platform-r1, D-26): through the shared `navigateToWebResourceSurfaceAsync`, which
+ * opens it IN-APP (SprkModal) while the Console's InAppWizardHost is mounted and otherwise falls
+ * back to the same `navigateTo(webresource)` dialog `WorkspaceGrid` uses. Resolves when it closes.
  */
 async function openFindSimilar(
   bffBaseUrl: string | undefined,
   documentId: string | undefined,
   containerId: string | undefined
 ): Promise<void> {
-  const nav = resolveXrmNavigation();
-  if (!nav) {
-    throw new Error('Xrm.Navigation is unavailable. Find Similar Documents can only be opened from a Dataverse host.');
-  }
-
   const params: string[] = [];
   if (documentId) {
     params.push(`documentId=${encodeURIComponent(documentId)}`);
@@ -180,19 +174,22 @@ async function openFindSimilar(
     params.push(`bffBaseUrl=${encodeURIComponent(bffBaseUrl)}`);
   }
 
-  await nav.navigateTo(
-    {
-      pageType: 'webresource',
-      webresourceName: FIND_SIMILAR_WEBRESOURCE,
-      data: params.join('&'),
-    },
-    {
-      target: 2,
-      width: OOB_MODAL_SIZES.wizard.width,
-      height: OOB_MODAL_SIZES.wizard.height,
-      title: DISPLAY_NAME,
-    }
-  );
+  const outcome = await navigateToWebResourceSurfaceAsync({
+    webresourceName: FIND_SIMILAR_WEBRESOURCE,
+    data: params.join('&'),
+    title: DISPLAY_NAME,
+  });
+  // Another in-app wizard is open: nothing opened. Say so (the error state offers Retry).
+  if (outcome.busy) {
+    throw new Error('Another wizard is already open. Close it, then retry.');
+  }
+  if (!outcome.launched) {
+    throw new Error('Xrm.Navigation is unavailable. Find Similar Documents can only be opened from a Dataverse host.');
+  }
+  // A real dialog failure (not the user closing it): surface it with Retry, not "opened".
+  if (outcome.failed) {
+    throw new Error('Find Similar Documents could not be opened. Try again.');
+  }
 }
 
 // ---------------------------------------------------------------------------

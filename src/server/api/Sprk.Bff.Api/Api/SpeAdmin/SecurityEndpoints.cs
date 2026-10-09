@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -222,7 +223,7 @@ public static class SecurityEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Security API Access Denied");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -337,7 +338,7 @@ public static class SecurityEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Security API Access Denied");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,

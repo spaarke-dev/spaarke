@@ -941,7 +941,8 @@ public static class DataverseDocumentsEndpoints
         try
         {
             var result = await relocator.AttachFileAsync(
-                documentId, CallerResolution.ResolveObjectId(context.User), request.DriveId, request.ItemId, ct);
+                documentId, CallerResolution.ResolveObjectId(context.User), request.DriveId, request.ItemId, ct,
+                callerTenantId: Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.ResolveTenantId(context.User));
 
             if (result.Outcome == Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.Attached)
             {
@@ -954,6 +955,7 @@ public static class DataverseDocumentsEndpoints
                 Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.InvalidRequest => StatusCodes.Status400BadRequest,
                 Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheCreator => StatusCodes.Status403Forbidden,
                 Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheUploader => StatusCodes.Status403Forbidden,
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.UploaderUnverifiable => StatusCodes.Status503ServiceUnavailable,
                 _ => StatusCodes.Status409Conflict,
             };
 

@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
@@ -47,9 +47,9 @@ public class EventRefileRestampRouteTests : IClassFixture<EventRefileRestampFixt
         var response = await client.PutAsJsonAsync($"/api/v1/events/{EventRefileRestampFixture.Event}", body);
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
-        _fixture.Events.ReceivedCalls().Should().BeEmpty("no event handler ran");
+        _fixture.EventsMock.Invocations.Should().BeEmpty("no event handler ran");
         _fixture.World.Patches.Should().BeEmpty();
-        _fixture.World.Service.ReceivedCalls().Should().BeEmpty("nothing was re-stamped");
+        Mock.Get(_fixture.World.Service).Invocations.Should().BeEmpty("nothing was re-stamped");
         _fixture.World.Lookup("sprk_event", EventRefileRestampFixture.Event, "sprk_regardingmatter")
             .Should().Be(EventRefileRestampFixture.MatterA, "the event's copy is untouched");
     }
@@ -68,7 +68,9 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
     internal StampWorld World { get; } = new();
 
     /// <summary>The event service at its module boundary (no member is configured: no route may reach it here).</summary>
-    internal IEventDataverseService Events { get; } = Substitute.For<IEventDataverseService>();
+    internal Mock<IEventDataverseService> EventsMock { get; } = new();
+
+    internal IEventDataverseService Events => EventsMock.Object;
 
     /// <summary>
     /// Fresh rows per test (the host is shared by the class): an event filed under a communication (matter A — the pair
@@ -88,8 +90,8 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
             .Row("sprk_todo", TodoUnderEvent,
                 [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
                 pairId: Event.ToString()));
-        World.Service.ClearReceivedCalls();
-        Events.ClearReceivedCalls();
+        Mock.Get(World.Service).Invocations.Clear();
+        EventsMock.Invocations.Clear();
     }
 
     public HttpClient Client()

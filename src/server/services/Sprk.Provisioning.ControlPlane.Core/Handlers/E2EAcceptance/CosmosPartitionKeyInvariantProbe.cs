@@ -4,18 +4,30 @@
 // H13 §4D I3 tenant-isolation invariant probe — task 174 (Wave G-7 Batch G-7A1).
 // Replaces the InfraFault deferral for InvariantKind.I3CosmosPartitionKey with
 // a REAL structural check against the CUSTOMER'S own Cosmos account (deployed
-// by H2a — customer.bicep provisions Cosmos for Model2Dedicated per task 128b).
+// by H2a — customer.bicep provisions Cosmos for every customer stamp, task 128b).
 //
 // WHAT IT VERIFIES:
 //   Enumerates all SQL databases + containers under the customer's Cosmos
-//   account and asserts every container carries an explicit partition-key
-//   definition (non-empty <c>PartitionKey.Paths</c>). A container with NO
-//   partition key would admit cross-partition queries by default — exactly
-//   the shape §4D I3 forbids (FR-30). PartitionKey.Paths[0] is additionally
-//   asserted to match <see cref="ExpectedPartitionKeyPath"/> (defaults to
-//   <c>/customerId</c> per DS-5 C5.5 / spec §I3) — the fleet-wide convention
-//   for tenant-scoping. Drift is flagged so it's noticed at acceptance, not
-//   in production.
+//   account and asserts the account holds exactly the containers the stamp
+//   template declares (infrastructure/bicep/modules/cosmos-db.bicep, database
+//   'spaarke-ai') carry the single partition-key path declared for them
+//   (<see cref="DeclaredPartitionKeys"/>; a parity test reads the bicep so the
+//   two cannot drift), and that every other container has a partition key at
+//   all. A container with NO partition key would admit cross-partition queries
+//   by default — exactly the shape §4D I3 forbids (FR-30). Container MEMBERSHIP
+//   drift (a declared container absent, or an extra one) is logged, not
+//   failed: the Worker's table and the template H2a deploys ship on different
+//   schedules, and ARM incremental deployments never delete a retired
+//   container — neither is a partitioning defect.
+//
+//   Task 230a: the probe used to demand `/customerId` on every container. FR-30
+//   reserves `/customerId` for L2's own ProvisioningRun container; the stamp's
+//   runtime containers are tenant-scoped (`/tenantId`, the synthetic
+//   `/partitionKey` = `{tenantId}|{yyyy-MM}` for audit-partitioned, `/subjectId`
+//   for memory-items), so the old check failed every real stamp. On a dedicated
+//   stamp the account itself holds one customer; what can drift is a container
+//   deployed without the key the template declares, or one the template does
+//   not know.
 //
 // WHAT IT DOES NOT VERIFY:
 //   Runtime SDK-usage compliance ("does BFF code always pass PartitionKey?").
@@ -38,6 +50,10 @@
 //     - ARM RBAC 403 / connectivity 5xx              → InfraFault.
 //     - 0 containers in account                      → InfraFault (H2a shape
 //                                                       problem, not silent-Pass).
+//     - Declared container with a different key     → Failed (task 230a).
+//     - Any container with no partition key         → Failed.
+//     - Declared container absent / extra container → Passed + WARNING log
+//                                                       (membership drift).
 //     - >=1 container missing/wrong PK path          → Failed with diagnostic
 //                                                       listing EVERY offender
 //                                                       (aggregate posture:
@@ -67,7 +83,7 @@
 //   Extension — the piecewise IInvariantProbe seam (task 174) is the minimum
 //     move that lets THIS probe land without blocking sibling probes.
 //   Cost-of-doing-nothing — the I3 gate cannot go green without this probe;
-//     an acceptance-gate transition to Ready for a Model2Dedicated stamp
+//     an acceptance-gate transition to Ready for a customer stamp
 //     could pass with a mis-provisioned Cosmos container that opens cross-
 //     tenant read paths — the CATASTROPHIC defect class H13 exists to prevent.
 // -----------------------------------------------------------------------------
@@ -81,16 +97,29 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
 /// Real §4D I3 probe — enumerates the customer Cosmos account's SQL databases
-/// + containers via ARM SDK and asserts every container carries an explicit
-/// partition-key definition matching <see cref="ExpectedPartitionKeyPath"/>.
+/// + containers via ARM SDK and asserts they are exactly the containers the stamp template declares, each with its
+/// declared partition-key path (<see cref="DeclaredPartitionKeys"/>).
 /// </summary>
 public sealed class CosmosPartitionKeyInvariantProbe : IInvariantProbe
 {
+    /// <summary>The database the stamp template creates (customer.bicep <c>databaseName</c>).</summary>
+    public const string DeclaredDatabaseName = "spaarke-ai";
+
     /// <summary>
-    /// The fleet-wide expected partition-key path for tenant-scoped containers
-    /// per DS-5 C5.5 / spec §I3.
+    /// Container → partition-key path, exactly as infrastructure/bicep/modules/cosmos-db.bicep declares them
+    /// (CosmosPartitionKeyInvariantProbeTests pins the parity). Change both together.
     /// </summary>
-    public const string ExpectedPartitionKeyPath = "/customerId";
+    public static IReadOnlyDictionary<string, string> DeclaredPartitionKeys { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["sessions"] = "/tenantId",
+            ["prompts"] = "/tenantId",
+            ["audit"] = "/tenantId",
+            ["audit-partitioned"] = "/partitionKey",
+            ["memory"] = "/tenantId",
+            ["memory-items"] = "/subjectId",
+            ["feedback"] = "/tenantId",
+        };
 
     /// <summary>
     /// Cosmos endpoint URI regex — matches the hostname pattern the ARM SDK
@@ -196,6 +225,8 @@ public sealed class CosmosPartitionKeyInvariantProbe : IInvariantProbe
 
         // (3) Walk databases + containers. Capture ALL violations.
         var violations = new List<string>();
+        var seenDeclared = new HashSet<string>(StringComparer.Ordinal);
+        var membershipDrift = new List<string>();
         int totalContainers = 0;
         int databasesScanned = 0;
 
@@ -206,37 +237,45 @@ public sealed class CosmosPartitionKeyInvariantProbe : IInvariantProbe
             {
                 databasesScanned++;
                 var dbName = db.Data?.Name ?? "(unknown)";
+                var isDeclaredDatabase = string.Equals(dbName, DeclaredDatabaseName, StringComparison.Ordinal);
                 var containers = db.GetCosmosDBSqlContainers();
                 await foreach (var container in containers.GetAllAsync(cancellationToken).ConfigureAwait(false))
                 {
                     totalContainers++;
                     var containerName = container.Data?.Name ?? "(unknown)";
-                    var partitionKey = container.Data?.Resource?.PartitionKey;
-                    var paths = partitionKey?.Paths;
+                    var paths = container.Data?.Resource?.PartitionKey?.Paths;
+
+                    if (!isDeclaredDatabase || !DeclaredPartitionKeys.TryGetValue(containerName, out var declaredPath))
+                    {
+                        // Not the template's (a retired container, or one newer than this Worker): only the
+                        // partitioning itself is checked; the membership difference is logged below.
+                        if (paths is null || paths.Count == 0)
+                        {
+                            violations.Add(
+                                $"Container '{dbName}/{containerName}' (not declared by the stamp template) has NO " +
+                                "partition-key definition (paths is null/empty). §4D I3 CATASTROPHIC.");
+                        }
+                        else
+                        {
+                            membershipDrift.Add($"'{dbName}/{containerName}' (key '[{string.Join(",", paths)}]') is not declared");
+                        }
+                        continue;
+                    }
+                    seenDeclared.Add(containerName);
 
                     if (paths is null || paths.Count == 0)
                     {
                         violations.Add(
                             $"Container '{dbName}/{containerName}' has NO partition-key definition (paths is null/empty). " +
-                            $"Expected: '{ExpectedPartitionKeyPath}'. §4D I3 CATASTROPHIC.");
+                            $"Declared: '{declaredPath}'. §4D I3 CATASTROPHIC.");
                         continue;
                     }
 
-                    if (paths.Count > 1)
-                    {
-                        var joined = string.Join(",", paths);
-                        violations.Add(
-                            $"Container '{dbName}/{containerName}' uses HIERARCHICAL partition key '[{joined}]' — " +
-                            $"§4D I3 documents a single-path '{ExpectedPartitionKeyPath}' convention. Confirm this is a deliberate design choice before Ready transitions.");
-                        continue;
-                    }
-
-                    var actualPath = paths[0];
-                    if (!string.Equals(actualPath, ExpectedPartitionKeyPath, StringComparison.Ordinal))
+                    if (paths.Count > 1 || !string.Equals(paths[0], declaredPath, StringComparison.Ordinal))
                     {
                         violations.Add(
-                            $"Container '{dbName}/{containerName}' partition-key path is '{actualPath}' — expected '{ExpectedPartitionKeyPath}' " +
-                            "per DS-5 C5.5 / spec §I3. §4D I3 CATASTROPHIC drift.");
+                            $"Container '{dbName}/{containerName}' partition key is '[{string.Join(",", paths)}]' — " +
+                            $"the stamp template declares '{declaredPath}'. §4D I3 drift.");
                     }
                 }
             }
@@ -260,21 +299,32 @@ public sealed class CosmosPartitionKeyInvariantProbe : IInvariantProbe
                 "Expected H2a's customer.bicep to have created at least one container.");
         }
 
+        foreach (var missing in DeclaredPartitionKeys.Keys.Where(k => !seenDeclared.Contains(k)).Order(StringComparer.Ordinal))
+        {
+            membershipDrift.Add($"'{DeclaredDatabaseName}/{missing}' is declared but absent");
+        }
+        if (membershipDrift.Count > 0)
+        {
+            _logger.LogWarning(
+                "I3 probe on Cosmos account {AccountName}: container membership differs from the stamp template " +
+                "(not a partitioning defect; check the deployed template version): {Drift}",
+                accountName, string.Join(" | ", membershipDrift));
+        }
+
         if (violations.Count > 0)
         {
             _logger.LogWarning(
-                "I3 probe FAILED on Cosmos account {AccountName}: {ViolationCount} of {TotalContainers} containers violate §4D I3 expected pk='{Expected}'. Details: {Details}",
-                accountName, violations.Count, totalContainers, ExpectedPartitionKeyPath,
-                string.Join(" | ", violations));
+                "I3 probe FAILED on Cosmos account {AccountName}: {ViolationCount} violation(s) across {TotalContainers} container(s). Details: {Details}",
+                accountName, violations.Count, totalContainers, string.Join(" | ", violations));
             return new InvariantVerificationOutcome.Failed(
                 Kind,
-                $"{violations.Count} of {totalContainers} container(s) in Cosmos account '{accountName}' violate §4D I3. " +
-                $"Expected partition-key path: '{ExpectedPartitionKeyPath}'. Violations: {string.Join(" | ", violations)}");
+                $"Cosmos account '{accountName}' does not match the stamp template's partitioning (§4D I3): " +
+                $"{violations.Count} violation(s) across {totalContainers} container(s). Violations: {string.Join(" | ", violations)}");
         }
 
         _logger.LogInformation(
-            "I3 probe PASSED on Cosmos account {AccountName}: {TotalContainers} container(s) across {DatabaseCount} database(s), all with pk='{Expected}'.",
-            accountName, totalContainers, databasesScanned, ExpectedPartitionKeyPath);
+            "I3 probe PASSED on Cosmos account {AccountName}: {TotalContainers} container(s) across {DatabaseCount} database(s); every declared container carries its declared partition key.",
+            accountName, totalContainers, databasesScanned);
         return new InvariantVerificationOutcome.Passed(Kind);
     }
 

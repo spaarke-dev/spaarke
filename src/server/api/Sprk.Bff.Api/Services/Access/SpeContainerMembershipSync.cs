@@ -4,7 +4,9 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -199,6 +201,16 @@ public class SpeContainerMembershipSync
             {
                 throw;
             }
+            catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+            {
+                // A business unit names a container this stamp neither configured nor created (task 227d) — a data or
+                // configuration fault an operator must correct; no standing grant can be made there.
+                _logger.LogError(
+                    "[SPE-MEMBERSHIP-SYNC] Container {ContainerId} (stamped on {UnitCount} business unit(s)) is not one of this "
+                    + "stamp's containers; its standing writers cannot be synced.", container, unitIds.Count);
+                problems.Add($"container {container} (stamped on {unitIds.Count} business unit(s)) is not one of this stamp's containers");
+                failed++;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[SPE-MEMBERSHIP-SYNC] Standing writers on container {ContainerId} could not be synced.", container);
@@ -211,13 +223,17 @@ public class SpeContainerMembershipSync
     }
 
     /// <summary>The round-70 population: an enabled, internal person (blank <c>sprk_isexternal</c> is internal).</summary>
+    /// <remarks>A container holds many records, so a user flagged external is NEVER a standing writer (owner round 70),
+    /// whatever any one record's Restricted state: the eligibility rule is asked as for a Restricted record
+    /// (<c>rootIsRestricted: true</c>), which bars exactly a stored <c>sprk_isexternal = true</c>.</remarks>
     internal static bool IsStandingEligible(Entity user)
         => !string.IsNullOrWhiteSpace(user.GetAttributeValue<string>("domainname"))
            && InternalShareEndpoints.ClassifyEligibility(
                   user.GetAttributeValue<bool?>("isdisabled"),
                   user.GetAttributeValue<OptionSetValue>("accessmode")?.Value,
                   user.GetAttributeValue<Guid?>("applicationid"),
-                  user.GetAttributeValue<bool?>("sprk_isexternal") ?? false)
+                  user.GetAttributeValue<bool?>("sprk_isexternal") ?? false,
+                  rootIsRestricted: true)
               == InternalShareEndpoints.ShareEligibility.Eligible;
 
     private async Task<Verdict> StandingVerdictAsync(
@@ -340,6 +356,16 @@ public class SpeContainerMembershipSync
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     throw;
+                }
+                catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+                {
+                    // Not one of this stamp's containers (deleted, or a pointer this stamp never created). A JIT grant is
+                    // only ever made through the ownership guard, so none can stand there: nothing to remove, not a
+                    // failure — the same outcome as a container that no longer exists (task 227d).
+                    _logger.LogWarning(
+                        "[SPE-MEMBERSHIP-SYNC] Secure {Entity} {RecordId} points at container {ContainerId}, which is not one of "
+                        + "this stamp's containers; skipped.", entity, record.Id, container);
+                    problems.Add($"{entity} {record.Id}: container {container} is not one of this stamp's containers; skipped");
                 }
                 catch (Exception ex)
                 {

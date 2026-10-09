@@ -1,0 +1,349 @@
+# Defer / Issue Tracking — customer-provisioning-orchestration-r1
+
+> **Source of truth** for deferred work + newly-discovered issues in this project.
+> Each entry has a paired GitHub Issue. See `/project-defer-issue-tracking` skill for the protocol.
+>
+> **Rollup view**: `gh issue list --label customer-provisioning-orchestration-r1` (visible to whole team via portfolio board)
+> **CLAUDE.md §11 rule**: every entry MUST name a concrete behavior or contract that fails without it.
+
+---
+
+## Open (in priority order)
+
+### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
+
+| Field | Value |
+|---|---|
+| **Status** | Open — waiting on unified-access-control-r2 |
+| **Urgency** | now (blocks T256 / T218 / T186) |
+| **Filed** | 2026-10-07 |
+| **Source** | 2026-10-06 conversion review; owner 2026-10-07 asked for an issue + message to UAC-r2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1364 |
+
+**Description**
+
+An environment without `sprk_noaccessentry` denies every read, so a freshly provisioned environment fails closed and
+T186 cannot pass. UAC-r2 documents the table only in its own notes; nothing tells provisioning which solution carries
+it, when it must exist, what to seed, or how H13 verifies it.
+
+**Entry-points**
+
+- `projects/unified-access-control-r2/` notes `DEPLOY-CHECKLIST.md`, `batch4-integration-steps.md`; `docs/data-model/INDEX.md`
+- This project: T256 (INCOMING-145), T218 (solution package), H13 checks
+
+**Suggested fix**
+
+UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
+answer into T256 handler work and T218 package content.
+
+**Update 2026-10-08 (T256).** What provisioning needs is now answered by the repository, and built:
+1. *Packaging*: the table ships in SpaarkeMaster 1.2.0.0 with every column the BFF reads (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_noaccessentry`).
+2. *Ordering*: H7b probes `sprk_noaccessentries` with the BFF reader's own `$select` (`NoAccessListReader.RowSelect`,
+   pinned by `SecureRecordOwnerRoleSetParityTests`) and refuses Resumable `secure_setup.noaccessentry_missing`; H9 waits
+   for H7b, so no BFF is deployed to an environment without it. Nothing is seeded: an empty deny list denies nothing.
+3. *Verification*: that probe, on every run.
+4. *Upgrades*: SpaarkeMaster upgrades carry it.
+Left open only for UAC-r2's confirmation on #1364 (and to hear if the schema changes — we re-export, never hand-edit).
+
+### ISS-003 — A second environment for the same customer overwrites the first one's BFF app registration
+
+| Field | Value |
+|---|---|
+| **Status** | Open — not needed while owner D6 holds (one environment per customer) |
+| **Urgency** | later (before per-customer staging/dev) |
+| **Filed** | 2026-10-07 |
+| **Source** | T240a review, verifier pass 2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1376 |
+
+**Description**
+
+The registration is per customer (D-13) but H3 sets its SPA redirect, FIC (`spaarke-uami-trust`) and pre-authorizations
+per run, so a second environment for the same customer breaks the first's code-page sign-in and BFF credential.
+
+**Suggested fix**
+
+A per-stamp registration (`spaarke-bff-api-{customerId}-{env}`), or intake refusing a second environment until then.
+
+### ISS-004 — Any Spaarke-tenant user can get any customer BFF token (no stamp-level token gate)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — investigate (known limit; no cross-customer data path found) |
+| **Urgency** | before the first external customer |
+| **Filed** | 2026-10-07 |
+| **Source** | T240a review, verifier pass 2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1377 |
+
+**Description**
+
+All Model 1 BFF registrations are in Spaarke's tenant; any member or guest can get a token for any customer's BFF. Record
+access is still bounded by the stamp's Dataverse/SPE authorization, but record-free endpoints (AI chat) may run on that
+customer's OpenAI quota.
+
+**Suggested fix**
+
+`appRoleAssignmentRequired` per BFF service principal with `sprk-{customerId}-users` assigned — after checking the Type-2
+external workforce plane (UAC-r2 task 141) and the External Access SPA (T240d).
+
+### ISS-002 — Demo self-registration SPE grant: marker keyed to the demo Dataverse; expiry leaves it behind (UAC-r2 code)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owned by unified-access-control-r2 (task 171 code) |
+| **Urgency** | next-round (latent: "Demo 1" has no `sprk_specontainerid` today) |
+| **Filed** | 2026-10-07 |
+| **Source** | Adversarial verifier finding F8 on the 2026-10-07 master merge (`f442915e6`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1363 |
+
+**Description**
+
+Step 8 records a standing-writer marker keyed by a systemuserid from the demo environment's Dataverse, which the
+membership sync cannot resolve. Demo expiry deletes the grant directly (first page only, no `Prefer` header) and
+leaves the marker. When the BFF's Dataverse and the demo's are the same, the standing pass sees a stale marker and can
+re-grant writer to an expired demo user whose systemuser is still enabled.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs:146`, `:169-185`, `:257-261`
+- `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs:226`, `:308-350`
+- `src/server/api/Sprk.Bff.Api/Services/Access/SpeContainerMembershipSync.cs:95-210`
+
+**Suggested fix**
+
+UAC-r2 decides the marker identity (or a demo prefix the standing pass ignores) and expires via
+`RemoveMarkedGrantAsync`. Provisioning side (ours): configuring a demo container also needs it owned by the hosting
+BFF (`SharePointEmbedded__OwnedContainerIds` or the `spaarkeCustomerId` marker), or Step 8 is skipped (T227d).
+
+### ISS-006 — RAG `DefaultRagModel = Dedicated` reads an index nothing creates
+
+| Field | Value |
+|---|---|
+| **Status** | Open — BFF code (not this project's surface) |
+| **Urgency** | before anyone sets `Analysis__DefaultRagModel` on a stamp |
+| **Filed** | 2026-10-08 (found in T235) |
+| **Source** | T235 doc sweep — the BYOK guide told operators to set `Dedicated` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1432 |
+
+**Description**
+
+`Shared` (the default) reads `AiSearch:KnowledgeIndexName` (`spaarke-files-index`, created by H2b in the stamp's own
+AI Search). `Dedicated` reads `{tenantId}-knowledge`, which nothing creates, so setting it breaks every RAG search that
+does not name its index. No stamp sets it today. The two docs that advised it were corrected in T235.
+
+**Suggested fix**
+
+Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
+`AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
+
+### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — needs an owner decision (placement + one new input) |
+| **Urgency** | before T186 (server-side creates of secure children; #1081) |
+| **Filed** | 2026-10-08 (T256) |
+| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
+
+**Description**
+
+§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
+business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
+parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
+parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
+built, because each needs a decision or an input that does not exist:
+- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
+  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
+- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
+  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
+  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
+  (a business-unit change removes a user's roles) is not a safe repair.
+- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
+  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
+  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
+  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
+  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
+  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
+  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
+  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
+  is run and acted on.
+
+**Suggested fix (one recommendation)**
+
+Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
+root before it creates the two application users IN it with System Administrator (T3), and records the unit id
+(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
+checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
+`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
+void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
+after H11 and treat any human reaching the Secure Record unit as a stop.
+
+---
+
+### ISS-008 — L2 CustomerRunGuard (I5 / FR-32) is off in every environment
+
+| Field | Value |
+|---|---|
+| **Status** | Open — before T186; needs an owner-approved live step |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 (punch-list re-verification, 203b row A27) |
+| **Source** | `infrastructure/bicep/platform-controlplane.bicep` `customerRunGuardEnabled` default false; no `.bicepparam` sets it; live dev Api `CustomerRunGuard__Enabled = False` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1484 |
+
+**Description**
+
+Two runs for the same customer can overlap: the guard that serializes them (spec §4D I5, FR-32 — required ON in
+production) is disabled. It authenticates as the L2 UAMI against the admin Dataverse environment and fails fast at host
+start when enabled without that access, which is why the default is off.
+
+**Suggested fix**
+
+Owner OK → ensure the UAMI is an Application User on the admin environment (`Grant-ControlPlaneIdentity.ps1`); set
+`customerRunGuardEnabled = true` in `platform-controlplane-dev.bicepparam` (and the prod parameter file when created);
+redeploy; prove a second concurrent run for one customer is refused.
+
+---
+
+### ISS-009 — External-contact bind-by-email (E11) binds contacts this stamp never invited
+
+| Field | Value |
+|---|---|
+| **Status** | Open — UAC-r2 code; before any stamp accepts CIAM tokens (T240d step 2) |
+| **Urgency** | before external contacts are enabled on a stamp |
+| **Filed** | 2026-10-09 (T240d design) |
+| **Source** | `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs` `// E11` (~line 659) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1485 |
+
+**Description**
+
+A CIAM sign-in whose verified email matches an unbound contact is bound to it whether or not this stamp invited the
+person. With one shared CIAM tenant, an account created for customer X can be bound to customer Y's same-email contact.
+
+**Suggested fix**
+
+Pending-invite marker written by this stamp's invitation; bind by email only when it exists; consume on bind. Also fixes
+"second customer invites a person who already has a CIAM account" (fails today). Design: `notes/t240d-ciam-external-contacts-design.md` §5–§6.
+
+---
+
+### ISS-011 — BFF asymmetric registrations: services that cannot be constructed when a feature gate is off (204e F1–F4)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — BFF code (ADR-032 decision per service); latent for customer stamps |
+| **Urgency** | before any environment runs with a gate off (DocIntel / AI Search) |
+| **Filed** | 2026-10-09 (task 204e) |
+| **Source** | `tests/Spaarke.ArchTests/Adr032/*` ledgers; `notes/task-202-punch-list.md` rows 204e-F1..F4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1487 |
+
+**Description**
+
+Finance job handlers (F1), the app-only analysis job handlers + `EmbeddingMigrationService` (F2 — the BFF cannot be
+constructed with `DocumentIntelligence:Enabled=false`, the code default), AI Search / chat-client consumers registered
+unconditionally (F3), and ~35 services when DocIntel is on without an AI Search endpoint (F4). Stamps set DocIntel on and
+the AI Search endpoint, so none of this hits T186.
+
+**Suggested fix**
+
+Per service: register on the dependency's gate, or give the dependency a Null-object peer (ADR-032); delete the ledger
+row as each is fixed.
+
+---
+
+### ISS-012 — `Graph:Scopes` is required at BFF startup but nothing reads it
+
+| Field | Value |
+|---|---|
+| **Status** | Open — not blocking (T258 supplies the value on every stamp) |
+| **Urgency** | later (maintainability) |
+| **Filed** | 2026-10-09 (T258) |
+| **Source** | T258 — reading the validators behind 204e-F7 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1499 |
+
+**Description**
+
+`GraphOptions.Scopes` carries `[Required]` + `[MinLength(1)]` with an empty default, so a BFF without
+`Graph__Scopes__0` does not start in any environment. No code reads `GraphOptions.Scopes`: every Graph client builds its
+own scopes. T258 writes the literal `https://graph.microsoft.com/.default` through the manifest so stamps start. This is
+the same latent-blocker class auth-v4 task 024 removed for `Graph:ClientSecret` (a rule that only prevents a boot).
+
+**Suggested fix**
+
+Owner decision (it changes a validator): drop the property and its two attributes, then the manifest entry
+`Graph__Scopes__0` and the `IOptionsDriftTests` census row. Until then the manifest literal is correct and harmless.
+
+### ISS-013 — The H0.5 consent callback cannot work as built (Model 2, out of scope)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — dormant: T258 gates the endpoint off (`Onboarding:Enabled`, default false) |
+| **Urgency** | when Model 2 returns (plan D3) |
+| **Filed** | 2026-10-09 (T258) |
+| **Source** | T258 — deciding whether a stamp needs the Onboarding endpoint (204e-F5) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1500 |
+
+**Description**
+
+`POST /api/onboarding/consent-callback` (BFF, task 042) cannot carry a Model 2 consent into L2 on any current host:
+(1) it enqueues to `sprk-provisioning-jobs` through the host BFF's own Service Bus client — on a customer stamp that is
+the stamp's namespace, which has no such queue and which L2 does not drain; (2) Microsoft's admin-consent redirect is a
+browser GET carrying `admin_consent`, `tenant` and `state` in the query, not an HMAC-signed POST, so something else
+would have to sign and forward it; (3) no host was ever given an `Onboarding:HmacSigningKey` (spaarke-bff-dev ran with
+`Onboarding__EnableDevBypass=true`, so the route answered 401 to every call). T258 maps the route and registers its
+services only when `Onboarding:Enabled=true`; no stamp channel sets it, and `IOptionsDriftTests` fails if one does
+without supplying the key.
+
+**Suggested fix**
+
+When Model 2 is reopened, decide the consent-capture host (L2 itself is the natural one — it owns the queue and the
+run) and either rebuild the callback there or remove the BFF endpoint, `HmacSignatureVerifier`,
+`ServiceBusProvisioningEnqueuer` and their tests. Needed → build, else remove.
+
+---
+
+## Resolved
+
+<!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-005 — Deploy-Release Phase 3 imports a 9-solution list that does not exist
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-08 — task 218f: Deploy-Release Phase 3 imports the CI-published SpaarkeMaster (Import-SpaarkeMasterPackage.ps1, H6 rules, typed by config/environments.json); Deploy-DataverseSolutions.ps1 deleted; first publish 1.2.0.0 (run 37864623352); PR #1365 |
+| **Urgency** | before the next release to demo |
+| **Filed** | 2026-10-07 (found in T218b) |
+| **Source** | T218b — H6 left `Deploy-DataverseSolutions.ps1`; `Deploy-Release.ps1` still calls it |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1401 |
+
+**Description**
+
+`Deploy-Release.ps1` Phase 3 (the `deploy-new-release` skill, Spaarke's own environments) runs
+`Deploy-DataverseSolutions.ps1`, whose list names 9 solutions — 6 exist nowhere — and whose zip filter
+(`:443`) accepts every zip. A release to demo imports nothing useful or fails at the first missing solution. The legacy
+`Provision-Customer.ps1` (step 7, `:915`) calls it too; `Load-DemoSampleData.ps1` and `scripts/README.md` point operators
+to it.
+
+**Suggested fix**
+
+Package type per Spaarke environment (`config/environments.json`), then point the script at SpaarkeMaster with an
+explicit type and fix the filter — or retire Phase 3 in favour of the CI-published SpaarkeMaster zips (T218d).
+
+### ISS-007 — CI identity trusts the `pull_request` OIDC subject
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-08 — owner OK; credential deleted (4 remaining: master, environment dev/staging/production); OIDC guide no longer creates it |
+| **Urgency** | soon (security exposure; nothing uses the subject) |
+| **Filed** | 2026-10-08 (T218d review) |
+| **Source** | T218d — the new publish workflow uses the same CI identity |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1446 |
+
+**Description**
+
+`github-actions-spe-infrastructure` (`8c85a481-…`) has federated credential `gh-pull_request`
+(`repo:spaarke-dev/spaarke:pull_request`). Unused since task 249. A same-repo pull request that edits a workflow can sign
+in to Azure as the app, with all its roles, before review.
+
+**Suggested fix**
+
+Delete the credential; drop `pull_request` from the OIDC guide's setup loop (guide row already corrected).

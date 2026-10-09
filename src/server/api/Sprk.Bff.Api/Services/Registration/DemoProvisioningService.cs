@@ -28,7 +28,7 @@ public sealed class DemoProvisioningService
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
         PasswordGenerator passwordGenerator,
-        IGraphClientFactory graphClientFactory,
+        SpeContainerOwnershipGuard ownership,
         IOptions<DemoProvisioningOptions> options,
         ILogger<DemoProvisioningService> logger,
         ILoggerFactory loggerFactory)
@@ -38,9 +38,9 @@ public sealed class DemoProvisioningService
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _passwordGenerator = passwordGenerator ?? throw new ArgumentNullException(nameof(passwordGenerator));
         // Task 171 (finding 6): Step 8 grants through the ONE marked-grant primitive. The service is stateless over the
-        // Graph factory, so this singleton holds its own instance rather than reaching into a request scope.
+        // ownership guard (task 227d), so this singleton holds its own instance rather than reaching into a request scope.
         _membership = new SpeContainerMembershipService(
-            graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory)),
+            ownership ?? throw new ArgumentNullException(nameof(ownership)),
             (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>());
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -167,7 +167,9 @@ public sealed class DemoProvisioningService
             _logger.LogInformation("[Step 7/9] Added to team {TeamName}", environment.TeamName);
 
             // ── Step 8: Grant SPE container Writer access ──
-            // SPE container access is optional — skip gracefully if container ID is a placeholder or grant fails
+            // SPE container access is optional — skip gracefully if container ID is a placeholder or grant fails.
+            // Only a container this BFF owns can be granted (task 227d, owner D29): a target environment served
+            // by another BFF is refused (404 spe_container_not_owned) and lands here as a skipped step.
             try
             {
                 _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",

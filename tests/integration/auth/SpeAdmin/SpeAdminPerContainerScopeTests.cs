@@ -589,9 +589,12 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         body.GetProperty("totalCount").GetInt32().Should().Be(1, "a page from which a hit was removed never reports Graph's total");
     }
 
+    // customer-provisioning-orchestration-r1 T227d (owner D28/D29): one container type serves every Model 1 stamp, so an
+    // unscoped search reaches every customer's documents and Graph's total counts theirs too. The total is therefore the
+    // number of hits this stamp may show, never Graph's — when nothing was removed the two are the same anyway.
     [Theory]
-    [InlineData(false, 7)]   // the result is complete: Graph's total is the operator's to see
-    [InlineData(true, 1)]    // a further page exists that nobody here judged: never Graph's total
+    [InlineData(false, 1)]
+    [InlineData(true, 1)]
     public async Task SearchItems_ForARootAdmin_ReportsGraphsTotal_OnlyWhenThereIsNoFurtherPage(bool moreResults, int expectedTotal)
     {
         _fixture.Reset();
@@ -735,7 +738,9 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         var response = await client.PostAsJsonAsync($"/api/spe/containers?configId={configId}", new { displayName = "New" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
-        var patch = _fixture.Graph.PatchRequestsFor($"{ContainersPath}/c-new/customProperties").Should().ContainSingle().Subject;
+        // The stamp's own PATCH — T227d then writes the ownership marker in a second one.
+        var patch = _fixture.Graph.PatchRequestsFor($"{ContainersPath}/c-new/customProperties")
+            .Should().ContainSingle(p => p.Body!.Contains(SpeContainerBusinessUnitStamp.PropertyName)).Subject;
         using var stamp = JsonDocument.Parse(patch.Body!);
         stamp.RootElement.GetProperty(SpeContainerBusinessUnitStamp.PropertyName).GetProperty("value").GetString()
             .Should().Be(expectedUnit);

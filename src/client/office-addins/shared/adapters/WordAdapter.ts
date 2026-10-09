@@ -712,6 +712,8 @@ export class WordAdapter implements IHostAdapter {
       canReadDocumentStamp: hasCustomXmlParts,
       // task 089 (UAT-9): the write uses the same Common set (addAsync / deleteAsync), so the same runtime gate.
       canWriteDocumentStamp: hasCustomXmlParts,
+      // task 120: an email lookup — a Word document is identified by its URL and stamp instead.
+      canResolveEmailIdentity: false,
       canSaveAsPdf: true, // Server-side conversion
       canSaveAsEml: false,
       canInsertLink: isApiSupported,

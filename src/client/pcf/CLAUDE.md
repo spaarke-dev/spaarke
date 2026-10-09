@@ -15,6 +15,8 @@ TypeScript/React PCF controls for the Dataverse model-driven app. Each control i
 - **AssociationResolver** (SRFR-045, 2026-07) — folded into **RegardingResolver**, the polymorphic set-regarding picker on child forms. It writes the denormalized `sprk_regarding*` fields with subgrid auto-detect (Xrm.WebApi, no BFF) and supplies the parent the Field Mapping Framework inherits from ([`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](../../../docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md)).
 - **EmailProcessingMonitor** (deleted 2026-09-25) — its folder holds only a stray `package-lock.json`.
 
+**Not retired:** **SpeDocumentViewer** (document main-form preview via BFF `/view-url`) — source restored 2026-10-08 (task 124) after it was wrongly deleted as an orphan; it is form-bound and ships in SpaarkeMaster.
+
 ## Binding rules
 
 - **ADR-006** — custom UI on a form is a PCF control; no new JS web resources for custom UI.

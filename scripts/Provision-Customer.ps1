@@ -13,7 +13,8 @@
       4. Populate customer Key Vault with secrets (connection strings, API keys)
       5. Create Dataverse environment via Power Platform Admin API
       6. Wait for Dataverse environment provisioning
-      7. Import managed solutions (Deploy-DataverseSolutions.ps1)
+      7. Import SpaarkeMaster, managed (solution-authoring/Import-SpaarkeMasterPackage.ps1 — the CI-published
+         package; T218f)
       8. Set Dataverse Environment Variables (7 required variables)
       9. Generate environment-config.json
       10. Provision SPE containers
@@ -509,13 +510,14 @@ function Invoke-Step3_DeployBicep {
     # Note: redis* outputs from customer.bicep are intentionally NOT consumed
     # per Q-E Architecture 1 (per-customer Redis deprecated). See deprecation
     # header above and scripts/Deploy-RedisCache.ps1 for the canonical path.
+    # customer.bicep has no storage / Service Bus connection-string outputs (task 244): the stamp's
+    # Storage has shared-key access disabled and its Service Bus has local (SAS) auth disabled, so
+    # there is no key to carry. The stamp reaches both with its managed identity.
     $stepOutputs = @{
         StorageAccountName      = $outputs.storageAccountName.value
-        StorageConnectionString = $outputs.storageConnectionString.value
         KeyVaultName            = $outputs.keyVaultName.value
         KeyVaultUri             = $outputs.keyVaultUri.value
         ServiceBusName          = $outputs.serviceBusName.value
-        ServiceBusConnString    = $outputs.serviceBusConnectionString.value
     }
 
     Write-Log "Storage Account: $($stepOutputs.StorageAccountName)" -Level SUCCESS
@@ -557,6 +559,10 @@ function Invoke-Step4_PopulateKeyVault {
     # `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. Neither is written here; the BFF
     # client secret is owned by Register-EntraAppRegistrations.ps1 (platform KV).
     # ── A38c secret-free marker gate ────────────────────────────────────────────────────────
+    # NOTE (task 244): this batch no longer writes ServiceBus-ConnectionString — customer.bicep has no
+    # connection-string outputs. The gate is kept only as the whole-script refusal for an environment
+    # that has migrated (pinned by tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1); the
+    # rationale below describes why it was added.
     # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
     # 2026-08-24). This legacy orchestrator is superseded by the L2 control-plane (§5.2 — see
     # the deprecation banner at script entry) and predates the secret-free credential-selection
@@ -567,9 +573,9 @@ function Invoke-Step4_PopulateKeyVault {
     # Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape.
     Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $kvName -CustomerId $CustomerId
 
+    # Storage-ConnectionString / ServiceBus-ConnectionString are no longer written (task 244):
+    # the stamp resources reject keys, and customer.bicep emits no connection string.
     $secrets = [ordered]@{
-        "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
-        "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString
         "Customer-Id"                 = $CustomerId
         "Customer-DisplayName"        = $DisplayName
         "Dataverse-ServiceUrl"        = $DataverseEnvUrl
@@ -899,7 +905,7 @@ function Invoke-Step6_WaitForDataverse {
 function Invoke-Step7_ImportSolutions {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 7 "Importing managed solutions to Dataverse"
+    Write-StepHeader 7 "Importing SpaarkeMaster (managed) to Dataverse"
 
     if ($SkipDataverse) {
         Write-Log "Solution import skipped (-SkipDataverse flag)." -Level WARN
@@ -907,9 +913,11 @@ function Invoke-Step7_ImportSolutions {
         return
     }
 
-    $deployScript = Join-Path $ScriptRoot "Deploy-DataverseSolutions.ps1"
+    # T218f: the canonical, CI-published SpaarkeMaster (managed) — the 9-solution Deploy-DataverseSolutions.ps1 retired.
+    # The import uses the operator's own az/pac sign-in; -ClientSecret / -CertificateThumbprint are not used here.
+    $deployScript = Join-Path $ScriptRoot "solution-authoring/Import-SpaarkeMasterPackage.ps1"
     if (-not (Test-Path $deployScript)) {
-        throw "Deploy-DataverseSolutions.ps1 not found at: $deployScript"
+        throw "Import-SpaarkeMasterPackage.ps1 not found at: $deployScript"
     }
 
     $envUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
@@ -920,28 +928,13 @@ function Invoke-Step7_ImportSolutions {
     }
 
     Write-Log "Target environment: $envUrl"
-    Write-Log "Calling Deploy-DataverseSolutions.ps1..."
+    # Identities: the script READS the environment with your az sign-in and IMPORTS with pac's active profile — step 5
+    # makes that the service principal's profile for this environment. Both must reach the new environment.
+    Write-Log "Calling Import-SpaarkeMasterPackage.ps1 (managed)..."
 
-    $deployArgs = @{
-        EnvironmentUrl = $envUrl
-        TenantId       = $TenantId
-        ClientId       = $ClientId
-    }
+    & $deployScript -EnvironmentUrl $envUrl -PackageType managed
 
-    if ($ClientSecret) {
-        $deployArgs.ClientSecret = $ClientSecret
-    }
-    else {
-        $deployArgs.CertificateThumbprint = $CertificateThumbprint
-    }
-
-    & $deployScript @deployArgs
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Solution import failed. See Deploy-DataverseSolutions.ps1 output above."
-    }
-
-    Write-Log "All solutions imported successfully." -Level SUCCESS
+    Write-Log "SpaarkeMaster imported." -Level SUCCESS
     Complete-Step -State $State -StepNumber 7 -StepName "Import solutions"
 }
 
@@ -1328,8 +1321,9 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     # 5. Bind it to the root business unit (task 165, owner round 35 item 1): stamp, read back, or remove.
     try {
+        # -CustomerId: the marker the stamp's BFF recognises its containers by (customer.bicep sets Customer__Id = customerId).
         Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $rootBuId `
-            -GraphBase 'https://graph.microsoft.com/v1.0'
+            -CustomerId $CustomerId -GraphBase 'https://graph.microsoft.com/v1.0'
         Write-Log "SPE container $containerId bound to root business unit $rootBuId." -Level SUCCESS
     }
     catch {

@@ -17,7 +17,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { CommunicationTimelineHost } from './CommunicationTimelineHost';
 
-const CONTROL_VERSION = '1.0.2';
+const CONTROL_VERSION = '1.0.3';
 
 export class CommunicationTimeline implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   public init(

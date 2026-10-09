@@ -26,6 +26,7 @@ import {
   PanelRightExpandRegular,
   PanelRightContractRegular,
   MailRegular,
+  BugRegular,
 } from '@fluentui/react-icons';
 import { getAvailableTabs, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
@@ -123,6 +124,8 @@ export interface TaskPaneToolbarProps {
   onSendEmail?: () => void;
   /** True while Send Email is opening the compose window; the button shows a spinner and is disabled. */
   isSendingEmail?: boolean;
+  /** Task 113: opens the dev-only sign-in Diagnostics view. Supplied only by a diagnostics-enabled build. */
+  onShowDiagnostics?: () => void;
 }
 
 function getThemeIcon(preference: ThemePreference): React.ReactElement {
@@ -162,6 +165,7 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   isResizing = false,
   onSendEmail,
   isSendingEmail = false,
+  onShowDiagnostics,
 }) => {
   const styles = useStyles();
   const tabs = getAvailableTabs(hostType, capabilities);
@@ -178,7 +182,9 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   const expandLabel = isExpanded ? 'Collapse pane' : 'Expand pane';
   const expandIcon = isExpanded ? <PanelRightContractRegular /> : <PanelRightExpandRegular />;
 
-  const hasOverflow = Boolean(onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)));
+  const hasOverflow = Boolean(
+    onThemeChange || onSettings || onShowDiagnostics || (isAuthenticated && (userName || userEmail))
+  );
 
   // NFR-11: announce tab changes to screen readers via the React-owned live region
   // (task 018 pattern) — `liveRegion` must be rendered here, not created out-of-tree.
@@ -285,6 +291,12 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
                 {onSettings && (
                   <MenuItem icon={<SettingsRegular />} onClick={onSettings}>
                     Settings
+                  </MenuItem>
+                )}
+
+                {onShowDiagnostics && (
+                  <MenuItem icon={<BugRegular />} onClick={onShowDiagnostics}>
+                    Diagnostics
                   </MenuItem>
                 )}
 

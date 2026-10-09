@@ -30,6 +30,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Reconciler;
@@ -80,13 +81,10 @@ public static class HandlerRunInputs
             [
                 Tenant, Subscription,
                 RunInput.Intake("region"),
-                RunInput.Intake("tier", required: false),
-                RunInput.Intake("estimatedMonthlyUsd", required: false),
-                RunInput.Intake("costEnvelopePolicy", required: false),
-                RunInput.Intake("minSlotsRequired", required: false),
-                RunInput.Intake("rateWindowHours", required: false),
-                RunInput.Intake("rateLimit", required: false),
+                RunInput.Intake(CostEnvelopeIntake.TierParameterKey),                    // T229: required (CostEnvelopeIntake)
+                RunInput.Intake(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),
+                RunInput.Intake("openAiLocation", required: false),   // T247: H0's OpenAI probes (else westus3)
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("currentBffVersion", required: false),
                 RunInput.Intake("currentSolutionVersion", required: false),
@@ -116,6 +114,8 @@ public static class HandlerRunInputs
             [HandlerIds.H3] =
             [
                 Tenant,
+                RunInput.Intake(IntakeParameterCatalog.DataverseEnvUrl),   // T240a: the code pages' SPA redirect
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),   // T240a: the URL rule's domain
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
                 RunInput.Output(nameof(InterStepState.S2SAppRegId), required: false),   // refused if present
@@ -123,7 +123,6 @@ public static class HandlerRunInputs
             [HandlerIds.H4] =
             [
                 Tenant, Subscription,
-                RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.CommunicationDefaultMailbox),   // T245c: KV Communication-DefaultMailbox
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("rotate", required: false),
@@ -141,30 +140,36 @@ public static class HandlerRunInputs
                 Tenant, Subscription,
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
+                RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
-                RunInput.Output(nameof(InterStepState.AppServiceName)),
+                RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
                 // PerEnvSourceCatalog sources:
                 RunInput.Output(nameof(InterStepState.KeyVaultUri)),
                 RunInput.Output(nameof(InterStepState.CosmosEndpoint)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.ServiceBusFullyQualifiedNamespace)),
                 RunInput.Output(nameof(InterStepState.RedisEndpoint)),     // T242: Redis__Endpoint
+                RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
+                RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
                 //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],
             [HandlerIds.H5] =
             [
                 Tenant,
-                RunInput.Intake("region"),
-                RunInput.Intake("tier"),
-                RunInput.Intake("dataverseDisplayName", required: false),
+                // T228: the environment the operator created — H5 adopts it, never creates one.
+                RunInput.Intake(IntakeParameterCatalog.DataverseEnvUrl),
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
             ],
             [HandlerIds.H6] =
             [
                 Tenant,
+                // T218b: managed (default, stored at CreateRun) | unmanaged — explicit instruction only.
+                RunInput.Intake(IntakeParameterCatalog.SolutionPackageType, required: false),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
@@ -179,14 +184,30 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
             ],
+            [HandlerIds.H7b] =
+            [
+                Tenant,
+                // T256: dry run (validated at POST /api/runs by SecureRecordSetupIntake). Absent = apply.
+                RunInput.Intake(IntakeParameterCatalog.SecureRecordSetupDryRun, required: false),
+                // The environment H5 adopted, signed in to as the BFF app registration (H3) — the identity H6/H7 use.
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // S12: the BFF's two Dataverse application users (H10) — the only members of the BFF writer profile.
+                RunInput.Output(nameof(InterStepState.BffAppRegSystemUserId)),
+                RunInput.Output(nameof(InterStepState.SystemUserId)),
+            ],
             [HandlerIds.H8] =
             [
                 Tenant,
                 // Also selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners — T245b).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake("speContainerDisplayName", required: false),
+                // T227b: H8 grants these two on the container-type registration before creating the container.
+                RunInput.Output(nameof(InterStepState.MiClientId)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 // unified-access-control-r2 task 165, owner round 35 item 1: the container is bound to this environment's
-                // ROOT business unit (read before anything is created) — H5 output; H8 depends on H5.
+                // ROOT business unit (read before anything is created) — H5 output; H8 depends on H5. T227e: H8 also reads
+                // that environment's recorded container (sprk_SharePointEmbeddedContainerId) to reuse it on a later run.
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H9] =
@@ -212,6 +233,10 @@ public static class HandlerRunInputs
                 // T245c: required intake, validated at POST /api/runs by UserProvisioningIntake (H11's own rules).
                 RunInput.Intake(IntakeParameterCatalog.IdentityPreset),
                 RunInput.Intake(IntakeParameterCatalog.UsersJson),
+                // T232: required for B2BGuest only (every Model 1 run) — UserProvisioningIntake enforces that at intake.
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentSecurityGroupId, required: false),
+                // T232: each guest becomes a Dataverse user of the environment H5 adopted (H5 → H10 → H11).
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
             [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
@@ -239,8 +264,12 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
                 // T248: T6 looks for H8's container in the owning app's app-only listing (absent → T6 InfraFault).
+                // T227c: I4 compares the BFF's container settings with it (absent → I4 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
+                // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
+                // first sign-in of a customer employee).
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
             ],
             [HandlerIds.H14] =
             [

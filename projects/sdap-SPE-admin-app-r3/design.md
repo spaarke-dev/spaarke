@@ -2,8 +2,58 @@
 
 > **Created**: 2026-08-31
 > **Predecessor**: [`sdap-SPE-admin-app-r2`](../sdap-SPE-admin-app-r2/) (merged — PRs #859, #907)
-> **Status**: seeded, awaiting `/design-to-spec`
+> **Status**: seeded, **re-scoped 2026-10-07 (§0 — read first)**, awaiting `/design-to-spec`
 > **Sponsor's original objective**: this is the objective r2 was chartered for and did not deliver.
+
+---
+
+## 0. 🔑 Decisions 2026-10-07 — operator-agreed; supersede §3, §8, §9 where they conflict
+
+### 0.1 What changed: this is now a first-class PRODUCT component, not an admin-tool refactor
+
+Since seeding, **core product code calls into `SpeAdminGraphService`**: `ContainerOperations.cs` (container
+creation in the document path) calls `WriteBusinessUnitStampAsync` + `ReadContainerBindingAsync` — the
+business-unit stamp is part of **tenant isolation** — and `SpeContainerMembershipService.cs` (external access)
+calls `ReadCustomProperties` + `ResolveGraphBaseUrl`; uac-r2 widened `SendGraphJsonAsync` to `internal` for
+reuse (PRs #1312, #1327, #1333 — three edits in three days). The file is **7,338 lines** on master
+(2026-10-07; 6,545 when seeded). The product's security-relevant container path now depends on an admin
+tool's class.
+
+### 0.2 Measured usage (App Insights, dev, 30 days to 2026-10-07, no sampling)
+
+| Surface | Calls / 30 d | Who | Days active |
+|---|---|---|---|
+| SPE Admin endpoints `/api/spe/*` | **341** (0.5% of BFF) | **1 user** | 4 / 31 — UAT |
+| Product → Graph SPE container calls | **4,225** | — | **31 / 31** |
+| ↳ via the shared helpers (BU stamp, custom properties) | **39** | background jobs | — |
+
+### 0.3 Answers to §9
+
+| Q | Decision |
+|---|---|
+| **Q1** granularity | **~5 groups**, not 9: container types (types/settings/owners/grants) · containers (CRUD/lifecycle/archival/columns/properties/quota/permissions) · content (items/search/item recycle bin) · deleted containers · security |
+| **Q2** facade vs direct | **Split by consumer.** The **product binds DIRECTLY** to the new first-class component — correct now, regardless of volume, because it is a security-relevant, daily, unattended path that must not depend on an admin tool's class. **SPE Admin endpoints keep the `SpeAdminGraphService` front door** — operator tool, ~1 user, occasional; facade forwarding is an in-process call (zero perf cost), so direct injection there is a nice-to-have, migrated per endpoint only if usage ever justifies it |
+| **Q3** shared helpers | A neutral, stateless component in `Infrastructure/Graph` — **this IS the foundation of the first-class component** (= Phase 1a) |
+| **Q4** PRs | Helpers/first-class component PR **first**, then one PR per group, each merged promptly (hot file) |
+
+### 0.4 Phasing — both phases live in THIS project (no deferral to an uncreated project)
+
+| Phase | Scope | Status |
+|---|---|---|
+| **1a — First-class SPE container component** | Extract the product-shared helpers (BU stamp/binding read, custom-properties read/write, raw Graph JSON request, base-URL resolution, 429 retry) out of `SpeAdminGraphService` into a neutral component; **product consumers (`ContainerOperations`, `SpeContainerMembershipService`, …) bind to it directly**; `SpeAdminGraphService` uses it too. Pure move — contract tests unchanged | **In scope — do first** |
+| **1b — Per-area file split** | `partial class SpeAdminGraphService` across ~5 files by Q1 group. Same type, same DI, zero behaviour change; cuts merge conflicts | **In scope** |
+| **2 — Full decomposition** | Separate per-area services | **Gated.** Requires (a) a consumer analysis of who calls what after 1a, and (b) **coordination with uac-r2**, now the main new consumer. **Explicit go / no-go decision recorded here** — "not needed" is an acceptable outcome. It may not be silently dropped |
+
+**Why not do Phase 1 inside r2?** r2's charter (make SPE Admin work) is complete pending UAT + 090. Folding a
+refactor that touches uac-r2's core product paths into a project whose only remaining work is verification
+would stall its closure and mix risk into a wrap-up.
+
+### 0.5 🔔 Coordination — uac-r2
+
+Phase 1a **moves helpers uac-r2's code calls today**. Before starting: check `projects/INDEX.md` /
+open uac-r2 PRs for in-flight edits to `SpeAdminGraphService.cs`, `ContainerOperations.cs`,
+`SpeContainerMembershipService.cs`; sequence the 1a PR around them and tell that project the new home.
+§7 (no CI gate on file size) still binds.
 
 ```xml
 <hot-path-declaration>
