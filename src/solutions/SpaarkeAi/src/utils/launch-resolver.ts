@@ -74,7 +74,10 @@
  * @see projects/spaarkeai-compose-r1/design.md §14 row 3 — Path A entry UX (locked)
  */
 
-import { cleanGuid, getXrm } from '@spaarke/ui-components';
+// The modules themselves, not the package barrel: the ribbon bundles (esbuild, build-ribbon.mjs) import this file
+// and must not pull in React/Fluent or the barrel's services.
+import { cleanGuid } from '@spaarke/ui-components/utils/guid';
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Types

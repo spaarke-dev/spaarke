@@ -53,7 +53,8 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAiCompose } from "../utils/launch-resolver";
-import { cleanGuid } from "@spaarke/ui-components";
+// The guid module itself, not the package barrel: a ribbon bundle (esbuild, build-ribbon.mjs) must not pull in React/Fluent.
+import { cleanGuid } from "@spaarke/ui-components/utils/guid";
 
 // ---------------------------------------------------------------------------
 // `sprk_document` field constants
