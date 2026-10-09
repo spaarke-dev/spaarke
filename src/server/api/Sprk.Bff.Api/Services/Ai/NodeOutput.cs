@@ -91,6 +91,28 @@ public record NodeOutput
     public bool IsDeliverOutput { get; init; }
 
     /// <summary>
+    /// True when the orchestrator skipped this node (its branch was not selected, a dependency failed, or every
+    /// dependency was itself skipped). A skipped output is stored so that skipping propagates: a node whose
+    /// every dependency is skipped is skipped too, rather than running on empty input (sweep PB-02).
+    /// <see cref="Success"/> stays true — a skip is not a failure and does not stop the run.
+    /// </summary>
+    public bool IsSkipped { get; init; }
+
+    /// <summary>
+    /// Creates the output stored for a node the orchestrator skipped. It carries no data; the reason is the
+    /// only warning.
+    /// </summary>
+    public static NodeOutput Skipped(Guid nodeId, string outputVariable, string reason) => new()
+    {
+        NodeId = nodeId,
+        OutputVariable = outputVariable,
+        Success = true,
+        IsSkipped = true,
+        Metrics = NodeExecutionMetrics.Empty,
+        Warnings = [reason]
+    };
+
+    /// <summary>
     /// Deserializes the StructuredData property to the specified type.
     /// </summary>
     /// <typeparam name="T">The type to deserialize to.</typeparam>

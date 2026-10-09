@@ -19,11 +19,26 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </para>
 /// <para>
 /// Node parameters are read from <c>node.ConfigJson</c> (JSON) using the same pattern as
-/// all other executors (e.g., <see cref="ConditionNodeExecutor"/>). Required keys:
+/// all other executors (e.g., <see cref="ConditionNodeExecutor"/>). Keys:
 /// <list type="bullet">
-///   <item><c>tenantId</c> — tenant scope for the Agent thread cache key (ADR-009).</item>
-///   <item><c>prompt</c> — user message sent to the Agent thread.</item>
+///   <item><c>tenantId</c> — tenant scope for the Agent thread cache key (ADR-009). Required.</item>
+///   <item><c>prompt</c> — user message sent to the Agent thread. Optional when the node links an Action
+///   with a system prompt.</item>
+///   <item><c>templateParameters</c> / <c>inputBinding</c> — inputs for the linked Action's JPS prompt, as for
+///   <see cref="AiCompletionNodeExecutor"/>.</item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>Prompt source (D-98, task 135).</b> The message is the node's own <c>prompt</c> when it authors one;
+/// otherwise the linked Action's <c>sprk_systemprompt</c>, rendered by <see cref="PromptSchemaRenderer"/> with the
+/// node's <c>templateParameters</c> and <c>inputBinding</c> — one source of truth for the prompt, as for every other
+/// prompt-driven executor. A JPS prompt with <c>structuredOutput</c> gets its JSON schema appended, because the
+/// Agent Service has no constrained decoding.
+/// </para>
+/// <para>
+/// <b>Output.</b> When the agent replies with a JSON object (optionally inside a code fence), that object is the
+/// node's <see cref="NodeOutput.StructuredData"/>, so downstream nodes can read its fields. Any other reply keeps the
+/// previous shape: <c>{ threadId, responseLength }</c> with the text in <see cref="NodeOutput.TextContent"/>.
 /// </para>
 /// <para>
 /// Exception mapping (ADR-016 / ADR-018):
@@ -43,13 +58,16 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     };
 
     private readonly AgentServiceClient _agentServiceClient;
+    private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<AgentServiceNodeExecutor> _logger;
 
     public AgentServiceNodeExecutor(
         AgentServiceClient agentServiceClient,
+        PromptSchemaRenderer promptSchemaRenderer,
         ILogger<AgentServiceNodeExecutor> logger)
     {
         _agentServiceClient = agentServiceClient;
+        _promptSchemaRenderer = promptSchemaRenderer;
         _logger = logger;
     }
 
@@ -60,7 +78,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     };
 
     // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
-    // Derived from AgentServiceNodeConfig (TenantId + Prompt, both required).
+    // Derived from AgentServiceNodeConfig (TenantId required; Prompt required unless the node links an Action).
     private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
         ExecutorTypeName: nameof(ExecutorType.AgentService),
         ExecutorTypeValue: (int)ExecutorType.AgentService,
@@ -76,8 +94,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             new(
                 Name: "prompt",
                 Type: SchemaFieldType.String,
-                Required: true,
-                Description: "User message sent to the Agent thread. Supports {{var}} template substitution against upstream node outputs. Required.",
+                Required: false,
+                Description: "User message sent to the Agent thread. Supports {{var}} template substitution against upstream node outputs. Optional when the node links an Action: the Action's system prompt is then rendered with templateParameters / inputBinding (D-98).",
                 Default: null)
         });
 
@@ -91,7 +109,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
 
         if (string.IsNullOrWhiteSpace(context.Node.ConfigJson))
         {
-            errors.Add("AgentService node requires configuration (ConfigJson with 'tenantId' and 'prompt')");
+            errors.Add("AgentService node requires configuration (ConfigJson with 'tenantId', and 'prompt' unless the node links an Action)");
             return NodeValidationResult.Failure(errors.ToArray());
         }
 
@@ -107,8 +125,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 if (string.IsNullOrWhiteSpace(config.TenantId))
                     errors.Add("AgentService node requires 'tenantId' in ConfigJson");
 
-                if (string.IsNullOrWhiteSpace(config.Prompt))
-                    errors.Add("AgentService node requires 'prompt' in ConfigJson");
+                if (string.IsNullOrWhiteSpace(config.Prompt) && !HasActionPrompt(context))
+                    errors.Add("AgentService node requires 'prompt' in ConfigJson, or a linked Action with a system prompt (sprk_systemprompt)");
             }
         }
         catch (JsonException ex)
@@ -160,7 +178,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             // Parse configuration — ConfigJson is validated above so safe to deserialize
             var config = JsonSerializer.Deserialize<AgentServiceNodeConfig>(context.Node.ConfigJson!, JsonOptions)!;
             var tenantId = config.TenantId!;
-            var prompt = config.Prompt!;
+            var prompt = ResolvePrompt(context, config, _promptSchemaRenderer, _logger);
+            activity?.SetTag("prompt.source", string.IsNullOrWhiteSpace(config.Prompt) ? "action" : "node");
 
             _logger.LogDebug(
                 "AgentService node {NodeId}: creating/resuming thread for tenant {TenantId}",
@@ -206,12 +225,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             activity?.SetTag("node.outcome", "success");
             activity?.SetTag("agent.response_length", responseText.Length);
 
-            return NodeOutput.Ok(
-                context.Node.Id,
-                context.Node.OutputVariable,
-                data: new { threadId, responseLength = responseText.Length },
-                textContent: responseText,
-                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            return BuildOutput(context, threadId, responseText, startedAt);
         }
         catch (ConcurrencyLimitExceededException ex)
         {
@@ -274,6 +288,112 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
     }
+
+    /// <summary>
+    /// True when the node links an Action whose system prompt can be the message (D-98).
+    /// </summary>
+    private static bool HasActionPrompt(NodeExecutionContext context) =>
+        context.Node.ActionId != Guid.Empty
+        && context.Action is not null
+        && !string.IsNullOrWhiteSpace(context.Action.SystemPrompt);
+
+    /// <summary>
+    /// The message sent to the agent: the node's own <c>prompt</c> when set, otherwise the linked Action's system
+    /// prompt rendered with the node's <c>templateParameters</c> and <c>inputBinding</c> (D-98). When the rendered
+    /// JPS declares structured output, its JSON schema is appended, since the Agent Service cannot constrain decoding.
+    /// </summary>
+    internal static string ResolvePrompt(
+        NodeExecutionContext context,
+        AgentServiceNodeConfig config,
+        PromptSchemaRenderer renderer,
+        ILogger logger)
+    {
+        if (!string.IsNullOrWhiteSpace(config.Prompt))
+            return config.Prompt!;
+
+        var rendered = renderer.Render(
+            rawPrompt: context.Action.SystemPrompt,
+            skillContext: null,
+            knowledgeContext: null,
+            documentText: null,
+            templateParameters: NodeConfigPromptInputs.ExtractTemplateParameters(context.Node.ConfigJson, logger, "AgentService"),
+            downstreamNodes: null,
+            runtimeInput: NodeConfigPromptInputs.ExtractInputBinding(context.Node.ConfigJson, logger, "AgentService"));
+
+        if (rendered.JsonSchema is null)
+            return rendered.PromptText;
+
+        return rendered.PromptText.TrimEnd()
+            + "\n\nRespond with a single JSON object that conforms to this JSON schema. No prose and no code fence.\n"
+            + rendered.JsonSchema.ToJsonString();
+    }
+
+    /// <summary>
+    /// Builds the node output from the agent's reply. A JSON-object reply (optionally fenced) becomes the
+    /// structured data; any other reply keeps the <c>{ threadId, responseLength }</c> shape.
+    /// </summary>
+    internal static NodeOutput BuildOutput(
+        NodeExecutionContext context,
+        string threadId,
+        string responseText,
+        DateTimeOffset startedAt)
+    {
+        var metrics = NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow);
+
+        if (TryParseJsonObject(responseText, out var structured))
+        {
+            return new NodeOutput
+            {
+                NodeId = context.Node.Id,
+                OutputVariable = context.Node.OutputVariable,
+                Success = true,
+                TextContent = responseText,
+                StructuredData = structured,
+                Metrics = metrics
+            };
+        }
+
+        return NodeOutput.Ok(
+            context.Node.Id,
+            context.Node.OutputVariable,
+            data: new { threadId, responseLength = responseText.Length },
+            textContent: responseText,
+            metrics: metrics);
+    }
+
+    private static bool TryParseJsonObject(string responseText, out JsonElement structured)
+    {
+        structured = default;
+        var text = responseText.Trim();
+
+        // Tolerate one Markdown code fence (a json-tagged fence), which agents add despite instructions.
+        if (text.StartsWith(Fence, StringComparison.Ordinal))
+        {
+            var firstNewline = text.IndexOf('\n');
+            var closingFence = text.LastIndexOf(Fence, StringComparison.Ordinal);
+            if (firstNewline < 0 || closingFence <= firstNewline)
+                return false;
+            text = text[(firstNewline + 1)..closingFence].Trim();
+        }
+
+        if (!text.StartsWith('{'))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+            structured = doc.RootElement.Clone();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private const string Fence = "```";
 }
 
 /// <summary>
@@ -288,7 +408,7 @@ internal sealed record AgentServiceNodeConfig
     public string? TenantId { get; init; }
 
     /// <summary>
-    /// User message sent to the Agent thread. Required.
+    /// User message sent to the Agent thread. Optional when the node links an Action (D-98).
     /// Supports template variable substitution when the orchestrator pre-renders ConfigJson.
     /// </summary>
     public string? Prompt { get; init; }

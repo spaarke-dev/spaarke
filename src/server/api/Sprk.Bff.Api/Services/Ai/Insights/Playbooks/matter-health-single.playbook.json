@@ -80,8 +80,8 @@
       "dependsOn": ["queryMatterContext"],
       "configJson": {
         "entityLogicalName": "sprk_kpiassessment",
-        "fetchXml": "<fetch version='1.0' mapping='logical' distinct='false'><entity name='sprk_kpiassessment'><attribute name='sprk_kpiassessmentid' /><attribute name='sprk_performancearea' /><attribute name='sprk_grade' /><attribute name='sprk_notes' /><attribute name='sprk_assessmentdate' /><attribute name='createdon' /><filter type='and'><condition attribute='sprk_matter' operator='eq' value='{{matterId}}' /></filter><order attribute='sprk_assessmentdate' descending='true' /></entity></fetch>",
-        "$comment-fetchXml": "Reads all KPI assessments for the Matter across all 3 Performance Areas per FR-13 (Guideline Compliance 100000000, Budget Compliance 100000001, Outcomes Achievement 100000002). {{matterId}} substituted at runtime. QueryDataverseNodeExecutor returns NodeOutput.StructuredData={count,items,entityLogicalName}; the synthesis prompt's {{assessments}} placeholder consumes this via PlaybookOrchestrationService.ApplyConfigJsonTemplates."
+        "fetchXml": "<fetch version='1.0' mapping='logical' distinct='false'><entity name='sprk_kpiassessment'><attribute name='sprk_kpiassessmentid' /><attribute name='sprk_kpiname' /><attribute name='sprk_performancearea' /><attribute name='sprk_kpigradescore' /><attribute name='sprk_assessmentcriteria' /><attribute name='sprk_assessmentnotes' /><attribute name='createdon' /><filter type='and'><condition attribute='sprk_matter' operator='eq' value='{{matterId}}' /><condition attribute='statecode' operator='eq' value='0' /></filter><order attribute='createdon' descending='false' /></entity></fetch>",
+        "$comment-fetchXml": "Reads the Matter's active KPI assessments, oldest first, across the 3 Performance Areas per FR-13 (Guideline Compliance 100000000, Budget Compliance 100000001, Outcomes Achievement 100000002). Column names are the live sprk_kpiassessment schema (task 135: the earlier sprk_grade / sprk_notes / sprk_assessmentdate do not exist, so the query failed). QueryDataverseNodeExecutor returns StructuredData={count,items,entityLogicalName}; option sets arrive as integers, labelled for the model by synthesize.inputBinding.optionLabels."
       }
     },
     {
@@ -97,8 +97,9 @@
       "configJson": {
         "indexName": "spaarke-insights-index",
         "artifactType": "observation",
-        "filter": "matterId eq '{{matterId}}'",
-        "vectorQuery": "{{matterContext.matterType}} performance themes inflection points client copy gaps deadlines scope",
+        "subjectScope": "matter:{{matterId}}",
+        "$comment-subjectScope": "Task 135: the index has no top-level matterId (verified against the deployed spaarke-insights-index schema), so the old filter \"matterId eq '…'\" returned HTTP 400. subjectScope makes IndexRetrieveNode build the scope/matterId (or scope/entityType + scope/entityId) filter and escape the id itself.",
+        "vectorQuery": "{{matterContext.value.raw.matterType}} performance themes inflection points client copy gaps deadlines scope",
         "topK": 25,
         "requireEvidence": false,
         "$comment-requireEvidence": "false — empty observations is acceptable per FR-11 ('optional — graceful empty if files-index pipeline unhealthy'). EvidenceSufficiencyNode gates on KPI assessment count instead."
@@ -143,12 +144,22 @@
         "tenantId": "{{tenantId}}",
         "templateParameters": {
           "matterId": "{{matterId}}",
-          "currentGrade": "{{currentGrade}}",
-          "matterContext": "{{matterContext}}",
-          "assessments": "{{assessments}}",
-          "observations": "{{observations}}"
+          "currentGrade": "(not supplied: derive it from the assessments)",
+          "matterContext": "matterContext (see the Input section)",
+          "assessments": "assessments (see the Input section)",
+          "observations": "observations (see the Input section)"
         },
-        "$comment-prompt-source": "Synthesis prompt content lives in sprk_analysisaction[matter-health-synthesis].sprk_systemprompt (Task 020 row 5981632e-4165-f111-ab0c-7ced8ddc4cc6). AgentServiceNodeExecutor reads the prompt at runtime via the actionCode FK; the templateParameters above feed the JPS placeholders {{matterId}}, {{currentGrade}}, {{matterContext}}, {{assessments}}, {{observations}} per Task 020 §9 prompt design. PlaybookOrchestrationService.ApplyConfigJsonTemplates resolves prior-node OutputVariables.",
+        "inputBinding": {
+          "matterId": "{{matterId}}",
+          "matterContext": "{{matterContext.value.raw}}",
+          "assessments": "{{assessments.items}}",
+          "observations": "{{observations.artifacts}}",
+          "optionLabels": {
+            "sprk_performancearea": { "100000000": "Guideline Compliance", "100000001": "Budget Compliance", "100000002": "Outcomes Achievement" },
+            "sprk_kpigradescore": { "100000000": "A+", "100000001": "A", "100000002": "B+", "100000003": "B", "100000004": "C+", "100000005": "C", "100000006": "D+", "100000007": "D", "100000008": "F", "100000009": "No Grade" }
+          }
+        },
+        "$comment-prompt-source": "Task 135 / D-98: AgentServiceNodeExecutor sends the linked Action's prompt (sprk_analysisaction 5981632e-4165-f111-ab0c-7ced8ddc4cc6, matter-health-synthesis) rendered by PromptSchemaRenderer; this node authors no 'prompt'. templateParameters fill the JPS instruction placeholders; the data itself goes in inputBinding (the '## Input' section), bound to the upstream outputs' fields: {{assessments}} alone would serialize the template context's self-referencing wrapper and render null. optionLabels names the integer option-set values the query returns.",
         "$comment-branching": "This node executes ONLY when checkSufficiency.verdict == 'sufficient'. Branch routing handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (universal-ingest Wave C1 Gap #2 patch: a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs).",
         "$comment-output-shape": "The synthesis prompt's output.fields per Task 020 §6 produces: { body: string (markdown narrative), citations: array (assessment + document refs), dimensions: array (composite-grade|trend|themes|inflection|critical-assessments|forward-risk|evidence-gap), confidence: number, reasoning: string }. ReturnInsightArtifactNode downstream maps these to InferenceArtifact envelope fields."
       }
@@ -164,12 +175,14 @@
       "positionX": 1300, "positionY": 200,
       "dependsOn": ["synthesize"],
       "configJson": {
-        "citationsFrom": "synthesize",
+        "citationsFrom": "synthesis",
         "citationsJsonPath": "citations",
-        "sourceChunksFrom": "retrieveObservations",
-        "sourceChunksJsonPath": "documents",
+        "sources": [
+          { "from": "assessments", "jsonPath": "items" },
+          { "from": "observations", "jsonPath": "artifacts" }
+        ],
         "annotationText": "[citation could not be verified]",
-        "$comment": "Verifies the synthesis citations' excerpts against retrieved observation chunks. Assessment-type citations (FR-07: { type: 'assessment', id: <sprk_kpiassessment Guid>, label, excerpt }) verify against the assessments node output's items (not retrieveObservations); GroundingVerifyNode handles type-discriminated citation streams via citationsJsonPath. Phase 1 implementation may need a follow-up to add 'sourceChunks2From' for the assessments stream — flagged for downstream task 022/023 if needed."
+        "$comment": "Task 135: 'from' names are OUTPUT VARIABLES (synthesis, assessments, observations), not node names. Each synthesis citation ({type, id, label, excerpt}) is checked verbatim against the KPI assessment rows (criteria and notes) and the retrieved index rows. The output carries VerifiedEvidence (EvidenceRef[]) and GroundedOutput (the synthesis envelope with only the verified citations)."
       }
     },
     {
@@ -184,7 +197,7 @@
       "positionX": 1600, "positionY": 200,
       "dependsOn": ["groundCitations"],
       "configJson": {
-        "from": "groundCitations",
+        "from": "groundedSynthesis",
         "artifactKind": "inference",
         "subject": "matter:{{matterId}}",
         "predicate": "matterHealthDiagnostic",
@@ -193,10 +206,9 @@
         "producedByKind": "playbook",
         "producedByVersion": "1.0",
         "$comment-producedByVersion": "Bare '1.0' string version per Q-U1 (NOT 'v1'). Authoritative version source is sprk_analysisplaybook.sprk_version (Dataverse-side) — this field is the in-envelope projection per FR-14 'playbookVersion' envelope field.",
-        "valueFrom": "body",
-        "evidenceFrom": "citations",
-        "confidenceFrom": "confidence",
-        "reasoningFrom": "reasoning",
+        "valueFrom": "GroundedOutput",
+        "evidenceFrom": "VerifiedEvidence",
+        "$comment-from": "Task 135: reads the groundCitations output (outputVariable groundedSynthesis). value.raw = the grounded synthesis envelope (body, verified citations, dimensions, …); evidence = the verified citations only. The property names are case-sensitive here and the grounding output serializes PascalCase.",
         "allowEmptyEvidence": false,
         "$comment-evidenceGuard": "allowEmptyEvidence=false enforces D-A23 / D-48 EvidenceGuard: empty citations after GroundingVerifyNode stripping yields node-level EVIDENCE_REQUIRED error. The orchestrator's null-artifact handling surfaces this as a DeclineResponse to the InsightSummaryCard, which renders the FR-06 Decline state."
       }
@@ -213,7 +225,8 @@
       "dependsOn": ["checkSufficiency"],
       "configJson": {
         "reason": "insufficient-evidence",
-        "from": "checkSufficiency",
+        "from": "sufficiency",
+        "$comment-from": "Task 135: the checkSufficiency OUTPUT VARIABLE. With the node name the gap list was not found and the decline showed literal {have} / {need}.",
         "explanationTemplate": "Insufficient data is available to provide Insights Analysis: only {have} KPI assessments are available for this Matter (need {need} per rule 'kpiAssessments.min' from queryKpiAssessments). Add at least {need} assessments per Performance Area to enable diagnostic Insights.",
         "$comment-explanationTemplate": "FR-24 + design.md §4.4 owner-confirmed copy. Surfaced to InsightSummaryCard via the DeclineResponse path; UI renders this verbatim in the FR-06 Decline state alongside the suggested action ('add N more assessments').",
         "suggestedActions": [
@@ -245,7 +258,8 @@
             "$comment-field": "Per FR-14 + FR-16 — the EXISTING longtext field on sprk_matter that previously held R5 placeholder static text. This UpdateRecord call REPLACES that placeholder with the AI-generated JSON envelope. NO new field is added per FR-16 / Q-U6.",
             "type": "string",
             "$comment-type": "type='string' (FieldMappingType.String) → UpdateRecordNodeExecutor.CoerceFieldValue returns the rendered string verbatim. We deliberately store serialized JSON as a string in the longtext column (rather than relying on JSON-typed coercion); downstream consumers per FR-15 parse the string as JSON via Power Fx / plugin / view transformations.",
-            "value": "{\"schemaVersion\":\"1.0\",\"body\":{{{groundCitations.output.body}}},\"citations\":{{{groundCitations.output.citations}}},\"generatedAt\":\"{{run.startedAtIso}}\",\"playbookName\":\"matter-health-single\",\"tenantId\":\"{{tenantId}}\",\"dimensions\":{{{groundCitations.output.dimensions}}}}",
+            "value": "{\"schemaVersion\":\"1.0\",\"body\":{{{json groundedSynthesis.GroundedOutput.body}}},\"citations\":{{{json groundedSynthesis.GroundedOutput.citations}}},\"generatedAt\":{{{json run.startedAt}}},\"playbookName\":\"matter-health-single\",\"tenantId\":{{{json tenantId}}},\"dimensions\":{{{json groundedSynthesis.GroundedOutput.dimensions}}} }",
+            "$comment-value-task135": "Task 135: every inserted value goes through the json helper, so the envelope is valid JSON whatever the text holds (quotes, newlines). Roots are the outputVariable groundedSynthesis (not the node name) and run.startedAt (run.startedAtIso does not exist). Citations are the VERIFIED ones only. The space before the closing brace is deliberate: Handlebars reads four closing braces as the end of the triple-stash plus a stray brace and drops the envelope's final }.",
             "$comment-value": "FR-14 envelope construction as a Handlebars-templated JSON string. The 7 envelope fields per Q-U1 + FR-14: (1) schemaVersion = literal string '1.0' (NOT int 1) per Q-U1; (2) body = markdown narrative from GroundingVerifyNode output (post-citation-stripping synthesis text from the AgentService synthesize node — groundCitations carries forward the synthesis output with verified citations only); (3) citations = type-discriminated array (FR-07 assessment + document refs); (4) generatedAt = ISO 8601 timestamp from run context (TemplateEngine populates run.startedAtIso); (5) playbookName = BARE 'matter-health-single' (NO @v1 suffix per Q-U1 owner ban); (6) tenantId = from playbook Parameters; (7) dimensions = the 7-element array from synthesis output (composite|trend|themes|inflection|critical|risk|evidenceGaps per FR-13 / Task 020 prompt §6).",
             "$comment-triple-stash": "Triple-stash Handlebars ({{{var}}}) on body/citations/dimensions ensures the renderer emits raw values (already-quoted JSON for strings, raw JSON for arrays/objects) without HTML-escaping. The synthesize node's StructuredData output flows through PlaybookOrchestrationService.ApplyConfigJsonTemplates into UpdateRecordNodeExecutor.BuildTemplateContext, which exposes prior outputs as `{{nodeName.output.fieldPath}}`. The synthesis prompt (Task 020 §6 output schema) emits body as a JSON string literal and citations/dimensions as arrays — Handlebars triple-stash preserves their JSON shape inside the envelope.",
             "$comment-playbookVersion-omission": "spec FR-14 example envelope mentions a 'playbookVersion' field, but POML acceptance criterion 'All 7 envelope fields present' enumerates exactly: schemaVersion, body, citations, generatedAt, playbookName, tenantId, dimensions. Per project Q-U1 owner ban + design.md §4.5, version is conveyed via schemaVersion='1.0' (envelope contract version, NOT playbook code version). The Dataverse-side sprk_analysisplaybook.sprk_version row column is authoritative for playbook versioning; the envelope schemaVersion describes the envelope shape itself. Omitting playbookVersion keeps the 7-field count exact and avoids reintroducing version-suffix vernacular."

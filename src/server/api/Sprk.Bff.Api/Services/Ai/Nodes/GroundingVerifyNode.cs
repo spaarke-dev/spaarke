@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Models.Ai;
@@ -25,13 +26,26 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 ///   "sourceChunksFrom": "loadDocument",          // required — output variable carrying source chunks
 ///   "citationsJsonPath": "evidence",             // optional — defaults to "evidence"; JSON property holding EvidenceRef[]
 ///   "sourceChunksJsonPath": "chunks",            // optional — defaults to "chunks"; JSON property holding ChunkRef[]
-///   "annotationText": "[citation could not be verified]"   // optional — defaults to D-47 string
+///   "annotationText": "[citation could not be verified]",  // optional — defaults to D-47 string
+///   "sources": [ { "from": "assessments", "jsonPath": "items" } ]  // optional — further source-chunk upstreams
 /// }
 /// </code>
 /// <para>
+/// <b>Citation and chunk shapes (task 135).</b> A citation is an <see cref="EvidenceRef"/>
+/// (<c>refType</c>/<c>ref</c>/<c>quote</c>) or the synthesis-prompt shape (<c>type</c>/<c>id</c>/<c>excerpt</c>,
+/// e.g. matter-health-single's <c>citations[]</c>); a field of the first form wins. A source chunk is a
+/// <see cref="ChunkRef"/> (<c>chunkId</c>/<c>text</c>), a string, or any other object — then its id is
+/// <c>chunkId</c>, <c>id</c> or the first string property whose name ends in "id", and its text is every string value
+/// it holds (so a KPI assessment row's notes and an index row's <c>valueJson</c> are verifiable). <c>sources</c> adds
+/// upstreams to <c>sourceChunksFrom</c>; at least one of the two is required.
+/// </para>
+/// <para>
 /// The structured output contains the verification verdict per citation. Downstream nodes
 /// (e.g., <c>ReturnInsightArtifactNode</c>, D-P12) consume the results to either strip
-/// failed citations or annotate them inline before emission.
+/// failed citations or annotate them inline before emission. It also carries
+/// <c>verifiedEvidence</c> (the passing citations as <see cref="EvidenceRef"/>s) and <c>groundedOutput</c> (the
+/// citations upstream's output with its citation array cut down to the passing citations), so a terminal node can
+/// emit only what was verified.
 /// </para>
 /// <para>
 /// <b>Zone A</b> per SPEC §3.5 — lives under <c>Services/Ai/Nodes/</c> alongside the other
@@ -83,8 +97,8 @@ public sealed class GroundingVerifyNode : INodeExecutor
             new(
                 Name: "sourceChunksFrom",
                 Type: SchemaFieldType.String,
-                Required: true,
-                Description: "OutputVariable of the prior node producing source chunks (ChunkRef[]). Required.",
+                Required: false,
+                Description: "OutputVariable of the prior node producing source chunks (ChunkRef[]). Required unless 'sources' is set.",
                 Default: null),
             new(
                 Name: "citationsJsonPath",
@@ -119,8 +133,11 @@ public sealed class GroundingVerifyNode : INodeExecutor
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(config.CitationsFrom))
             errors.Add("ConfigJson.citationsFrom is required (the upstream output variable producing citations).");
-        if (string.IsNullOrWhiteSpace(config.SourceChunksFrom))
-            errors.Add("ConfigJson.sourceChunksFrom is required (the upstream output variable producing source chunks).");
+        var hasSources = config.Sources is { Count: > 0 };
+        if (string.IsNullOrWhiteSpace(config.SourceChunksFrom) && !hasSources)
+            errors.Add("ConfigJson.sourceChunksFrom (or a non-empty 'sources' list) is required (the upstream output variable(s) producing source chunks).");
+        if (hasSources && config.Sources!.Any(src => string.IsNullOrWhiteSpace(src.From)))
+            errors.Add("Every ConfigJson.sources entry requires 'from' (an upstream output variable).");
 
         return errors.Count > 0
             ? NodeValidationResult.Failure(errors.ToArray())
@@ -147,7 +164,8 @@ public sealed class GroundingVerifyNode : INodeExecutor
 
         try
         {
-            var citations = ExtractCitations(context, config);
+            var parsedCitations = ExtractCitations(context, config);
+            var citations = parsedCitations.Select(c => c.Ref).ToList();
             var chunks = ExtractSourceChunks(context, config);
 
             _logger.LogDebug(
@@ -164,6 +182,8 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 : config.AnnotationText!;
 
             var annotated = new List<AnnotatedCitation>(results.Count);
+            var verifiedEvidence = new List<EvidenceRef>(results.Count);
+            var passedOriginals = new List<JsonElement>(results.Count);
             var verifiedCount = 0;
             var approximateCount = 0;
             var notFoundCount = 0;
@@ -181,6 +201,14 @@ public sealed class GroundingVerifyNode : INodeExecutor
                     MatchedChunkId = r.MatchedChunkId,
                     Annotation = isFailure ? annotation : null
                 });
+
+                if (!isFailure)
+                {
+                    verifiedEvidence.Add(r.Citation);
+                    var original = parsedCitations.FirstOrDefault(c => ReferenceEquals(c.Ref, r.Citation));
+                    if (original.Ref is not null)
+                        passedOriginals.Add(original.Original);
+                }
 
                 switch (r.Verdict)
                 {
@@ -201,7 +229,9 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 NoQuoteCount = noQuoteCount,
                 InvalidInputCount = invalidInputCount,
                 AllVerified = (notFoundCount + invalidInputCount) == 0,
-                AnnotatedCitations = annotated
+                AnnotatedCitations = annotated,
+                VerifiedEvidence = verifiedEvidence,
+                GroundedOutput = BuildGroundedOutput(context, config, passedOriginals)
             };
 
             var warnings = new List<string>();
@@ -259,7 +289,8 @@ public sealed class GroundingVerifyNode : INodeExecutor
         }
     }
 
-    private static IReadOnlyList<EvidenceRef> ExtractCitations(NodeExecutionContext context, GroundingVerifyConfig config)
+    private static IReadOnlyList<(EvidenceRef Ref, JsonElement Original)> ExtractCitations(
+        NodeExecutionContext context, GroundingVerifyConfig config)
     {
         var upstream = context.GetPreviousOutput(config.CitationsFrom!)
             ?? throw new GroundingVerifyConfigException(
@@ -270,56 +301,193 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 $"Upstream node '{config.CitationsFrom}' failed; cannot verify citations.");
 
         if (upstream.StructuredData is null)
-            return Array.Empty<EvidenceRef>();
+            return Array.Empty<(EvidenceRef, JsonElement)>();
 
-        var path = string.IsNullOrWhiteSpace(config.CitationsJsonPath) ? "evidence" : config.CitationsJsonPath!;
-        if (!upstream.StructuredData.Value.TryGetProperty(path, out var citationsElement))
-            return Array.Empty<EvidenceRef>();
+        var path = CitationsPath(config);
+        if (!TryGetPropertyIgnoreCase(upstream.StructuredData.Value, path, out var citationsElement))
+            return Array.Empty<(EvidenceRef, JsonElement)>();
 
         if (citationsElement.ValueKind != JsonValueKind.Array)
-            return Array.Empty<EvidenceRef>();
+            return Array.Empty<(EvidenceRef, JsonElement)>();
 
-        try
+        var list = new List<(EvidenceRef, JsonElement)>();
+        foreach (var item in citationsElement.EnumerateArray())
         {
-            var list = JsonSerializer.Deserialize<List<EvidenceRef>>(citationsElement.GetRawText(), JsonOptions);
-            return list ?? new List<EvidenceRef>();
+            list.Add((ToEvidenceRef(item, config, path), item.Clone()));
         }
-        catch (JsonException ex)
-        {
+
+        return list;
+    }
+
+    /// <summary>
+    /// Maps one citation to an <see cref="EvidenceRef"/>: <c>refType</c>/<c>ref</c>/<c>quote</c>, or the
+    /// synthesis-prompt fields <c>type</c>/<c>id</c> (or <c>chunkId</c>)/<c>excerpt</c>. A citation without a type or
+    /// a reference is a configuration error, as before.
+    /// </summary>
+    private static EvidenceRef ToEvidenceRef(JsonElement item, GroundingVerifyConfig config, string path)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
             throw new GroundingVerifyConfigException(
-                $"Could not deserialize citations from '{config.CitationsFrom}.{path}': {ex.Message}");
-        }
+                $"Could not deserialize citations from '{config.CitationsFrom}.{path}': a citation is not an object.");
+
+        var refType = StringProperty(item, "refType") ?? StringProperty(item, "type");
+        var reference = StringProperty(item, "ref") ?? StringProperty(item, "id") ?? StringProperty(item, "chunkId");
+        if (string.IsNullOrWhiteSpace(refType) || string.IsNullOrWhiteSpace(reference))
+            throw new GroundingVerifyConfigException(
+                $"Could not deserialize citations from '{config.CitationsFrom}.{path}': a citation needs refType (or type) and ref (or id).");
+
+        return new EvidenceRef
+        {
+            RefType = refType!,
+            Ref = reference!,
+            Quote = StringProperty(item, "quote") ?? StringProperty(item, "excerpt")
+        };
     }
 
     private static IReadOnlyList<ChunkRef> ExtractSourceChunks(NodeExecutionContext context, GroundingVerifyConfig config)
     {
-        var upstream = context.GetPreviousOutput(config.SourceChunksFrom!)
+        var chunks = new List<ChunkRef>();
+
+        if (!string.IsNullOrWhiteSpace(config.SourceChunksFrom))
+        {
+            var path = string.IsNullOrWhiteSpace(config.SourceChunksJsonPath) ? "chunks" : config.SourceChunksJsonPath!;
+            chunks.AddRange(ExtractChunksFrom(context, config.SourceChunksFrom!, path));
+        }
+
+        foreach (var source in config.Sources ?? new List<GroundingVerifySource>())
+        {
+            var path = string.IsNullOrWhiteSpace(source.JsonPath) ? "chunks" : source.JsonPath!;
+            chunks.AddRange(ExtractChunksFrom(context, source.From!, path));
+        }
+
+        return chunks;
+    }
+
+    private static IReadOnlyList<ChunkRef> ExtractChunksFrom(NodeExecutionContext context, string from, string path)
+    {
+        var upstream = context.GetPreviousOutput(from)
             ?? throw new GroundingVerifyConfigException(
-                $"No previous output found for variable '{config.SourceChunksFrom}'.");
+                $"No previous output found for variable '{from}'.");
 
         if (!upstream.Success)
             throw new GroundingVerifyConfigException(
-                $"Upstream node '{config.SourceChunksFrom}' failed; cannot verify against missing source chunks.");
+                $"Upstream node '{from}' failed; cannot verify against missing source chunks.");
 
         if (upstream.StructuredData is null)
             return Array.Empty<ChunkRef>();
 
-        var path = string.IsNullOrWhiteSpace(config.SourceChunksJsonPath) ? "chunks" : config.SourceChunksJsonPath!;
-        if (!upstream.StructuredData.Value.TryGetProperty(path, out var chunksElement))
+        if (!TryGetPropertyIgnoreCase(upstream.StructuredData.Value, path, out var chunksElement))
             return Array.Empty<ChunkRef>();
 
         if (chunksElement.ValueKind != JsonValueKind.Array)
             return Array.Empty<ChunkRef>();
 
-        try
+        var list = new List<ChunkRef>();
+        var index = 0;
+        foreach (var item in chunksElement.EnumerateArray())
         {
-            var list = JsonSerializer.Deserialize<List<ChunkRef>>(chunksElement.GetRawText(), JsonOptions);
-            return list ?? new List<ChunkRef>();
+            var fallbackId = $"{from}[{index++}]";
+            switch (item.ValueKind)
+            {
+                case JsonValueKind.String:
+                    list.Add(new ChunkRef(fallbackId, item.GetString() ?? string.Empty));
+                    break;
+                case JsonValueKind.Object:
+                    var text = StringProperty(item, "text");
+                    var chunkId = StringProperty(item, "chunkId") ?? StringProperty(item, "id") ?? FirstIdProperty(item) ?? fallbackId;
+                    list.Add(new ChunkRef(chunkId, text ?? string.Join("\n", StringValues(item))));
+                    break;
+            }
         }
-        catch (JsonException ex)
+
+        return list;
+    }
+
+    /// <summary>
+    /// The citations upstream's output with its citation array replaced by the citations that passed, or null when
+    /// that output is not a JSON object.
+    /// </summary>
+    private static JsonElement? BuildGroundedOutput(
+        NodeExecutionContext context, GroundingVerifyConfig config, IReadOnlyList<JsonElement> passedOriginals)
+    {
+        var upstream = context.GetPreviousOutput(config.CitationsFrom!);
+        if (upstream?.StructuredData is not { ValueKind: JsonValueKind.Object } data)
+            return null;
+
+        var node = JsonNode.Parse(data.GetRawText())!.AsObject();
+        var path = CitationsPath(config);
+        var existing = node.Select(p => p.Key).FirstOrDefault(k => string.Equals(k, path, StringComparison.OrdinalIgnoreCase));
+        node[existing ?? path] = new JsonArray(passedOriginals.Select(o => JsonNode.Parse(o.GetRawText())).ToArray());
+        return JsonSerializer.SerializeToElement(node);
+    }
+
+    private static string CitationsPath(GroundingVerifyConfig config) =>
+        string.IsNullOrWhiteSpace(config.CitationsJsonPath) ? "evidence" : config.CitationsJsonPath!;
+
+    /// <summary>JSON paths are matched case-insensitively: executor outputs serialize PascalCase (Artifacts), LLM
+    /// outputs camelCase (citations), and authors write either.</summary>
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
         {
-            throw new GroundingVerifyConfigException(
-                $"Could not deserialize source chunks from '{config.SourceChunksFrom}.{path}': {ex.Message}");
+            if (element.TryGetProperty(name, out value))
+                return true;
+
+            foreach (var prop in element.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = prop.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? StringProperty(JsonElement item, string name)
+    {
+        foreach (var prop in item.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                return prop.Value.GetString();
+        }
+
+        return null;
+    }
+
+    private static string? FirstIdProperty(JsonElement item)
+    {
+        foreach (var prop in item.EnumerateObject())
+        {
+            if (prop.Name.EndsWith("id", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                return prop.Value.GetString();
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> StringValues(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                var value = element.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    yield return value!;
+                break;
+            case JsonValueKind.Object:
+                foreach (var prop in element.EnumerateObject())
+                    foreach (var nested in StringValues(prop.Value))
+                        yield return nested;
+                break;
+            case JsonValueKind.Array:
+                foreach (var entry in element.EnumerateArray())
+                    foreach (var nested in StringValues(entry))
+                        yield return nested;
+                break;
         }
     }
 }
@@ -343,6 +511,20 @@ internal sealed record GroundingVerifyConfig
 
     [JsonPropertyName("annotationText")]
     public string? AnnotationText { get; init; }
+
+    /// <summary>Further source-chunk upstreams, read in addition to <see cref="SourceChunksFrom"/>.</summary>
+    [JsonPropertyName("sources")]
+    public List<GroundingVerifySource>? Sources { get; init; }
+}
+
+/// <summary>One further source-chunk upstream of <see cref="GroundingVerifyNode"/>.</summary>
+internal sealed record GroundingVerifySource
+{
+    [JsonPropertyName("from")]
+    public string? From { get; init; }
+
+    [JsonPropertyName("jsonPath")]
+    public string? JsonPath { get; init; }
 }
 
 /// <summary>
@@ -361,6 +543,15 @@ public sealed record GroundingVerifyOutput
     public bool AllVerified { get; init; }
 
     public IReadOnlyList<AnnotatedCitation> AnnotatedCitations { get; init; } = Array.Empty<AnnotatedCitation>();
+
+    /// <summary>The citations that passed (not NotFound, not InvalidInput), as evidence references.</summary>
+    public IReadOnlyList<EvidenceRef> VerifiedEvidence { get; init; } = Array.Empty<EvidenceRef>();
+
+    /// <summary>
+    /// The citations upstream's output with its citation array cut down to the citations that passed; null when
+    /// that output is not a JSON object.
+    /// </summary>
+    public JsonElement? GroundedOutput { get; init; }
 }
 
 /// <summary>

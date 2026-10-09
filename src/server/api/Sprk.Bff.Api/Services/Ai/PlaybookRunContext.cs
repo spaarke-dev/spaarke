@@ -237,6 +237,12 @@ public class PlaybookRunContext
     {
         _nodeOutputs[output.OutputVariable] = output;
 
+        // A skipped node is counted by RecordNodeSkipped, not as completed.
+        if (output.IsSkipped)
+        {
+            return;
+        }
+
         if (output.Success)
         {
             Interlocked.Increment(ref _completedNodes);

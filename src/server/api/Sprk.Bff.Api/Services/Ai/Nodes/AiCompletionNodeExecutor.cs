@@ -562,49 +562,8 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
     /// </remarks>
     /// <param name="configJson">The node's ConfigJson string (may be null or empty).</param>
     /// <returns>A dictionary of template parameter names to values, or null if none found.</returns>
-    private Dictionary<string, object?>? ExtractTemplateParameters(string? configJson)
-    {
-        if (string.IsNullOrWhiteSpace(configJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(configJson);
-            if (!doc.RootElement.TryGetProperty("templateParameters", out var paramsElement))
-                return null;
-
-            if (paramsElement.ValueKind != JsonValueKind.Object)
-            {
-                _logger.LogWarning(
-                    "AiCompletion node ConfigJson templateParameters is not an object (found {ValueKind}); ignoring",
-                    paramsElement.ValueKind);
-                return null;
-            }
-
-            var result = new Dictionary<string, object?>();
-            foreach (var prop in paramsElement.EnumerateObject())
-            {
-                result[prop.Name] = prop.Value.ValueKind switch
-                {
-                    JsonValueKind.String => prop.Value.GetString(),
-                    JsonValueKind.Number => prop.Value.GetDouble(),
-                    JsonValueKind.True => true,
-                    JsonValueKind.False => false,
-                    JsonValueKind.Null => null,
-                    _ => prop.Value.GetRawText()
-                };
-            }
-
-            return result.Count > 0 ? result : null;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "AiCompletion node failed to parse templateParameters from ConfigJson; using null fallback");
-            return null;
-        }
-    }
+    private Dictionary<string, object?>? ExtractTemplateParameters(string? configJson) =>
+        NodeConfigPromptInputs.ExtractTemplateParameters(configJson, _logger, "AiCompletion");
 
     /// <summary>
     /// R7 Wave 11 task 111 (Option B Layer 2): extracts the <c>inputBinding</c> object from the
@@ -622,35 +581,8 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
     /// </remarks>
     /// <param name="configJson">The node's ConfigJson string (may be null or empty).</param>
     /// <returns>JsonElement clone of the inputBinding object, or null if absent/malformed.</returns>
-    private JsonElement? ExtractInputBindingAsJsonElement(string? configJson)
-    {
-        if (string.IsNullOrWhiteSpace(configJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(configJson);
-            if (!doc.RootElement.TryGetProperty("inputBinding", out var bindingElement))
-                return null;
-
-            if (bindingElement.ValueKind != JsonValueKind.Object)
-            {
-                _logger.LogWarning(
-                    "AiCompletion node ConfigJson inputBinding is not an object (found {ValueKind}); ignoring",
-                    bindingElement.ValueKind);
-                return null;
-            }
-
-            return bindingElement.Clone();
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "AiCompletion node failed to parse inputBinding from ConfigJson; using null fallback");
-            return null;
-        }
-    }
+    private JsonElement? ExtractInputBindingAsJsonElement(string? configJson) =>
+        NodeConfigPromptInputs.ExtractInputBinding(configJson, _logger, "AiCompletion");
 
     /// <summary>
     /// Derives the <c>schemaName</c> argument for the LLM structured-output call.

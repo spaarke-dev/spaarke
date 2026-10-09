@@ -956,6 +956,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 tenantId: null);
         }
 
+        // Skips the node: stores a skipped output (so its dependents can see the skip, PB-02), counts it, and
+        // emits the NodeSkipped event. A skip is not a failure; the run continues.
+        async Task<NodeOutput> SkipNodeAsync(string skipReason)
+        {
+            var skipOutput = NodeOutput.Skipped(node.Id, node.OutputVariable, skipReason);
+            runContext.RecordNodeSkipped();
+            runContext.StoreNodeOutput(skipOutput);
+
+            _logger.LogDebug("Skipping node {NodeName}: {Reason}", node.Name, skipReason);
+
+            await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+            EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
+            return skipOutput;
+        }
+
         try
         {
             // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
@@ -980,6 +997,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             //
             // Backward compatibility: nodes whose upstreams have no selectedBranch (most existing
             // playbooks) behave unchanged — branchingDepCount stays 0 and the skip branch is bypassed.
+
+            // Sweep PB-02 (task 135): skipping propagates. Every skip below STORES a skipped output, so a node
+            // whose every dependency was skipped is skipped too, instead of running on empty input (before this,
+            // a skip returned Ok(null) without storing anything, GetOutput(dep) was null, and the dependent ran —
+            // e.g. matter-health-single's groundCitations ran on the decline path and failed the run). A node
+            // with at least one dependency that did run (a join, such as universal-ingest's emitObservations)
+            // still runs.
+            if (AllDependenciesSkipped(node, graph, runContext))
+            {
+                return await SkipNodeAsync("Every dependency was skipped").ConfigureAwait(false);
+            }
+
             int branchingDepCount = 0;
             int branchingDepsSelectingThisNode = 0;
             foreach (var depId in node.DependsOn)
@@ -1000,21 +1029,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             if (branchingDepCount > 0 && branchingDepsSelectingThisNode == 0)
             {
-                var skipReason = $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch";
-                runContext.RecordNodeSkipped();
-
-                _logger.LogDebug(
-                    "Skipping node {NodeName}: {Reason}",
-                    node.Name, skipReason);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
-
-                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
-
-                // Return a skip output (treated as success for flow control — matches existing
-                // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
-                return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+                return await SkipNodeAsync(
+                    $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch")
+                    .ConfigureAwait(false);
             }
 
             // Check if dependencies failed
@@ -1026,20 +1043,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     var depOutput = runContext.GetOutput(depNode.OutputVariable);
                     if (depOutput != null && !depOutput.Success)
                     {
-                        var skipReason = $"Dependency '{depNode.Name}' failed";
-                        runContext.RecordNodeSkipped();
-
-                        _logger.LogDebug(
-                            "Skipping node {NodeName}: {Reason}",
-                            node.Name, skipReason);
-
-                        await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
-                            runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
-
-                        EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
-
-                        // Return a skip output (treated as success for flow control)
-                        return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+                        return await SkipNodeAsync($"Dependency '{depNode.Name}' failed").ConfigureAwait(false);
                     }
                 }
             }
@@ -1382,6 +1386,32 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             return errorOutput;
         }
+    }
+
+    /// <summary>
+    /// True when the node has at least one dependency and every dependency that resolves in the graph produced a
+    /// skipped output (sweep PB-02). A dependency that has not stored an output, or that ran (successfully or
+    /// not), makes this false — failures are handled by the dependency-failed check.
+    /// </summary>
+    internal static bool AllDependenciesSkipped(PlaybookNodeDto node, ExecutionGraph graph, PlaybookRunContext runContext)
+    {
+        var resolved = 0;
+        foreach (var depId in node.DependsOn)
+        {
+            var depNode = graph.GetNode(depId);
+            if (depNode == null)
+            {
+                continue;
+            }
+
+            resolved++;
+            if (runContext.GetOutput(depNode.OutputVariable) is not { IsSkipped: true })
+            {
+                return false;
+            }
+        }
+
+        return resolved > 0;
     }
 
     /// <summary>
