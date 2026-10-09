@@ -102,8 +102,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// <see cref="TrapVerificationOutcome"/> for
 /// <see cref="TrapKind.T2DataverseAppUser"/>. Assembly task 185 composes this
 /// + 5 sibling probes into the aggregate <see cref="IE2ETrapVerifier"/>
-/// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
-/// registration.
+/// implementation that replaced <c>PlaceholderTrapVerifier</c>'s DI
+/// registration (the placeholder was deleted by task 230a).
 /// </summary>
 public sealed class DataverseAppUserPairT2Probe : ITrapProbe
 {
@@ -142,7 +142,7 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
         {
             return new TrapVerificationOutcome.InfraFault(Kind,
                 "T2 probe: request.TenantId is empty. §4D I1 forbids default-tenant fallback — " +
-                "upstream handler (H0.5 for Model 2, L2 endpoint for Model 1) MUST populate before H13.");
+                "the run's tenantId (required at POST /api/runs for every model) MUST reach H13.");
         }
         if (string.IsNullOrWhiteSpace(request.DataverseUrl))
         {

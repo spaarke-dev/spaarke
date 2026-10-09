@@ -45,6 +45,7 @@
     "pcf-start": "^1",
     "react": "^16.14.0",
     "react-dom": "^16.14.0",
+    "scheduler": "^0.19.1",
     "ts-jest": "^29.2.5",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.31.0"

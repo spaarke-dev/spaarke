@@ -1,0 +1,153 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.SecureChild.sprk_invoice.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_invoice.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_invoice.SubGrid.New" Command="sprk.SecureChild.sprk_invoice.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_invoice.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_invoice.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_invoice.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_invoice.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Invoice.CustomAction" Location="Mscrm.HomepageGrid.sprk_invoice.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Invoice.Flyout" Command="sprk.ThemeMenu.Invoice.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Invoice.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Invoice.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Invoice.Controls">
+                <Button Id="sprk.ThemeMenu.Invoice.Auto" Command="sprk.ThemeMenu.Invoice.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Invoice.Light" Command="sprk.ThemeMenu.Invoice.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Invoice.Dark" Command="sprk.ThemeMenu.Invoice.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Invoice.Form.CustomAction" Location="Mscrm.Form.sprk_invoice.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Invoice.Form.Flyout" Command="sprk.ThemeMenu.Invoice.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Invoice.Form.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Invoice.Form.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Invoice.Form.Controls">
+                <Button Id="sprk.ThemeMenu.Invoice.Form.Auto" Command="sprk.ThemeMenu.Invoice.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Invoice.Form.Light" Command="sprk.ThemeMenu.Invoice.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Invoice.Form.Dark" Command="sprk.ThemeMenu.Invoice.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.AddNewRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="sprk.SecureChild.sprk_invoice.NativeNewAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.HideAddNewForChildEntities" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Open.addNewFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+          <CrmParameter Value="FirstPrimaryItemId" />
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_invoice.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_invoice" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Invoice.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.Invoice.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="sprk.SecureChild.sprk_invoice.NativeNewAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.Invoice.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.SecureChild.sprk_invoice.New.LabelText">
+      <Titles>
+        <Title description="New Invoice" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_invoice.New.ToolTipDescription">
+      <Titles>
+        <Title description="Add a Invoice to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

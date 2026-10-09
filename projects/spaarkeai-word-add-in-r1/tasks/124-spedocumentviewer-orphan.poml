@@ -3,7 +3,7 @@
   <metadata>
     <title>SpeDocumentViewer: deployed on the Document main form with no source — restore and fix, or replace; audit the other source-less deployed controls</title>
     <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth + a deployed control with no source of record.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -32,4 +32,5 @@
     <extension>Restore/fix or replace with an existing control — decided in the task.</extension>
     <cost-of-doing-nothing>Document preview fails for every Model 1 user, and the control cannot be fixed without source.</cost-of-doing-nothing>
   </justification>
+  <notes>DONE 2026-10-08 (notes/124-spedocumentviewer-and-orphans.md). Restored SpeDocumentViewer (the only form-bound preview on the Document main form; deployed 1.0.27 byte-identical to 5b4cca898^) as 1.0.28: tenant sprk_TenantId, then Xrm org tenant, else fail closed; client/BFF app ids from env vars only (the form properties carry dev values shipped in SpaarkeMaster; now ignored, kept optional); user_impersonation; shared MSAL client. build:prod PASS, jest 25/25. Audit of 11 other source-less controls: #1468; cleanup-gate gap: #1469; sprk_MsalClientId default and app b36e9b91 retirement: #1470. Deploy is a plain solution import, no form edit (task 125).</notes>
 </task>

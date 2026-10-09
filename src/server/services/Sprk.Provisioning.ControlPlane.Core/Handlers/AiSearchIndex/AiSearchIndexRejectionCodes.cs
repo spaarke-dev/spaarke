@@ -90,6 +90,14 @@ public static class AiSearchIndexRejectionCodes
     public const string IndexProvisioningFailed = "index-provisioning-failed";
 
     /// <summary>
+    /// The stamp's AI Search service refused the L2 identity (HTTP 401/403) — on a new stamp, the Search Service
+    /// Contributor / Search Index Data Reader assignments H2a just created have not taken effect yet (role
+    /// propagation can take several minutes; the service is Entra-only since task 244). Resumable: wait, then
+    /// <c>POST /api/runs/{id}/resume</c>. If it persists, check the two assignments on the search service.
+    /// </summary>
+    public const string SearchAccessDenied = "search-access-denied";
+
+    /// <summary>
     /// Post-deploy invariant verifier flagged a violation (required filterable
     /// field missing, required vector field missing/wrong dim, forbidden
     /// field present, semantic-config-field mismatch). Diagnostic names the

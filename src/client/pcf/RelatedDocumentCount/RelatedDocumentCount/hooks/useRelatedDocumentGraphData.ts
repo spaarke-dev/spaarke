@@ -83,13 +83,11 @@ export interface UseRelatedDocumentGraphDataResult {
  * Returns count (from metadata) and graph preview data (nodes + edges).
  *
  * @param documentId - Source document GUID
- * @param tenantId - Azure AD tenant ID
  * @param apiBaseUrl - BFF API base URL
  * @param enabled - Only fetch when true (typically after auth is ready)
  */
 export function useRelatedDocumentGraphData(
   documentId: string,
-  tenantId: string | undefined,
   apiBaseUrl: string | undefined,
   enabled: boolean
 ): UseRelatedDocumentGraphDataResult {
@@ -132,7 +130,8 @@ export function useRelatedDocumentGraphData(
       }
       // Use buildBffApiUrl helper — idempotent and guarantees correct /api/ prefix.
       // See .claude/patterns/auth/bff-url-normalization.md
-      const query = `${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
+      // No tenantId param: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
+      const query = 'limit=20';
       const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {
@@ -231,7 +230,7 @@ export function useRelatedDocumentGraphData(
         setIsLoading(false);
       }
     }
-  }, [documentId, tenantId, apiBaseUrl, enabled]);
+  }, [documentId, apiBaseUrl, enabled]);
 
   useEffect(() => {
     if (enabled) {

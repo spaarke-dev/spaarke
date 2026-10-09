@@ -125,6 +125,9 @@ public class EmailProcessingOptions
     /// for a single production request thread is not generous enough to absorb that. The
     /// PRODUCTION default stays at 1 second (unchanged behavior); see task 095
     /// (spaarke-ontology-platform-r1) for the investigation that added this seam.
+    /// <c>AttachmentFilterService</c> uses the same budget for its signature AND tracking-pixel patterns
+    /// (customer-provisioning-orchestration-r1, 2026-10-07: the same load-sensitive flake, in
+    /// <c>AttachmentFilterServiceTests.Filter_LogoImage_Excluded</c>).
     /// </remarks>
     public TimeSpan SignatureImageRegexTimeout { get; set; } = TimeSpan.FromSeconds(1);
 

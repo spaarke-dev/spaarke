@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -138,21 +139,25 @@ public static class AnalysisServicesModule
         // unconditional registration (pattern precedent: EventRulesTelemetry above).
         services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
 
-        // ── Per-tenant token-budget enforcement (customer-provisioning-orchestration-r1 task 077,
-        //    D19 + spec.md FR-13 §M1/M2 + SC #13) ────────────────────────────────────────────────
-        // UNCONDITIONAL registration per ADR-032 F.1 (feature is opt-in via config, not DI gate).
-        // Pattern: options bound from configuration section 'TenantBudget'; ledger tracks month-
-        // to-date USD spend per tenant; policy reads ambient AiMeteringContext.TenantId + options
-        // + ledger to make the pre-call 429 decision.
-        // Design rationale: notes/per-tenant-metering-impl-2026-08-17.md (Phase A decision) —
-        // extends existing observability shipped by task 054 (AiTelemetry.RecordMeteredTokens),
-        // adds enforcement seam without duplicating any observability code (CLAUDE.md §11).
-        services.Configure<Services.Ai.Metering.TenantBudgetOptions>(
-            configuration.GetSection(Services.Ai.Metering.TenantBudgetOptions.SectionName));
-        services.AddSingleton<Services.Ai.Metering.ITenantTokenLedger,
-                              Services.Ai.Metering.InMemoryTenantTokenLedger>();
-        services.AddSingleton<Services.Ai.Metering.ITenantBudgetPolicy,
-                              Services.Ai.Metering.TenantBudgetPolicy>();
+        // ── Optional monthly OpenAI spend limit of the stamp (customer-provisioning-orchestration-r1 task 254,
+        //    owner G37; replaces task 077's per-tenant budget map) ─────────────────────────────────────────────
+        // UNCONDITIONAL per ADR-032 F.1: OpenAiClient and the IChatClient pipeline consume AiSpendLimit; no limit
+        // configured (the default) makes the check a no-op. The ledger follows the cache mode like the scheduler lease:
+        // Redis on (every deployed environment) -> RedisAiSpendLedger, shared by instances, restarts and slots
+        // (ADR-009); Redis off (Development / Testing) -> InMemoryAiSpendLedger.
+        // Decisions: projects/customer-provisioning-orchestration-r1/notes/t254-ai-spend-limit-decisions.md.
+        services.Configure<Services.Ai.Metering.AiSpendLimitOptions>(
+            configuration.GetSection(Services.Ai.Metering.AiSpendLimitOptions.SectionName));
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<Services.Ai.Metering.IAiSpendLedger>(sp =>
+        {
+            var redisOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisOptions>>();
+            return redisOptions.Value.Enabled
+                ? new Services.Ai.Metering.RedisAiSpendLedger(
+                    sp.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>(), redisOptions)
+                : new Services.Ai.Metering.InMemoryAiSpendLedger();
+        });
+        services.AddSingleton<Services.Ai.Metering.AiSpendLimit>();
 
         // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
         // TRULY UNCONDITIONAL, mirroring the always-mapped

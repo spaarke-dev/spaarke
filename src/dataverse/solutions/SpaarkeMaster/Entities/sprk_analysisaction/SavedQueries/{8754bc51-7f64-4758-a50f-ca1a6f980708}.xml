@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{8754bc51-7f64-4758-a50f-ca1a6f980708}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_analysisactionid">
+          <cell name="sprk_actioncode" width="102" />
+          <cell name="sprk_name" width="186" />
+          <cell name="sprk_description" width="300" />
+          <cell name="sprk_sortorder" width="100" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_analysisaction">
+          <attribute name="sprk_analysisactionid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_sortorder" />
+          <attribute name="sprk_description" />
+          <attribute name="sprk_actioncode" />
+          <order attribute="sprk_actioncode" descending="false" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Analysis Actions" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

@@ -21,6 +21,7 @@
 
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
@@ -845,6 +846,29 @@ public sealed class DailyBriefingCollectorTests
         await act.Should().NotThrowAsync("only the caller's own cancellation may propagate; a timeout dates by UTC");
         inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
             .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-05'"));
+    }
+
+    /// <summary>Collects every formatted log line.</summary>
+    private sealed class ListLogger : ILogger<DailyBriefingCollector>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheZoneReadFails_TheFallbackWarningCarriesTheReasonAndErrorKind()
+    {
+        var logger = new ListLogger();
+        var sut = new DailyBriefingCollector(
+            new TimingOutZoneQuery(AllChannelsQuery()), PeopleResolver(AllSets).Object, logger, new FakeTimeProvider(EveningEastern));
+
+        await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        logger.Entries.Where(e => e.Level == LogLevel.Warning && e.Message.Contains("time zone could not be read")).Should().ContainSingle()
+            .Which.Message.Should().Contain("lookup-failed").And.Contain("TaskCanceledException");
     }
 
     [Theory]

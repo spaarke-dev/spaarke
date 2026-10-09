@@ -166,12 +166,21 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
                 nonSecretParameters = new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-2222-3333-4444-555555555555",
+                    ["subscriptionId"] = "66666666-7777-8888-9999-000000000000",   // T228: every model
                     // T245c: the operator intake H11 / H14 / H4 need — POST /api/runs refuses a run without it.
-                    ["identityPreset"] = "NativeAccount",
-                    ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\"}]",
+                    // T232: a Model1 run takes only B2BGuest, which needs each user's email and the environment group.
+                    ["identityPreset"] = "B2BGuest",
+                    ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\",\"email\":\"load@contoso.example\",\"companyName\":\"Contoso\"}]",
+                    ["environmentSecurityGroupId"] = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
                     ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
                     ["communicationGraphResource"] = "users/load@contoso.example/messages",
                     ["communicationDefaultMailbox"] = "load@contoso.example",
+                    // T228: the customer's container type and the Dataverse environment the operator created
+                    // (named for the customer); T229: the cost tier + estimate H0 compares (every model).
+                    ["containerTypeId"] = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+                    ["dataverseEnvUrl"] = $"https://spaarke-{customerId}.crm.dynamics.com/",
+                    ["tier"] = "smb",
+                    ["estimatedMonthlyUsd"] = "450",
                 },
             }),
         };

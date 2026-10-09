@@ -175,8 +175,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// DS-4 s6. Produces exactly one <see cref="TrapVerificationOutcome"/> for
 /// <see cref="TrapKind.T3GraphAppRoleParity"/>. Assembly task 185 composes
 /// this + 5 sibling probes into the aggregate <see cref="IE2ETrapVerifier"/>
-/// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
-/// registration.
+/// implementation that replaced <c>PlaceholderTrapVerifier</c>'s DI
+/// registration (the placeholder was deleted by task 230a).
 /// </summary>
 public sealed class GraphAppRoleParityT3Probe : ITrapProbe
 {
@@ -256,7 +256,7 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
         {
             return new TrapVerificationOutcome.InfraFault(Kind,
                 "T3 probe: request.TenantId is empty. s4D I1 forbids default-tenant fallback -- " +
-                "upstream handler (H0.5 for Model 2, L2 endpoint for Model 1) MUST populate before H13. " +
+                "the run's tenantId (required at POST /api/runs for every model) MUST reach H13. " +
                 "The probe refuses to acquire a Graph token against an ambient tenant.");
         }
         if (string.IsNullOrWhiteSpace(request.UamiClientId))

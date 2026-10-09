@@ -53,7 +53,7 @@ Load this pattern when:
 - ❌ Assuming subscription Owner is enough for KV secret ops → data-plane is separate; F18 discovery cost hours of debugging.
 - ❌ Using `az role assignment create` for operator's own KV Secrets Officer grant → hits F15b (`MissingSubscription`) with confusing error message.
 - ❌ Skipping the idempotency check + creating the assignment blindly → PUT-409 clutters audit + slows re-runs.
-- ❌ Enumerating only one KV in the RG and assuming that's all → shared-tier stamps have per-tenant + shared KVs; per-customer stamps may have multiple KVs for shared vs runtime secrets.
+- ❌ Enumerating only one KV in the RG and assuming that's all → a stamp may have more than one vault (e.g. separate vaults for runtime vs platform secrets). The pre-D-12 shared tier, with per-tenant + shared vaults, is retired.
 
 ## Recovery recipes
 
