@@ -1594,6 +1594,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
                 accessCacheInvalidator: accessCacheInvalidator));
             // Task 147: the job's recent-changes pass finds the records above changed rows through the synchronizer.
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(_world, shares ?? Shares));
+            services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(_world)); // task 173: as the host registers it
             _provider = services.BuildServiceProvider();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,

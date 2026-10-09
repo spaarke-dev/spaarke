@@ -47,7 +47,7 @@ Build and deploy a Vite + React 18 SPA to Power Pages as a **Code Site**. This s
 - Deploying PCF controls → Use `pcf-deploy`
 - Deploying Code Page dialogs (webpack-based) → Use `code-page-deploy`
 - Deploying BFF API → Use `bff-deploy`
-- Deploying the internal Corporate Workspace → Use `scripts/Deploy-CorporateWorkspace.ps1` directly
+- Deploying LegalWorkspace (formerly the internal Corporate Workspace) → it ships inside the Console bundle; use `scripts/Deploy-SpaarkeAi.ps1`
 
 ---
 

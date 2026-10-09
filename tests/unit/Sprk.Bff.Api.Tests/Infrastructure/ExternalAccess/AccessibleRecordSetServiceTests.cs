@@ -1833,6 +1833,7 @@ public class AccessibleRecordSetServiceTests
         IContactIdentityStore? identityStore = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
                identityStore ?? UnlinkedIdentityStore(), InternalSystemUsers(),
+               Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>

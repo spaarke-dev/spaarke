@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218f" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Spaarke's own environments take the canonical SpaarkeMaster too: Deploy-Release imports the CI-published package; the 9-solution list (Deploy-DataverseSolutions.ps1) retires (#1401, ISS-005)</title>
+    <phase>Model 1 dedicated-stamp remediation — T218 follow-on; owner decision 2026-10-08</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the release path into Spaarke's own environments (demo, dev) and retires an operator script.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Release pipeline; touches the deploy-new-release skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/skills/deploy-new-release — main-session-only (permission boundary).</parallel-reason>
+    <tags>provisioning, dataverse, solution, deployment, skill-directive</tags>
+    <deps>218d</deps>
+  </metadata>
+
+  <prompt>Owner 2026-10-08 (#1401): "we need our canonical solution(s) and don't use others that are created/used/managed by dev team." Every environment — customer stamps and Spaarke's own — gets only the canonical SpaarkeMaster built by CI from git.</prompt>
+
+  <goal>
+    `Deploy-Release.ps1` Phase 3 imports SpaarkeMaster from the CI-published store (218d's manifest + versioned zips), with
+    the package type per Spaarke environment from `config/environments.json` (managed by default, unmanaged only where the
+    owner says so — D8), the same refusals as H6 (type switch, downgrade) and a post-import check of ismanaged + version.
+    `Deploy-DataverseSolutions.ps1` and its 9-solution list are retired; every caller and pointer (`Provision-Customer.ps1`
+    step 7, `Load-DemoSampleData.ps1`, `scripts/README.md`, the deploy-new-release skill) is updated or removed.
+  </goal>
+
+  <context>
+    <background>ISS-005 (notes/defer-issues.md): Phase 3 still runs Deploy-DataverseSolutions.ps1, whose list names 9 solutions (6 exist nowhere) and whose zip filter accepts every zip. 218b retired the list for H6 only; 218d makes CI the only producer of the package.</background>
+    <relevant-files>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Load-DemoSampleData.ps1</file>
+      <file>scripts/README.md</file>
+      <file>config/environments.json</file>
+      <file>.claude/skills/deploy-new-release/SKILL.md</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionImporter.cs (the reference for manifest parsing, refusals and the async import + poll)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner 2026-10-08">No environment imports a solution the dev team creates or manages by hand; only the CI-published SpaarkeMaster.</constraint>
+    <constraint source="D8">Managed by default; unmanaged only by an explicit per-environment setting.</constraint>
+    <constraint source="live">Any import into a live Spaarke environment (dev, demo) needs the owner's OK per action.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Add a per-environment `solutionPackageType` to config/environments.json; read it in Deploy-Release Phase 3.</step>
+    <step order="2">Phase 3: read the manifest from the artifact store, refuse type switch / downgrade against the installed package, import async + poll, verify ismanaged + version.</step>
+    <step order="3">Retire Deploy-DataverseSolutions.ps1; update or remove every caller and pointer; update the skill and the runbook.</step>
+    <step order="4">-WhatIf run against demo (read-only); owner OK → real release to demo; close ISS-005 and #1401.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep finds no caller of Deploy-DataverseSolutions.ps1 and no 9-solution list in scripts/ or .claude/skills/.</criterion>
+    <criterion testable="true">Deploy-Release -WhatIf against demo names exactly SpaarkeMaster {version} ({type}) from the manifest.</criterion>
+    <criterion testable="true">Phase 3 refuses a managed→unmanaged switch and a downgrade (Pester test with a fake installed package).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-08">CODE COMPLETE (SESSION 44) — open only for AC2 (the live -WhatIf against demo naming SpaarkeMaster {version} (unmanaged)), which needs the first CI publish (after PR #1365 merges + owner OK). Commits 8350f27bc (implementation), 4a0b711b6 (review fixes).
+    - scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1: manifest from the store → installed package → Resolve-PackageImportPlan (H6's rules, version validated first) → pac solution import --async --force-overwrite --activate-plugins [--stage-and-upgrade managed upgrade] [--publish-changes unmanaged] → read back version + type. Operator's own az/pac identity; refuses the authoring environment (host compare incl. .api.).
+    - Deploy-Release Phase 3 typed by config/environments.json solutionPackageType: dev none (authoring), demo unmanaged (demo holds SpaarkeMaster 1.0.0.0 unmanaged, read 2026-10-08; switching = rebuild, owner decision); missing = refused. -ClientSecret ignored with a warning. Provision-Customer step 7 switched (documents its two identities). Deploy-DataverseSolutions.ps1 deleted; ADR-027 MUSTs; skill + docs updated (no downgrade = roll forward; U-CB-1's nonexistent --allow-destructive flag corrected).
+    - Verified: Pester 39/39; read-only -WhatIf against demo + the real store refuses the pre-T218 manifest (SpaarkeMaster 1.1.0.0 with no managed/unmanagedBlobName) with a clear message; dev refused (also the .api. URL form). AC1 met (grep: no caller, no 9-solution list in scripts/ or .claude/skills/). AC3 met (Pester: type switch both ways, downgrade).
+    QUALITY GATES: one full review pass — no F1; F2 fixed: H6's import options (--force-overwrite, --activate-plugins), version validated before install, fresh token per read, ADR-027 interim-path wording, doc drift (U-CB-1, matrix, inventory, README, multi-env guide). KNOWN LIMITS: zip checksums not verified (H6 neither); refusals tested at plan level, not through Phase 3 wiring; demo also carries hand-installed dev-team solutions (harmless; nothing but SpaarkeMaster is imported there now).</note>
+  </notes>
+</task>

@@ -3,6 +3,7 @@ using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -121,7 +122,7 @@ public static class DashboardEndpoints
                 statusCode: 499,
                 title: "Cancelled");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to read dashboard metrics from cache.");
 
@@ -201,7 +202,7 @@ public static class DashboardEndpoints
                 statusCode: 499,
                 title: "Cancelled");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Dashboard refresh failed.");
 

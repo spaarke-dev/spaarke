@@ -235,6 +235,38 @@ function extractTenantId(token: string): string | null {
 // readSseStream — the canonical non-hook SSE streaming primitive
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** ProblemDetails code of the BFF's monthly AI usage limit (task 254 — `AiSpendLimitExceededException.ErrorCode`). */
+export const AI_SPEND_LIMIT_ERROR_CODE = 'ai_spend_limit_exceeded';
+
+/**
+ * The message for an HTTP 429. The BFF answers 429 for two reasons: rate limiting (wait a moment) and the stamp's
+ * monthly AI usage limit (task 254 — retrying does not help until next month or until an administrator raises it).
+ * The latter carries ProblemDetails `extensions.code` = {@link AI_SPEND_LIMIT_ERROR_CODE} and a user-facing `detail`.
+ */
+export function describeTooManyRequests(responseBody: string): string {
+  try {
+    const problem = JSON.parse(responseBody) as { detail?: unknown; extensions?: { code?: unknown } };
+    if (
+      problem?.extensions?.code === AI_SPEND_LIMIT_ERROR_CODE &&
+      typeof problem.detail === 'string' &&
+      problem.detail
+    ) {
+      return problem.detail;
+    }
+  } catch {
+    // Not JSON — an ordinary rate-limit response.
+  }
+  return 'You are sending messages too quickly. Please wait a moment and try again.';
+}
+
+/**
+ * The error message for a failed streaming request: {@link describeTooManyRequests} for a 429, otherwise
+ * `"{what} failed ({status}): {body}"` — for callers that pass their own `mapHttpError`.
+ */
+export function requestFailedMessage(what: string, status: number, responseBody: string): string {
+  return status === 429 ? describeTooManyRequests(responseBody) : `${what} failed (${status}): ${responseBody}`;
+}
+
 /**
  * Options for {@link readSseStream}.
  */
@@ -373,9 +405,10 @@ export async function readSseStream(options: ReadSseStreamOptions): Promise<void
       throw await mapHttpError(response);
     }
     const errorText = await response.text();
-    // ADR-016: Show user-friendly message for rate limiting (429)
+    // ADR-016: Show user-friendly message for rate limiting (429) — unless the 429 is the stamp's monthly AI usage
+    // limit (customer-provisioning-orchestration-r1 task 254), whose own message says when AI resumes.
     if (response.status === 429) {
-      throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
+      throw new Error(describeTooManyRequests(errorText));
     }
     throw new Error(`Chat request failed (${response.status}): ${errorBodyReason(errorText)}`);
   }

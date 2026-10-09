@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="173" project="unified-access-control-r2">
+  <metadata>
+    <title>Child records show their parent's Access Permission: To Do, Event, Communication and Document carry the parent's sprk_accesspermission, written once in the shared stamp path and kept in step by the secure-child reconcile; a parentless child keeps its own value (owner round 81)</title>
+    <phase>Session 27 — UAC defect remediation (owner round 81, 2026-10-08)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the shared child write path (CoreAncestorResolver / RecordOwnershipResolver callers) and the SecureChildReconciliationJob, adds a form library and a schema script, and modifies tests (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Owner-requested tier. Cross-cutting: every child create path of four tables, the 2-minute reconcile and live forms; it reverses part of task 138's retirement, so stale rules elsewhere must be found and corrected.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SecureChildReconciliationJob / SecureChildReconciler (issue #1378 touches the same pass) and rewrites live form XML on sprk_todo, sprk_event, sprk_communication and sprk_document; no other formxml writer may run against dev at the same time (task 168 rule).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, forms, webresource, job, testing, deploy</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>UAT 2026-10-08: a To Do created through the Word web add-in on a document under Restricted matter PAT-176903 showed Access Permission = Standard. Peer trace (spaarkeai-word-add-in-r1): ownership was correct, but no BFF path writes sprk_todo.sprk_accesspermission. Owner round 81 (notes/session27-owner-decisions-and-research.md) decides the behaviour; round 82 is the related "parent permissions control" rule.</origin>
+  </metadata>
+
+  <prompt>Make sprk_accesspermission on To Do, Event, Communication and Document show the value inherited from the record's parents whenever it has a parent, and leave a parentless record's own user-set value alone. Compute and write the value server-side in the ONE shared child stamp path, keep it in step through SecureChildReconciliationJob, lock the field on the forms while a parent exists, bring sprk_document.sprk_accesspermission into source, and correct every doc and comment that still calls the child column retired.</prompt>
+
+  <role>SPAARKE platform developer: .NET 10 BFF (Dataverse write path, IScheduledJob reconcile), Dataverse form XML and form web resources, PowerShell operator scripts over the Web API.</role>
+
+  <goal>After this task:
+(1) EFFECTIVE VALUE RULE. For a row of sprk_todo, sprk_event, sprk_communication or sprk_document: walk its parent lookups (the table's lineage in SecureChildLineage, the single source of which lookups count) up to records that have no parent (a root sprk_matter / sprk_project / sprk_workassignment, or a parentless child). The inherited value is the MOST RESTRICTIVE own sprk_accesspermission among those top records: Restricted (100000002) over Limited (100000001) over Standard (100000000); a null counts as Standard. A row with no non-null parent lookup has no inherited value: its own value is user-set and never overwritten.
+(2) CREATE AND RE-FILE. Every server create or re-file of these four tables that already goes through CoreAncestorResolver.StampAsync / DeriveForHostAsync writes the inherited value in the same payload. It is implemented ONCE in a shared helper called from that path, never in Office-only or endpoint-local code. A failed read leaves the column untouched (no Standard written by default) and is logged; it does not fail the create, since the value is display-only.
+(3) RECONCILE. SecureChildReconciliationJob's recent-changes pass corrects drift within its normal cycle: a child re-filed by a client or the Web API, a child whose parent's value changed (descending from changed roots and changed parentless children through the existing scoped downward walk), and a hand edit of a parented child's value. Writes go only to rows whose stored value differs.
+(4) NO ENFORCEMENT CHANGE. No access decision reads a child table's sprk_accesspermission. Enforcement keeps reading the root flags (ExternalParticipationService.GetRootRecordFlagsAsync and the secure-root path). A parentless child's value is recorded only (owner, round 81: "This is fine (BUT in future we might need to revisit)").
+(5) FORMS. On every Main and Quick Create form of the four tables that shows sprk_accesspermission, the control is read-only while any filing column in config/regarding-filing-columns.json (task 168's list) is non-null, with an info-level form notification "Access permission is inherited from {parent name}". It is editable when there is no parent. No TrackingFieldTrio is added to sprk_communication (owner). Applied by a checked-in, idempotent operator script with dry run, -Apply (snapshot first), -Verify and -RestoreFrom, modelled on scripts/Add-RegardingFilingPickerToForms.ps1.
+(6) SCHEMA IN SOURCE. sprk_document.sprk_accesspermission (added live by the owner 2026-10-08) is bound to the same global choice as the roots, is in the SpaarkeCore solution (Test-DvInSolution from scripts/common/DataverseSolutionMembership.ps1), and is documented in docs/data-model.
+(7) DOCS. docs/data-model/sprk_communication.md (the "retired column" section, line 12 onward), projects/unified-access-control-r2/unified-access-control-cascade.md:37, docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md:527, the remarks in ExternalParticipationService.cs (~line 871), EmailWorkspace.mapping.ts:42 and TrackingFieldTrio/index.ts:119 describe the column as a display copy of the parent's value that enforcement never reads. scripts/Retire-CommunicationAccessPermission.ps1 is deleted, because running it would destroy a column the owner now uses. Record the supersession in notes/decisions.md.</goal>
+
+  <context>
+    <background>Round 81 (and the peer's advice, current-task.md "Round 81"): show the parent's value, write it once in the shared stamp path, keep it in step by the reconcile. Round 2 Q6 / task 138 had retired sprk_communication.sprk_accesspermission; round 81 extends that rule: the column returns as an inherited DISPLAY copy and enforcement still reads the root. Round 82: the parent's permissions control a filed child.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (StampAsync at ~726/750, DeriveForHostAsync)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (per-table parent lookups)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs, SecureChildReconciler.cs, SecureChildShareSynchronizer.cs (already reads the root's sprk_accesspermission at ~1019)</file>
+      <file>Create paths to enumerate (grep StampAsync / DeriveForHostAsync callers): Services/Office/OfficeService.cs (CreateTodoAsync ~2067), Api/ChildRecordEndpoints.cs, Api/CommunicationEndpoints.cs, Api/DataverseDocumentsEndpoints.cs, Api/Events/EventEndpoints.cs, the wizard and AI to-do writers</file>
+      <file>config/regarding-filing-columns.json; scripts/Add-RegardingFilingPickerToForms.ps1 (form-script reference); scripts/common/DataverseSolutionMembership.ps1</file>
+      <file>Docs listed in goal (7); scripts/Retire-CommunicationAccessPermission.ps1 (delete)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §17 / ADR-002">No Dataverse plugin. One server-side owner for the invariant: a single shared helper, called from the stamp path and the reconcile. No client writes the inherited value (the form only locks and labels).</constraint>
+    <constraint source="round 81">Never overwrite the own value of a row with no non-null parent lookup, including on re-file to "no parent": the last value stays and becomes editable.</constraint>
+    <constraint source="round 2 Q6 / round 81">No code added or changed in this task may read sprk_accesspermission from sprk_todo, sprk_event, sprk_communication or sprk_document for an access decision.</constraint>
+    <constraint source="ADR-036 / ADR-052">Extend SecureChildReconciliationJob; do not add a new job or timer. Keep its one-try-per-table behaviour (#1378 is filed separately; do not widen it).</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE. No new endpoint.</constraint>
+    <constraint source="CLAUDE.md §11">Any new file (helper, form web resource, script) carries the three-question justification in the task notes; prefer extending an existing per-table form library over a new one.</constraint>
+    <constraint source="task 168">Form XML writes are whole-document rewrites: snapshot before write; never run while another formxml script runs against dev.</constraint>
+    <constraint source="project CLAUDE.md">Agents make no app-setting, Entra or Key Vault changes. Live -Apply runs (schema, forms, web resource) are main-session gates unless the main session delegates them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md</file>
+      <file>projects/unified-access-control-r2/notes/task-138-access-permission-levels.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read round 81/82. Live, read-only: confirm sprk_accesspermission exists on all four tables, is bound to the roots' global choice, and which forms show it.</step>
+    <step order="2">Enumerate every create/re-file path of the four tables (server StampAsync/DeriveForHostAsync callers, and client or Web API paths that bypass them); list them in the notes with which mechanism covers each (stamp path or reconcile).</step>
+    <step order="3">Implement the shared inherited-value helper over SecureChildLineage; wire it into the stamp path; unit tests.</step>
+    <step order="4">Extend SecureChildReconciliationJob for drift (re-file, parent change, hand edit); tests including the downward walk.</step>
+    <step order="5">Form library + form-lock script (dry run / -Apply / -Verify / -RestoreFrom / -SelfTest) and the sprk_document schema/solution script with -Verify.</step>
+    <step order="6">Docs and comments (goal 7); delete the retire script; record the supersession.</step>
+    <step order="7">Full test suites, publish delta, open the PR. Update TASK-INDEX (🔄 [wip] → ✅ [done] only after the live gate) and the POML status; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_accesspermission on any of the four tables is NOT bound to the roots' global choice, or carries different option values, STOP and escalate before writing anything.</trigger>
+    <trigger>If an existing access decision already reads a child table's sprk_accesspermission (check SpeContainerMembershipSync.cs ~420 and OfficeEditAccessService.cs ~235 for which tables reach them), STOP and report: writing the inherited value would change enforcement.</trigger>
+    <trigger>If a create path for these tables writes stamps without CoreAncestorResolver and the reconcile cannot see the row within its cycle, report it as a first-class stop with the proposed fix.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">Shared helper (location chosen by the executor, next to CoreAncestorResolver) + its wiring</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (and reconciler) changes</output>
+    <output type="code">Form library and scripts/ form-lock script; scripts/ schema script for sprk_document.sprk_accesspermission</output>
+    <output type="test">Unit/integration tests beside the existing CoreAncestorResolver and SecureChildReconciliationJob tests; script -SelfTest fixtures</output>
+    <output type="docs">Goal (7) files; projects/unified-access-control-r2/notes/task-173-child-access-permission.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A To Do created through POST /api/office/todo on a document under a Restricted matter is created with sprk_accesspermission = Restricted.</criterion>
+    <criterion testable="true">A child with two roots, Standard and Limited, gets Limited; with Limited and Restricted, Restricted; with all parents null-valued, Standard.</criterion>
+    <criterion testable="true">A To Do on a parentless Document whose own value is Restricted gets Restricted.</criterion>
+    <criterion testable="true">A parentless child created with Limited keeps Limited after create and after every reconcile run; un-filing a child keeps its last value.</criterion>
+    <criterion testable="true">An unreadable parent or a lineage past MaxLineageDepth leaves the stored value unchanged, logs a warning, and does not fail the create.</criterion>
+    <criterion testable="true">Changing a matter from Standard to Restricted updates its existing To Do, Event, Communication and Document children within one reconcile cycle; a hand edit of a parented child to Standard is reverted in one cycle; rows already correct are not written.</criterion>
+    <criterion testable="true">No changed or added code reads a child table's sprk_accesspermission for an access decision (shown by grep in the notes); existing enforcement tests pass unchanged.</criterion>
+    <criterion testable="true">On the forms, the field is read-only with the "inherited from" notification when a filing column is set, editable when none is set; -Verify passes after -Apply and fails on a re-opened control.</criterion>
+    <criterion testable="true">sprk_document.sprk_accesspermission is in SpaarkeCore, bound to the roots' global choice, and -Verify passes; scripts/Retire-CommunicationAccessPermission.ps1 no longer exists and no doc references it.</criterion>
+    <criterion testable="true">Test scope: cover the rule in goal (1), the create and reconcile paths, and the negative cases named above. Request one seeding proof only for "a parentless own value is never overwritten". Anything beyond that needs a one-line justification in the notes.</criterion>
+    <criterion testable="true">All BFF unit, integration and ArchTests suites pass; publish delta is recorded.</criterion>
+    <criterion testable="true">LIVE GATE (dev, after deploy): repeat the owner's UAT — a To Do created through the Word web add-in on a document under PAT-176903 shows Restricted, with the field locked and labelled on the To Do form.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Inherited and locked on a parented To Do">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_todo</url>
+      <steps>
+        <step>Open a To Do filed under a Restricted matter</step>
+        <step>Verify Access Permission shows Restricted, is read-only, and the info notification names the parent</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Locked, labelled, no console errors; the same holds for an Event, a Communication and a Document</expected>
+    </test>
+    <test name="Editable on a parentless record">
+      <steps>
+        <step>Create a To Do with no regarding record; set Access Permission to Limited; save; reopen</step>
+      </steps>
+      <expected>The field is editable and keeps Limited after the next reconcile cycle</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files, follow task-execute, and record decisions and the create-path inventory in notes/task-173-child-access-permission.md.</protocol>
+  </execution>
+</task>

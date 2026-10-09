@@ -11,7 +11,7 @@
 
 | Source | What it authoritatively defines | Path |
 |---|---|---|
-| **`Build-SpaarkeMaster.ps1`** ✅ | The machine composition of the full Dataverse component set — entities, web resources, option sets, PCF, roles, env-vars, MDA app/sitemap. Discovers by `sprk_` prefix + explicit IDs; **386 total components** (incl. auto-added subcomponents). | `scripts/Build-SpaarkeMaster.ps1` |
+| **`Build-SpaarkeMaster.ps1`** (RETIRED 2026-10-07, T218c → `scripts/solution-authoring/SpaarkePackageScope.psm1`) | The machine composition of the full Dataverse component set — entities, web resources, option sets, PCF, roles, env-vars, MDA app/sitemap. Discovers by `sprk_` prefix + explicit IDs; **386 total components** (incl. auto-added subcomponents). | `scripts/Build-SpaarkeMaster.ps1` |
 | `Deploy-DataverseSolutions.ps1` | Managed-solution import set + dependency order | `scripts/` |
 | `src/client/pcf/*` | PCF control source (33 control folders) | repo tree |
 | `src/solutions/*`, `src/client/code-pages/*` | Code-page SPA source | repo tree |

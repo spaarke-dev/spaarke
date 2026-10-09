@@ -493,6 +493,7 @@ public static class ChatEndpoints
         [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
         [FromServices] AiTelemetry aiTelemetry,
+        [FromServices] Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit spendLimit,
         [FromServices] ISessionPersistenceService? sessionPersistence,
         // spaarkeai-assistant-enhancements-r4 task 021a (FR-04): the grounded follow-on proposer.
         // Runs ONE pass after the response to emit typed capability + question followups (replacing the
@@ -511,6 +512,12 @@ public static class ChatEndpoints
                 .ExecuteAsync(httpContext);
             return;
         }
+
+        // Task 254: the stamp's optional monthly OpenAI spend limit, checked before the turn runs and the stream starts
+        // (the endpoint filters have already authorized the caller and the session), so an over-limit turn is a real
+        // 429 + Retry-After (global exception handler), not an in-band error. A limit crossed during the turn is
+        // reported in-band (AiSpendLimitExceededException catch).
+        await spendLimit.EnsureUnderLimitAsync(cancellationToken);
 
         // === FR-P4-05 per-tenant metering scope (task 054) ===
         // The text entry path's attribution scope: every meterable fact observed inside
@@ -1156,6 +1163,20 @@ public static class ChatEndpoints
                     CancellationToken.None);
             }
         }
+        catch (Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException ex)
+        {
+            // Task 254: the limit was reached during this turn (a later model round-trip of the tool loop). The stream is
+            // already committed — report the stable code in-band, the same shape as the kill-switch error above.
+            logger.LogWarning("SendMessage stopped mid-turn: the AI spend limit was reached. Session={SessionId}", sessionId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error during SendMessage: session={SessionId}", sessionId);
@@ -1197,6 +1218,7 @@ public static class ChatEndpoints
         ChatRefineRequest request,
         ChatSessionManager sessionManager,
         IChatClient chatClient,
+        [FromServices] Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit spendLimit,
         HttpContext httpContext,
         ILogger<ChatHistoryManager> logger)
     {
@@ -1219,6 +1241,10 @@ public static class ChatEndpoints
                 .ExecuteAsync(httpContext);
             return;
         }
+
+        // Task 254: the stamp's optional monthly OpenAI spend limit — before the stream starts, so an over-limit
+        // refinement is a 429 + Retry-After (global exception handler), not the generic in-band error below.
+        await spendLimit.EnsureUnderLimitAsync(cancellationToken);
 
         // Set SSE headers — X-Accel-Buffering prevents reverse proxy buffering (NFR-01).
         response.ContentType = "text/event-stream";

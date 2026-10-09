@@ -34,7 +34,7 @@ export class VisualizationApiService {
    * Token acquisition, caching, and 401 retry are handled by the shared auth library.
    *
    * @param documentId - Source document GUID
-   * @param params - Query parameters including tenantId
+   * @param params - Query parameters
    * @returns Graph data with nodes and edges for visualization
    */
   async getRelatedDocuments(
@@ -77,8 +77,7 @@ export class VisualizationApiService {
   private buildUrl(documentId: string, params: VisualizationQueryParams): string {
     const url = new URL(`${this.apiBaseUrl}/api/ai/visualization/related/${documentId}`);
 
-    // Required parameter
-    url.searchParams.set('tenantId', params.tenantId);
+    // No tenantId parameter: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
 
     // Optional parameters
     if (params.threshold !== undefined) {

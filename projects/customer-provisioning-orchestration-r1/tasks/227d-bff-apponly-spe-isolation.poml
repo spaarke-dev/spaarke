@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227d" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>BFF app-only SharePoint Embedded calls target only the stamp's own container(s) — enforced in code and tests (plan G32, owner D28)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G32)</phase>
+    <gate>after 227b (✅); independent of 227c</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code (Sprk.Bff.Api Infrastructure/Graph + app-only SPE callers), tenant isolation (security), ArchTests; BFF §10 governance applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security / tenant-isolation design across many BFF call sites; judgement on which app-only calls take caller-supplied ids.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path; touches .claude constraints if the rule text changes (main-session-only)</parallel-reason>
+    <tags>bff-api, spe, auth, tenant-isolation, model1-dedicated, testing</tags>
+    <deps>227b</deps>
+  </metadata>
+
+  <prompt>Make every app-only SPE call in the BFF provably target only this stamp's own container(s), and prove it with tests.</prompt>
+
+  <role>SPAARKE platform developer (BFF Minimal API, Microsoft Graph / SPE, ADR-007 facade, ArchTests). Load .claude/constraints/bff-extensions.md and the provisioning constraint "SPE: container type per model ..." before designing.</role>
+
+  <goal>
+    An app-only SPE call (Graph client from GraphClientFactory.ForApp() — the stamp UAMI, which holds application `full` on the
+    shared container type) can only reach a container the stamp owns: the configured container(s) for this environment
+    (Dataverse env-var sprk_SharePointEmbeddedContainerId / EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId
+    — confirm the authoritative set during step 1). A request for any other container or drive is refused before Graph is called,
+    and a test fails if a new app-only SPE call path bypasses the check.
+  </goal>
+
+  <justification>
+    <existing>SpeFileStore facade (ADR-007) + ContainerOperations / DriveItemOperations / UploadSessionManager / SpeContainerMembershipService / IncomingCommunicationProcessor / SpeSyncOrchestrator call ForApp() for SPE; I4_SpeContainerIdLiteralTests only forbids container-id literals; ITenantContainerResolver (Diagnostics) resolves the stamp's container for H13.</existing>
+    <extension>Extend the existing facade layer with one allow-list check keyed on the stamp's configured container(s); reuse ITenantContainerResolver if it is the right source. No new service unless step 1 shows the facade cannot carry it.</extension>
+    <cost-of-doing-nothing>Owner D28: every Model 1 stamp UAMI can reach every customer's container (Microsoft: no per-container app scoping). A caller-supplied drive/container id reaching an app-only call lets one customer's request read another customer's privileged documents.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Researcher 2026-10-06 (.claude/agent-memory/researcher/spe-apponly-per-container-isolation-2026-10-06.md): app-only tokens
+      reach all containers enabled by the container-type application permissions; container permissions apply only to delegated
+      access; no per-container app scoping exists. Delegated (OBO) access is isolated by container membership. Files with
+      ForApp() today (count): GraphUserService 7, IncomingCommunicationProcessor 7, SpeFileStore 7, DriveItemOperations 7,
+      SpeContainerMembershipService 5, GraphSubscriptionManager 4, MailboxVerificationService 3, ContainerOperations 3, … — only
+      the SPE ones matter (mail / user / subscription calls are not SPE).
+      T227c adr-check W2 (pre-existing): ITenantContainerResolver (OptionsTenantContainerResolver) reads
+      SharePointEmbedded:StagingContainerId, which nothing writes, while BFF call sites read
+      configuration["EmailProcessing:DefaultContainerId"] directly (ChatDocumentEndpoints.cs:1653,
+      ChatWordExportEndpoints.cs:265) — the "single ITenantContainerResolver" rule (FR-31) is not met. The stamp's own
+      container is EmailProcessing__DefaultContainerId = Communication__ArchiveContainerId = H8's container (T227c);
+      the guard should resolve "own container" through one place, and that place should be the resolver.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/{SpeFileStore,ContainerOperations,DriveItemOperations,UploadSessionManager,GraphClientFactory}.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs; Services/Compose/SpeSyncOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/{ITenantContainerResolver,OptionsTenantContainerResolver}.cs</file>
+      <file>tests/Spaarke.ArchTests/TenantIsolation/I4_SpeContainerIdLiteralTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <decisions>
+    <decision date="2026-10-06" by="owner (D28)">One container type per model, one container per customer (per Dataverse environment); app-only isolation is enforced in code with tests. Do not propose a container type per customer.</decision>
+    <decision date="2026-10-06" by="owner (D29)">Escalation trigger fired at step 1 (SPE Admin /api/spe lists and acts on every container of the shared type). Owner: confine SPE Admin to the stamp's own containers like every other app-only path; no stamp administers another customer's containers. Fleet-wide container admin uses SharePoint admin tooling, not a stamp BFF.</decision>
+  </decisions>
+
+  <constraints>
+    <constraint source="D28">Refuse before calling Graph; the refusal is an authorization failure (never a silent empty result).</constraint>
+    <constraint source="ADR-007">Keep Graph inside Infrastructure/Graph; the check lives in the facade path, not scattered in endpoints.</constraint>
+    <constraint source="BFF §10">Placement justification in design.md; publish-size delta vs a fresh master build; CVE check; tests for every changed Services/** file.</constraint>
+    <constraint source="scope">Delegated (OBO) SPE calls are out of scope (platform-isolated). Non-SPE ForApp() calls (mail, users, subscriptions) are out of scope.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>Step 1 finds an app-only SPE flow that legitimately needs a container outside the stamp's configured set (e.g. a cross-environment admin surface) → STOP and ask the owner.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="1">Inventory every app-only SPE call path (ForApp() + SPE endpoints) and where its container/drive id comes from (config, Dataverse record, caller input). Decide the authoritative "own containers" set.</step>
+    <step order="2">Implement the guard at the facade layer; route the app-only SPE paths through it.</step>
+    <step order="3">Tests: unit tests for allow/deny; an ArchTest that fails if a type outside the facade calls ForApp() for SPE storage endpoints (or an equivalent structural check).</step>
+    <step order="4">Docs (topology D28 note → done; constraint rule references the test); BFF §10 checks; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A request for a container/drive outside the stamp's own set is refused before any Graph call (test), on every app-only SPE path found in step 1.</criterion>
+    <criterion testable="true">An ArchTest (or equivalent) fails when a new app-only SPE call bypasses the guard.</criterion>
+    <criterion testable="true">BFF unit tests, ArchTests pass; publish-size delta reported against a fresh master build; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Step 1 inventory: app-only SPE = the Graph facade (ContainerOperations / DriveItemOperations / UploadSessionManager /
+      SpeFileStore, ~45 callers), SpeContainerMembershipService, DemoProvisioningService / DemoExpirationService, and SPE
+      Admin (type-wide). Container ids come from customer-writable Dataverse fields (sprk_graphdriveid, sprk_containerid on
+      records and business units, sprk_specontainerid) and from config; a stamp also owns one container per secure record
+      (ProvisionProjectEndpoint) — so "own" cannot be a config allow-list. Escalation trigger fired on SPE Admin → owner D29.
+    - Built: SpeContainerOwnershipGuard (Infrastructure/Graph) — the only source of app-only Graph clients for SPE. Own =
+      configured stamp container (EmailProcessing:DefaultContainerId, Communication:ArchiveContainerId, operator-only
+      SharePointEmbedded:OwnedContainerIds — read in GraphModule, not in the Graph layer, per SpeWriteSinkContainerProvenance
+      Rule D) OR custom property spaarkeCustomerId == Customer:Id. Refusal = 404 spe_container_not_owned before any Graph
+      content call (same answer as a nonexistent container). Created containers are marked (and deleted again if marking
+      fails). Marker VALUE cached in GraphMetadataCache (own/none 10 min, another customer's 60 min).
+      Justification for a new class (POML said "no new service unless the facade cannot carry it"): the check is shared by
+      the five facade classes plus SpeContainerMembershipService and the demo services outside the facade — one class, one
+      rule. No interface (virtual IsOwnedAsync for test doubles; ArchTest forbids subclasses in src/).
+    - SPE Admin (D29): container-scoped calls via GetClientForContainerAsync; lists / container search / deleted bin
+      filtered (FilterOwnedAsync, ≤8 parallel reads); item search collects owned hits over ≤10 Graph pages and never passes
+      Graph's total or "more" flag through (no cross-customer existence oracle); the marker is reserved in custom-property
+      updates (an unchanged marker the editor sends back is dropped from the write). Container-TYPE operations are not
+      filtered: Graph refuses them app-only (stamp identity holds only FileStorageContainer.Selected) — T186 live check.
+    - Removed (no callers): ContainerOperations/SpeFileStore.ListContainersAsync, GraphCallScope.RunForConfig.
+    - Tests: tests/integration/tenant/Spe/SpeAppOnlyContainerIsolationTests.cs (real Graph SDK over a hand-written routing
+      handler — the request path IS the assertion); ArchTest TenantIsolation/SpeAppOnlyContainerGuardTests (ForApp census +
+      non-SPE files carry no SPE path + type-wide callers pinned + no guard subclass + Graph .default scope census; negative
+      and positive controls).
+    - Step 9.5: adr-check — V-1 SPE Admin catch-alls turned the refusal into 500 → 50 filters `and not SdapProblemException`
+      (C); V-2 403→404 per tenant category (C); V-3 cache data not decision (C); V-4 key convention → Path A (design §17 ADR
+      Tensions; GraphMetadataCache migration = plan G34); W-1 pre-existing ADR-007 debt (demo/membership services) → G34.
+      code-review — 0 critical; fixed W1 (search hit container id), W2 (paging oracle), W3 (editor resends marker), W4
+      (type-wide accessors internal + ArchTest), W5 (delta link path check), W6 (guard Graph errors → SpaarkeStorageException),
+      W7 doc, W8 (parallel filter, longer TTL for foreign markers), W9 (resolve customer before create; delete on mark
+      failure), W12 (ArchTest regexes: method groups, search/shares/sites/drive), S1 (only OwnedContainerIds is a list),
+      S2/S3 (cache keys, forget after restore), S4 docs, S6 tests, S7 README, S8 (above), S10. Accepted: S5 (ContentDedupDetector
+      treats a refusal as "no dedup" — runs after an upload to an owned drive); W13 → T186 live check.
+    - BFF §10: Publish size (fresh short-path worktrees, `Compress-Archive` Optimal, PDBs incl.): pre-task `34f7a0888` **45.88 MB / 173 files** vs task `1e8089c77` **45.89 MB / 173 files** = **+0.01 MB**. Fresh `origin/master` `d254d7166` = 36.13 MB / 169 files — the gap is QuestPDF (removed on master by another project, not yet merged here), not this task. `dotnet list package --vulnerable --include-transitive`: none.
+    - ROLLOUT (before 227d reaches an environment): containers that predate the marker are refused app-only. dev needs
+      SharePointEmbedded__OwnedContainerIds = b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh,b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN
+      (b!yLRd… is EmailProcessing default already; Dataverse query 2026-10-06: 2 BU containers + 1 secure project). demo:
+      same check when T242c refreshes it (its DemoExpirationService revoke is refused otherwise). Live setting changes —
+      owner approval each time.
+    - Live unknowns → T186: PATCH customProperties on a just-created (inactive) container; deletedContainers/{id}
+      ?$select=customProperties returns the marker; Graph refuses app-only container-type operations for a stamp UAMI.
+    - Checked (code-review S9): app-only MAIL has the same shared-tenant shape, but it is already scoped per customer —
+      owner D26 / T251: H14a gives each stamp UAMI Exchange RBAC for Applications scoped to the customer's group.
+  </notes>
+</task>

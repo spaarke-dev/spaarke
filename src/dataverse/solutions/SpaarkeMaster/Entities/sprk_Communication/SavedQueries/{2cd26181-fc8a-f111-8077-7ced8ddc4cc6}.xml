@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{2cd26181-fc8a-f111-8077-7ced8ddc4cc6}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_communicationid">
+          <cell name="sprk_to" width="292" />
+          <cell name="sprk_from" width="300" />
+          <cell name="sprk_subject" width="300" />
+          <cell name="sprk_direction" width="100" />
+          <cell name="sprk_sentat" width="100" />
+          <cell name="sprk_receiveddate" width="123" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical" distinct="true">
+        <entity name="sprk_communication">
+          <attribute name="sprk_communicationid" />
+          <attribute name="sprk_from" />
+          <attribute name="sprk_sentat" />
+          <attribute name="sprk_subject" />
+          <attribute name="sprk_to" />
+          <filter type="and">
+            <condition attribute="sprk_communicationtype" operator="eq" value="100000000" />
+          </filter>
+          <attribute name="sprk_direction" />
+          <attribute name="sprk_receiveddate" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Email" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

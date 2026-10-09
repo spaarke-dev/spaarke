@@ -32,9 +32,8 @@
 //       BicepDeployOutputs (including the honest-empty fields for outputs
 //       customer.bicep does not currently produce — see ArmDeploymentRunner.cs
 //       file-header "BLOCKING DISCOVERY" note).
-//   T2  Model 1 fails closed (task 225a): its shared stack is retired and the dedicated
-//       Model 1 path is task 228 (T225b landed) — no template is resolved or downloaded
-//       (ResolveTemplateAsync — task 245b split template resolution from deploy).
+//   T2  Both models resolve the same `customer` template (D-12; Model 1 deployable since task 228 —
+//       before it, Model 1 failed closed) — ResolveTemplateAsync, split from deploy by task 245b.
 //   T3  RG-ensure ARM rejection (403) -> BicepDeployOutcome.Failure, domain
 //       result (does NOT throw).
 //   T4  Deployment ARM rejection (400 quota) -> BicepDeployOutcome.Failure.
@@ -115,6 +114,8 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
         // Task 242 — the Managed Redis endpoint, verbatim (host:10000).
         success.Outputs.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
+        // Task 246 — the Content Safety endpoint, verbatim.
+        success.Outputs.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
         // Honest-empty per the file-header "BLOCKING DISCOVERY" note — customer.bicep
         // does not currently produce these; the runner must NOT fabricate values.
         success.Outputs.UserAssignedIdentityObjectId.Should().BeEmpty();
@@ -180,31 +181,18 @@ public sealed class ArmDeploymentRunnerTests
         }
     }
 
-    // ---------- T2 Model 1 fails closed (task 225a) ----------
+    // ---------- T2 both models deploy the dedicated customer stamp (D-12; T228 made Model 1 deployable) ----------
 
     [Fact]
-    public async Task ResolveTemplateAsync_Model1_FailsClosed_DownloadsNoTemplate()
+    public async Task ResolveTemplateAsync_BothModels_ResolveTheSameCustomerTemplate()
     {
-        var templateRequests = 0;
-        var handler = ArmSdkTestFakes.NewHandler(request =>
-        {
-            var path = request.RequestUri!.AbsolutePath;
-            if (path.EndsWith("provisioning-arm-latest.json"))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmManifestBody());
-            }
-            templateRequests++;
-            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
-        });
-
-        var runner = NewRunner(handler);
-
-        var resolve = () => runner.ResolveTemplateAsync(
+        var model1 = await NewRunner(TemplateHandler(TemplateBody, Sha256Of(TemplateBody))).ResolveTemplateAsync(
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1, CancellationToken.None);
+        var model2 = await NewRunner(TemplateHandler(TemplateBody, Sha256Of(TemplateBody))).ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
 
-        (await resolve.Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*not deployable yet*task 228*");
-        templateRequests.Should().Be(0, "no customer.bicep template may be deployed for Model 1 before task 228");
+        model1.Json.Should().Be(TemplateBody, "Model 1 is the same dedicated stamp, in Spaarke's tenant");
+        model1.Version.Should().Be(model2.Version);
     }
 
     // ---------- T3 RG-ensure ARM rejection ----------
@@ -392,6 +380,7 @@ public sealed class ArmDeploymentRunnerTests
                   "keyVaultUri": { "type": "String", "value": "https://sprk-acme-prod-kv.vault.azure.net/" },
                   "serviceBusEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-sbus.servicebus.windows.net:443/" },
                   "redisEndpoint": { "type": "String", "value": "sprk-acme-prod-redis.westus2.redis.azure.net:10000" },
+                  "contentSafetyEndpoint": { "type": "String", "value": "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/" },
                   "signalrEnabled": { "type": "Bool", "value": false }
                 }
                 """));

@@ -13,7 +13,7 @@
 //   tests (F13 verification is: fresh Production env lacking
 //   msft_PowerBI_Anchor → installer shells `pac application install` →
 //   returns Success after simulated ~6min poll → H6 proceeds to
-//   CanonicalSolutionCatalog resolve without MissingDependency; that path
+//   package import without MissingDependency; that path
 //   is exercised end-to-end at the operator level via the
 //   /provision-environment skill, not at CI).
 //

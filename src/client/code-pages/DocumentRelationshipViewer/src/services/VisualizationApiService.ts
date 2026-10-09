@@ -62,7 +62,7 @@ export class VisualizationApiService {
 
   private buildUrl(documentId: string, params: VisualizationQueryParams): string {
     const url = new URL(`${this.apiBaseUrl}/api/ai/visualization/related/${documentId}`);
-    url.searchParams.set('tenantId', params.tenantId);
+    // No tenantId param: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
     if (params.threshold !== undefined) url.searchParams.set('threshold', params.threshold.toString());
     if (params.limit !== undefined) url.searchParams.set('limit', params.limit.toString());
     if (params.depth !== undefined) url.searchParams.set('depth', params.depth.toString());

@@ -1,0 +1,161 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{a0fc5699-417f-4d3c-b834-fbd95e80963d}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab name="tab_general" id="{472ac234-0f05-1d54-0a49-fdc7a495f259}" IsUserDefined="0" locklevel="0" showlabel="false" expanded="true" verticallayout="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_entry" id="{98ea40e5-c064-2029-2064-ec1a4e07614a}" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="140">
+                  <labels>
+                    <label description="ENTRY" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{a9196f9f-3f17-fd53-337c-48ef1b6067ee}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_subject" id="{2ec19943-7385-c075-402f-45cf6ec4c50e}" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="140">
+                  <labels>
+                    <label description="SUBJECT - WHO IS DENIED (EXACTLY ONE)" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{cffe4ef6-565d-e814-5172-d4b358342bf6}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Contact" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_subjectcontact" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_subjectcontact" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{19df0d25-5573-e440-8b85-fb80245f680a}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Organization" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_subjectorganization" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_subjectorganization" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c5c4503f-2f73-b02c-8a43-4fe6c5ed490f}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="User" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_subjectsystemuser" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_subjectsystemuser" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_object" id="{c26e5efc-c6e2-5a25-b1fd-a4b066508869}" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="140">
+                  <labels>
+                    <label description="OBJECT - AN ORGANIZATION, OR ONE RECORD" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{124df803-5e1b-951f-4c48-52c13d6adb18}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Organization" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_objectorganization" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_objectorganization" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{85623dc5-0388-2657-44c1-f12c2dcddae7}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Record Type (opens the record picker)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_objectrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_objectrecordtype" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{eda9e02c-0ee5-5474-6a06-5bb4c2796730}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Record Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_objectrecordid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_objectrecordid" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_reason" id="{9d60a341-03cf-1245-1274-a54da4fb22f3}" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="140">
+                  <labels>
+                    <label description="REASON" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{4f731d0c-7229-a5e2-12a8-e7cbf389f4c7}" showlabel="true" locklevel="0" colspan="1" rowspan="3">
+                        <labels>
+                          <label description="Reason" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_reason" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_reason" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{47b74d6f-d90b-30f2-1bd1-01902e109003}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{3a6ae4f2-be01-7722-9033-8c97215173b7}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="true" />
+            </cell>
+            <cell id="{e0579e9b-689e-207b-7871-806a43f77831}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Author (last modified by)" languagecode="1033" />
+              </labels>
+              <control id="header_modifiedby" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="modifiedby" disabled="true" />
+            </cell>
+            <cell id="{9cf0a136-5fc8-e51d-b7ed-290520082e00}" showlabel="true" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Modified On" languagecode="1033" />
+              </labels>
+              <control id="header_modifiedon" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="modifiedon" disabled="true" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <formLibraries>
+        <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{3ce9035b-3c28-93d7-b136-c01b0e6a430b}" />
+        <Library name="sprk_/scripts/noaccessentry_postsave.js" libraryUniqueId="{d88f213f-670e-caa0-9d40-9e1c0e3b333b}" />
+      </formLibraries>
+      <events>
+        <event name="onload" application="false" active="false">
+          <Handlers>
+            <Handler functionName="Spaarke.NoAccessEntry.onLoad" libraryName="sprk_/scripts/noaccessentry_postsave.js" handlerUniqueId="{5e9f70d9-3a52-1a28-f1ce-ee5a11c331bf}" enabled="true" parameters="" passExecutionContext="true" />
+          </Handlers>
+        </event>
+      </events>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

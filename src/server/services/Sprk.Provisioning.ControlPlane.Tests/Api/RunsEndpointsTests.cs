@@ -907,6 +907,43 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Fact]
+    public async Task PostRuns_SolutionPackageTypeAbsent_StoresManagedOnTheRun()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest("testcust"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret
+            .Should().Contain(IntakeParameterCatalog.SolutionPackageType, "managed",
+                "managed by default; the stored value is what H6 imports and H13 records (ADR-027 §3, owner D8)");
+    }
+
+    [Theory]
+    [InlineData("Managed")]   // exact case
+    [InlineData("both")]
+    [InlineData("")]
+    public async Task PostRuns_SolutionPackageTypeNotAllowed_Returns400_BeforeCosmosOrEnqueue(string value)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [IntakeParameterCatalog.SolutionPackageType] = value,
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be("intake-invalid-solution-package-type");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task PostRuns_ProvisionEnvironmentSkillStep40Payload_Returns202()
     {
         // The exact key set /provision-environment Step 4.0 sends (SKILL.md) must stay accepted.
@@ -920,14 +957,15 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["confirmationAcknowledgment"] = "proceed with provisioning",
             ["intakeFileSha256"] = "ABCDEF",
             ["region"] = "westus2",
-            ["tier"] = "standard",
+            ["tier"] = "dedicated",          // T229: a CostEnvelopeIntake tier (required, exact case)
             ["estimatedMonthlyUsd"] = "900",
-            ["costEnvelopePolicy"] = "abortOnOverrun",
             ["operatorUpn"] = "operator@spaarke.com",
             ["containerTypeId"] = "33333333-3333-3333-3333-333333333333",
-            // T245c: the operator intake H11 / H14 / H4 need.
-            ["identityPreset"] = "NativeAccount",
-            ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"companyName\":\"Contoso\"}]",
+            ["dataverseEnvUrl"] = "https://spaarke-testcust.crm.dynamics.com/",   // T228
+            // T245c: the operator intake H11 / H14 / H4 need. T232: Model 1 takes only B2BGuest + the environment group.
+            ["identityPreset"] = "B2BGuest",
+            ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\",\"companyName\":\"Contoso\"}]",
+            ["environmentSecurityGroupId"] = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
             ["exchangePolicyScopeGroupId"] = "spaarke-mail-scope@contoso.com",
             ["communicationGraphResource"] = "users/comms@contoso.com/messages",
             ["emailGraphResource"] = null!,   // Step 4.0 always sends the key; null when the intake omits it
@@ -953,7 +991,12 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("usersJson", "[]", "userprov-missing-users")]
     [InlineData("usersJson", "{\"firstName\":\"Ada\"}", "userprov-malformed-users-payload")]   // an object, not an array
     [InlineData("usersJson", "[{\"firstName\":\"Ada\"", "userprov-malformed-users-payload")]  // truncated
-    [InlineData("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\" \"}]", "userprov-invalid-user-entry")]
+    [InlineData("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\" \"}]", "userprov-invalid-user-entry")]   // a guest without an email
+    [InlineData("identityPreset", "NativeAccount", "userprov-model1-requires-b2b-guest")]            // T232 (owner D2)
+    [InlineData("environmentSecurityGroupId", null, "userprov-missing-security-group-id")]            // T232
+    [InlineData("environmentSecurityGroupId", "sprk-testcust-users", "userprov-invalid-security-group-id")]   // a name, not the object id
+    [InlineData("environmentSecurityGroupId", "{6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b}", "userprov-invalid-security-group-id")]   // only the schema's hyphenated form
+    [InlineData("usersJson", "[{\"email\":\"ada@contoso.com\"},{\"email\":\"ADA@contoso.com\"}]", "userprov-invalid-user-entry")]   // a repeated email (any case) would be invited twice
     [InlineData("exchangePolicyScopeGroupId", null, "h14a-missing-policy-scope-group-id")]
     [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
     [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]
@@ -992,10 +1035,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Theory]
-    [InlineData("NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email optional for NativeAccount
-    [InlineData("B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email and group optional for NativeAccount (Model 2 only — T232)
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"team@contoso.com\"},{\"firstName\":\"Grace\",\"lastName\":\"Hopper\",\"email\":\"team@contoso.com\"}]", "communicationGraphResource")]   // a shared contact email is fine — nothing is invited for NativeAccount
+    [InlineData("Model1", "B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
     public async Task PostRuns_CompleteOperatorIntake_Returns202_AndStoresTheValues(
-        string identityPreset, string usersJson, string graphResourceKey)
+        string tenancyModel, string identityPreset, string usersJson, string graphResourceKey)
     {
         using var factory = new L2WebApplicationFactory();
         var client = factory.CreateClient();
@@ -1004,8 +1048,12 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret[graphResourceKey] = "users/comms@contoso.com/messages";
         nonSecret["identityPreset"] = identityPreset;
         nonSecret["usersJson"] = usersJson;
+        if (identityPreset == "NativeAccount")
+        {
+            nonSecret.Remove("environmentSecurityGroupId");
+        }
 
-        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret, tenancyModel));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         factory.Repository.CreatedRuns.Single().Parameters.NonSecret.Should().Contain(new Dictionary<string, string>
@@ -1076,11 +1124,22 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     /// </summary>
     internal static Dictionary<string, string> WithOperatorIntake(Dictionary<string, string> nonSecret)
     {
-        nonSecret.TryAdd("identityPreset", "NativeAccount");
-        nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]");
+        // T232: the request builder sends Model1, which takes only B2BGuest — guests need an email and the environment's
+        // security group.
+        nonSecret.TryAdd("identityPreset", "B2BGuest");
+        nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\"}]");
+        nonSecret.TryAdd("environmentSecurityGroupId", "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b");
         nonSecret.TryAdd("exchangePolicyScopeGroupId", "spaarke-mail-scope@contoso.com");
         nonSecret.TryAdd("communicationGraphResource", "users/comms@contoso.com/messages");
         nonSecret.TryAdd("communicationDefaultMailbox", "comms@contoso.com");
+        // T228: required for every model — the customer's own subscription, the model's container type (G19) and the
+        // Dataverse environment the operator created (named for TestCustomerId).
+        nonSecret.TryAdd("subscriptionId", "abcdef01-2345-6789-abcd-ef0123456789");
+        nonSecret.TryAdd("containerTypeId", "8a6ce34c-6055-4681-8f87-2f4f9f921c06");
+        nonSecret.TryAdd("dataverseEnvUrl", $"https://spaarke-{TestCustomerId}.crm.dynamics.com/");
+        // T229: H0's cost tier + estimate, required for every model.
+        nonSecret.TryAdd("tier", "smb");
+        nonSecret.TryAdd("estimatedMonthlyUsd", "450");
         return nonSecret;
     }
 
@@ -1096,9 +1155,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         => BuildCreateRunRequest(customerId, WithOperatorIntake(new Dictionary<string, string>
         {
             ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            ["dataverseEnvUrl"] = $"https://spaarke-{customerId}.crm.dynamics.com/",   // T228: named for THIS customer
         }));
 
-    private static HttpRequestMessage BuildCreateRunRequest(string customerId, Dictionary<string, string> nonSecretParameters)
+    private static HttpRequestMessage BuildCreateRunRequest(
+        string customerId, Dictionary<string, string> nonSecretParameters, string tenancyModel = "Model1")
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
         {
@@ -1106,8 +1167,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1",
-                profile = "spaarke-hosted-model2",
+                tenancyModel,
+                profile = tenancyModel == "Model2" ? "customer-owned-model2" : "spaarke-hosted-model2",
                 nonSecretParameters,
             }),
         };
@@ -1211,148 +1272,207 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
-    // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
-    // 2026-08-27) — Model2Dedicated CreateRun MUST fail-fast with 400 when
-    // nonSecretParameters['subscriptionId'] is absent. Nine downstream handlers
-    // hard-stop on absence with MissingSubscriptionId; surfacing at intake
-    // saves a minimum ~20s H1 dispatch + gives operators a fixable diagnostic.
-    // Mirrors the intake.schema.json Model2Dedicated allOf constraint.
+    // T228 (owner D4 / Q1; ADR-027) — the operator creates the customer's subscription and Dataverse environment; intake
+    // requires both for EVERY tenancy model (ISH-02's Model 1 exemption is gone), plus the container type (G19). Each
+    // refusal happens before any Cosmos write or enqueue.
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public async Task PostRuns_Model2Dedicated_MissingSubscriptionId_Returns400()
+    private async Task<(HttpStatusCode Status, string Body, L2WebApplicationFactory Factory)> PostT228RunAsync(
+        string tenancyModel, Action<Dictionary<string, string>> shape)
     {
-        using var factory = new L2WebApplicationFactory();
-        var client = factory.CreateClient();
-
+        var factory = new L2WebApplicationFactory();
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        shape(nonSecret);
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
         {
             Content = JsonContent.Create(new
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model2",
-                profile = "customer-owned-model2",
-                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
-                {
-                    // ISH-02: tenantId supplied but subscriptionId absent → 400 for Model 2.
-                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                }),
+                tenancyModel,
+                profile = tenancyModel == "Model1" ? "spaarke-hosted-model2" : "customer-owned-model2",
+                nonSecretParameters = nonSecret,
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
+        var response = await factory.CreateClient().SendAsync(request);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(), factory);
+    }
 
-        var response = await client.SendAsync(request);
+    [Theory]
+    [InlineData("Model1", null)]
+    [InlineData("Model2", null)]
+    [InlineData("Model1", "   ")]
+    [InlineData("Model2", "not-a-guid")]
+    [InlineData("Model1", "00000000-0000-0000-0000-000000000000")]
+    public async Task PostRuns_WithoutTheCustomersSubscription_Returns400_ForEveryModel(string model, string? subscriptionId)
+    {
+        var (status, body, factory) = await PostT228RunAsync(model, p =>
+        {
+            if (subscriptionId is null) p.Remove("subscriptionId"); else p["subscriptionId"] = subscriptionId;
+        });
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "no subscription is defaulted or shared for any model (T228)");
+            ReadProblemErrorCode(body).Should().Be("subscription-id-required");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+            factory.Enqueuer.Enqueued.Should().BeEmpty();
+        }
+    }
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "ISH-02 — Model 2 CreateRun MUST fail-fast when subscriptionId is absent (ADR-027 D4).");
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("subscriptionId",
-            "the diagnostic must name the missing key so the operator can fix the intake.");
-        body.Should().Contain("Model2",
-            "the diagnostic must scope the rule to Model 2 so Model 1 operators are not confused.");
+    [Theory]
+    [InlineData(null)]
+    [InlineData("standard")]
+    public async Task PostRuns_WithoutAContainerTypeGuid_Returns400(string? containerTypeId)
+    {
+        var (status, body, factory) = await PostT228RunAsync("Model1", p =>
+        {
+            if (containerTypeId is null) p.Remove("containerTypeId"); else p["containerTypeId"] = containerTypeId;
+        });
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "H0, H4b and H8 need it — fail at intake, not one by one (G19)");
+            ReadProblemErrorCode(body).Should().Be("container-type-id-required");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+        }
+    }
 
-        // Neither the Cosmos row nor the Service Bus envelope should be created.
-        factory.Repository.CreatedRuns.Should().BeEmpty();
-        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    [Theory]
+    [InlineData(null)]
+    [InlineData("http://spaarke-testcust.crm.dynamics.com/")]                 // not https
+    [InlineData("https://spaarke-testcust.crm.dynamics.com/main.aspx")]       // a path
+    [InlineData("https://spaarke-testcust.crm.dynamics.com:8443/")]           // a port
+    [InlineData("https://spaarke-testcust.example.com/")]                     // not Dataverse
+    [InlineData("https://spaarke-other.crm.dynamics.com/")]                   // another customer's environment
+    [InlineData("https://spaarke-testcustx.crm.dynamics.com/")]               // a longer id is another customer
+    [InlineData("https://testcust.crm.dynamics.com/")]                        // not the naming rule
+    [InlineData("https://spaarke-testcust-dev.crm.dynamics.com/")]            // another environment of this customer
+    public async Task PostRuns_ADataverseEnvironmentNotNamedForThisCustomer_Returns400(string? url)
+    {
+        var (status, body, factory) = await PostT228RunAsync("Model1", p =>
+        {
+            if (url is null) p.Remove("dataverseEnvUrl"); else p["dataverseEnvUrl"] = url;
+        });
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "a run must never adopt an environment that is not this customer's");
+            ReadProblemErrorCode(body).Should().Be("dataverse-env-url-invalid");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [InlineData("https://SPAARKE-testcust.crm.dynamics.com", "https://spaarke-testcust.crm.dynamics.com/")]
+    [InlineData("https://spaarke-testcust-prod.crm4.dynamics.com/", "https://spaarke-testcust-prod.crm4.dynamics.com/")]
+    public async Task PostRuns_TheCustomersEnvironment_IsStoredInCanonicalForm(string url, string stored)
+    {
+        var (status, _, factory) = await PostT228RunAsync("Model1", p => p["dataverseEnvUrl"] = url);
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret["dataverseEnvUrl"].Should().Be(stored,
+                "H5 compares against and hands on the canonical https://{host}/");
+        }
     }
 
     [Fact]
-    public async Task PostRuns_Model1_MissingSubscriptionId_Returns202()
+    public async Task PostRuns_Model2_ValidSubscriptionId_Returns202_AndFlowsToRunParameters()
     {
-        // ISH-02 exemption — Model 1 does NOT require subscriptionId at intake
-        // (the skill auto-injects the Spaarke shared sub-id at CreateRun time).
-        using var factory = new L2WebApplicationFactory();
-        var client = factory.CreateClient();
-
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        var (status, _, factory) = await PostT228RunAsync("Model2", p => p["subscriptionId"] = "abcdef01-2345-6789-abcd-ef0123456789");
+        using (factory)
         {
-            Content = JsonContent.Create(new
-            {
-                customerId = TestCustomerId,
-                environmentId = "env-1",
-                tenancyModel = "Model1",
-                profile = "spaarke-hosted-model2",
-                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
-                {
-                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                    // NO subscriptionId — Model 1 exemption per ISH-02.
-                }),
-            }),
-        };
-        AttachAuth(request, roles: new[] { "Operator" });
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret["subscriptionId"]
+                .Should().Be("abcdef01-2345-6789-abcd-ef0123456789", "H1 / H2a and the rest read it from the run");
+        }
+    }
 
-        var response = await client.SendAsync(request);
+    // -------------------------------------------------------------------------
+    // T229 (G4) — every run deploys a dedicated stamp, so H0's cost tier + estimate are required for every model and
+    // validated with H0's own rules (CostEnvelopeIntake); there is no shared-trial tier and no warnAndProceed waiver.
+    // -------------------------------------------------------------------------
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted,
-            "ISH-02 — Model 1 runs are exempt from the subscriptionId requirement at intake.");
+    [Theory]
+    [InlineData("Model1", null, "450", "quota-cost-envelope-required-missing")]
+    [InlineData("Model2", "  ", "450", "quota-cost-envelope-required-missing")]
+    [InlineData("Model1", "shared-trial", "450", "quota-cost-envelope-unknown-tier")]   // retired (D-12)
+    [InlineData("Model2", "Dedicated", "450", "quota-cost-envelope-unknown-tier")]      // exact case
+    [InlineData("Model1", "standard", "450", "quota-cost-envelope-unknown-tier")]
+    [InlineData("Model1", "smb", null, "quota-cost-envelope-required-missing")]
+    [InlineData("Model2", "smb", "lots", "quota-cost-envelope-unparseable-estimate")]
+    [InlineData("Model1", "smb", "-1", "quota-cost-envelope-unparseable-estimate")]
+    [InlineData("Model1", "smb", "1,200.50", "quota-cost-envelope-unparseable-estimate")]   // invariant decimal only
+    public async Task PostRuns_WithoutAUsableCostTierAndEstimate_Returns400_ForEveryModel(
+        string model, string? tier, string? estimate, string errorCode)
+    {
+        var (status, body, factory) = await PostT228RunAsync(model, p =>
+        {
+            if (tier is null) p.Remove("tier"); else p["tier"] = tier;
+            if (estimate is null) p.Remove("estimatedMonthlyUsd"); else p["estimatedMonthlyUsd"] = estimate;
+        });
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "H0 would refuse it — refuse it before anything is written (T229)");
+            ReadProblemErrorCode(body).Should().Be(errorCode);
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+            factory.Enqueuer.Enqueued.Should().BeEmpty();
+        }
+    }
+
+    // T254 (G37): the OPTIONAL monthly OpenAI spend limit — absent = no limit; present must be usable.
+    [Theory]
+    [InlineData("0")]          // zero reads as "no limit" in the BFF — omit the key instead
+    [InlineData("-5")]
+    [InlineData("lots")]
+    [InlineData("5.")]
+    [InlineData("1,000")]
+    [InlineData("1000000.01")] // above the ceiling: a typo of extra digits
+    [InlineData(" ")]
+    public async Task PostRuns_AnUnusableOpenAiMonthlyLimit_Returns400(string limit)
+    {
+        var (status, body, factory) = await PostT228RunAsync("Model1", p => p["openAiMonthlyLimitUsd"] = limit);
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest);
+            ReadProblemErrorCode(body).Should().Be("quota-openai-monthly-limit-invalid");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [InlineData("500")]
+    [InlineData("1250.75")]
+    public async Task PostRuns_AUsableOpenAiMonthlyLimit_IsStoredForH4b(string limit)
+    {
+        var (status, _, factory) = await PostT228RunAsync("Model2", p => p["openAiMonthlyLimitUsd"] = limit);
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret["openAiMonthlyLimitUsd"].Should().Be(limit);
+        }
     }
 
     [Fact]
-    public async Task PostRuns_Model2Dedicated_EmptySubscriptionId_Returns400()
+    public async Task PostRuns_WithoutAnOpenAiMonthlyLimit_IsAccepted_NoLimitIsTheDefault()
     {
-        // ISH-02: whitespace-only subscriptionId is treated identically to missing.
-        using var factory = new L2WebApplicationFactory();
-        var client = factory.CreateClient();
-
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        var (status, _, factory) = await PostT228RunAsync("Model1", p => p.Remove("openAiMonthlyLimitUsd"));
+        using (factory)
         {
-            Content = JsonContent.Create(new
-            {
-                customerId = TestCustomerId,
-                environmentId = "env-1",
-                tenancyModel = "Model2",
-                profile = "customer-owned-model2",
-                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
-                {
-                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                    ["subscriptionId"] = "   ",
-                }),
-            }),
-        };
-        AttachAuth(request, roles: new[] { "Operator" });
-
-        var response = await client.SendAsync(request);
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        factory.Repository.CreatedRuns.Should().BeEmpty();
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret.Should().NotContainKey("openAiMonthlyLimitUsd");
+        }
     }
 
     [Fact]
-    public async Task PostRuns_Model2Dedicated_ValidSubscriptionId_Returns202_AndFlowsToRunParameters()
+    public async Task PostRuns_TheRetiredCostEnvelopePolicy_IsAnUnknownParameter()
     {
-        // ISH-02 happy path: Model 2 with subscriptionId proceeds + value round-trips
-        // into RunParameters.NonSecret so downstream handlers can read it.
-        using var factory = new L2WebApplicationFactory();
-        var client = factory.CreateClient();
-        var expectedSubscriptionId = "abcdef01-2345-6789-abcd-ef0123456789";
-
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        var (status, body, factory) = await PostT228RunAsync("Model1", p => p["costEnvelopePolicy"] = "warnAndProceed");
+        using (factory)
         {
-            Content = JsonContent.Create(new
-            {
-                customerId = TestCustomerId,
-                environmentId = "env-1",
-                tenancyModel = "Model2",
-                profile = "customer-owned-model2",
-                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
-                {
-                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                    ["subscriptionId"] = expectedSubscriptionId,
-                }),
-            }),
-        };
-        AttachAuth(request, roles: new[] { "Operator" });
-
-        var response = await client.SendAsync(request);
-
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        factory.Repository.CreatedRuns.Should().ContainSingle();
-        var stored = factory.Repository.CreatedRuns.Single();
-        stored.Parameters.NonSecret
-            .Should().ContainKey("subscriptionId")
-            .WhoseValue.Should().Be(expectedSubscriptionId,
-                because: "ISH-02 — subscriptionId must round-trip from intake → Cosmos so H1/H2a/etc can read it.");
+            status.Should().Be(HttpStatusCode.BadRequest, "the waiver key is retired, so it is an unknown intake key (T229)");
+            ReadProblemDetail(body).Should().Contain("costEnvelopePolicy");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+        }
     }
 
     [Fact]

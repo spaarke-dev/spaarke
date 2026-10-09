@@ -1,6 +1,7 @@
 import type { IAuthConfig } from './types';
 import { AuthError } from './errors';
-import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
+import { resolveConfig, discoverTenantSync, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
+import { normalizeTenant, tenantFromAuthority } from './tenant';
 import type { AuthStrategy } from './strategies/AuthStrategy';
 import { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
 import { InMemoryCache } from './strategies/InMemoryCache';
@@ -23,6 +24,13 @@ export class SpaarkeAuthProvider {
   private readonly _cache: InMemoryCache;
   private _refreshInterval: ReturnType<typeof setInterval> | null = null;
   private _disposeBroadcastListener: (() => void) | null = null;
+  /**
+   * Set when initAuth() replaces this provider (#1453). Code that captured this
+   * instance before the replacement (e.g. a useAuth() result from an earlier
+   * render) is forwarded to the replacement instead of continuing on the old,
+   * non-tenant authority.
+   */
+  private _successor: SpaarkeAuthProvider | null = null;
 
   /**
    * @param userConfig Optional config overrides — merged with defaults via resolveConfig().
@@ -59,6 +67,7 @@ export class SpaarkeAuthProvider {
 
   /** Acquire a token via the in-memory cache, falling through to the strategy on miss. */
   async getAccessToken(): Promise<string> {
+    if (this._successor) return this._successor.getAccessToken();
     try {
       const result = await this._cache.acquire();
       if (result.accessToken) {
@@ -83,11 +92,13 @@ export class SpaarkeAuthProvider {
    * Does NOT cascade to the inner strategy. Use clearAllCaches() for explicit logout (INV-7).
    */
   clearCache(): void {
+    if (this._successor) return this._successor.clearCache();
     this._cache.invalidate();
   }
 
   /** Clear the in-memory cache AND cascade to the strategy. Use for explicit logout. */
   clearAllCaches(): void {
+    if (this._successor) return this._successor.clearAllCaches();
     this._cache.clearCache();
   }
 
@@ -105,17 +116,20 @@ export class SpaarkeAuthProvider {
    * task 014 notes). Real server-side revocation lands with CAE in Phase D task 061.
    */
   async logout(): Promise<void> {
+    if (this._successor) return this._successor.logout();
     broadcastLogout();
     await this._cache.logout();
   }
 
   /** Whether a cached token is currently available (synchronous check). */
   isAuthenticated(): boolean {
+    if (this._successor) return this._successor.isAuthenticated();
     return this._cache.getCachedToken() !== null;
   }
 
   /** Get the resolved config. */
   getConfig(): Required<IAuthConfig> {
+    if (this._successor) return this._successor.getConfig();
     return this._config;
   }
 
@@ -127,6 +141,7 @@ export class SpaarkeAuthProvider {
    * every Entra-issued access token includes `tid`.
    */
   getCachedTenantId(): string {
+    if (this._successor) return this._successor.getCachedTenantId();
     return this._extractTidFromCachedToken();
   }
 
@@ -135,40 +150,21 @@ export class SpaarkeAuthProvider {
    *
    * Resolution order:
    *   1. JWT `tid` claim from cached token — universal
-   *   2. Xrm.organizationSettings.tenantId via frame-walk — fallback for Dataverse hosts
+   *   2. the tenant of this provider's authority
+   *   3. window.__SPAARKE_TENANT_ID__ → persisted runtime config →
+   *      Xrm.organizationSettings.tenantId — fallback for Dataverse hosts
+   *      (order: "TENANT PRECEDENCE" in tenant.ts)
+   * Every value is validated (#1453); '' when none is usable.
    */
   async getTenantId(): Promise<string> {
-    const tid = this._extractTidFromCachedToken();
+    if (this._successor) return this._successor.getTenantId();
+    const tid = normalizeTenant(this._extractTidFromCachedToken());
     if (tid) return tid;
 
-    try {
-      const frames: Window[] = [window];
-      try {
-        if (window.parent !== window) frames.push(window.parent);
-      } catch {
-        /* */
-      }
-      try {
-        if (window.top && window.top !== window) frames.push(window.top);
-      } catch {
-        /* */
-      }
+    const fromAuthority = tenantFromAuthority(this._config.authority);
+    if (fromAuthority) return fromAuthority;
 
-      for (const frame of frames) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const xrm = (frame as any).Xrm;
-          const xrmTid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
-          if (xrmTid) return xrmTid;
-        } catch {
-          /* cross-origin */
-        }
-      }
-    } catch {
-      /* */
-    }
-
-    return '';
+    return discoverTenantSync()?.tenant ?? '';
   }
 
   /**
@@ -176,8 +172,15 @@ export class SpaarkeAuthProvider {
    * listener, in-memory cache, and any strategy-local cache. Called by
    * `initAuth()` on re-initialization to prevent leaks of the prior MSAL
    * instance and listener.
+   *
+   * @param options.preserveSharedCache When true, leave the strategy's own
+   *   cache (MSAL localStorage) alone. `initAuth()` sets it when replacing a
+   *   provider with one for the SAME clientId: both share that cache, and
+   *   clearing it would sign the new provider out (#1453).
    */
-  dispose(): void {
+  dispose(options?: { preserveSharedCache?: boolean }): void {
+    // A superseded provider shares its MSAL cache with its successor: never clear it.
+    const preserveSharedCache = options?.preserveSharedCache || this._successor !== null;
     if (this._refreshInterval) {
       clearInterval(this._refreshInterval);
       this._refreshInterval = null;
@@ -186,7 +189,30 @@ export class SpaarkeAuthProvider {
       this._disposeBroadcastListener();
       this._disposeBroadcastListener = null;
     }
-    this._cache.clearCache();
+    if (preserveSharedCache) {
+      this._cache.invalidate();
+    } else {
+      this._cache.clearCache();
+    }
+  }
+
+  /**
+   * Resolves once this provider has no token acquisition in flight (e.g. an open
+   * sign-in popup), whatever its outcome.
+   */
+  whenIdle(): Promise<void> {
+    return this._cache.whenIdle();
+  }
+
+  /**
+   * @internal Called by initAuth() when it replaces this provider with one for the
+   * same clientId (#1453). Stops this instance's timers and listener, keeps the
+   * shared MSAL cache, and forwards every later call to `next`.
+   */
+  supersede(next: SpaarkeAuthProvider): void {
+    if (next === this) return;
+    this.dispose({ preserveSharedCache: true });
+    this._successor = next;
   }
 
   private _extractTidFromCachedToken(): string {

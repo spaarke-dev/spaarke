@@ -17,7 +17,7 @@
 | **EventFormController** | 1.0.6 | Form-level orchestration controller on the Event form | Zero importers; no live binding found | ❌ none | ✅ `…/baseline-EventFormControllerSolution-…zip` |
 | **FieldMappingAdmin** | 1.1.0 | **Legacy** admin PCF to author field-mapping profiles/rules (ProfileEditor / RulesList / RuleEditor) | Superseded by **native Dataverse forms** (current authoring path); manifest hard-codes the *retired* `spe-api-dev-67e2xz` BFF URL | ⚠️ bundle only, in `infrastructure/dataverse/solutions/FieldMappingAdminSolution/` | ✅ `…/baseline-FieldMappingAdminSolution-…zip` |
 
-**Same-bucket siblings** (also orphaned, same disposition, from the same audit — listed for completeness): `EventCalendarFilter` (→ `@spaarke/events-components` CalendarFilterPane), `RegardingLink` (predecessor of RegardingResolver), `AnalysisBuilder` / `AnalysisWorkspace` PCF / `LegalWorkspace` PCF (→ Code Pages), `UniversalQuickCreate`, `SpeDocumentViewer`. **Exception — do NOT retire:** `AnalysisWorkspace` PCF + its canvas app are on **permanent hold** (live ribbon ref, DEV-001).
+**Same-bucket siblings** (also orphaned, same disposition, from the same audit — listed for completeness): `EventCalendarFilter` (→ `@spaarke/events-components` CalendarFilterPane), `RegardingLink` (predecessor of RegardingResolver), `AnalysisBuilder` / `AnalysisWorkspace` PCF / `LegalWorkspace` PCF (→ Code Pages), `UniversalQuickCreate`. **`SpeDocumentViewer` is NOT an orphan** — it is the Document main form's preview, was wrongly deleted from source in `5b4cca898` (2026-06-22), and was restored as v1.0.28 by `spaarkeai-word-add-in-r1` task 124 (`projects/spaarkeai-word-add-in-r1/notes/124-spedocumentviewer-and-orphans.md`). **Exception — do NOT retire:** `AnalysisWorkspace` PCF + its canvas app are on **permanent hold** (live ribbon ref, DEV-001).
 
 **Deletion status (why they still exist):** `pcf-orphan-cleanup-r1` completed pre-flight (backups + 4-check, 2026-06-22) and vetted 10/11 controls as **ready-to-delete**, but its **Task 003 (the Dataverse deletion session) was never executed** — it's still `🔲 not-started`. So these are approved-for-removal but physically still deployed. The authoritative per-control disposition is [`projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md`](../../projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md); resuming removal = running that project's Task 003 (HIGH blast radius; Maker-portal "Used By" re-check + AssociationResolver backup required first).
 
@@ -61,7 +61,7 @@
 |---|---|---|---|---|
 | **RelatedDocumentCount** | `Spaarke.Pcf.RelatedDocumentCount` | 1.21.2 | Document main form | 2026-05-13 |
 | **SemanticSearchControl** | `Sprk` | 1.1.41 | Matter / Work Assignment / Invoice / Project main forms | 2026-05-13 |
-| **SpeDocumentViewer** | `Spaarke` | 1.0.25 | Document main form | 2026-05-14 |
+| **SpeDocumentViewer** | `Spaarke` | 1.0.28 (source restored 2026-10-08, task 124; 1.0.27 deployed until task 125) | Document main form | 2026-10-08 |
 | **UniversalQuickCreate** (constructor: `UniversalDocumentUpload`) | `Spaarke.Controls` | 3.15.3 | Upload Documents form | 2026-05-14 |
 | **VisualHost** | `Spaarke.Visuals` | 1.4.0 | Matter / Work Assignment / Project main forms | 2026-05-13 |
 

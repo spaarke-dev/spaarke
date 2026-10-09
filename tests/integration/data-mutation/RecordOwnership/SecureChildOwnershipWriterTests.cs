@@ -737,9 +737,9 @@ public class SecureChildOwnershipWriterTests
 
         public UploadingSpeFileStore()
             : base(
-                new ContainerOperations(Graph, NullLogger<ContainerOperations>.Instance),
-                new DriveItemOperations(Graph, NullLogger<DriveItemOperations>.Instance),
-                new UploadSessionManager(Graph, Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
+                new ContainerOperations(Graph, TestSpeOwnership.AllowAll(Graph), NullLogger<ContainerOperations>.Instance),
+                new DriveItemOperations(Graph, TestSpeOwnership.AllowAll(Graph), NullLogger<DriveItemOperations>.Instance),
+                new UploadSessionManager(Graph, TestSpeOwnership.AllowAll(Graph), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
                 new UserOperations(Graph, NullLogger<UserOperations>.Instance))
         {
         }

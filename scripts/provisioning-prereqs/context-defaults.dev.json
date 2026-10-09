@@ -38,7 +38,7 @@
       "source": "runtime-az",
       "shape": "Azure subscription GUID",
       "populatedBy": "az account show --query id -o tsv",
-      "note": "Aliased to {sub} at substitution time. For Model 2 dedicated stamps intake.schema.json.subscriptionId is the operator-supplied override; Model 1 shared trials read the operator's default subscription."
+      "note": "Aliased to {sub} at substitution time. The operator's current az subscription — used only by once_per_env / once_per_tenant checks. A customer's stamp subscription is {stampSubscriptionId} (intake subscriptionId, required for every model — T228)."
     },
     "sub": {
       "source": "runtime-az",
@@ -94,12 +94,6 @@
       "populatedBy": "az acr show -g rg-spaarke-platform-{env} -n sprk{env}acr --query id -o tsv",
       "note": "RBAC scope for PRQ-E-06 (AcrPull for L2 worker sidecar image pulls)."
     },
-    "bffAppServiceId": {
-      "source": "runtime-az",
-      "shape": "Azure resource id of the BFF App Service (per-env)",
-      "populatedBy": "az webapp list -g rg-spaarke-platform-{env} --query \"[?starts_with(name,'sprksharedprod-api') || starts_with(name,'spaarke-bff-{env}')].id\" -o tsv",
-      "note": "RBAC scope for PRQ-E-07 (Website Contributor for slot swaps)."
-    },
     "kvResourceId": {
       "source": "runtime-az",
       "shape": "Azure resource id of the platform Key Vault",
@@ -112,16 +106,10 @@
       "populatedBy": "spaarke-constants.yaml per_env_constants.dev.containerTypeId (operator MUST populate before first Step 0.5 run)",
       "note": "SPE container-type on the Spaarke tenant. Never changes once created (owner directive 2026-08-24 SPE never_delete). If null, SKILL.md Step 0.5b hard-stops with a targeted operator-facing error."
     },
-    "bffAppId": {
-      "source": "constants-per-env-operator",
-      "shape": "Entra app registration appId for the BFF (per-tenancy tier)",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6). Populated by task 213 after one-time topology setup (SPE container-type + owning app-reg + BFF app-reg creation via delegated flow).",
-      "note": "One per tenancy tier, shared across all Model 1 customers. Currently referenced only in PRQ-T-02 tightening (Wave 4 deferred)."
-    },
     "dvUrl": {
       "source": "runtime-context",
       "shape": "Customer Dataverse environment URL",
-      "populatedBy": "Runtime — read from customer sprk_dataverseenvironment row post-Step 1f",
+      "populatedBy": "intake dataverseEnvUrl — the environment the operator created (PRQ-C-09), canonical https://{host}/ with a trailing slash (T228)",
       "note": "Only appears in per-customer once_per_customer scoped prereqs (deferred to H0 server-side per EXEC-10)."
     },
     "adminDvUrl": {
@@ -134,13 +122,19 @@
       "source": "intake",
       "shape": "Azure subscription GUID — the customer stamp's own subscription",
       "populatedBy": "intake.schema.json subscriptionId (ADR-027: one subscription per customer)",
-      "note": "Used by PRQ-E-05 (once_per_customer, an H2a postcondition) — documented for operators, not substituted by Step 0.5b."
+      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — documented for operators, not substituted by Step 0.5b."
     },
     "stampEnvironment": {
       "source": "intake",
       "shape": "dev | staging | prod — the customer stamp's environment segment (customer.bicep environmentName)",
       "populatedBy": "nonSecretParameters environmentName (default 'prod', owner D6)",
       "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — not substituted by Step 0.5b."
+    },
+    "environmentSecurityGroupId": {
+      "source": "intake",
+      "shape": "Object id (GUID) of the security group sprk-{customerId}-users",
+      "populatedBy": "intake.schema.json environmentSecurityGroupId property (skill Step 1e-bis); the operator creates the group and sets it on the environment (PRQ-C-10)",
+      "note": "PRQ-C-10 is once_per_customer — documented for the operator, not run by Step 0.5b. Required for B2BGuest (every Model 1 run)."
     },
     "exchangePolicyScopeGroupId": {
       "source": "intake",

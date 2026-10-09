@@ -9,7 +9,7 @@
   },
   "playbook": {
     "name": "New Work Assignments",
-    "description": "Notifies users when new sprk_workassignment records have been assigned to them since the last check. Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
+    "description": "Notifies the user of active sprk_workassignment records created or modified in the last 24 hours on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
     "isPublic": true,
     "sprk_playbooktype": 2,
     "capabilities": ["notify"],
@@ -42,6 +42,7 @@
     {
       "name": "Start",
       "nodeType": "Control",
+      "executorType": 33,
       "actionType": null,
       "canvasType": "start",
       "outputVariable": "start",
@@ -58,6 +59,7 @@
     {
       "name": "Lookup My Matters",
       "nodeType": "Workflow",
+      "executorType": 52,
       "actionType": 52,
       "canvasType": "lookupUserMembership",
       "outputVariable": "myMatters",
@@ -69,12 +71,13 @@
         "entityType": "sprk_matter",
         "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids)."
       }
     },
     {
       "name": "Query New Work Assignments",
       "nodeType": "Workflow",
+      "executorType": 51,
       "actionType": 51,
       "canvasType": "queryDataverse",
       "outputVariable": "workAssignmentsQuery",
@@ -85,16 +88,17 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_workassignment",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_workassignment\"><attribute name=\"sprk_name\"/><attribute name=\"sprk_workassignmentid\"/><attribute name=\"sprk_workassignmentnumber\"/><attribute name=\"sprk_priority\"/><attribute name=\"sprk_responseduedate\"/><attribute name=\"sprk_assignedto\"/><attribute name=\"sprk_assignedtointernal\"/><attribute name=\"sprk_assignedattorney1\"/><attribute name=\"sprk_assignedparalegal1\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\"/><filter type=\"or\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_workassignment\"><attribute name=\"sprk_name\"/><attribute name=\"sprk_workassignmentid\"/><attribute name=\"sprk_workassignmentnumber\"/><attribute name=\"sprk_priority\"/><attribute name=\"sprk_responseduedate\"/><attribute name=\"sprk_assignedto\"/><attribute name=\"sprk_assignedtointernal\"/><attribute name=\"sprk_assignedattorney1\"/><attribute name=\"sprk_assignedparalegal1\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\"/><filter type=\"or\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "New OR updated sprk_workassignment records (statecode=Active 0, createdon OR modifiedon in last {{timeWindowHours}}) where EITHER (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: createdon desc."
+        "description": "Active sprk_workassignment rows (statecode 0) created or modified in the last 24 hours (timeWindowHours; the scheduler passes 24), where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the assignment's own owner is the user. Newest createdon first, at most 50."
       }
     },
     {
       "name": "Has Assignments?",
       "nodeType": "Control",
+      "executorType": 30,
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasAssignments",
@@ -115,6 +119,7 @@
     {
       "name": "Create Notification",
       "nodeType": "Workflow",
+      "executorType": 50,
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "workAssignmentNotification",
@@ -146,7 +151,7 @@
           "sourceModifiedOn": "{{item.modifiedon}}",
           "sourceOwningUser": "{{item.ownerid}}",
           "viaMatterId": "{{item.sprk_regardingmatter}}",
-          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
           "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
