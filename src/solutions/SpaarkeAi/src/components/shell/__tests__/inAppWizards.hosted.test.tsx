@@ -76,6 +76,24 @@ describe("FindSimilarApp — in-app (SprkModal)", () => {
     expect(windowClose).not.toHaveBeenCalled();
   });
 
+  it("a preselected documentId (#1479) opens with that document chosen and Find Similar enabled, in both layouts", () => {
+    const initialDocument = { documentId: "abc-123", containerId: "c1" };
+    const first = inHost(<FindSimilarApp {...baseProps} initialDocument={initialDocument} inApp={{ onClose: jest.fn() }} />);
+    expect(screen.getByText("Selected document")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Find Similar/ })).toBeEnabled();
+    first.unmount();
+
+    inHost(<FindSimilarApp {...baseProps} initialDocument={initialDocument} />); // the code-page layout
+    expect(screen.getByText("Selected document")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Find Similar/ })).toBeEnabled();
+  });
+
+  it("an empty documentId preselects nothing", () => {
+    inHost(<FindSimilarApp {...baseProps} initialDocument={{ documentId: "" }} inApp={{ onClose: jest.fn() }} />);
+    expect(screen.queryByText("Selected document")).toBeNull();
+    expect(screen.getByRole("button", { name: /Find Similar/ })).toBeDisabled();
+  });
+
   it("Find Similar stays disabled until a record or file is chosen", () => {
     inHost(<FindSimilarApp {...baseProps} inApp={{ onClose: jest.fn() }} />);
     expect(screen.getByRole("button", { name: /Find Similar/ })).toBeDisabled();

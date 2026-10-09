@@ -52,6 +52,14 @@ export interface IFindSimilarAppProps {
    * closes ONLY through this callback. Absent = the code-page layout under the Dataverse
    * `navigateTo` dialog's chrome, whose Cancel clicks the platform close button.
    */
+  /**
+   * Preselected document from the launch data (`documentId` / `containerId`; #1479). A non-empty
+   * `documentId` opens with Path A already chosen; `containerId` is carried but never used to select anything.
+   */
+  initialDocument?: {
+    readonly documentId: string;
+    readonly containerId?: string;
+  };
   inApp?: {
     readonly onClose: () => void;
     /** App-shell `--sprk-ui-scale`. */
@@ -183,7 +191,11 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
   const [selectedRecord, setSelectedRecord] = React.useState<{
     id: string;
     name: string;
-  } | null>(null);
+  } | null>(() =>
+    props.initialDocument?.documentId
+      ? { id: props.initialDocument.documentId, name: "Selected document" }
+      : null
+  );
 
   // State: uploaded file (Path B)
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);

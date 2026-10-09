@@ -239,6 +239,17 @@ interface NavigateToParams {
   title?: string;
 }
 
+/**
+ * A `navigateTo` rejection that is NOT the user closing/cancelling the dialog (Dataverse errorCode 2)
+ * is a real dialog failure: log it with the surface name (never a token or payload; ADR-019) instead
+ * of swallowing it. Cancels stay silent.
+ */
+function logNavigateFailure(webresourceName: string, err: unknown): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((err as any)?.errorCode === 2) return;
+  console.error(`[wizardLaunchers] navigateTo failed for ${webresourceName}:`, err);
+}
+
 function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): void {
   // Tasks 112/113: a mounted in-app host opens the wizards it supports itself.
   if (tryOpenInApp(webresourceName, data) !== null) return;
@@ -261,9 +272,9 @@ function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): voi
           ...(title !== undefined ? { title } : {}),
         }
       )
-      .catch(() => {
-        // Intentional: user cancel / dialog error — ignore (matches
-        // WorkspaceGrid.tsx's try/await/catch swallow precedent).
+      .catch((err: unknown) => {
+        // User cancel is silent; a real dialog failure is logged (not thrown: fire-and-forget).
+        logNavigateFailure(webresourceName, err);
       });
   } catch {
     /* xrm getter threw — silent */
@@ -462,8 +473,9 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
       }
     );
     return { launched: true };
-  } catch {
-    // User cancel / dialog error — the outcome (if any) is in sessionStorage.
+  } catch (err) {
+    // The outcome (if any) is in sessionStorage; a real dialog failure is logged, a cancel is silent.
+    logNavigateFailure(params.webresourceName, err);
     return { launched: true, cancelled: true };
   }
 }

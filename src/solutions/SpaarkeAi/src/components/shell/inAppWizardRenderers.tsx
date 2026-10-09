@@ -21,6 +21,7 @@ import type { InAppWizardRenderer, InAppWizardRenderers } from '@spaarke/ui-comp
 import { DocumentUploadWizardDialog } from '../../../../DocumentUploadWizard/src/DocumentUploadWizardDialog';
 import { resolveUploadLaunchParams } from '../../../../DocumentUploadWizard/src/launchParams';
 import { FindSimilarApp } from '../../../../FindSimilarCodePage/src/App';
+import { parseFindSimilarLaunch } from '../../../../FindSimilarCodePage/src/launchParams';
 import { App as WorkspaceLayoutWizardApp } from '../../../../WorkspaceLayoutWizard/src/App';
 import { parseLayoutWizardData } from '../../../../WorkspaceLayoutWizard/src/launchParams';
 
@@ -42,6 +43,7 @@ export const renderDocumentUploadWizard: InAppWizardRenderer = ({ data, onClose,
 
 /** Find Similar (`sprk_findsimilar`): the lookup / upload form in SprkModal. */
 export const renderFindSimilarWizard: InAppWizardRenderer = ({
+  data,
   onClose,
   bffBaseUrl,
   tenantId,
@@ -54,6 +56,7 @@ export const renderFindSimilarWizard: InAppWizardRenderer = ({
     tenantId={tenantId ?? ''}
     authenticatedFetch={authenticatedFetch}
     initialFileRefs={initialFileRefs}
+    initialDocument={parseFindSimilarLaunch(`?${data}`)}
     inApp={{ onClose, uiScale }}
   />
 );

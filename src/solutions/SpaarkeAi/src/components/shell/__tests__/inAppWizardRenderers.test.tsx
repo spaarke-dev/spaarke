@@ -115,6 +115,18 @@ describe("inAppWizardRenderers", () => {
     expect(p.inApp).toEqual({ onClose, uiScale: 1.5 });
   });
 
+  it("Find Similar: passes the documentId / containerId launch params as initialDocument (#1479)", () => {
+    render(
+      <>{renderFindSimilarWizard(ctx({ data: "documentId=%7BABC-123%7D&containerId=cont-1&bffBaseUrl=x" }))}</>
+    );
+    expect(mockFindSimilarProps.current.initialDocument).toEqual({ documentId: "abc-123", containerId: "cont-1" });
+  });
+
+  it("Find Similar: the empty params WorkspaceGrid sends preselect nothing", () => {
+    render(<>{renderFindSimilarWizard(ctx({ data: "documentId=&containerId=&bffBaseUrl=x" }))}</>);
+    expect(mockFindSimilarProps.current.initialDocument).toEqual({ documentId: "", containerId: "" });
+  });
+
   it("Find Similar: a host with no resolved tenant passes an empty string, never undefined", () => {
     render(<>{renderFindSimilarWizard(ctx({ tenantId: undefined }))}</>);
     expect(mockFindSimilarProps.current.tenantId).toBe("");
