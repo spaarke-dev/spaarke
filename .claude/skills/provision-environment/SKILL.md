@@ -1912,6 +1912,7 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 🔔 MANUAL GATE: Customer admin consent required (Model 2)
 
   Handler: H0.5 consent-callback
+  NOTE (T258): the BFF maps this route only with `Onboarding__Enabled=true`, which no stamp sets; the endpoint cannot carry consent to L2 as built (ISS-013).
   Reason:  The customer's BFF app-reg (created by H3) needs admin consent on the customer's
            Entra tenant before H10 can create a Dataverse Application User.
 

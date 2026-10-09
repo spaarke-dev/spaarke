@@ -278,6 +278,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - `tests/Spaarke.ArchTests/IOptionsDriftTests.cs` (task 204e) fails the PR when a `ValidateOnStart` options type demands a key no stamp channel writes. Per-PR, not nightly. Checklist: `bff-extensions.md` §F.5.
 
 Full mechanic: `.claude/patterns/provisioning/progressive-fail-fast-recovery.md`.
+- An `Exempt` census row names its `Gate`; `IOptionsDriftTests` fails when a stamp channel writes that gate without the demanded key (T258). The BFF's H0.5 consent callback is such a gate (`Onboarding:Enabled`, off on every stamp).
 
 ## Reserved-suffix registry for global-namespace resources
 

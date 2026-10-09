@@ -250,6 +250,57 @@ row as each is fixed.
 
 ---
 
+### ISS-012 — `Graph:Scopes` is required at BFF startup but nothing reads it
+
+| Field | Value |
+|---|---|
+| **Status** | Open — not blocking (T258 supplies the value on every stamp) |
+| **Urgency** | later (maintainability) |
+| **Filed** | 2026-10-09 (T258) |
+| **Source** | T258 — reading the validators behind 204e-F7 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1499 |
+
+**Description**
+
+`GraphOptions.Scopes` carries `[Required]` + `[MinLength(1)]` with an empty default, so a BFF without
+`Graph__Scopes__0` does not start in any environment. No code reads `GraphOptions.Scopes`: every Graph client builds its
+own scopes. T258 writes the literal `https://graph.microsoft.com/.default` through the manifest so stamps start. This is
+the same latent-blocker class auth-v4 task 024 removed for `Graph:ClientSecret` (a rule that only prevents a boot).
+
+**Suggested fix**
+
+Owner decision (it changes a validator): drop the property and its two attributes, then the manifest entry
+`Graph__Scopes__0` and the `IOptionsDriftTests` census row. Until then the manifest literal is correct and harmless.
+
+### ISS-013 — The H0.5 consent callback cannot work as built (Model 2, out of scope)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — dormant: T258 gates the endpoint off (`Onboarding:Enabled`, default false) |
+| **Urgency** | when Model 2 returns (plan D3) |
+| **Filed** | 2026-10-09 (T258) |
+| **Source** | T258 — deciding whether a stamp needs the Onboarding endpoint (204e-F5) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1500 |
+
+**Description**
+
+`POST /api/onboarding/consent-callback` (BFF, task 042) cannot carry a Model 2 consent into L2 on any current host:
+(1) it enqueues to `sprk-provisioning-jobs` through the host BFF's own Service Bus client — on a customer stamp that is
+the stamp's namespace, which has no such queue and which L2 does not drain; (2) Microsoft's admin-consent redirect is a
+browser GET carrying `admin_consent`, `tenant` and `state` in the query, not an HMAC-signed POST, so something else
+would have to sign and forward it; (3) no host was ever given an `Onboarding:HmacSigningKey` (spaarke-bff-dev ran with
+`Onboarding__EnableDevBypass=true`, so the route answered 401 to every call). T258 maps the route and registers its
+services only when `Onboarding:Enabled=true`; no stamp channel sets it, and `IOptionsDriftTests` fails if one does
+without supplying the key.
+
+**Suggested fix**
+
+When Model 2 is reopened, decide the consent-capture host (L2 itself is the natural one — it owns the queue and the
+run) and either rebuild the callback there or remove the BFF endpoint, `HmacSignatureVerifier`,
+`ServiceBusProvisioningEnqueuer` and their tests. Needed → build, else remove.
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
@@ -296,52 +347,3 @@ in to Azure as the app, with all its roles, before review.
 **Suggested fix**
 
 Delete the credential; drop `pull_request` from the OIDC guide's setup loop (guide row already corrected).
-
-### ISS-012 — `Graph:Scopes` is required at BFF startup but nothing reads it
-
-| Field | Value |
-|---|---|
-| **Status** | Open — not blocking (T258 supplies the value on every stamp) |
-| **Urgency** | later (maintainability) |
-| **Filed** | 2026-10-09 (T258) |
-| **Source** | T258 — reading the validators behind 204e-F7 |
-| **GitHub Issue** | not yet filed (T258 ran as an isolated sub-agent with no GitHub writes) |
-
-**Description**
-
-`GraphOptions.Scopes` carries `[Required]` + `[MinLength(1)]` with an empty default, so a BFF without
-`Graph__Scopes__0` does not start in any environment. No code reads `GraphOptions.Scopes`: every Graph client builds its
-own scopes. T258 writes the literal `https://graph.microsoft.com/.default` through the manifest so stamps start. This is
-the same latent-blocker class auth-v4 task 024 removed for `Graph:ClientSecret` (a rule that only prevents a boot).
-
-**Suggested fix**
-
-Owner decision (it changes a validator): drop the property and its two attributes, then the manifest entry
-`Graph__Scopes__0` and the `IOptionsDriftTests` census row. Until then the manifest literal is correct and harmless.
-
-### ISS-013 — The H0.5 consent callback cannot work as built (Model 2, out of scope)
-
-| Field | Value |
-|---|---|
-| **Status** | Open — dormant: T258 gates the endpoint off (`Onboarding:Enabled`, default false) |
-| **Urgency** | when Model 2 returns (plan D3) |
-| **Filed** | 2026-10-09 (T258) |
-| **Source** | T258 — deciding whether a stamp needs the Onboarding endpoint (204e-F5) |
-| **GitHub Issue** | not yet filed (T258 ran as an isolated sub-agent with no GitHub writes) |
-
-**Description**
-
-`POST /api/onboarding/consent-callback` (BFF, task 042) cannot carry a Model 2 consent into L2 on any current host:
-(1) it enqueues to `sprk-provisioning-jobs` through the host BFF's own Service Bus client — on a customer stamp that is
-the stamp's namespace, which has no such queue and which L2 does not drain; (2) Microsoft's admin-consent redirect is a
-browser GET carrying `admin_consent`, `tenant` and `state` in the query, not an HMAC-signed POST, so something else
-would have to sign and forward it; (3) no host was ever given an `Onboarding:HmacSigningKey` (spaarke-bff-dev ran with
-`Onboarding__EnableDevBypass=true`, so the route answered 401 to every call). T258 maps the route and registers its
-services only when `Onboarding:Enabled=true`; no stamp channel sets it, and `IOptionsDriftTests` fails if one does
-without supplying the key.
-
-**Suggested fix**
-
-When Model 2 is reopened, decide the consent-capture host (L2 itself is the natural one — it owns the queue and the
-run) and either rebuild the callback there or remove the BFF endpoint, `HmacSignatureVerifier`,
-`ServiceBusProvisioningEnqueuer` and their tests. Needed → build, else remove.
