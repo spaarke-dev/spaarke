@@ -56,6 +56,10 @@ import {
   isAuthFailure,
   type AuthenticatedFetchFn,
 } from '@spaarke/auth';
+import type { PaneEventBus } from '@spaarke/ai-widgets/events';
+
+import type { Intent } from './CommandRouter';
+import { HardSlashes } from './CommandRouter';
 
 /**
  * The HTTP status of a failure the injected `authenticatedFetch` THREW (it never returns a non-OK
@@ -67,10 +71,6 @@ function thrownHttpStatus(err: unknown): number | null {
   if (isAuthFailure(err)) return 401;
   return null;
 }
-import type { PaneEventBus } from '@spaarke/ai-widgets/events';
-
-import type { Intent } from './CommandRouter';
-import { HardSlashes } from './CommandRouter';
 
 // ---------------------------------------------------------------------------
 // Telemetry event-name constants (ADR-015 — name + decision + timestamp only)

@@ -493,6 +493,9 @@ function mapSession(item: any): HistorySessionRow {
   };
 }
 
+/** Shown when authenticatedFetch's 401 retries are spent — "try again" cannot succeed. */
+const SIGN_IN_EXPIRED_MESSAGE = "Your sign-in has expired. Refresh the page and sign in again.";
+
 /** FR-D8 time-grouping buckets, in display order. */
 const GROUP_ORDER = ["Today", "Yesterday", "This week", "Older"] as const;
 type GroupLabel = (typeof GROUP_ORDER)[number];
@@ -897,7 +900,12 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
     } catch (err) {
       // authenticatedFetch THROWS for a non-OK response — same outcome as the `!response.ok` branch:
       // the server's ProblemDetails detail (400 already-associated), else the friendly fallback.
-      if (isApiError(err) || isAuthFailure(err)) {
+      if (isAuthFailure(err)) {
+        setRelatedError(SIGN_IN_EXPIRED_MESSAGE);
+        setRelatedSubmitting(false);
+        return;
+      }
+      if (isApiError(err)) {
         setRelatedError(problemOf(err)?.detail || "Couldn't set the related record. Try again.");
         setRelatedSubmitting(false);
         return;
@@ -979,7 +987,12 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
     } catch (err) {
       // authenticatedFetch THROWS for a non-OK response — same outcome as the `!response.ok` branch:
       // the server's ProblemDetails detail, else the friendly fallback (never "HTTP 500").
-      if (isApiError(err) || isAuthFailure(err)) {
+      if (isAuthFailure(err)) {
+        setRenameError(SIGN_IN_EXPIRED_MESSAGE);
+        setRenaming(false);
+        return;
+      }
+      if (isApiError(err)) {
         setRenameError(problemOf(err)?.detail || "Couldn't rename this conversation. Try again.");
         setRenaming(false);
         return;
@@ -1048,7 +1061,12 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         setDeleteTarget(null);
         return;
       }
-      if (isApiError(err) || isAuthFailure(err)) {
+      if (isAuthFailure(err)) {
+        setDeleteError(SIGN_IN_EXPIRED_MESSAGE);
+        setDeleting(false);
+        return;
+      }
+      if (isApiError(err)) {
         setDeleteError("Couldn't delete this conversation. Try again.");
         setDeleting(false);
         return;

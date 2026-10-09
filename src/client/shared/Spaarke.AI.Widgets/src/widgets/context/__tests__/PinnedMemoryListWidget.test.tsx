@@ -28,7 +28,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
-import { ApiError } from '@spaarke/auth';
+import { ApiError, AuthError } from '@spaarke/auth';
 import type { PinDto } from '../../../components/memory/pinned-memory-contracts';
 
 // ---------------------------------------------------------------------------
@@ -410,6 +410,16 @@ describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
     renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     expect(await screen.findByText('Could not load pinned memory. Please try again.')).toBeInTheDocument();
+  });
+
+  it('an expired sign-in (AuthError) says to sign in again, not "try again"', async () => {
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      new AuthError('Authentication failed after all retry attempts', 'auth_exhausted')
+    );
+    renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
+
+    expect(await screen.findByText('Your sign-in has expired. Refresh the page and sign in again.')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load pinned memory. Please try again.')).not.toBeInTheDocument();
   });
 });
 

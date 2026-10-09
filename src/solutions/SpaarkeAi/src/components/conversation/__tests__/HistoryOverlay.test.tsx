@@ -418,6 +418,26 @@ describe("HistoryMenu (task 037, FR-D6/D7/D8)", () => {
     expect(alert).not.toHaveTextContent(/HTTP 500/);
   });
 
+  // An exhausted sign-in (authenticatedFetch throws AuthError) cannot be fixed by retrying.
+  it.each([
+    ["rename", "onPatch", "history-menu-overflow-rename-s1", "rename-session-confirm"],
+    ["set related", "onPost", "history-menu-overflow-set-related-s1", "set-related-confirm"],
+    ["delete", "onDelete", "history-menu-overflow-delete-s1", "delete-session-confirm"],
+  ] as const)("%s after an expired sign-in says to sign in again", async (_label, hook, menuItem, confirm) => {
+    const handler = jest.fn().mockReturnValue({ ok: false, status: 401 });
+    renderMenu({ fetchScript: { sessions, [hook]: handler } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId(menuItem));
+    await user.click(await screen.findByTestId(confirm));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your sign-in has expired. Refresh the page and sign in again.");
+    expect(alert).not.toHaveTextContent(/Try again/);
+  });
+
   it("records the real HTTP status in load-failure telemetry", async () => {
     const spy = jest.spyOn(errorTelemetry, "logTelemetryError").mockImplementation(() => undefined);
     try {

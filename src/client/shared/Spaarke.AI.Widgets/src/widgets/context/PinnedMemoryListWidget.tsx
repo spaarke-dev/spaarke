@@ -56,7 +56,7 @@ import {
   PinRegular,
   SearchRegular,
 } from '@fluentui/react-icons';
-import { buildBffApiUrl, isApiError, problemOf } from '@spaarke/auth';
+import { buildBffApiUrl, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { useAiSession } from '../../providers/useAiSession';
@@ -353,10 +353,11 @@ async function extractError(response: Response): Promise<string> {
 /**
  * {@link extractError} for a failure `authenticatedFetch` THREW — it never returns a non-OK Response, so
  * the server's ProblemDetails (e.g. the title/content length cap) arrives as `ApiError.problemDetails`.
- * `null` when the error is not an HTTP failure (network, expired sign-in): the caller keeps its generic
- * sentence for those.
+ * An expired sign-in gets its own sentence, since "try again" cannot succeed. `null` for a network
+ * failure: the caller keeps its generic sentence for that.
  */
 function thrownRequestError(err: unknown): string | null {
+  if (isAuthFailure(err)) return 'Your sign-in has expired. Refresh the page and sign in again.';
   if (!isApiError(err)) return null;
   const problem = problemOf(err);
   if (problem && typeof problem.detail === 'string' && problem.detail.length > 0) return problem.detail;
