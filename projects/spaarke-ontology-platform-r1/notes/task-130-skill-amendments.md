@@ -46,3 +46,18 @@ Add a short "PCF publish" note under step 4: "An imported PCF build is NOT serve
 
 ## Docs and CLAUDE.md files also changed in the code PR (no .claude action)
 `src/client/pcf/CLAUDE.md`, `docs/guides/*`, `docs/procedures/production-release.md`, `infrastructure/**`. `.claude` is already in the lint roots. The three skill files are on a temporary allow-list, `tests/scripts/publish-lint-allowlist.txt` (reason: this note is not applied yet). After applying this note, delete those three lines from the allow-list in the same commit, so the skills are linted. The new-text cells in the tables above and the binding block contain none of the banned forms; the old-text cells quote them, which is why this note itself is not linted.
+
+
+## Add to the dataverse-deploy skill: workflows, resume, read-back, probe method (round 4)
+
+**A solution that contains a workflow or cloud flow (component type 29).** The scoped import refuses it by default: the `RetrieveUnpublished` probe answers "record does not exist" (error 0x80040217) for workflows, so the function is bound to the table and a draft layer cannot be ruled out, and a workflow is activated by the import, not by `PublishXml`. When the solution really contains one, run the import with `-AllowWorkflows`:
+`pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath <zip> -SolutionUniqueName <name> -AllowWorkflows`
+This adds `--activate-plugins` to the pac import (the pac help text for that option is "Activate plug-ins and workflows on the solution"), publishes the rest as usual, and afterwards reads `workflows(id).statecode` for every workflow in the solution; it fails unless each is 1 (Activated).
+
+**If a publish request fails part-way.** The error prints the resume command; run it, it does not re-import:
+`pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -SolutionUniqueName <name> -PublishOnly`
+Requests go out in this order so nothing goes live before what it uses: option sets and web resources, entities, the application ribbon, site maps and dashboards, app modules last.
+
+**Read-back and its known limit.** After every request the script compares web resources, app modules, app settings, site maps and (for each published entity) system forms, saved queries and charts with their `RetrieveUnpublished` copies. Option sets and the application ribbon have no read-back surface: check them by effect.
+
+**Probe method (why a type is on the no-publish list).** Call `<set>(<fake id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished()`. Only error code 0x80060888 ("Resource not found for the segment") proves the table is not bound to the unpublished-layer function. Error 0x80040217 ("... Does Not Exist") means the function is bound and only the record is missing, so the table has a draft layer. The reviewer re-probed every no-publish type with a fake id and all returned 0x80060888; I re-probed field permissions (0x80060888), app settings and workflows (0x80040217).
