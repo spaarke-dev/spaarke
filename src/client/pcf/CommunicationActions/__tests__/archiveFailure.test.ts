@@ -31,7 +31,15 @@ describe('archiveFailureMessage', () => {
     );
   });
 
-  it('keeps a non-HTTP error message (network)', () => {
-    expect(archiveFailureMessage(new TypeError('Failed to fetch'))).toBe('Failed to fetch');
+  it('a network failure (fetch TypeError) says the server could not be reached, not "Failed to fetch"', () => {
+    expect(archiveFailureMessage(new TypeError('Failed to fetch'))).toBe(
+      'Save to SharePoint failed: the Spaarke server could not be reached. Check your connection.'
+    );
+  });
+
+  it('any other non-HTTP error is the plain frame, never its raw message', () => {
+    expect(archiveFailureMessage(new SyntaxError('Unexpected token < in JSON at position 0'))).toBe(
+      'Save to SharePoint failed.'
+    );
   });
 });

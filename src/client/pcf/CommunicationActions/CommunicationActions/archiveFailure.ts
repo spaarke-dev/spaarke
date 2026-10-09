@@ -22,5 +22,11 @@ export function archiveFailureMessage(err: unknown): string {
   if (isAuthFailure(err)) {
     return 'Save to SharePoint failed: your sign-in has expired. Refresh the page to sign in again.';
   }
-  return err instanceof Error && err.message ? err.message : 'Save to SharePoint failed.';
+  // `fetch` rejects with a TypeError when the request never got an answer (offline, DNS, CORS). Any other
+  // non-HTTP error (e.g. an unreadable success body) is not a connectivity problem; neither shows the raw
+  // browser message ("Failed to fetch").
+  if (err instanceof TypeError) {
+    return 'Save to SharePoint failed: the Spaarke server could not be reached. Check your connection.';
+  }
+  return 'Save to SharePoint failed.';
 }
