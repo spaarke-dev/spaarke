@@ -38,6 +38,14 @@
       dashboards     system form (type 0): published formxml and modifiedon equal the unpublished ones
       site maps      published modifiedon and sitemapxml equal the unpublished ones. Microsoft Learn says the <sitemap> value in
                      ParameterXml "is not used", so a site map that failed to publish would otherwise pass silently
+    PENDING COLLATERAL (owner decision D-103): PublishXml has no per-view or per-form element, so publishing an entity also publishes
+    every pending (unpublished) view, form and chart of that entity, and publishing an app (needed for an app setting) publishes the
+    whole app. When that would publish SOMEONE ELSE'S pending change, the procedure STOPS before any import or publish, lists every
+    entity or app and each pending component, and prints the exact re-run command with the opt-in flag -AllowPendingCollateral (the
+    flag name was chosen because no existing module name fits). With the flag it warns, lists and continues. The solution's own
+    installed items are left out. The check runs before `pac solution import`, so nothing is half-imported when it stops. The
+    -PublishOnly resume applies the same rule, and the printed resume command carries the flag only if the original run had it.
+
     KNOWN LIMITS (read-back and workflows)
       K3  -AllowWorkflows requires EVERY workflow in the solution to read statecode 1, so a workflow deliberately left as a draft cannot
           pass. No solution in the repo or on spaarkedev1 has one today; handle that case by hand if it ever appears.
@@ -361,6 +369,36 @@ function Get-ZipSolutionInfo {
     }
 }
 
+function Resolve-PendingCollateral {
+<#
+.SYNOPSIS  D-103. Lists the pending (unpublished) changes that a publish of these entities and parent apps would ALSO publish, and
+           STOPS (throws) unless -Allow. With -Allow it warns for each item and returns. Nothing is imported or published by this
+           function. -RerunCommand is the exact command (without the flag) to run again; the message appends -AllowPendingCollateral.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Context,
+        [string[]]$Entities = @(), [string[]]$ParentApps = @(), [string[]]$OwnIds = @(), [string[]]$InSolutionApps = @(),
+        [switch]$Allow, [Parameter(Mandatory)][string]$RerunCommand
+    )
+    $items = @()
+    foreach ($ent in @($Entities | Where-Object { $_ } | Select-Object -Unique)) {
+        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $OwnIds)) { $items += "entity ${ent}: $c" }
+    }
+    $inApps = @($InSolutionApps | ForEach-Object { "$_".Trim('{', '}').ToLowerInvariant() })
+    foreach ($app in @($ParentApps | Where-Object { $_ } | ForEach-Object { "$_".Trim('{', '}').ToLowerInvariant() } | Select-Object -Unique)) {
+        if ($inApps -contains $app) { continue }   # the app is part of the solution: its own changes are the ones being published
+        foreach ($c in @(Get-AppPendingChanges -Context $Context -AppId $app)) { $items += "parent app ${app} (outside the solution; an app setting publish publishes the whole app): $c" }
+    }
+    if ($items.Count -eq 0) { return @() }
+    if ($Allow) {
+        foreach ($i in $items) { Write-Warning "Publishing will also publish someone else's pending change (allowed by -AllowPendingCollateral): $i" }
+        return $items
+    }
+    throw ("Stopping BEFORE any import or publish: this publish would also publish pending (unpublished) changes that are not part of the solution:`n  - " +
+        ($items -join "`n  - ") + "`nIf publishing them is intended, re-run with the opt-in flag:`n  $RerunCommand -AllowPendingCollateral")
+}
+
 function Invoke-ImportPreflight {
 <#
 .SYNOPSIS  Runs before ANY import of an unmanaged solution: (1) every component type the ZIP carries (root components,
@@ -372,7 +410,9 @@ function Invoke-ImportPreflight {
     param(
         [Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$SolutionUniqueName,
         [string[]]$ExtraEntities = @(),
-        [switch]$AllowWorkflows
+        [switch]$AllowWorkflows,
+        [switch]$AllowPendingCollateral,
+        [string]$RerunCommand = 'the same command'
     )
     $zipInfo = Get-ZipSolutionInfo -ZipPath $ZipPath
     $installed = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
@@ -382,23 +422,17 @@ function Invoke-ImportPreflight {
         throw "Refusing to import ${SolutionUniqueName}: $($unknown -join ', ') cannot be published by the scoped procedure. Map them in scripts/lib/Publish-SolutionComponents.ps1 first. Nothing was imported."
     }
     $own = @($installed | Where-Object { $_ } | ForEach-Object { $_.objectid })
-    foreach ($ent in @($zipInfo.RootEntities) + $ExtraEntities | Select-Object -Unique) {
-        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $own)) { Write-Warning "Entity publish of $ent will also publish pending change: $c" }
-    }
     # K2: an app setting whose parent app sits OUTSIDE the solution publishes that whole app, with anyone else's pending changes to it.
-    $inSolutionApps = @($installed | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)".Trim('{', '}').ToLowerInvariant() })
+    $inSolutionApps = @($installed | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)" })
     $parents = @()
     foreach ($row in @($installed | Where-Object { $_ -and [int]$_.componenttype -eq 10075 })) {
         $p = Get-AppSettingParent -Context $Context -AppSettingId "$($row.objectid)"
-        if ($p) { $parents += "$p".Trim('{', '}').ToLowerInvariant() }
+        if ($p) { $parents += "$p" }
     }
     $parents += @($zipInfo.AppSettingParents)
-    foreach ($app in @($parents | Where-Object { $_ } | Select-Object -Unique)) {
-        $where = if ($inSolutionApps -contains $app) { 'in the solution' } else { 'OUTSIDE the solution (or not yet installed)' }
-        foreach ($c in @(Get-AppPendingChanges -Context $Context -AppId $app)) {
-            Write-Warning "App setting publish will publish the whole parent app $app ($where); pending change: $c"
-        }
-    }
+    # D-103: stop (before the import) unless the caller opted in.
+    Resolve-PendingCollateral -Context $Context -Entities (@($zipInfo.RootEntities) + $ExtraEntities) -ParentApps $parents -OwnIds $own `
+        -InSolutionApps $inSolutionApps -Allow:$AllowPendingCollateral -RerunCommand $RerunCommand | Out-Null
     return $zipInfo
 }
 
@@ -616,6 +650,7 @@ function Publish-SolutionComponents {
         [switch]$IncludeControlHostEntities,
         [switch]$SkipCollateralCheck,
         [switch]$AllowWorkflows,
+        [switch]$AllowPendingCollateral,
         [int]$ChunkSize = 25
     )
     # Validate first: nothing unvalidated may reach a REST call or the resume command.
@@ -631,12 +666,6 @@ function Publish-SolutionComponents {
         -Dashboards $plan.Dashboards -AppModules $plan.AppModules -AppSettings $plan.AppSettings -ApplicationRibbon:([bool]$plan.ApplicationRibbon) -ChunkSize $ChunkSize)
     if ($chunks.Count -eq 0) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
     Write-Host "Scoped publish of ${SolutionUniqueName}: $($allEntities.Count) entities, $($allWebs.Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules, $(@($plan.AppSettings).Count) app settings, application ribbon: $([bool]$plan.ApplicationRibbon), in $($chunks.Count) request(s)."
-    if (-not $SkipCollateralCheck) {
-        $own = @(Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName | ForEach-Object { $_.objectid })
-        foreach ($e in @($plan.Entities) + $ExtraEntities | Select-Object -Unique) {
-            foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $e -ExcludeIds $own)) { Write-Warning "Entity publish of $e will also publish pending change: $c" }
-        }
-    }
     $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
     # Components published in THIS run that are not in the solution (a caller's -Extra* lists) are lost by a plain -PublishOnly resume,
     # so the resume command carries them. FORMAT: one single-quoted, comma-separated string ('g1,g2'). Bash and PowerShell both deliver it
@@ -649,6 +678,17 @@ function Publish-SolutionComponents {
     $outsideNote = ''
     if ($outsideWebs.Count -gt 0) { $resume += " -ExtraWebResources '$($outsideWebs -join ',')'"; $outsideNote += " web resources outside the solution: $($outsideWebs -join ', ');" }
     if ($outsideEnts.Count -gt 0) { $resume += " -ExtraEntities '$($outsideEnts -join ',')'"; $outsideNote += " entities outside the solution: $($outsideEnts -join ', ');" }
+    # The pending-collateral rule applies to the resume too: it carries the opt-in flag ONLY if this run had it. $resumeBase is the command without the flag.
+    $resumeBase = $resume
+    if ($AllowPendingCollateral) { $resume += ' -AllowPendingCollateral' }
+    if (-not $SkipCollateralCheck) {
+        $rows = @(Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName)
+        $own = @($rows | Where-Object { $_ } | ForEach-Object { $_.objectid })
+        $inApps = @($rows | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)" })
+        $parents = @($plan.AppSettings | Where-Object { $_ } | ForEach-Object { Get-AppSettingParent -Context $Context -AppSettingId $_ })
+        Resolve-PendingCollateral -Context $Context -Entities (@($plan.Entities) + $ExtraEntities) -ParentApps $parents -OwnIds $own -InSolutionApps $inApps `
+            -Allow:$AllowPendingCollateral -RerunCommand $resumeBase | Out-Null
+    }
     $n = 0
     foreach ($c in $chunks) {
         $n++
@@ -688,7 +728,8 @@ function Invoke-ScopedSolutionImport {
         [string[]]$ExtraWebResources = @(),
         [string[]]$ExtraEntities = @(),
         [switch]$IncludeControlHostEntities,
-        [switch]$AllowWorkflows
+        [switch]$AllowWorkflows,
+        [switch]$AllowPendingCollateral
     )
     $ExtraWebResources = @(ConvertTo-ExtraList -Values $ExtraWebResources -Kind WebResource)
     $ExtraEntities = @(ConvertTo-ExtraList -Values $ExtraEntities -Kind Entity)
@@ -701,11 +742,16 @@ function Invoke-ScopedSolutionImport {
     if (-not $Context) { $Context = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
 
     # PRE-FLIGHT (before anything is imported): an import must never be left unpublished.
-    Invoke-ImportPreflight -Context $Context -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ExtraEntities $ExtraEntities -AllowWorkflows:$AllowWorkflows | Out-Null
+    $rerun = "pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl $EnvironmentUrl -ZipPath '$ZipPath' -SolutionUniqueName $SolutionUniqueName" +
+        $(if ($AllowWorkflows) { ' -AllowWorkflows' } else { '' }) +
+        $(if ($ExtraWebResources.Count -gt 0) { " -ExtraWebResources '$($ExtraWebResources -join ',')'" } else { '' }) +
+        $(if ($ExtraEntities.Count -gt 0) { " -ExtraEntities '$($ExtraEntities -join ',')'" } else { '' })
+    Invoke-ImportPreflight -Context $Context -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ExtraEntities $ExtraEntities -AllowWorkflows:$AllowWorkflows `
+        -AllowPendingCollateral:$AllowPendingCollateral -RerunCommand $rerun | Out-Null
     if ($AllowWorkflows -and ($ImportArgs -notcontains '--activate-plugins')) { $ImportArgs = @($ImportArgs) + '--activate-plugins' }
 
     & $PacExe solution import --environment $EnvironmentUrl --path $ZipPath @ImportArgs
     if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
     return Publish-SolutionComponents -Context $Context -SolutionUniqueName $SolutionUniqueName `
-        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck -AllowWorkflows:$AllowWorkflows
+        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck -AllowWorkflows:$AllowWorkflows -AllowPendingCollateral:$AllowPendingCollateral
 }

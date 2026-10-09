@@ -35,7 +35,10 @@ param(
     [string[]]$ExtraWebResources = @(),
     [string[]]$ExtraEntities = @(),
     # Validate and print the normalized arguments, then stop (no token, no Dataverse call). Used by the end-to-end argument test.
-    [switch]$CheckArguments
+    [switch]$CheckArguments,
+    # D-103: publishing would also publish someone else's pending (unpublished) changes (other views/forms of an entity, a whole parent app).
+    # The default is to STOP before any import or publish and list them; this flag continues with a warning.
+    [switch]$AllowPendingCollateral
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
@@ -57,12 +60,12 @@ if ($PlanOnly) {
     return
 }
 if ($PublishOnly) {
-    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities | Out-Null
+    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral | Out-Null
     Write-Host "Scoped-published $SolutionUniqueName (no import). No tenant-wide publish was run."
     return
 }
 if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) { throw "-ZipPath is required and must exist (got '$ZipPath')." }
 Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName `
     -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows `
-    -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities | Out-Null
+    -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral | Out-Null
 Write-Host "Imported and scoped-published $SolutionUniqueName. No tenant-wide publish was run."

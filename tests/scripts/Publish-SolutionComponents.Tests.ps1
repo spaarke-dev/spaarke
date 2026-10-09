@@ -507,6 +507,79 @@ Describe 'extras: one printed form, validated on entry (round-6 F4/K5)' {
     }
 }
 
+Describe 'pending collateral stops unless flagged (D-103)' {
+    BeforeEach {
+        $script:PacCalled = $false; $script:Posts = 0
+        function global:pac-d103 { $script:PacCalled = $true; $global:LASTEXITCODE = 0 }
+    }
+    AfterEach { Remove-Item function:global:pac-d103 -ErrorAction SilentlyContinue }
+    It '1. entity collateral without the flag stops the import path: no pac import, no PublishXml, the item is listed with the re-run command' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(1); AllTypes = @(1); UnknownParts = @(); RootEntities = @('sprk_event'); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { $null }
+        Mock Get-EntityPublishCollateral { @('systemforms: Their form (f1)') }
+        Mock Invoke-RestMethod { if ("$Method" -eq 'Post') { $script:Posts++ }; $null }
+        $err = $null
+        try { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://org.crm.dynamics.com' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-d103' -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } | Out-Null } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'Stopping BEFORE any import or publish'
+        $err | Should -Match 'entity sprk_event: systemforms: Their form \(f1\)'
+        $err | Should -Match "pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl https://org.crm.dynamics.com -ZipPath 'a.zip' -SolutionUniqueName S -AllowPendingCollateral"
+        $script:PacCalled | Should -BeFalse
+        $script:Posts | Should -Be 0
+    }
+    It '1b. the standalone publish (and -PublishOnly) stops the same way before the first PublishXml' {
+        Mock Get-EntityPublishCollateral { @('savedqueries: Their view (v1)') }
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { $script:Posts++ }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 1; objectid = 'e1' }) } }
+                '*/EntityDefinitions(*' { return [pscustomobject]@{ LogicalName = 'sprk_event' } }
+                default { return $null }
+            }
+        }
+        $err = $null
+        try { Publish-SolutionComponents -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S | Out-Null } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'Stopping BEFORE'
+        $err | Should -Match 'savedqueries: Their view \(v1\)'
+        $err | Should -Match 'Import-SolutionScoped.ps1 -EnvironmentUrl https://org.crm.dynamics.com -SolutionUniqueName S -PublishOnly -AllowPendingCollateral'
+        $script:Posts | Should -Be 0
+    }
+    It '2. with -AllowPendingCollateral it warns, lists and continues (import runs)' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(1); AllTypes = @(1); UnknownParts = @(); RootEntities = @('sprk_event'); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { $null }
+        Mock Get-EntityPublishCollateral { @('systemforms: Their form (f1)') }
+        Mock Publish-SolutionComponents { [pscustomobject]@{} }
+        $w = & { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-d103' -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -AllowPendingCollateral | Out-Null } 3>&1
+        $script:PacCalled | Should -BeTrue
+        (@($w) -join ' ') | Should -Match 'Their form'
+    }
+    It '4. no collateral means no stop and no flag is needed' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(1); AllTypes = @(1); UnknownParts = @(); RootEntities = @('sprk_event'); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { $null }
+        Mock Get-EntityPublishCollateral { @() }
+        Mock Publish-SolutionComponents { [pscustomobject]@{} }
+        { Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-d103' -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } | Out-Null } | Should -Not -Throw
+        $script:PacCalled | Should -BeTrue
+    }
+    It '5. the resume command carries -AllowPendingCollateral only when the run had it' {
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { throw 'boom' }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                default { return $null }
+            }
+        }
+        $ctx = @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} }
+        $without = $null; $with = $null
+        try { Publish-SolutionComponents -Context $ctx -SolutionUniqueName S -SkipCollateralCheck } catch { $without = $_.Exception.Message }
+        try { Publish-SolutionComponents -Context $ctx -SolutionUniqueName S -SkipCollateralCheck -AllowPendingCollateral } catch { $with = $_.Exception.Message }
+        $without | Should -Match 'PublishOnly'
+        $without | Should -Not -Match 'AllowPendingCollateral'
+        $with | Should -Match 'PublishOnly -AllowPendingCollateral'
+    }
+}
+
 Describe 'request order and resume command' {
     It 'puts option sets and web resources first, entities next, app modules last' {
         $chunks = @(Split-PublishPlan -Entities @('sprk_a', 'sprk_b') -WebResources @('11111111-1111-1111-1111-111111111111') -OptionSets @('sprk_o') `
@@ -561,15 +634,28 @@ Describe 'workflows (type 29)' {
 }
 
 Describe 'app setting parent outside the solution (pre-flight warning)' {
-    It 'lists the parent app''s pending changes and says it is outside the solution' {
+    It 'STOPS (D-103) and lists the parent app and its pending change; with -AllowPendingCollateral it warns and continues' {
         Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(10075); AllTypes = @(10075); UnknownParts = @(); RootEntities = @(); AppSettingParents = @() } }
         Mock Get-SolutionComponentRows { @([pscustomobject]@{ componenttype = 10075; objectid = 's1' }) }
         Mock Get-AppSettingParent { '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}' }
         Mock Get-AppPendingChanges { @('app setting theirs (x)') }
-        $w = $null
-        Invoke-ImportPreflight -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -ZipPath 'a.zip' -SolutionUniqueName S -WarningVariable w -WarningAction SilentlyContinue | Out-Null
-        ($w -join ' ') | Should -Match 'OUTSIDE the solution'
-        ($w -join ' ') | Should -Match 'app setting theirs'
+        $ctx = @{ Api = 'https://x/api/data/v9.2'; Headers = @{} }
+        $err = $null
+        try { Invoke-ImportPreflight -Context $ctx -ZipPath 'a.zip' -SolutionUniqueName S -RerunCommand 'pwsh scripts/Import-SolutionScoped.ps1 -X' | Out-Null } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'Stopping BEFORE any import or publish'
+        $err | Should -Match 'parent app aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        $err | Should -Match 'outside the solution'
+        $err | Should -Match 'app setting theirs'
+        $err | Should -Match 'pwsh scripts/Import-SolutionScoped.ps1 -X -AllowPendingCollateral'
+        $w = & { Invoke-ImportPreflight -Context $ctx -ZipPath 'a.zip' -SolutionUniqueName S -AllowPendingCollateral | Out-Null } 3>&1
+        (@($w) -join ' ') | Should -Match 'app setting theirs'
+    }
+    It 'does not stop for a parent app that is part of the solution' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(10075, 80); AllTypes = @(10075, 80); UnknownParts = @(); RootEntities = @(); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { @([pscustomobject]@{ componenttype = 10075; objectid = 's1' }, [pscustomobject]@{ componenttype = 80; objectid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }) }
+        Mock Get-AppSettingParent { '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}' }
+        Mock Get-AppPendingChanges { @('should not be asked') }
+        { Invoke-ImportPreflight -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -ZipPath 'a.zip' -SolutionUniqueName S | Out-Null } | Should -Not -Throw
     }
     It 'Get-AppPendingChanges compares the app module and its settings against RetrieveUnpublished' {
         Mock Invoke-RestMethod {
