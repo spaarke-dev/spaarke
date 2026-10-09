@@ -4,7 +4,7 @@
     <title>Action executors: Revise budget, Approve variance (record-only), Do actions, Next-step creators</title>
     <phase>4b Commit and actions</phase>
     <gate>036, 008, 047 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Server-side writes to budgets, events, To Dos and communications on behalf of a decision.</rigor-reason>
     <model-tier>sonnet</model-tier>

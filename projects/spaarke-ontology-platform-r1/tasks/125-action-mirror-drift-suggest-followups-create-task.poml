@@ -4,7 +4,7 @@
     <title>ISS-001 (#1048): reconcile the drifted AI action mirrors (suggest-followups, create-task-from-email, propose-field-updates) with spaarkedev1 and settle the Create_Task_From_Email 400s</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable (diagnosis); any Dataverse write needs owner approval</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live AI action's runtime prompt/schema (Dataverse data read by the BFF at runtime).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -58,6 +58,8 @@ Entry points: `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-ActionMirrors.p
   </escalation>
 
   <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Closes #1048.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

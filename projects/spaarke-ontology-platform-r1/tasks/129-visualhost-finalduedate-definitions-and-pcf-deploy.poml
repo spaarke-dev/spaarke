@@ -4,7 +4,7 @@
     <title>D-63 completion: move Dataverse chart/view/grid definitions off sprk_finalduedate, and deploy VisualHost PCF 1.4.39 (task 068) to dev without a tenant-wide publish</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable (inventory + build); data changes and the import need owner approval</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dev data changes to shared view/chart definitions plus a PCF solution import into a shared environment.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -81,6 +81,8 @@ No tenant-wide publish: import WITHOUT --publish-changes, then PublishXml for ex
   </escalation>
 
   <notes>Created 2026-10-08 by the no-parking sweep on the coordinator's request (D-63 data readers; #1413 merged undeployed).</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

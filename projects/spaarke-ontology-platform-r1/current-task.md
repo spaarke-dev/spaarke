@@ -1,50 +1,45 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-09, checkpoint 5 + master merge (main session). State only — history is in git log, task
-> `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md) (§3 no-parking
-> rule D-81; §6 gotchas incl. "never save a system playbook in the Designer"). Decisions: [`notes/decisions.md`](notes/decisions.md) +
-> spec §9 (D-1..D-104). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-09 (main session, after D-106). State only — history is in git log, task `<completion>`
+> blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: ontology critical
+> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-106). Issues for after the
+> project: [`notes/defer-issues.md`](notes/defer-issues.md) (D-106 section). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 116 tasks, **56 ✅** (board synced). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. synced with origin/master 2026-10-09 (`217b8f3c6`; Signal-ownership invariant now **I-17** — uac-r2 took I-16). |
-| **Critical context** | D-100 done in dev 2026-10-09 04:15Z: all 7 notification playbooks inactive, 05:00Z tick ran none (deploy-log "D-100 retire"); `C:\wt120d` can be removed. |
-| **Context** | Every PR gets an independent review + a re-check of each fix round before the owner's merge; the owner pre-approves "merge when green" per PR (I build / merge-tree against current master first). No tenant-wide publish (D-83). Dev deploys/data changes need an owner decision. Never park an issue (D-81). **Notification playbooks are RETIRED (D-100)** — bell-only; the Briefing never reads `appnotification`. AI playbooks: Matter Health only (D-101). |
-| **Next Action** | (1) Act on agent notifications below as they arrive (each PR → independent review → owner merge question). (2) Bring the owner the open questions at the bottom. |
+| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 3 🔄 (044, 051, 070), 44 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), synced with master 2026-10-09 (`217b8f3c6`). Signal-ownership invariant is **I-17**. |
+| **Rule** | **D-106:** fix an issue only if ontology functionality needs it; document everything else in `notes/defer-issues.md` (D-106 section, GitHub link) for post-project review. Every sub-agent/reviewer prompt carries it. No demo/non-dev work. |
+| **Critical path** | **#1390 (039) waits on uac-r2 approval** → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064 Briefing cutover. Decision path: 040 (after 039) + 044 + 046 + 070 → 043 commit route → 058 wizard → 045. |
+| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → owner merge question. Re-ask uac-r2 on #1355 if no answer. |
 
 ## Running now (SendMessage resumes an agent by ID)
 
 | ID | What | Then |
 |---|---|---|
-| `afa95b62d109541c3` (author) / `afead9298bddac72a` (reviewer) | **130** #1467 round 8 = D-103 stop-unless-flagged (`577355f72`, 68/68) in re-check | CI green → merge-tree vs master → **merge (D-102 approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → ask owner for the 4 live proofs |
-| `a05ace738dcb47fe5` | **131** #1493 round 2 (review: vacuous Issue1452 theory, PLAYBOOK-AUTHOR-GUIDE still teaches notification playbooks, stale docs/comments) + **second PR deleting verified-unused notification code (D-104b)** | On round-2 push: main session applies `.claude` edits on #1493's branch (dataverse-create-schema SKILL.md:671; ADR-036:21; ADR-034:23/94 "(retired, D-100)") → re-check → owner merge |
-| `acfdd3ea462a111e9` (author) | **132** #1494 round 2 `c86ff04dd` re-checked by main session (JSON edits reverted, constants, IsTransient, seam validation) — APPROVABLE | **Merge order: #1493 first** (its deletion of the 4 notification JSONs clears #1494's 4 expected Issue1452 failures) → re-run #1494 CI → owner merge |
-| `ada91107a9efd8931` (author) / `a45f465c6ce16e9e3` (reviewer) | **133** #1497 round 2: F3 single check (permit + node snapshot; nothing persisted on guard failure), F4 correlationId + ProducesProblem, K2 flag-only test, PR wording (server paths only) | Re-check → owner merge + dev BFF deploy approval → task **137** (#1498 + K3 marker) |
-| `aaa74682a6e89bfc8` | **135** #1496 Matter Health: author fixing reviewer items 1,2,3,5,6,9,11,12,14,15,16,17; #4 recorded under D-101 | Push → independent re-check → owner: live proof needs AgentService (disabled in dev) |
-| `a9cc345014f28b750` (author) / `a594f6e15e836ba8f` (reviewer) | **136** #1501 (root cause: org-owned lookup tables 400 on RetrievePrincipalAccess → 404; fix = uac-r2 #1391, stacked) in review | #1391 merge (uac-r2, asked on #1355 comment 6080141491) → owner merge → dev BFF + Console deploy (owner) → owner re-runs card r1. Open: orphan `sprk_document` 2cf67ed0-207b-4c58-a43d-11d8a7c9a424 (dev data, owner); Basic User lacks `prvAppendTosprk_RecordType_Ref` (asked uac-r2) |
-| `aca557cdbb835f49c` | **111** #1415: merge master (conflicts after #1480), keep named sizes + in-app hosting | CI → re-check → owner merge → owner fills checklist r2-r8 |
+| `afc4660035026f317` | **044** decision executors (`C:\wts-044`) | PR → independent review → owner merge |
+| `ae92bd3b6793849a2` | **070** Inquiry Action + Binding (`C:\wts-070`) | PR → review → owner merge |
+| `ab96aa06581dc8e9d` | **051** the one row component (`C:\wts-051`, xhigh) | PR → review → owner merge |
+| `afa95b62d109541c3` (author) / `afead9298bddac72a` (reviewer) | **130** #1467 round 9 = F1 (`systemform.modifiedon` 400 blocks every entity deploy) + F2 (own subcomponents seen as collateral) only; F3/K1-K3 → issues F-8 | Light re-check → CI → merge-tree → **merge (D-102 approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) |
+| `aca557cdbb835f49c` | **111** #1415: merge master after #1480, keep named sizes + in-app hosting | CI → re-check → owner merge (D-26/D-70 commitment) |
 
 ## Waiting on others
 
 | What | Waiting for | Then |
 |---|---|---|
-| **#1390** (039 lineage + role config) | uac-r2 approval on #1355 | Owner merge → merge master into `stream/039-signal-writer` → pin test → writer into this branch → 039 live gate (D-67) |
-| **#1391** (uac-r2 AppendTo fix; #1399 → task 126) | uac-r2 approval | Owner merge; 126 starts when uac-r2 names the rule |
-| uac-r2 on **#1355** | 6074035905: PB-07 membership role-credit bug + AI-EX7 AiAnalysis write tools (→ task 134); D-65 WA create path (046); D-66 write-core move (048) | 134, 046, 048 |
+| **#1390** (039 lineage + role config) — **critical path** | uac-r2 approval (asked again on #1355, comment 6081244854) | Merge master into `stream/039-signal-writer` → pin test → owner merge → 039 live gate (D-67) → 037, 040 |
+| **#1391** (uac-r2 org-owned AppendTo fix) — needed by 044/070 executors' child creates | uac-r2 | Owner merge. Role gap: Spaarke Basic User lacks `prvAppendTosprk_RecordType_Ref` (asked uac-r2, comment 6080141491; needs owner approval once they agree) |
+| uac-r2 on 046 (D-65 WA create path), 048 (D-66 write-core move), 126 (G5 rule) | uac-r2 answers on #1355 | Start each when answered |
 
 ## Open owner questions / owner actions
 
-- **Task 138 demo deploy** (to ask): demo still runs the 2026-05-19 canvas PlaybookBuilder (saves canvas + deletes unmarked nodes from the browser, bypasses the 133 guard). Redeploy current PlaybookBuilder to demo (scoped publish) + remove legacy PlaybookBuilderHost PCF after a dependency check.
+- **Labelling page** https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU — 24/92 labelled; task **074 (recall exit gate) waits on it**. Finish → `status/final.complete` → resume `a1bcb0bae3c363ca9`.
+- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV: r1 failed → task 136 (deferred, D-106); r2-r8 not yet filled (r2-r5 wizards = 111; r6/r7/r8 belong to deferred 121/122/129).
+- **Task 130 live proofs** after merge: NoAccessEntryRibbon -Apply, FieldMappingAdminSolution scoped import, small app module + sitemap + app setting, first unmanaged SpaarkeMaster import.
+- **Housekeeping (owner, by hand):** `C:\wt120d`, `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480*`, `C:\wts-b56`, `C:\wts-135`, `C:\wts-131` (keep while #1493/#1507 are open), older list in `notes/handoff-history/2026-10.md`. Unused `SpaarkeLegalWorkspace` solution in dev: decision after the project.
 
-- **Task 130 live proofs** after its re-check: NoAccessEntryRibbon -Apply, FieldMappingAdminSolution scoped import, small app module + sitemap + app setting, first unmanaged SpaarkeMaster import; plus VisualHost `customcontrols.version` (still 1.4.38).
-- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV (db `results/r1..r8`, `status/final`): r1-r5 wizards (111; **r1 FAILED at Finish → task 136**, r2-r5 not yet filled), r6 To Do dates (106 + LW badge → 121), r7 external app (122, closes #1428), r8 due-date cards/calendar/counts + VisualHost version (129). Read back with ArtifactData `list results`, then close 111, 121, 122, 129.
-- **Labelling page** https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU — 24/92 labelled; finish → `status/final.complete` → resume `a1bcb0bae3c363ca9` (074 run).
-- **Housekeeping (owner, by hand)**: `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480`, `C:\wtrv1480b`, `C:\wtrv1480m`, `C:\wts-b56`, plus the older list in `notes/handoff-history/2026-10.md`. Unused `SpaarkeLegalWorkspace` solution in dev: needs a decision.
+## Queued (startable, not started)
 
-## Queued (not started)
-
-- **123** (ISS-010 triage enabled filter + ISS-002 counters; on this branch), **125** (ISS-001 AI action mirror drift; live writes need approval), **134** (blocked on uac-r2), **114** (#1480 merged 05:32Z, Console auto-deployed; still waits on 111 #1415 and 121), **126** (blocked on uac-r2).
-- **Critical path:** 039 live gate → 037 → 031 (098 ✅, 106 ✅).
+- **066** (deprecate `sprk_eventstatus` inventory, D-28), **067** (To Do score on calendar days, D-29), **123** (triage category enabled/active — classifier input), **111** follow-on **114**. Next wave when a lane frees.
