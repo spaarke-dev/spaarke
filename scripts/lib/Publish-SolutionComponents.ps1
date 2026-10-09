@@ -150,6 +150,32 @@ function New-PublishParameterXmlFromPlan {
         -SiteMaps $Plan.SiteMaps -Dashboards $Plan.Dashboards -AppModules $Plan.AppModules -ApplicationRibbon:([bool]$Plan.ApplicationRibbon)
 }
 
+function ConvertTo-ExtraList {
+<#
+.SYNOPSIS  Splits comma-separated values, trims, drops empties and VALIDATES them (task 130 round 6, F4/K5). Web resources must be
+           GUIDs (returned as lower-case, no braces); entities must be lower-case logical names. Anything else throws, before any
+           import or publish, so an unvalidated value can never reach a resume command.
+#>
+    [CmdletBinding()]
+    param([string[]]$Values = @(), [Parameter(Mandatory)][ValidateSet('WebResource', 'Entity')][string]$Kind)
+    $out = @()
+    foreach ($v in @($Values)) {
+        foreach ($part in @("$v" -split ',')) {
+            $t = $part.Trim()
+            if (-not $t) { continue }
+            if ($Kind -eq 'WebResource') {
+                $m = [regex]::Match($t, '^\{?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\}?$')
+                if (-not $m.Success) { throw "Invalid web resource id (a GUID is required); rejected before any import or publish." }
+                $out += $m.Groups[1].Value.ToLowerInvariant()
+            } else {
+                if ($t -cnotmatch '^[a-z_][a-z0-9_]*$') { throw "Invalid entity logical name (lower-case letters, digits and underscores only); rejected before any import or publish." }
+                $out += $t
+            }
+        }
+    }
+    return @($out | Select-Object -Unique)
+}
+
 function Get-DataverseApiContext {
 <# Token via the operator's az CLI identity. Returns @{ Api; Headers }. #>
     [CmdletBinding()]
@@ -592,6 +618,9 @@ function Publish-SolutionComponents {
         [switch]$AllowWorkflows,
         [int]$ChunkSize = 25
     )
+    # Validate first: nothing unvalidated may reach a REST call or the resume command.
+    $ExtraWebResources = @(ConvertTo-ExtraList -Values $ExtraWebResources -Kind WebResource)
+    $ExtraEntities = @(ConvertTo-ExtraList -Values $ExtraEntities -Kind Entity)
     $plan = Get-SolutionPublishPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
     if (@($plan.Unmapped).Count -gt 0) {
         throw "Cannot publish $SolutionUniqueName without a tenant-wide publish: unmapped component(s) $(@($plan.Unmapped) -join ', '). Add a mapping in scripts/lib/Publish-SolutionComponents.ps1 (never use publish-all)."
@@ -610,15 +639,16 @@ function Publish-SolutionComponents {
     }
     $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
     # Components published in THIS run that are not in the solution (a caller's -Extra* lists) are lost by a plain -PublishOnly resume,
-    # so the resume command carries them.
+    # so the resume command carries them. FORMAT: one single-quoted, comma-separated string ('g1,g2'). Bash and PowerShell both deliver it
+    # as ONE argument and Import-SolutionScoped.ps1 splits it; a quoted list ('g1','g2') would reach it from bash as g1,g2 anyway.
     $inPlanWebs = @($plan.WebResources | ForEach-Object { "$_".Trim('{', '}').ToLowerInvariant() })
     $inPlanEnts = @($plan.Entities | ForEach-Object { "$_".ToLowerInvariant() })
     $outsideWebs = @($ExtraWebResources | Where-Object { $_ -and ($inPlanWebs -notcontains "$_".Trim('{', '}').ToLowerInvariant()) } | Select-Object -Unique)
     $outsideEnts = @($ExtraEntities | Where-Object { $_ -and ($inPlanEnts -notcontains "$_".ToLowerInvariant()) } | Select-Object -Unique)
     $resume = "pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl $envUrl -SolutionUniqueName $SolutionUniqueName -PublishOnly" + $(if ($AllowWorkflows) { ' -AllowWorkflows' } else { '' })
     $outsideNote = ''
-    if ($outsideWebs.Count -gt 0) { $resume += " -ExtraWebResources $(($outsideWebs | ForEach-Object { "'$_'" }) -join ',')"; $outsideNote += " web resources outside the solution: $($outsideWebs -join ', ');" }
-    if ($outsideEnts.Count -gt 0) { $resume += " -ExtraEntities $(($outsideEnts | ForEach-Object { "'$_'" }) -join ',')"; $outsideNote += " entities outside the solution: $($outsideEnts -join ', ');" }
+    if ($outsideWebs.Count -gt 0) { $resume += " -ExtraWebResources '$($outsideWebs -join ',')'"; $outsideNote += " web resources outside the solution: $($outsideWebs -join ', ');" }
+    if ($outsideEnts.Count -gt 0) { $resume += " -ExtraEntities '$($outsideEnts -join ',')'"; $outsideNote += " entities outside the solution: $($outsideEnts -join ', ');" }
     $n = 0
     foreach ($c in $chunks) {
         $n++
@@ -660,6 +690,8 @@ function Invoke-ScopedSolutionImport {
         [switch]$IncludeControlHostEntities,
         [switch]$AllowWorkflows
     )
+    $ExtraWebResources = @(ConvertTo-ExtraList -Values $ExtraWebResources -Kind WebResource)
+    $ExtraEntities = @(ConvertTo-ExtraList -Values $ExtraEntities -Kind Entity)
     if ($ImportArgs | Where-Object { $_ -match '^(--publish-changes|-pc)$' }) { throw '--publish-changes is a tenant-wide publish and is not allowed.' }
     if (-not $PacExe) {
         $PacExe = (Get-Command pac -CommandType Application -ErrorAction SilentlyContinue |

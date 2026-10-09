@@ -417,6 +417,72 @@ Describe 'resume command carries components published outside the solution (roun
     }
 }
 
+Describe 'extras: one printed form, validated on entry (round-6 F4/K5)' {
+    BeforeAll {
+        # Emulate bash quote removal on the printed command: split on spaces outside single quotes, drop the quotes.
+        function Split-LikeBash([string]$line) {
+            $tok = @(); $cur = ''; $q = $false; $has = $false
+            foreach ($ch in $line.ToCharArray()) {
+                if ($ch -eq "'") { $q = -not $q; $has = $true; continue }
+                if ($ch -eq ' ' -and -not $q) { if ($has -or $cur) { $tok += $cur }; $cur = ''; $has = $false; continue }
+                $cur += $ch; $has = $true
+            }
+            if ($has -or $cur) { $tok += $cur }
+            return $tok
+        }
+        $script:ScriptPath = Join-Path $script:RepoRoot 'scripts' 'Import-SolutionScoped.ps1'
+    }
+    It 'the printed resume command, run through the real script parameter binding, yields every extra (two or more)' {
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { throw 'boom' }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                default { return $null }
+            }
+        }
+        $err = $null
+        try {
+            Publish-SolutionComponents -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } -SolutionUniqueName MySol -SkipCollateralCheck `
+                -ExtraWebResources @('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333') -ExtraEntities @('sprk_event', 'sprk_todo')
+        } catch { $err = $_.Exception.Message }
+        $cmd = [regex]::Match($err, 'pwsh scripts/Import-SolutionScoped\.ps1[^()]*?(?= \(this run| *$)').Value
+        $cmd | Should -Match "-ExtraWebResources '22222222-2222-2222-2222-222222222222,33333333-3333-3333-3333-333333333333'"
+        $cmd | Should -Match "-ExtraEntities 'sprk_event,sprk_todo'"
+        $args2 = @(Split-LikeBash $cmd | Select-Object -Skip 2) + '-CheckArguments'
+        $out = & pwsh -NoProfile -File $script:ScriptPath @args2 2>&1
+        $LASTEXITCODE | Should -Be 0
+        $r = ($out -join '') | ConvertFrom-Json
+        @($r.ExtraWebResources) | Should -Be @('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333')
+        @($r.ExtraEntities) | Should -Be @('sprk_event', 'sprk_todo')
+    }
+    It 'accepts the comma list, the PowerShell array form, spaces and empty entries' {
+        $out = & pwsh -NoProfile -File $script:ScriptPath -EnvironmentUrl https://x -SolutionUniqueName S -ExtraEntities ' sprk_a , ,sprk_b' -CheckArguments 2>&1
+        $LASTEXITCODE | Should -Be 0
+        @((($out -join '') | ConvertFrom-Json).ExtraEntities) | Should -Be @('sprk_a', 'sprk_b')
+    }
+    It 'rejects a quote-containing or malformed value before any import or publish, with a clear error' {
+        $out = & pwsh -NoProfile -File $script:ScriptPath -EnvironmentUrl https://x -SolutionUniqueName S -ExtraWebResources "11111111-1111-1111-1111-111111111111'; calc" -PublishOnly 2>&1
+        $LASTEXITCODE | Should -Not -Be 0
+        ($out -join ' ') | Should -Match 'Invalid web resource id'
+        $out = & pwsh -NoProfile -File $script:ScriptPath -EnvironmentUrl https://x -SolutionUniqueName S -ExtraEntities "Sprk_Event','x" -CheckArguments 2>&1
+        $LASTEXITCODE | Should -Not -Be 0
+        ($out -join ' ') | Should -Match 'Invalid entity logical name'
+    }
+    It 'Publish-SolutionComponents validates too, so a bad value never reaches a REST call or the resume command' {
+        $script:Rest = 0
+        Mock Invoke-RestMethod { $script:Rest++ ; $null }
+        $err = $null
+        try { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -ExtraWebResources "a'; evil" } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'Invalid web resource id'
+        $err | Should -Not -Match 'resume'
+        $script:Rest | Should -Be 0
+    }
+    It 'ConvertTo-ExtraList normalises braces and case and removes duplicates' {
+        @(ConvertTo-ExtraList -Values @('{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') -Kind WebResource) | Should -Be @('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+    }
+}
+
 Describe 'request order and resume command' {
     It 'puts option sets and web resources first, entities next, app modules last' {
         $chunks = @(Split-PublishPlan -Entities @('sprk_a', 'sprk_b') -WebResources @('11111111-1111-1111-1111-111111111111') -OptionSets @('sprk_o') `

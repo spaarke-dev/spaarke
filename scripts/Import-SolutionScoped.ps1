@@ -33,10 +33,21 @@ param(
     [switch]$AllowWorkflows,
     # With -PublishOnly: components published outside the solution in the failed run (the resume message prints them).
     [string[]]$ExtraWebResources = @(),
-    [string[]]$ExtraEntities = @()
+    [string[]]$ExtraEntities = @(),
+    # Validate and print the normalized arguments, then stop (no token, no Dataverse call). Used by the end-to-end argument test.
+    [switch]$CheckArguments
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
+
+# Extras arrive as 'g1,g2' (the form the resume command prints), as 'g1','g2', or one per entry: split, trim, drop empties, VALIDATE.
+# A bad value is rejected here, before any import or publish.
+$ExtraWebResources = @(ConvertTo-ExtraList -Values $ExtraWebResources -Kind WebResource)
+$ExtraEntities = @(ConvertTo-ExtraList -Values $ExtraEntities -Kind Entity)
+if ($CheckArguments) {
+    [pscustomobject]@{ ExtraWebResources = $ExtraWebResources; ExtraEntities = $ExtraEntities } | ConvertTo-Json -Compress
+    return
+}
 
 $ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
 if ($PlanOnly) {
@@ -52,5 +63,6 @@ if ($PublishOnly) {
 }
 if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) { throw "-ZipPath is required and must exist (got '$ZipPath')." }
 Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName `
-    -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows | Out-Null
+    -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows `
+    -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities | Out-Null
 Write-Host "Imported and scoped-published $SolutionUniqueName. No tenant-wide publish was run."
