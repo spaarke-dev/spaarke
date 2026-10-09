@@ -689,7 +689,7 @@ public static class PlaybookEndpoints
     /// <summary>
     /// Save canvas layout for a playbook.
     /// </summary>
-    private static async Task<IResult> SaveCanvasLayout(
+    internal static async Task<IResult> SaveCanvasLayout(
         Guid id,
         SaveCanvasLayoutRequest request,
         IPlaybookService playbookService,
@@ -709,6 +709,10 @@ public static class PlaybookEndpoints
 
         try
         {
+            // D-97 / PB-08: repo-deployed system playbooks are read-only in the Designer. Refuse before
+            // BOTH writes (canvas JSON and node sync).
+            await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             // Persist the raw canvas JSON to the playbook record
             var result = await playbookService.SaveCanvasLayoutAsync(id, request.Layout);
 
@@ -717,6 +721,14 @@ public static class PlaybookEndpoints
 
             logger.LogInformation("Saved canvas layout and synced nodes for playbook {PlaybookId}", id);
             return Results.Ok(result);
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Canvas save refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            return Results.Problem(
+                statusCode: 409,
+                title: "Playbook is read-only",
+                detail: ex.Message);
         }
         catch (Exception ex)
         {

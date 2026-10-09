@@ -249,6 +249,45 @@ public class AnalysisOrchestrationServiceTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task ExecutePlaybookAsync_ProtectedPlaybookCanvasSyncRefused_ContinuesOnStoredNodes()
+    {
+        // D-97 / PB-08: the just-in-time canvas sync is refused for a repo-deployed playbook;
+        // the run must not fail and must proceed to node detection on the stored nodes.
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var request = new PlaybookExecuteRequest { PlaybookId = playbookId, DocumentIds = [documentId] };
+
+        _playbookServiceMock
+            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreatePlaybook(playbookId, "matter-health-single"));
+        _playbookServiceMock
+            .Setup(x => x.GetCanvasLayoutAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CanvasLayoutResponse
+            {
+                PlaybookId = playbookId,
+                Layout = new CanvasLayoutDto { Nodes = [new CanvasNodeDto { Id = "c1", Type = "aiAnalysis" }], Edges = [] }
+            });
+        _nodeServiceMock
+            .Setup(x => x.SyncCanvasToNodesAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProtectedPlaybookCanvasSyncException(playbookId, "matter-health-single", ProtectedPlaybookReason.SystemFlag));
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDocument(documentId));
+
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+            chunks.Add(chunk);
+
+        chunks.Should().NotBeEmpty();
+        chunks[0].Type.Should().Be("metadata");
+        _nodeServiceMock.Verify(x => x.SyncCanvasToNodesAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        _nodeServiceMock.Verify(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact(Skip = "Requires complete mock setup for playbook execution pipeline including tool scope resolution")]
     public async Task ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook()
     {
