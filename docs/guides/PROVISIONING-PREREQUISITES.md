@@ -1,9 +1,13 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 7 · **Last Updated**: 2026-10-07
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 9)
+> **Version**: 8 · **Last Updated**: 2026-10-08
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 10)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v10 (2026-10-08, `customer-provisioning-orchestration-r1` T253 — G38)**: `PRQ-C-07` **retired** — the CI-built
+> SpaarkeMaster needs no Power BI Extensions and H6 installs no application. `PRQ-C-06`: H6 applies the org-settings
+> contract through the Dataverse Web API (the L2 Worker host has no pac).
 >
 > **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
 > users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
@@ -184,8 +188,8 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | ~~PRQ-C-04~~ | **Retired 2026-10-06 (T228).** Dataverse environment-creation rate — L2 no longer creates environments (PRQ-C-09). | — | — |
 | ~~PRQ-C-05~~ | **Retired 2026-10-06 (T227a).** Model 2 only (out of scope, D-12), and the customer's BFF app registration does not exist before the run (H3 creates it), so no pre-run check could hold its id. | — | — |
-| PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
-| PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
+| PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) — H6 applies it before the import (Dataverse Web API `organization` PATCH, T253) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
+| ~~PRQ-C-07~~ | **Retired 2026-10-08 (T253).** Required applications (Power BI Extensions) — the CI-built SpaarkeMaster depends on no application a fresh environment lacks (`SpaarkeMasterApplicationDependencyTests`); H6 installs none. | — | — |
 | PRQ-C-09 | The customer's Dataverse environment, created by the operator: domain `spaarke-{customerId}` (or `-{environmentName}`), URL = intake `dataverseEnvUrl`; the L2 Worker identity is its System Administrator application user (T228) | Spaarke admin (Power Platform admin) | POST /api/runs 400 `dataverse-env-url-invalid`; H5 `worker-not-app-user` / `env-health-check-failed` |
 | PRQ-C-10 | The environment's security group `sprk-{customerId}-users` (Entra security group, assigned membership) exists and is set on the Dataverse environment; its object id is the intake value `environmentSecurityGroupId` (T232) | Spaarke admin (Entra + Power Platform admin) | POST /api/runs 400 `userprov-missing-security-group-id`; H11 `userprov-security-group-rejected`; **not set on the environment → every user of Spaarke's tenant (other customers' guests included) is admitted** |
 | PRQ-C-11 | The environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Spaarke pays guest access; no per-user licences — owner 2026-10-07, T232) | Spaarke admin (Power Platform admin) | Guests are refused at sign-in; L2 cannot detect it (billing is not visible to Dataverse) |
