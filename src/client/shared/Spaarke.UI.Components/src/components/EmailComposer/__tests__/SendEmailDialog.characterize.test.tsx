@@ -119,16 +119,14 @@ describe('SendEmailDialog — send-path invocation (NOT covered by wrappers.test
     // The production shape: `@spaarke/auth`'s authenticatedFetch THROWS ApiError for a 400 — it never
     // returns the failed response. (A mock resolving `{ ok: false }` let this pass while every real
     // failed send was silent.)
-    const authenticatedFetch = jest
-      .fn()
-      .mockRejectedValue(
-        apiErrorFor(400, {
-          title: 'Bad request',
-          status: 400,
-          detail: 'Invalid recipient',
-          errorCode: 'INVALID_RECIPIENT',
-        })
-      );
+    const authenticatedFetch = jest.fn().mockRejectedValue(
+      apiErrorFor(400, {
+        title: 'Bad request',
+        status: 400,
+        detail: 'Invalid recipient',
+        errorCode: 'INVALID_RECIPIENT',
+      })
+    );
     const onError = jest.fn();
     const onClose = jest.fn();
     const onSent = jest.fn();
@@ -161,8 +159,11 @@ describe('SendEmailDialog — send-path invocation (NOT covered by wrappers.test
     });
     expect(onSent).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
-    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog". The composer
+    // dialog stays open; since 2026-10-09 the engine's "Email not sent" alert opens over it as well (onError
+    // is a notification — this host did not set sendFailureDisplay="host").
+    expect(screen.getByRole('alertdialog', { name: 'New Email' })).toBeInTheDocument();
+    expect(await screen.findByRole('alertdialog', { name: 'Email not sent' })).toBeInTheDocument();
   });
 });
 
@@ -184,7 +185,8 @@ describe('SendEmailDialog — prop contract (task 020 extends additively)', () =
     // Send moved to the header From row (owner UAT 2026-08-03 item 1); Cancel + Save Draft stay
     // in the bottom action bar. View-mode-only buttons (Reply/Forward) are absent in compose.
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
+    // Save Draft is hidden when the host does not wire onSaveDraftRequest (owner decision 2026-10-09).
+    expect(screen.queryByRole('button', { name: 'Save Draft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Forward' })).toBeNull();
