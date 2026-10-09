@@ -1386,6 +1386,10 @@ public class RecordOwnerAssignmentCensusTests
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
+        ["EventDueAssigneeWrite.cs"] = "Ontology platform R1 task 044 (#29): PATCHes an event's sprk_duedate and/or its assignee CONTACT "
+                                       + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
+                                       + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
+                                       + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
