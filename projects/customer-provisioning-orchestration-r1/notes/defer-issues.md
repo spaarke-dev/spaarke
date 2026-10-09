@@ -330,6 +330,45 @@ the BFF's owning project.
 
 ---
 
+### ISS-018 — Graph identity grant gaps found by T261: the L2 Worker lacks the roles H3/H10 call with; H3's delegated catalog has a wrong id; app-only SPE search
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | F3 and F6 before T186 (F3 blocks H3 and H10 outright); F2/F4/F5 low |
+| **Filed** | 2026-10-09 (T261) |
+| **Source** | T261 inventory — `notes/t261-stamp-graph-least-privilege.md` §8 (call sites, Learn citations, live reads) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1543 |
+
+**Description**
+
+- **F3 (blocks T186).** The L2 Worker identity (`sprk-controlplane-dev-uami`, read live 2026-10-09) holds neither
+  `AppRoleAssignment.ReadWrite.All` nor `Application.ReadWrite.OwnedBy`. H10 (`POST/DELETE
+  /servicePrincipals/{stamp}/appRoleAssignments`) and H3 (`POST /applications`, FICs, `appRoleAssignedTo`) need them;
+  no prerequisite granted them (`Grant-ControlPlaneIdentity.ps1` granted the BFF stamp catalog). T261 gave the Worker
+  its own catalog (`Handlers/ControlPlaneGraphAppRoles.cs`, PRQ-E-07 manifest 11). Owed: run
+  `Grant-ControlPlaneIdentity.ps1` for `sprk-controlplane-dev-uami` (live, owner OK); then, optionally, remove the
+  Worker roles the note lists as no longer needed (`Directory.ReadWrite.All`, `User.ReadWrite.All`, `Files.*`,
+  `Sites.*`, `FileStorageContainer.Selected`, `Group.Read.All`, `User.Read.All`, `Mail.ReadWrite`, `Mail.Send`,
+  `MailboxSettings.Read`).
+- **F6 (risk for T186, delegated).** `EntraAppReg/EntraAppRegPermissionCatalog.cs` requests delegated
+  `Files.ReadWrite.All` with id `75359482-…` — the APPLICATION role id; the delegated scope is
+  `863451e7-0667-486c-a5d6-d135439485f0` (read live). It also lacks delegated `FileStorageContainer.Selected`
+  (`085ca537-6565-41c2-aca7-db852babc212`), which OBO SPE calls need and the dev BFF registration carries. A stamp's OBO
+  SharePoint Embedded calls may fail. Fix in H3's catalog + `scripts/Register-EntraAppRegistrations.ps1:288` (same id).
+- **F2.** `POST /api/spe/search/items` calls `/search/query` app-only (`SpeAdminGraphService.cs:7432`). Microsoft
+  documents SharePoint Embedded search as delegated-only, so it cannot return container content; the old catalog's
+  `Files.Read.All` would have let it search all of Spaarke's SharePoint instead. Needs OBO or `$filter` enumeration
+  (SPE admin owner — sdap-SPE-admin-app-r2).
+- **F4 (dev).** `mi-bff-api-dev` lacks `Mail.ReadWrite` → inbound mark-as-read 403 (3/3, 2026-10-06); security pages
+  `GET /security/alerts_v2` 403 7/8 (Learn least: `SecurityAlert.Read.All`; dev holds `SecurityEvents.Read.All`).
+- **F5 (dev).** `createLink` 403 app-only and delegated — a sharing setting, not a Graph role; not investigated.
+
+**Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
+(F6).
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->

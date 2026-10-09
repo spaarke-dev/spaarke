@@ -10,9 +10,13 @@
 //   syncs the Microsoft Graph application (app-only) permission catalog
 //   (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally via
 //   IGraphAppRolesRegistry — see that file's header for the L2/BFF
-//   assembly-isolation rationale) onto the UAMI service principal: the 11
-//   Entra-granted roles. The 4 mailbox roles are granted by H14a through
-//   Exchange, scoped to the customer's group (task 251) — never here.
+//   assembly-isolation rationale) onto the UAMI service principal: the
+//   Entra-granted roles (FileStorageContainer.Selected since task 261), and
+//   REMOVES every other Microsoft Graph app role on it (task 261 / G31 — a stamp
+//   in Spaarke's tenant must not hold tenant-wide directory, SharePoint or mail
+//   rights; evidence: notes/t261-stamp-graph-least-privilege.md). The mailbox
+//   roles are granted by H14a through Exchange, scoped to the customer's group
+//   (task 251) — never here.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-13 (H10
@@ -72,8 +76,11 @@
 //   │ T259 App User already in another unit      │ QuarantineRequired        │
 //   │ T2 post-condition mismatch (count != 1)    │ QuarantineRequired        │
 //   │ Graph role grant call(s) failed            │ RetryableWithCleanup      │
+//   │ Removing an extra Graph role failed (T261) │ RetryableWithCleanup      │
 //   │ T3 post-condition partial (still missing   │ QuarantineRequired        │
 //   │ roles after "successful" grant loop)       │                           │
+//   │ T3 extra role still present (T261)         │ QuarantineRequired        │
+//   │ T3 extras re-read failed (T261)            │ Resumable                 │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                 │
 //   │ Run row deleted mid-flight                 │ Resumable                 │
 //   └────────────────────────────────────────────┴───────────────────────────┘
@@ -427,6 +434,34 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.GraphRoleGrantFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (12b) Task 261 (G31): REMOVE every Microsoft Graph app role on the stamp identity that is not in the
+        //       Entra-granted set — roles an earlier catalog granted (Directory.ReadWrite.All, User.ReadWrite.All,
+        //       Files.*, Sites.*, the mailbox roles before T251, …) or someone granted by hand. Every stamp lives in
+        //       Spaarke's tenant, so a leftover tenant-wide role reaches Spaarke's own directory. Each removal is
+        //       logged by the granter; assignments on other resources are untouched.
+        var removal = await _roleGranter.RemoveUnexpectedRolesAsync(
+            uamiObjectId, uamiClientId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+        if (removal is GraphAppRoleRemovalOutcome.Failure removalFailure)
+        {
+            var diagnostic =
+                $"Removing Graph app roles outside the stamp set failed: {removalFailure.Diagnostic}" +
+                (removalFailure.FailedRoleValues.Count > 0
+                    ? $" Still assigned: {string.Join(", ", removalFailure.FailedRoleValues)}."
+                    : string.Empty) +
+                " Each removal is idempotent (404 = already gone) — resume re-reads the assignments and removes only what " +
+                "is still extra.";
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                H10Rejections.GraphRoleRemovalFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+        var removedRoles = ((GraphAppRoleRemovalOutcome.Success)removal).RemovedRoleValues;
+        if (removedRoles.Count > 0)
+        {
+            _logger.LogWarning(
+                "H10 removed {RemovedCount} Graph app role(s) outside the stamp set from stamp identity SP {UamiSpId}: {RemovedRoles} " +
+                "(runId={RunId} customerId={CustomerId})",
+                removedRoles.Count, uamiObjectId, string.Join(", ", removedRoles), envelope.RunId, envelope.CustomerId);
+        }
+
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
             uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
@@ -441,6 +476,24 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 "Microsoft Graph resource SP. Do NOT blindly retry.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 H10Rejections.TrapT3VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        // (13b) T3, task 261 — independent re-read: nothing outside the Entra-granted set remains.
+        var extras = await _roleParityVerifier.FindUnexpectedRolesAsync(
+            uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+        switch (extras)
+        {
+            case GraphAppRoleExtrasResult.Found found:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.TrapT3UnexpectedRoles,
+                    $"T3 verification FAILED: the stamp identity (SP {uamiObjectId}) still holds Graph app role(s) outside the " +
+                    $"stamp set after removal reported success: {string.Join(", ", found.RoleValues)}. Something re-grants them " +
+                    "(an operator script, another pipeline) or the removal did not land — find the granter before resuming; " +
+                    "the stamp set is projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md.",
+                    cancellationToken).ConfigureAwait(false);
+            case GraphAppRoleExtrasResult.Unknown unknown:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    $"Could not confirm that no Graph app role outside the stamp set remains: {unknown.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
         }
 
         stopwatch.Stop();

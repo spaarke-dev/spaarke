@@ -35,11 +35,16 @@
 
       SECTION B — C5.8 Microsoft Graph app-role grants (delegated)
         B.1  Delegate to the existing scripts/Grant-GraphAppRoles.ps1 helper
-             (task 015 — already tested, PSScriptAnalyzer-clean, idempotent,
-             reads the single-source-of-truth GraphAppRoles.cs catalog). We
-             do NOT duplicate the GraphAppRoles.cs parser here — that would
-             re-introduce the drift r3 task 062 was created to close and
-             would violate CLAUDE.md §11 (reuse over duplicate).
+             (task 015 — already tested, PSScriptAnalyzer-clean, idempotent),
+             passing the L2 Worker identity's OWN catalog,
+             src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs
+             (task 261 / G31). Until task 261 this granted the BFF stamp
+             catalog (GraphAppRoles.cs), which mixed the two identities'
+             needs and lacked AppRoleAssignment.ReadWrite.All (H10, H3) and
+             Application.ReadWrite.OwnedBy (H3). Evidence per role:
+             projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md §4.
+             ADD-ONLY: roles the identity holds beyond the catalog are left
+             in place (removing them is a separate, owner-approved step).
 
     IDEMPOTENCY CONTRACT (POML acceptance criterion #2, DS-8 §4.3):
       - Fully-configured admin env + fully-granted UAMI: re-run reports "no
@@ -142,10 +147,11 @@
     successfully in a prior invocation. Section A still runs.
 
 .PARAMETER GraphAppRolesPath
-    Optional explicit path to GraphAppRoles.cs (passed through to
+    Optional explicit path to the role catalog (passed through to
     Grant-GraphAppRoles.ps1). Default resolves to
-    src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
-    relative to this script's directory.
+    src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs
+    relative to this script's directory (task 261). Never point it at the
+    BFF's GraphAppRoles.cs — that is the customer stamp identity's set.
 
 .PARAMETER GrantGraphAppRolesScriptPath
     Optional explicit path to Grant-GraphAppRoles.ps1 (the helper this
@@ -196,7 +202,7 @@
 .NOTES
     Project:      customer-provisioning-orchestration-r1
     Task:         111 - Author Grant-ControlPlaneIdentity.ps1 (Path X + C5.8)
-    Depends on:   005 (GraphAppRoles.cs GUIDs populated), 015 (Grant-GraphAppRoles.ps1)
+    Depends on:   005 (GUIDs populated), 015 (Grant-GraphAppRoles.ps1), 261 (L2 catalog)
     Consumed by:  operator runbook, task 112 C1.4 registry client (must land first),
                   and every subsequent L2 registry write.
     Boundary:     Path X only (admin env; Spaarke tenant). DOES NOT grant on
@@ -728,6 +734,23 @@ if (-not $SkipGraphGrants) {
         exit 2
     }
     Write-Success "Grant-GraphAppRoles.ps1: $GrantGraphAppRolesScriptPath"
+
+    # Task 261: the L2 Worker identity's own catalog — not the BFF stamp catalog the helper defaults to.
+    if (-not $GraphAppRolesPath) {
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $default = Join-Path $scriptDir '..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Handlers\ControlPlaneGraphAppRoles.cs'
+        $resolved = Resolve-Path -LiteralPath $default -ErrorAction SilentlyContinue
+        if ($resolved) { $GraphAppRolesPath = $resolved.Path }
+    }
+    if (-not $GraphAppRolesPath -or -not (Test-Path -LiteralPath $GraphAppRolesPath)) {
+        Write-Fail "ControlPlaneGraphAppRoles.cs not resolved. Pass -GraphAppRolesPath explicitly (run from the repo checkout)."
+        exit 2
+    }
+    if ($GraphAppRolesPath -match 'Sprk\.Bff\.Api[\\/]Infrastructure[\\/]Auth[\\/]GraphAppRoles\.cs$') {
+        Write-Fail "GraphAppRoles.cs is the customer STAMP identity's catalog, not the L2 Worker's. Use ControlPlaneGraphAppRoles.cs."
+        exit 2
+    }
+    Write-Success "Role catalog: $GraphAppRolesPath"
 }
 
 # -----------------------------------------------------------------------------
@@ -928,13 +951,13 @@ if ($SkipGraphGrants) {
     Write-Skip 'Section B skipped (-SkipGraphGrants)'
 }
 else {
-    Write-Step 8 'Delegate to Grant-GraphAppRoles.ps1 for the 14-role catalog grant'
+    Write-Step 8 'Delegate to Grant-GraphAppRoles.ps1 for the L2 Worker identity catalog grant'
 
     $delegateArgs = @{
         TenantId        = $TenantId
         UamiPrincipalId = $UamiPrincipalId
     }
-    if ($GraphAppRolesPath) { $delegateArgs.GraphAppRolesPath = $GraphAppRolesPath }
+    $delegateArgs.GraphAppRolesPath = $GraphAppRolesPath
     if ($DryRun) { $delegateArgs.DryRun = $true }
 
     try {

@@ -100,6 +100,28 @@ public static class H10Rejections
     /// </summary>
     public const string TrapT3VerificationFailed = "h10-trap-T3-verification-failed";
 
+    // ---- Task 261 (G31, owner 2026-10-09): the stamp identity holds exactly the evidence-backed role set ----
+
+    /// <summary>
+    /// Removing a Microsoft Graph app role outside the stamp set from the stamp identity failed, or the assignments
+    /// could not be read. RetryableWithCleanup — each DELETE is idempotent (404 = already gone); resume re-reads and
+    /// removes only what is still extra. H10 is not marked complete while an extra role remains.
+    /// </summary>
+    public const string GraphRoleRemovalFailed = "h10-graph-role-removal-failed";
+
+    /// <summary>
+    /// T3 post-condition: after removal reported success, an independent re-read still finds a Graph app role outside
+    /// the stamp set on the stamp identity (something re-granted it, or the removal did not land). QuarantineRequired —
+    /// an operator finds who grants it before anything resumes.
+    /// </summary>
+    public const string TrapT3UnexpectedRoles = "h10-trap-T3-unexpected-roles";
+
+    /// <summary>
+    /// The T3 "nothing extra" re-read could not run (token or HTTP failure). Resumable — no verdict was reached and
+    /// nothing was written.
+    /// </summary>
+    public const string GraphRoleExtrasUnverified = "h10-graph-role-extras-unverified";
+
     // ---- T259 (ISS-010, owner 2026-10-09): the customer's business unit ----
 
     /// <summary>
@@ -155,9 +177,9 @@ public static class H10Gates
     public const string AppUserCreated = "app-user-created";
 
     /// <summary>
-    /// T3 gate — flips to Verified once all 14 Graph app-role assignments
-    /// are confirmed present on the UAMI service principal via the
-    /// independent post-grant re-query.
+    /// T3 gate — flips to Verified once the Entra-granted Graph app roles are
+    /// confirmed present on the UAMI service principal, and no other Graph app
+    /// role is (task 261), via independent post-grant re-queries.
     /// </summary>
     public const string GraphRoleParity = "graph-role-parity";
 }

@@ -33,25 +33,21 @@
 //   without touching the other 5 branches. Documented explicitly here rather
 //   than silently skipped.
 //
-// CATALOG SOURCE-OF-TRUTH (15 roles as of 2026-08-20):
+// CATALOG SOURCE-OF-TRUTH:
 //   IGraphAppRolesRegistry.GetAll() is the L2-local mirror of
-//   Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All. Populated to 14
-//   roles by task 005 (2026-08-17, live `az ad sp show` enumeration), then a
-//   15th role (User.Invite.All) was added by task 144 (2026-08-20, H11
-//   B2BGuest preset live verification). Task 143 corrected a WRONG GUID for
-//   GroupMember.ReadWrite.All the same day. This probe uses the registry's
-//   current .Count -- it does NOT hardcode "14" or "15" so the probe stays
-//   correct as the catalog evolves (a compile-time reference, not a
-//   memorized constant).
+//   Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All — the stamp identity's
+//   evidence-backed set since task 261 (G31; 15 roles before, from tasks
+//   005/143/144). This probe uses the registry's current contents -- it does
+//   NOT hardcode a count, so it stays correct as the catalog evolves.
 //
 // PROBE CONTRACT:
 //   T3 has ONE valid Passed shape -- the UAMI service principal in the
-//   customer's tenant holds EVERY (Value, AppRoleId) pair in
-//   IGraphAppRolesRegistry.GetEntraGranted() as an appRoleAssignment scoped to
-//   the Microsoft Graph resource SP (00000003-...), and NONE of
-//   GetExchangeScoped() (the mailbox roles H14a grants through Exchange,
-//   scoped to the customer's group -- task 251). Missing ANY Entra role, or
-//   holding ANY mailbox role in Entra, is Failed.
+//   customer's tenant holds EXACTLY the (Value, AppRoleId) pairs in
+//   IGraphAppRolesRegistry.GetEntraGranted() as appRoleAssignments scoped to
+//   the Microsoft Graph resource SP (00000003-...), and no other Graph app role
+//   (task 261) -- in particular none of GetExchangeScoped() (the mailbox roles
+//   H14a grants through Exchange, scoped to the customer's group -- task 251).
+//   Missing ANY Entra role, or holding ANY other Graph app role, is Failed.
 //
 //   FAILED shapes -- the silent-fail traps this probe catches (per POML +
 //   spec.md FR-33 T3 + design.md s4B T3 + parent-dispatch "task 143 lesson:
@@ -276,7 +272,6 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
         //     and L2GraphAppRolesRegistry.cs.
         var allRoles = _rolesRegistry.GetAll();
         var expectedRoles = _rolesRegistry.GetEntraGranted();
-        var exchangeScopedRoles = _rolesRegistry.GetExchangeScoped();
         var nullGuidRoles = allRoles
             .Where(r => string.IsNullOrWhiteSpace(r.AppRoleId))
             .Select(r => r.Value)
@@ -431,17 +426,18 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                 "failing (network / auth / other) rather than a T3 trigger. Handler classifies Resumable.");
         }
 
-        // (7) Task 251 (owner D26): the mailbox roles must be ABSENT in Entra. H14a grants them through
-        //     Exchange, scoped to the customer's group; Exchange adds the two sources together, so an
-        //     Entra grant gives the stamp every mailbox in the tenant (Spaarke's own, on Model 1).
-        //     Same verifier: the roles it does NOT report missing are the ones granted.
-        if (parityResult is GraphAppRoleParityResult.Verified && exchangeScopedRoles.Count > 0)
+        // (7) Task 261 (G31) — the stamp identity holds NOTHING outside the Entra-granted set. This covers
+        //     task 251's rule (owner D26: the mailbox roles must be ABSENT in Entra — H14a grants them through
+        //     Exchange, scoped to the customer's group, and Exchange adds the two sources together) and every
+        //     tenant-wide role an earlier catalog granted (Directory.ReadWrite.All, Files.*, Sites.*, …), each of
+        //     which reaches Spaarke's own tenant on Model 1. H10 removes them; this is the independent check.
+        if (parityResult is GraphAppRoleParityResult.Verified)
         {
-            GraphAppRoleParityResult mailboxResult;
+            GraphAppRoleExtrasResult extras;
             try
             {
-                mailboxResult = await _parityVerifier
-                    .VerifyAsync(uamiSpObjectId, request.TenantId, exchangeScopedRoles, cancellationToken)
+                extras = await _parityVerifier
+                    .FindUnexpectedRolesAsync(uamiSpObjectId, request.TenantId, expectedRoles, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -451,23 +447,32 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
             catch (Exception ex)
             {
                 return new TrapVerificationOutcome.InfraFault(Kind,
-                    $"T3 verdict deferred: checking that the mailbox roles are absent in Entra threw {ex.GetType().Name}: {ex.Message}.");
+                    $"T3 verdict deferred: checking for Graph app roles outside the stamp set threw {ex.GetType().Name}: {ex.Message}.");
             }
-            var missing = mailboxResult is GraphAppRoleParityResult.Partial p
-                ? new HashSet<string>(p.MissingRoleValues, StringComparer.Ordinal)
-                : new HashSet<string>(StringComparer.Ordinal);
-            var grantedInEntra = exchangeScopedRoles.Select(r => r.Value).Where(v => !missing.Contains(v)).ToArray();
-            if (grantedInEntra.Length > 0)
+
+            switch (extras)
             {
-                var diagnostic =
-                    $"T3 FAILED on UAMI SP objectId='{uamiSpObjectId}' (appId='{request.UamiClientId}') in tenant='{request.TenantId}': " +
-                    $"mailbox role(s) granted through Entra: {string.Join(", ", grantedInEntra)}. These are granted through Exchange, " +
-                    "scoped to the customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope. " +
-                    "Remove the Entra appRoleAssignment(s) on the UAMI service principal (Graph DELETE " +
-                    $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — H10 no longer grants them; a stamp provisioned " +
-                    "before task 251 still carries them.";
-                _logger.LogWarning("T3 probe FAILED (mailbox roles in Entra): {Diagnostic}", diagnostic);
-                return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+                case GraphAppRoleExtrasResult.Unknown unknown:
+                    return new TrapVerificationOutcome.InfraFault(Kind,
+                        $"T3 verdict deferred: could not check for Graph app roles outside the stamp set: {unknown.Diagnostic}");
+                case GraphAppRoleExtrasResult.Found found:
+                {
+                    var mailboxInEntra = found.RoleValues
+                        .Where(v => IGraphAppRolesRegistry.ExchangeScopedValues.Contains(v)).ToArray();
+                    var diagnostic =
+                        $"T3 FAILED on UAMI SP objectId='{uamiSpObjectId}' (appId='{request.UamiClientId}') in tenant='{request.TenantId}': " +
+                        $"Graph app role(s) outside the stamp set: {string.Join(", ", found.RoleValues)}. The stamp holds exactly " +
+                        $"{string.Join(", ", expectedRoles.Select(r => r.Value))} in Entra (task 261; " +
+                        "projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md)." +
+                        (mailboxInEntra.Length > 0
+                            ? $" Mailbox role(s) {string.Join(", ", mailboxInEntra)} are granted through Exchange, scoped to the " +
+                              "customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope."
+                            : string.Empty) +
+                        " Resume H10 in a new run (it removes them), or remove the Entra appRoleAssignment(s) (Graph DELETE " +
+                        $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — and find whoever granted them.";
+                    _logger.LogWarning("T3 probe FAILED (roles outside the stamp set): {Diagnostic}", diagnostic);
+                    return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+                }
             }
         }
 

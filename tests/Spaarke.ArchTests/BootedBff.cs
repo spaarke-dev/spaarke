@@ -38,7 +38,7 @@ namespace Spaarke.ArchTests;
 ///   demand (an HTTPS CORS origin, a customer id, the public config, the onboarding HMAC key, an Application Insights
 ///   connection string pointed at a closed loopback port). Every feature gate that decides whether a route group is
 ///   MAPPED is ON (<c>DocumentIntelligence:Enabled</c>, <c>Analysis:Enabled</c>, <c>RecordMatchingEnabled</c>,
-///   <c>Onboarding:Enabled</c>), so the
+///   <c>Onboarding:Enabled</c>, <c>DemoProvisioning:AccountDomain</c>), so the
 ///   endpoint table is the largest the configuration allows.</item>
 /// </list>
 ///
@@ -246,6 +246,7 @@ public sealed class BootedApp : IDisposable
                 ["Analysis:Enabled"] = "true",
                 ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
                 ["Onboarding:Enabled"] = "true",   // task 258: maps the H0.5 consent callback (off on every customer stamp)
+                ["DemoProvisioning:AccountDomain"] = "archtests.example",   // task 261: maps /api/registration/* (platform BFF only; off on every stamp)
                 ["DocumentIntelligence:OpenAiEndpoint"] = "https://archtests.openai.azure.com/",
                 ["DocumentIntelligence:OpenAiKey"] = "archtests-key",
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
