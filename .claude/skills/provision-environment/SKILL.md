@@ -2061,6 +2061,7 @@ $completedAtIso     = ([datetimeoffset]$run.completedOn).ToString('o')
 $rgName             = $isv.resourceGroupName           # H2a output
 $appServiceName     = $isv.appServiceName              # H2a output
 $kvName             = $isv.keyVaultName                # H2a output (the CUSTOMER vault)
+$bffAppRegId        = $isv.bffAppRegId                 # H3 output — the customer BFF app registration (T257: registry sprk_bffappid)
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
@@ -2137,6 +2138,7 @@ if (-not $script:RegistryStale) {
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName
     sprk_keyvaultname             = $kvName
+    sprk_bffappid                 = $bffAppRegId         # run.interStepState.bffAppRegId (H3) — T257
     sprk_containertypeid          = $containerTypeId
     sprk_ClientCacheBustToken     = $cacheBustToken
     # sprk_currentrunid release is routed via ICustomerRunGuard.ReleaseAsync
@@ -2175,7 +2177,7 @@ if (-not $script:RegistryStale) {
       }
       # MED#10 SESSION-19: also honor the include-sprk_setupstatus decision in
       # the Web API fallback body (same rule as Step 2b MCP path above).
-      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
+      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_bffappid = $bffAppRegId; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
       if ($observedSetupStatus -ne 'Ready') { $bodyHash.sprk_setupstatus = 'Ready' }
       $body = $bodyHash | ConvertTo-Json
       Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
@@ -2305,7 +2307,7 @@ The provisioning run reached RunStatus.Completed successfully, but the operator-
 Step 6a Dataverse registry PATCH FAILED. The customer's `sprk_dataverseenvironment`
 row is missing the promoted Ready-state columns (sprk_provisionedon, sprk_bffversion,
 sprk_solutionversion, sprk_azuresubscriptionid, sprk_resourcegroupname,
-sprk_appservicename, sprk_keyvaultname, sprk_containertypeid, sprk_ClientCacheBustToken).
+sprk_appservicename, sprk_keyvaultname, sprk_bffappid, sprk_containertypeid, sprk_ClientCacheBustToken).
 
 The customer's Azure resources are provisioned correctly and the L2 control-plane
 has released the I5 concurrency guard (`sprk_currentrunid` via ICustomerRunGuard.
@@ -2333,6 +2335,7 @@ pac data update `
       "sprk_resourcegroupname":   "$rgName",
       "sprk_appservicename":      "$appServiceName",
       "sprk_keyvaultname":        "$kvName",
+      "sprk_bffappid":            "$bffAppRegId",
       "sprk_containertypeid":     "$containerTypeId",
       "sprk_ClientCacheBustToken":"$cacheBustToken"
     }'
@@ -2392,6 +2395,7 @@ If manual recovery fails repeatedly, file a GitHub Issue with:
     [ ] Verify first user can sign in and load workspace
     [ ] Confirm cost drift alerts configured in Azure
     [ ] Update project #2 (portfolio board) with the new customer entry
+    [ ] Copilot agent gate (6f): auth config recorded, package rendered and sent to customer IT
 ```
 
 **Bucket B HIGH#10 SESSION 18**: When `$script:RegistryStale = $true`, replace the final summary above with the WARNING variant:
@@ -2422,16 +2426,62 @@ if ($script:RegistryStale) {
 
 ---
 
-#### 6d. Secure-record environment setup (MANDATORY before the customer is told the environment is ready — task 227g)
+#### 6e. Secure-record environment verification (MANDATORY before the customer is told the environment is ready — H7b, T256)
 
-No handler configures unified-access-control-r2's secure records: the `Secure Record` business unit (no users, **no
-container**), the named `Secure Record Owners` team, the `Secure Record Owner` role + privileges, role depth, and
-`sprk_issecure` field security. Run [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md)
-against THIS environment (it is the one source — do not copy its steps here) and gate on its **§7 verification checklist**:
+H7b creates unified-access-control-r2's secure-record configuration on every run, between H6 and H9:
+- the `Secure Record` business unit, with no users and **no container**;
+- the named `Secure Record Owners` team;
+- the `Secure Record Owner` role inside that unit;
+- the BFF-managed field-security memberships and the identity-link memberships.
+
+The operator verifies the result. Run the **§7 verification checklist** of
+[`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) against THIS
+environment. It is the one source; do not copy its steps here.
 record each item's result in `runs/{runId}.md`. Any item not passing → report the environment as NOT secure-record ready
 (the BFF fails closed — nothing leaks — but no record can be made secure). Containers are not part of this step: the BFF
 creates each secure record's container when the record is made secure, and H7 has already linked the root business unit
 to H8's container.
+
+#### 6f. Per-customer Copilot agent (MANUAL GATE after Ready — T257; one delegated step per customer)
+
+Each customer gets its own Microsoft Copilot agent. The customer's IT installs it in THEIR tenant; never install it in
+Spaarke's catalog. The full procedure, with the one-time platform setup, is
+[`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12; do not copy
+it here. This gate is the exception to the no-human-interaction end state that the owner accepted on 2026-10-09
+(design note t257 Q3). Microsoft has no API for creating an auth config. Re-check Graph and `wiqd` at each refresh.
+
+Interactive mode only. In batch mode, write `runs/{runId}-copilot-gate.md` with the values below, mark it PENDING in the
+handoff, and continue.
+
+1. **Pre-check (read-only).** If either check fails, STOP the gate, not the run, and report it:
+   - `az ad app show --id <run.interStepState.bffAppRegId> --query "api.preAuthorizedApplications[].appId" -o tsv`
+     lists the Spaarke Copilot Agent client id (`copilotAgentClientAppId` in the control-plane bicepparam). If it does
+     not, the control plane was deployed without the client; fix that first (guide §7.12 step 3).
+   - The registry row has `sprk_bffappid` (H13 promoted it, or Step 6a did).
+2. **Show the operator the auth-config values** and ask them to create it in the Teams developer portal (Tools → OAuth
+   client registration → New):
+   - name `spaarke-copilot-{customerId}`. Reuse it if it exists; never create a duplicate;
+   - base URL `<run.interStepState.bffApiUrl>`;
+   - restrict usage by org: Any Microsoft 365 organization;
+   - restrict usage by app: Any Teams app;
+   - client id = the Spaarke Copilot Agent client, **no client secret**;
+   - authorize `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/authorize`;
+   - token and refresh `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/token`;
+   - scope `api://<bffAppRegId>/user_impersonation offline_access`;
+   - PKCE on.
+3. **Ask for the OAuth client registration ID.** Refuse a value that does not match `^[A-Za-z0-9+/=_.-]{8,512}$`.
+4. **Write it to the registry** with the operator's identity. This is a live write; confirm before sending it.
+   `PATCH sprk_dataverseenvironments(<environmentId>)` `{ "sprk_copilotauthconfigid": "<id>" }`, through the Dataverse MCP
+   or the F1 Web API fallback, as in Step 6a. If `sprk_bffappid` is empty, set it in the same PATCH from
+   `run.interStepState.bffAppRegId`.
+5. **Render the package** (local file only):
+   `scripts/copilot-agent/Render-CopilotAgentPackage.ps1 -TemplatePath <template zip> -TemplateManifestPath <copilot-agent-template-latest.json> -OutputFolder runs/<runId>-copilot -CustomerId <customerId> -AdminEnvironmentUrl <registry env URL>`.
+   - Download the template and manifest read-only from `provisioning-artifacts`.
+   - Record the package path, version, manifest id and SHA-256 in `runs/{runId}.md` § Copilot agent.
+6. **Hand-off text for the operator:** "Send `spaarke-copilot-<customerId>-<version>.zip` and
+   docs/guides/COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md to the customer's IT. They upload it in their Microsoft 365 admin
+   center (Agents → Upload custom agent) and assign it to the staff invited as guests. When one user has signed in,
+   check the BFF log: `tid` = Spaarke, `acct` = 1, `azp` = the Spaarke Copilot Agent client, `aud` = this BFF."
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
