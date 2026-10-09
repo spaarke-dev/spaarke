@@ -123,6 +123,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.43 (task 174, unified-access-control-r2 — owner round 84; task 067's amendment): no change in this file's logic;
+ *   the bundled `AccessGrantModal` gates its options, explains its banner ("It follows the {matter|project} it is filed
+ *   under: {name}.") and marks "No effect" from the record's EFFECTIVE access that task 064's read now reports — the
+ *   stricter of that and the stored values this host passes. Also carries task 123's auth change (#1453, declared 1.0.42).
+ *
  * v1.0.41 (task 153, unified-access-control-r2 — owner round 83 item 11, O1 "BOTH"): an access-status indicator in the
  *   header row. The host reads task 064's per-record route (`GET /api/v1/records/{table}/{id}/no-access`, Read-gated,
  *   the same answer the form banner `sprk_accessstatus_banner.js` reads) with `evaluateGrantGate`'s rules — fail
@@ -464,7 +469,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const bffAppId =
         (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
       this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
-      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      const tenantId = (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl(), tenantId);
       // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
       // up the resolved value now that auth init has completed.
       this.renderControl();
@@ -1376,7 +1382,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.41 • Built 2026-10-08',
+      versionText: 'v1.0.43 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

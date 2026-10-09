@@ -16,7 +16,7 @@
  * React-16 PCF control.
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 
 /**
@@ -26,20 +26,24 @@ import type { IAuthConfig } from '@spaarke/auth';
  * @param bffAppId BFF Application ID for scope construction (manifest `bffAppId`).
  * @param bffApiUrl BFF API base URL (manifest `apiBaseUrl`).
  * @param dataverseUrl Dataverse org URL for the MSAL redirect URI (e.g. `https://org.crm.dynamics.com`).
+ * @param tenantId The environment's tenant (`sprk_TenantId`). Optional: when absent or invalid it is not
+ *        passed and @spaarke/auth's discovery decides (it fails closed in a Dataverse host).
  */
 export async function initializeAuth(
   clientAppId: string,
   bffAppId: string,
   bffApiUrl: string,
-  dataverseUrl: string
+  dataverseUrl: string,
+  tenantId?: string
 ): Promise<void> {
   const config: IAuthConfig = {
     // Empty strings fall through to @spaarke/auth's own window-global
     // defaults (documented above) rather than forcing an explicit value.
     clientId: clientAppId || undefined,
-    // authority intentionally omitted — @spaarke/auth resolves tenant-specific
-    // authority via resolveTenantFromXrm() (frame-walk to
-    // Xrm.Utility.getGlobalContext().organizationSettings.tenantId).
+    // Pass the environment's tenant so the authority is tenant-specific (a B2B guest signed in against
+    // /organizations lands in their home tenant — #1453). The 2026-05-13 popup regression was a malformed
+    // `/undefined` authority, which @spaarke/auth now rejects; isValidTenant() filters bad values here.
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     redirectUri: dataverseUrl || undefined,
     bffApiScope: bffAppId ? `api://${bffAppId}/user_impersonation` : undefined,
     bffBaseUrl: bffApiUrl || undefined,

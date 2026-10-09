@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -508,7 +509,8 @@ public class TemplateEngineTests
     #region JoinIds Helper (FR-1B.2 + FR-3H1.2)
 
     // Covers acceptance criteria for R3 task 002 / FR-1B.2 / FR-3H1.2 / AC-1B.2 / AC-H1.1:
-    // {{joinIds arr}} produces comma-separated list suitable for FetchXML `operator='in'` clauses.
+    // {{joinIds arr}} produces a comma-separated list. NOT for FetchXML (ISS-018, #1452): Dataverse ignores the value
+    // attribute of a list operator; FetchXML uses fetchInGuids (region below).
     // Single implementation shared between FR-1B.2 (LookupUserMembership consumers)
     // and FR-3H1.2 (Workstream H1 template helpers).
 
@@ -598,37 +600,6 @@ public class TemplateEngineTests
     }
 
     [Fact]
-    public void Render_JoinIdsHelper_FetchXmlConditionSnippet_ProducesValidXml()
-    {
-        // Arrange — FR-1B.2 / AC-H1.1 realistic FetchXML usage from migrated playbook.
-        // Output should be valid XML parseable by System.Xml.Linq.XDocument.
-        var template = "<condition attribute=\"sprk_matter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/>";
-        var context = new Dictionary<string, object?>
-        {
-            ["myMatters"] = new
-            {
-                ids = new List<Guid>
-                {
-                    Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                    Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                }
-            }
-        };
-
-        // Act
-        var result = _engine.Render(template, context);
-
-        // Assert — rendered output is valid XML
-        var act = () => System.Xml.Linq.XDocument.Parse(result);
-        act.Should().NotThrow("rendered FetchXML condition must be valid XML");
-
-        // Verify the `value` attribute contains the comma-separated GUIDs
-        var element = System.Xml.Linq.XDocument.Parse(result).Root!;
-        var valueAttr = element.Attribute("value")!.Value;
-        valueAttr.Should().Be("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-    }
-
-    [Fact]
     public void Render_JoinIdsHelper_StringValue_RendersEmpty()
     {
         // Arrange — defensive: caller passed a scalar string, not an enumerable.
@@ -662,6 +633,90 @@ public class TemplateEngineTests
 
         // Assert
         result.Should().Be("alpha,42,cccccccc-cccc-cccc-cccc-cccccccccccc");
+    }
+
+    #endregion
+
+    #region fetchInGuids Helper (ISS-018, #1452, D-77)
+
+    // The joinIds FetchXML test this region replaces asserted `in value="a,b"` — the shape Dataverse reads as an EMPTY
+    // list (every notification playbook failed on it in dev). fetchInGuids writes one <value> child per id.
+
+    private const string Empty = "<value>00000000-0000-0000-0000-000000000000</value>";
+    private const string A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    private const string B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+    private string RenderFetchInGuids(object? ids) =>
+        _engine.Render("{{fetchInGuids ids}}", new Dictionary<string, object?> { ["ids"] = ids });
+
+    [Fact]
+    public void FetchInGuids_ManyIds_OneValueChildPerId_Sorted()
+    {
+        RenderFetchInGuids(new List<object?> { B, A }).Should().Be($"<value>{A}</value><value>{B}</value>");
+    }
+
+    [Fact]
+    public void FetchInGuids_OneId_OneValueChild()
+    {
+        RenderFetchInGuids(new List<Guid> { Guid.Parse(A) }).Should().Be($"<value>{A}</value>");
+    }
+
+    [Fact]
+    public void FetchInGuids_DuplicatesAndCase_AreCollapsed()
+    {
+        RenderFetchInGuids(new List<object?> { A, A.ToUpperInvariant(), "{" + A + "}" }).Should().Be($"<value>{A}</value>");
+    }
+
+    [Fact]
+    public void FetchInGuids_EmptyList_SelectsNothing()
+    {
+        RenderFetchInGuids(new List<object?>()).Should().Be(Empty);
+    }
+
+    [Fact]
+    public void FetchInGuids_NullOrUnresolvedOrScalar_SelectsNothing()
+    {
+        RenderFetchInGuids(null).Should().Be(Empty);
+        _engine.Render("{{fetchInGuids missing.ids}}", new Dictionary<string, object?>()).Should().Be(Empty);
+        RenderFetchInGuids(A).Should().Be(Empty, "a bare string is a scalar, not a list");
+    }
+
+    [Fact]
+    public void FetchInGuids_AnyNonGuidElement_SelectsNothing_NeverAPartialList()
+    {
+        RenderFetchInGuids(new List<object?> { A, "not-a-guid" }).Should().Be(Empty);
+        RenderFetchInGuids(new List<object?> { A, null }).Should().Be(Empty);
+    }
+
+    [Fact]
+    public void FetchInGuids_InjectionString_NeverReachesTheMarkup()
+    {
+        var hostile = A + "\"/><condition attribute=\"ownerid\" operator=\"not-null\"/><x a=\"";
+        RenderFetchInGuids(new List<object?> { hostile }).Should().Be(Empty);
+    }
+
+    [Fact]
+    public void FetchInGuids_InACondition_RendersAWellShapedInList()
+    {
+        var xml = _engine.Render(
+            "<fetch><entity name=\"sprk_event\"><filter><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition></filter></entity></fetch>",
+            new Dictionary<string, object?> { ["myMatters"] = new { ids = new List<string> { A, B } } });
+
+        var condition = System.Xml.Linq.XDocument.Parse(xml).Descendants("condition").Single();
+        condition.Attribute("value").Should().BeNull();
+        condition.Elements("value").Select(v => v.Value).Should().Equal(A, B);
+        Sprk.Bff.Api.Services.Ai.Nodes.FetchXmlShapeValidator.Validate(xml).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LookupHelper_ReadsAnAliasedColumnKey_ThatADottedPathCannot()
+    {
+        // QueryDataverse output keys a link-entity column as "alias.column" (e.g. "m.sprk_mattername"); the repo
+        // notification templates read it with {{lookup item 'm.sprk_mattername'}} (they used {{item.m_sprk_mattername}},
+        // which never resolved).
+        var item = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>("{\"m.sprk_mattername\":\"Acme v. Beta\"}");
+        _engine.Render("{{lookup item 'm.sprk_mattername'}}", new Dictionary<string, object?> { ["item"] = item })
+            .Should().Be("Acme v. Beta");
     }
 
     #endregion

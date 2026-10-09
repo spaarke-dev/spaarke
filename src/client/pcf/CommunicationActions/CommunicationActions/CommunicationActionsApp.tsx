@@ -66,7 +66,7 @@ import {
   launchCreate,
   type CreateKind,
 } from '@spaarke/communication-components/logic/actions';
-import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
@@ -300,7 +300,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           }
           return;
         }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
         if (cancelled) return;
         setBffBaseUrl(baseUrl);
         setAuthReady(true);

@@ -152,7 +152,6 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   hidden = false,
   yieldToSidePane = false,
   uiScale = 1,
-  legacySize,
   maximizable = true,
   nav,
   headerActions,
@@ -187,16 +186,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   }, [open]);
 
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
-  const namedSurfaceStyle = getSurfaceStyle(effectiveSize, uiScale);
-  // Deprecated WizardShell maxWidth/height carry-over (see `legacySize`); a maximized surface ignores it.
-  const surfaceStyle: React.CSSProperties =
-    legacySize && !maximized
-      ? {
-          ...namedSurfaceStyle,
-          ...(legacySize.width ? { width: legacySize.width } : {}),
-          ...(legacySize.height ? { height: legacySize.height, minHeight: legacySize.height } : {}),
-        }
-      : namedSurfaceStyle;
+  const surfaceStyle: React.CSSProperties = getSurfaceStyle(effectiveSize, uiScale);
   const effectiveLayout: SprkModalLayout = layout ?? SIZE_SPEC[size].layout;
   // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
   // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened

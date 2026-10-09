@@ -32,7 +32,7 @@
 //   T20 Run not found → Failure(Resumable, run-not-found).
 //   T21 MapImporterFailure round-trip — every failure kind maps to (rejection, class),
 //       incl. T218b PackageTypeMismatch / DowngradeRefused (Resumable).
-//   HANDLER-07/08 pre-import gates.
+//   HANDLER-08 pre-import org-settings gate (HANDLER-07 required apps removed, task 253).
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
@@ -551,58 +551,29 @@ public sealed class H6SolutionImportHandlerTests
         ISolutionVerifier verifier,
         string? clientSecret = ClientSecret,
         Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions? credentials = null,
-        IRequiredApplicationsInstaller? requiredAppsInstaller = null,
         IOrgSettingsContractApplier? orgSettingsApplier = null)
     {
         var options = Options.Create(new SolutionImportOptions
         {
             ClientSecret = clientSecret,
             ImportTimeout = TimeSpan.FromSeconds(10),
-            VerifierCallTimeout = TimeSpan.FromSeconds(5),
             // A44.5: default (unconfigured) = legacy [ClientSecret] chain —
             // every pre-existing test in this file keeps task-141/204a
             // semantics unchanged.
             Credentials = credentials ?? new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions(),
         });
-        // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation
-        // 2026-08-27; both lifted to LIVE impls 2026-08-27 Wave 2.5):
-        // default to Success-returning stubs so existing H6 orchestration
-        // tests remain focused on H6-level flow (parity with pre-Wave-2.5
-        // scaffold behavior that also returned Success unconditionally).
-        // HANDLER-07/08-specific H6 tests inject Failure-returning fakes
-        // explicitly. Direct coverage of the LIVE
-        // `PacRequiredApplicationsInstaller` shell-out lives in
-        // <see cref="PacRequiredApplicationsInstallerTests"/>; the LIVE
-        // `PacOrgSettingsContractApplier` shell-out in
-        // <see cref="PacOrgSettingsContractApplierTests"/>.
+        // HANDLER-08: default to a Success-returning applier stub so the H6
+        // orchestration tests stay focused on H6-level flow; the HANDLER-08
+        // test injects a Failure-returning one. The live Web API applier is
+        // covered by DataverseWebApiOrgSettingsContractApplierTests (task 253).
         return new H6SolutionImportHandler(
             repo, importer, verifier,
-            requiredAppsInstaller ?? new StubRequiredApplicationsInstaller(
-                new RequiredApplicationsInstallOutcome.Success(StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames)),
-            new StaticRequiredApplicationsManifest(),
             orgSettingsApplier ?? new StubOrgSettingsContractApplier(
                 new OrgSettingsContractOutcome.Success(StaticOrgSettingsContractManifest.DefaultOrgSettings)),
             new StaticOrgSettingsContractManifest(),
             options,
             TimeProvider.System,
             NullLogger<H6SolutionImportHandler>.Instance);
-    }
-
-    // ---------- HANDLER-07 required-applications gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
-
-    private sealed class StubRequiredApplicationsInstaller : IRequiredApplicationsInstaller
-    {
-        private readonly RequiredApplicationsInstallOutcome _outcome;
-        public int CallCount { get; private set; }
-        public RequiredApplicationsInstallRequest? LastRequest { get; private set; }
-        public StubRequiredApplicationsInstaller(RequiredApplicationsInstallOutcome outcome) => _outcome = outcome;
-        public Task<RequiredApplicationsInstallOutcome> EnsureInstalledAsync(
-            RequiredApplicationsInstallRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            LastRequest = request;
-            return Task.FromResult(_outcome);
-        }
     }
 
     private sealed class StubOrgSettingsContractApplier : IOrgSettingsContractApplier
@@ -620,48 +591,6 @@ public sealed class H6SolutionImportHandlerTests
         }
     }
 
-    [Fact]
-    public async Task Handler07_RequiredApps_FailureFromInstaller_FailsResumable_NoImporterCall()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h07");
-        var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
-        var failingInstaller = new StubRequiredApplicationsInstaller(
-            new RequiredApplicationsInstallOutcome.Failure("msft_PowerBI_Anchor install timed out at 6min poll."));
-        var handler = BuildHandler(repo, importer, verifier,
-            requiredAppsInstaller: failingInstaller);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.MissingRequiredApplication);
-        failure.Diagnostic.Should().Contain("msft_PowerBI_Anchor");
-        importer.CallCount.Should().Be(0, "importer MUST NOT fire when required-apps gate fails");
-        failingInstaller.CallCount.Should().Be(1);
-        failingInstaller.LastRequest!.RequiredApplicationNames.Should().Contain("msft_PowerBI_Anchor");
-    }
-
-    [Fact]
-    public async Task Handler07_RequiredApps_Success_ProceedsToImporter()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h07-ok");
-        var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
-        var okInstaller = new StubRequiredApplicationsInstaller(
-            new RequiredApplicationsInstallOutcome.Success(new[] { "msft_PowerBI_Anchor" }));
-        var handler = BuildHandler(repo, importer, verifier,
-            requiredAppsInstaller: okInstaller);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        okInstaller.CallCount.Should().Be(1);
-        importer.CallCount.Should().Be(1, "importer MUST fire when required-apps gate passes");
-    }
-
     // ---------- HANDLER-08 org-settings contract gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
     [Fact]
@@ -672,7 +601,7 @@ public sealed class H6SolutionImportHandlerTests
         var importer = FakeSolutionImporter.Success();
         var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
         var failingApplier = new StubOrgSettingsContractApplier(
-            new OrgSettingsContractOutcome.Failure("maxuploadfilesize apply failed: pac org update-settings exit 1."));
+            new OrgSettingsContractOutcome.Failure("The organization PATCH returned 403 Forbidden. Settings not applied: maxuploadfilesize=25600000."));
         var handler = BuildHandler(repo, importer, verifier,
             orgSettingsApplier: failingApplier);
 
@@ -692,8 +621,6 @@ public sealed class H6SolutionImportHandlerTests
     public void StaticManifests_MatchCanonicalR1Values()
     {
         // Regression guard: the canonical values ship in the constants.
-        StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames
-            .Should().Contain("msft_PowerBI_Anchor");
         StaticOrgSettingsContractManifest.DefaultOrgSettings
             .Should().ContainKey("maxuploadfilesize");
         StaticOrgSettingsContractManifest.DefaultOrgSettings["maxuploadfilesize"]

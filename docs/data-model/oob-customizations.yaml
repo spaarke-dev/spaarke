@@ -47,6 +47,10 @@ oob_entities:
       - sprk_identitycollisionplane # identity binding
       - sprk_identitycollisionreason # identity binding (option set sprk_identitycollisionreason)
       - sprk_identityplane # identity binding (option set sprk_identityplane)
+    alternate_keys:
+      # T255: an OOB-table KEY is not a column — the package rule includes unmanaged sprk_ keys on OOB tables since
+      # T255 (SpaarkePackageScope.psm1). The BFF creates contacts by contacts(sprk_externalobjectidkey='<oid>').
+      - sprk_externalobjectiduniquekey # on sprk_externalobjectidkey (UAC-r2 task 141, owner round 4 item 4 B2)
 
   systemuser:
     custom_columns:

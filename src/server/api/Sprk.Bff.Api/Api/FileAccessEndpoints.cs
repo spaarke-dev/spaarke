@@ -139,7 +139,8 @@ public static class FileAccessEndpoints
         foreach (var group in roots.GroupBy(r => r.Entity, StringComparer.Ordinal))
         {
             var ids = group.Select(r => r.Id).ToArray();
-            var flags = await participations.GetRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
+            // Task 174 (owner round 84): EFFECTIVE flags — a record under a secure or Restricted parent refuses a link too.
+            var flags = await participations.GetEffectiveRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
             foreach (var id in ids)
             {
                 // Every id asked about is in the map; an unreadable one is secure AND restricted (fail closed).

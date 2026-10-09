@@ -4,7 +4,7 @@
     <title>The L2 Worker runs no shell tool: H4b writes app settings through ARM, H6 applies org settings through the Dataverse Web API and installs required applications without pac — nothing depends on pwsh, pac or a scripts folder on the host</title>
     <phase>Model 1 dedicated-stamp remediation — new gap G38 (found by T230a, 2026-10-06)</phase>
     <gate>after 230a; before T186</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H4b + H6 handler collaborators replaced; Worker DI; tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -83,5 +83,35 @@
     <trigger>The application-install API needs a permission or license the Worker identity cannot be given by the operator.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-09" author="T253 sub-agent (isolated worktree)">
+      DONE — no registered (or unregistered) L2 type starts a process; nothing in L2 reads a scripts/ folder at run time.
+      H4b: settings built in C# (H4bBulkAppSettingsHandler.BuildDesiredSettings — secrets[].app_settings as
+      @Microsoft.KeyVault(VaultName={stamp vault};SecretName=…) + per_env_settings, per-env wins on a duplicate key,
+      optional entries without a value left out) and merged through the new IAppServiceSettingsWriter /
+      ArmAppServiceSettingsWriter (ARM SDK, production site then `staging` slot, read-merge-write, no PUT when a slot
+      already matches; the one merge rule is shared with H9's ArmSlotStickyAppSettingWriter). Parity test
+      (H4bBulkAppSettingsHandlerTests.Parity_*) evaluates the real generated script against the real embedded manifest,
+      with and without the optional spend limit. FilePerEnvSettingsManifest now also serves the KV references.
+      H6: DataverseWebApiOrgSettingsContractApplier (one organization GET + one PATCH, If-Match *, integer as JSON number,
+      never lowers a higher value) as H6's importer identity (the Worker UAMI acting as the BFF app registration via
+      FIC — System Administrator since H10; no new identity or permission). Required applications: NOT built — the
+      CI-built SpaarkeMaster 1.2.0.0 Solution.xml has no Power BI / msft_PowerBI_* dependency (F13 was a spurious
+      dependency of the hand-made package); installer, manifest and HANDLER-07 step deleted, PRQ-C-07 retired, and
+      ArchTest SpaarkeMasterApplicationDependencyTests fails the build if a re-export adds an application outside the
+      1.2.0.0 platform set. Escalation trigger did not fire (no install API needed).
+      Same G38 class, fixed here (task title: "nothing depends on … a scripts folder"): H12a/H12b read
+      {AppContext.BaseDirectory}/scripts/seed-data/manifest.yaml from DISK — absent in the Worker publish, so both failed
+      live. EmbeddedSeedManifestReader (renamed from FileSeedManifestReader) reads the embedded copy; H12b takes its
+      hash from that reader (its key suffix is now lowercase hex — within-run only).
+      Deleted: IProcessRunner, PwshProcessRunner, PacOrgSettingsContractApplier, PacRequiredApplicationsInstaller,
+      IRequiredApplicationsInstaller(+manifest), DotnetR3GateVerifier, IR3GateVerifier, and the dead shell options
+      (BulkAppSettings Pwsh/ConfigureScriptPath/ScriptTimeout; SolutionImport PacCliExecutable/VerifierCallTimeout;
+      AiSeedChain/AppConfigSeed ManifestPath + pwsh/script fields; BffDeploy Pwsh/AzCli/Dotnet/RepositoryRoot/
+      NamingConformanceScriptPath/R3GateStepTimeout/DeployBffApiScriptPath/BffPublishDirectory/DeployTimeout;
+      BicepInfraDeploy Pwsh/AzCli/ProvisionCustomerScriptPath/DeployTimeout; KvSecretsPopulation AzCliExecutable).
+      Forcing function: tests/Spaarke.ArchTests/ControlPlaneNoProcessStartGuardTests.cs (IL scan of Core/Api/Worker; with
+      compiled negative controls). Live proof: T186 (no live call made here).
+    </note>
+  </notes>
 </task>

@@ -24,7 +24,7 @@ import { resolveRegardingContext } from './hostContext';
 import { buildPreviewModel } from './previewModel';
 import { ConversationPreview } from './ConversationPreview';
 import { ConversationModal } from './ConversationModal';
-import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -148,7 +148,7 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
           }
           return;
         }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
         if (cancelled) return;
         setBffBaseUrl(baseUrl);
         setAuthReady(true);

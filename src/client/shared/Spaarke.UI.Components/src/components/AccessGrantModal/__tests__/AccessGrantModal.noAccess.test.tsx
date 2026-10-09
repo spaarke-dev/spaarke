@@ -20,7 +20,15 @@ import type {
   IUserPick,
   IRecordNoAccessEntry,
 } from '../types';
-import { parseNoAccessResponse, describeCoverage, suppressionFor, vetoFor, buildVetoIndex } from '../noAccess';
+import {
+  parseNoAccessResponse,
+  parseEffectiveAccess,
+  effectiveAccessState,
+  describeCoverage,
+  suppressionFor,
+  vetoFor,
+  buildVetoIndex,
+} from '../noAccess';
 
 const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
 const CONTACT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
@@ -93,7 +101,8 @@ function noAccessBody(entries: IRecordNoAccessEntry[] | null, entriesState = 'co
   return {
     recordType: 'sprk_matter',
     recordId,
-    secure: 'applies',
+    // Task 174: `secure` is the record's EFFECTIVE flag, which the dialog folds in; the fixture's matter is not secure.
+    secure: 'doesNotApply',
     noAccess: entries?.some(e => e.inForce === true) ? 'applies' : 'doesNotApply',
     entriesState,
     entries,
@@ -538,6 +547,75 @@ describe('AccessGrantModal — rows the record policy cancels (task 066, folded 
     const vetoLine = within(walled).getByText(/On the No Access list/);
     const cancelLine = within(cancelled).getByText(/No effect: this record is Restricted/);
     expect(vetoLine.className).not.toBe(cancelLine.className);
+  });
+});
+
+describe('AccessGrantModal — cancellation follows the parent (task 174, owner round 84)', () => {
+  const allRows = (server: Record<string, unknown>) =>
+    makeProps({
+      grants: [CONTACT_GRANT, ORG_GRANT],
+      standing: [STANDING_ROW],
+      noAccess: async () => jsonResponse({ ...noAccessBody([]), ...server }),
+    });
+
+  it('a record whose own values are Standard, under a secure matter: organization and standing rows have no effect', async () => {
+    renderModal(
+      allRows({
+        secure: 'applies',
+        accessPermission: 'standard',
+        inheritedFrom: { recordType: 'sprk_matter', recordId: PARENT_MATTER_ID, name: 'Parent Matter' },
+      })
+    );
+    await noAccessSection();
+    expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('active');
+    expect(
+      within(currentAccessRow('All contacts at Acme LLP')).getByText(
+        'No effect: this record is secure, so organization-wide grants give no access.'
+      )
+    ).toBeInTheDocument();
+    expect(
+      within(currentAccessRow('Sam Standing')).getByText('No effect: this record is secure, so standing grants give no access.')
+    ).toBeInTheDocument();
+    expect(screen.getByText(/It follows the matter it is filed under: Parent Matter\./)).toBeInTheDocument();
+  });
+
+  it('under a Restricted matter: every contact-based row has no effect', async () => {
+    renderModal(allRows({ secure: 'doesNotApply', accessPermission: 'restricted' }));
+    await noAccessSection();
+    for (const name of ['Walter Walled', 'All contacts at Acme LLP', 'Sam Standing']) {
+      expect(
+        within(currentAccessRow(name)).getByText('No effect: this record is Restricted, so contacts get no access.')
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("never less strict than the record's own values: a Restricted host stays Restricted on a Standard answer", async () => {
+    renderModal({ ...allRows({ secure: 'doesNotApply', accessPermission: 'standard' }), accessPermissionState: 'restricted' });
+    await noAccessSection();
+    expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('suppressed');
+  });
+
+  it('an answer without accessPermission (an older BFF) on a non-secure record cancels nothing', async () => {
+    renderModal(allRows({ secure: 'doesNotApply' }));
+    await noAccessSection();
+    for (const name of ['Walter Walled', 'All contacts at Acme LLP', 'Sam Standing']) {
+      expect(currentAccessRow(name).getAttribute('data-access-state')).toBe('active');
+    }
+  });
+
+  it('helpers: parse reads the effective fields; unknown folds in as Limited; another record is not trusted', () => {
+    const parsed = parseEffectiveAccess(
+      { recordId: RECORD_ID, secure: 'unknown', accessPermission: 'unknown', inheritedFrom: null },
+      RECORD_ID
+    );
+    expect(parsed).toEqual({ isSecure: null, accessPermission: null, inheritedFrom: null });
+    expect(effectiveAccessState('standard', false, parsed)).toEqual({ state: 'limited', isSecure: false });
+    expect(effectiveAccessState('standard', false, null)).toEqual({ state: 'standard', isSecure: false });
+    expect(
+      effectiveAccessState('limited', false, { isSecure: false, accessPermission: 'restricted', inheritedFrom: null })
+    ).toEqual({ state: 'restricted', isSecure: false });
+    expect(parseEffectiveAccess({ recordId: CONTACT_ID, secure: 'applies' }, RECORD_ID)).toBeNull();
+    expect(parseEffectiveAccess({ recordId: RECORD_ID }, RECORD_ID)).toBeNull();
   });
 });
 

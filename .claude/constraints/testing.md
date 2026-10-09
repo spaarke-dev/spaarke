@@ -43,7 +43,7 @@ Tests under these eight paths are **KEEP-protected**. Deleting a file under any 
 
 - ✅ **MUST** write a regression test for every fixed production bug — file lands under `tests/integration/regression/Issue{N}_*Tests.cs`
 - ✅ **MUST** write at least one integration test under `tests/integration/contract/**` for every new endpoint
-- ✅ **MUST** mirror `src/` directory structure within each KEEP path (e.g., `tests/integration/contract/Api/Ai/ChatEndpointsTests.cs` mirrors `src/server/api/.../Api/Ai/`)
+- ✅ **MUST** mirror `src/` directory structure within each KEEP path (e.g., `tests/integration/contract/Api/Compose/ComposeActiveDocumentContractTests.cs` mirrors `src/server/api/.../Api/`)
 - ✅ **MUST** use xUnit as the test framework
 - ✅ **MUST** use Moq (NOT NSubstitute) for mocking — matches the existing codebase
 - ✅ **MUST** use FluentAssertions for assertions
@@ -129,7 +129,7 @@ The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffol
 - ❌ **MUST NOT** ignore or skip tests without a `[Trait("skip-reason", "<concrete reason + ticket>")]` marker and a follow-up issue
 - ❌ **MUST NOT** use `Thread.Sleep` or arbitrary delays (use `TimeProvider`/`FakeTimeProvider`)
 - ❌ **MUST NOT** mock value objects or DTOs
-- ❌ **MUST NOT** introduce a new test under any path OTHER than the 7 KEEP categories — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.
+- ❌ **MUST NOT** introduce a new test under any path OTHER than the eight KEEP categories (§1) — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.
 
 ---
 

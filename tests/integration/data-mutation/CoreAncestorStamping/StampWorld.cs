@@ -4,7 +4,7 @@ using System.Xml.Linq;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 
@@ -82,24 +82,24 @@ internal sealed class StampWorld
 
     public StampWorld()
     {
-        Service = Substitute.For<IGenericEntityService>();
+        var service = new Mock<IGenericEntityService>();
+        Service = service.Object;
 
-        Service.RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        service.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, string[] columns, CancellationToken _) =>
             {
-                var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
+                var key = (entity, id);
                 if (_readFaults.TryGetValue(key, out var fault)) throw fault;
                 return _rows.TryGetValue(key, out var row)
-                    ? Task.FromResult(Project(row, call.ArgAt<string[]>(2)))
+                    ? Task.FromResult(Project(row, columns))
                     : throw NotFound(key.Item1);
             });
 
         // A create stores the row as sent (a fresh id unless the entity carries one) — task 156, owner round 8 item 2: a
         // TaskActionCore create lands here, so the job then reads exactly what that writer wrote.
-        Service.CreateAsync(Arg.Any<Entity>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        service.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity sent, CancellationToken _) =>
             {
-                var sent = call.ArgAt<Entity>(0);
                 var id = sent.Id != Guid.Empty ? sent.Id : Guid.NewGuid();
                 var row = new Entity(sent.LogicalName, id);
                 foreach (var attribute in sent.Attributes) row[attribute.Key] = attribute.Value;
@@ -108,11 +108,10 @@ internal sealed class StampWorld
                 return Task.FromResult(id);
             });
 
-        Service.UpdateAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        service.Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
-                var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
-                var fields = call.ArgAt<Dictionary<string, object>>(2);
+                var key = (entity, id);
                 Patches.Add((key.Item1, key.Item2, new Dictionary<string, object>(fields)));
                 if (_writeFaults.TryGetValue(key, out var fault)) throw fault;
 
@@ -126,10 +125,9 @@ internal sealed class StampWorld
                 return Task.CompletedTask;
             });
 
-        Service.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
             {
-                var query = call.ArgAt<QueryExpression>(0);
                 if (_scanFaults.TryGetValue(query.EntityName, out var fault)) throw fault;
 
                 var matches = _rows.Values
@@ -144,13 +142,13 @@ internal sealed class StampWorld
                 return Task.FromResult(Page(matches, query.PageInfo?.Count ?? 0, query.PageInfo?.PageNumber ?? 1));
             });
 
-        Service.RetrieveMultipleAsync(Arg.Any<FetchExpression>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression sentFetch, CancellationToken _) =>
             {
-                var fetch = XDocument.Parse(call.ArgAt<FetchExpression>(0).Query);
+                var fetch = XDocument.Parse(sentFetch.Query);
                 var entity = fetch.Root!.Element("entity")!;
                 var table = entity.Attribute("name")!.Value;
-                FetchXml.Add(call.ArgAt<FetchExpression>(0).Query);
+                FetchXml.Add(sentFetch.Query);
                 if (_scanFaults.TryGetValue(table, out var fault)) throw fault;
 
                 var filter = entity.Element("filter");

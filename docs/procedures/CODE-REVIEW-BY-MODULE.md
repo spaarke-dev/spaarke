@@ -154,7 +154,7 @@ Spaarke ships **no Dataverse plugins** (the former "Dataverse Plugins" module ch
 
 ### Checklist
 
-- [ ] **No Circular Dependencies**: `Spaarke.Core` has no dependencies on other Spaarke libraries; `Spaarke.Dataverse` can depend on `Spaarke.Core`; both are consumed by `Sprk.Bff.Api`
+- [ ] **No Circular Dependencies**: `Spaarke.Dataverse` is the base layer (no Spaarke references); `Spaarke.Core` references `Spaarke.Dataverse`; `Spaarke.Scheduling` references `Spaarke.Core`; all are consumed by `Sprk.Bff.Api` (enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs`)
 - [ ] **Context-Agnostic Components (ADR-012)**: Shared UI components must not reference PCF `ComponentFramework` types or Dataverse-specific APIs
 - [ ] **React Compatibility**: `@spaarke/ui-components` peer dependencies require React >=16.14.0 to work in both PCF (React 16) and code pages (React 18)
 - [ ] **Fluent UI v9 Only**: Shared components use only Fluent UI v9; no v8 imports

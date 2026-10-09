@@ -23,11 +23,16 @@ import { DocumentGraph } from './components/DocumentGraph';
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
 import type { DocumentNode } from './types/graph';
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
-import { getApiBaseUrl, getTenantId, getMsalClientId, getBffApiAppId } from '../../shared/utils/environmentVariables';
+import {
+  getApiBaseUrl,
+  getMsalClientId,
+  getBffApiAppId,
+  resolveSignInIdentity,
+} from '../../shared/utils/environmentVariables';
 import { initializeAuth } from './authInit';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.36';
+const CONTROL_VERSION = '1.0.37';
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -192,8 +197,9 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
         // Resolve API base URL — prefer manifest param, fall back to env var
         const apiBaseUrl = (context.parameters.apiBaseUrl?.raw ?? '') || (await getApiBaseUrl(webApi));
-        // Resolve Tenant ID — prefer manifest param, fall back to env var
-        const tenantId = (context.parameters.tenantId?.raw ?? '') || (await getTenantId(webApi));
+        // Resolve Tenant ID — sprk_TenantId first, the form param only as a fallback (#1453 — shipped forms
+        // can carry a static dev tenant).
+        const { tenantId } = await resolveSignInIdentity(webApi, { tenantId: context.parameters.tenantId?.raw ?? '' });
         // Auth config — always from env vars
         const clientAppId = await getMsalClientId(webApi);
         const bffAppId = await getBffApiAppId(webApi);
