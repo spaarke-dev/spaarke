@@ -94,6 +94,7 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
 
         var started = _timeProvider.GetTimestamp();
         SecureBuAssertionOutcome? outcome = null;
+        SecureRecordIsolationCensusResult? result = null;
         Exception? readFailure = null;
         var status = StatusError;
 
@@ -104,6 +105,7 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
             outcome = await SecureRecordIsolationCensus.EvaluateAsync(dataverse, _configuration, cancellationToken)
                 .ConfigureAwait(false);
             status = SecureRecordIsolationCensus.StatusOf(outcome);
+            result = SecureRecordIsolationCensus.ToResult(outcome);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -165,12 +167,16 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
             ErrorMessage: status == StatusIsolated ? null : outcome!.Message,
             ProcessedItems: findingCount,
             Duration: duration,
-            ResultJson: JsonSerializer.Serialize(new
-            {
-                status,
-                verdict = outcome!.Verdict.ToString(),
-                findings = outcome.Findings.Select(f => new { verdict = f.Verdict.ToString(), message = f.Message }),
-                attempt = context.Attempt
-            }));
+            // The SAME result type the acceptance route returns (SecureRecordIsolationCensusResult), camelCase as the route
+            // serialises it, plus this run's attempt.
+            ResultJson: JsonSerializer.Serialize(
+                new
+                {
+                    status,
+                    verdict = result!.Verdict,
+                    findings = result.Findings,
+                    attempt = context.Attempt
+                },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
     }
 }

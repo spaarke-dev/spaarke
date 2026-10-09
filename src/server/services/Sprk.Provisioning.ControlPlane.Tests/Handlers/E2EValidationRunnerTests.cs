@@ -456,6 +456,9 @@ public sealed class E2EValidationRunnerTests
     [InlineData("<html>gateway</html>")]                                                          // not JSON
     [InlineData("{\"status\":\"isolated\",\"findings\":[{\"verdict\":\"X\",\"message\":\"y\"}]}")] // isolated WITH findings
     [InlineData("{\"status\":\"ISOLATED\",\"findings\":[]}")]                                     // statuses are exact
+    [InlineData("{\"status\":\" isolated\",\"findings\":[]}")]                                    // padded
+    [InlineData("{\"status\":\"isolated!\",\"findings\":[]}")]                                    // decorated
+    [InlineData("{\"status\":\"isolated\\u200b\",\"findings\":[]}")]                              // zero-width suffix
     public async Task Census_AnAnswerThisBuildCannotRead_FailsClosed(string body)
     {
         var outcome = await BuildRunner(CensusAnswers(body)).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);

@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Contracts.Provisioning;
+using Sprk.Bff.Api.Api.Platform;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Xunit;
 
@@ -71,6 +72,44 @@ public sealed class SecureRecordIsolationCensusEndpointContractTests : IClassFix
             .PostAsync(Route, null);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Census_ATokenFromAnotherTenant_Is403()
+    {
+        var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue, tenantId: "another-tenant-id")
+            .PostAsync(Route, null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Census_ThatTimesOut_IsStatusError_WithNoExceptionText()
+    {
+        var original = KeylessProofEndpoints.CensusTimeout;
+        KeylessProofEndpoints.CensusTimeout = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            _host.Dataverse
+                .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns(async (QueryExpression _, CancellationToken ct) =>
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                    return new EntityCollection();
+                });
+
+            var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue).PostAsync(Route, null);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "a timeout is isolation UNKNOWN, reported as error - not a 5xx");
+            var text = await response.Content.ReadAsStringAsync();
+            text.Should().NotContain("Cancel").And.NotContain("Exception");
+            using var body = JsonDocument.Parse(text);
+            body.RootElement.GetProperty("status").GetString().Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Error);
+        }
+        finally
+        {
+            KeylessProofEndpoints.CensusTimeout = original;
+        }
     }
 
     [Fact]

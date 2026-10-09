@@ -79,6 +79,16 @@ public sealed class KeylessProofEndpointContractTests : IClassFixture<KeylessPro
     }
 
     [Fact]
+    public async Task Prove_ATokenFromAnotherTenant_Is403()
+    {
+        // The app registration is multi-tenant: a foreign tenant's app holding a same-named role is still refused.
+        var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue, tenantId: "another-tenant-id")
+            .PostAsync(KeylessProofContract.Route, null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task Prove_AV1AppOnlyTokenWithoutIdtyp_IsAdmitted()
     {
         var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue).PostAsync(KeylessProofContract.Route, null);
@@ -141,7 +151,7 @@ public sealed class KeylessProofHost : WebApplicationFactory<Program>
     /// </summary>
     public Mock<IDataverseService> Dataverse { get; } = new();
 
-    public HttpClient Caller(string? roles = null, string? scope = null, string? idtyp = null, string? audience = null)
+    public HttpClient Caller(string? roles = null, string? scope = null, string? idtyp = null, string? audience = null, string? tenantId = null)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "task-230b");
@@ -149,6 +159,7 @@ public sealed class KeylessProofHost : WebApplicationFactory<Program>
         if (scope is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.ScopeHeader, scope);
         if (idtyp is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.IdtypHeader, idtyp);
         if (audience is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.AudienceHeader, audience);
+        if (tenantId is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.TenantHeader, tenantId);
         return client;
     }
 
@@ -276,6 +287,7 @@ internal sealed class KeylessProofFakeAuthHandler : AuthenticationHandler<Authen
     public const string ScopeHeader = "X-Test-Scp";
     public const string IdtypHeader = "X-Test-Idtyp";
     public const string AudienceHeader = "X-Test-Aud";
+    public const string TenantHeader = "X-Test-Tid";
 
     public KeylessProofFakeAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : base(options, logger, encoder)
@@ -289,7 +301,7 @@ internal sealed class KeylessProofFakeAuthHandler : AuthenticationHandler<Authen
 
         var claims = new List<Claim>
         {
-            new("tid", "test-tenant-id"),
+            new("tid", Request.Headers.TryGetValue(TenantHeader, out var tid) ? tid.ToString() : "test-tenant-id"),
             new("oid", "230b0000-0000-0000-0000-000000000001"),
             new("appid", "l2-worker-app-id"),
             // The fixture's AzureAd:ClientId — the audience the filter pins (or the override header).

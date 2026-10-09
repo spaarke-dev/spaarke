@@ -72,5 +72,70 @@
     <criterion testable="true">dotnet build Spaarke.sln 0 errors / 0 warnings; BFF unit tests + ControlPlane tests + Spaarke.ArchTests pass; BFF publish-size delta measured.</criterion>
   </acceptance-criteria>
   <notes>
+    Completed 2026-10-09 (sub-agent worktree, FULL rigor, no live action).
+
+    WHAT WAS BUILT
+    - BFF: POST /api/platform/secure-record-isolation-census in Api/Platform/KeylessProofEndpoints.cs (same group, same
+      file as the keyless proof — the route guard's GovernedFile/AdminOnlyGroup entry gained the route; endpoint file count
+      unchanged). RequireAuthorization + AddKeylessProofAuthorizationFilter + RequireRateLimiting("job-submission").
+      Synchronous, CancelAfter 60 s (below H13's 90 s KeylessProofTimeout); a read failure / timeout → 200 status=error
+      with no exception text (logged as [SECURE-CENSUS] at Error). Body: {status, verdict, findings[{verdict, message}]}.
+    - One census: SecureRecordIsolationCensus (Services/ExternalAccess, static — no DI registration, ADR-010) holds the
+      read (moved verbatim from the job), EvaluateAsync, StatusOf, ToResult. The job calls it; its logging, heartbeat,
+      throw-on-read-failure and ResultJson are unchanged.
+    - Contract: KeylessProofContract.SecureRecordIsolationCensus (Route + isolated/findings/inert/error), source-linked.
+    - L2: IE2EValidationRunner.RunSecureIsolationCensusAsync + SecureIsolationCensusOutcome (Isolated / NotIsolated /
+      Failed / Inconclusive). The keyless proof's call path was extracted into PostAsL2IdentityAsync and is shared — the
+      keyless proof's diagnostics and classification are unchanged (all prior runner tests pass unmodified).
+    - H13 step 7b (after the existing checks): only Isolated passes; gate h13-secure-isolation. Codes:
+      h13-secure-isolation-not-isolated (findings) / -inert / -census-failed → QuarantineRequired;
+      h13-secure-isolation-inconclusive (error, transport, timeout, 404, a throw) → Resumable. Census verdicts rank after
+      trap/invariant failures and before the keyless/validation failures; census inconclusive after validation inconclusive.
+
+    DECISION — what `inert` means on a fresh stamp (step 2 of the dispatch)
+    The census grades the security TOPOLOGY — role depth reaching the Secure Record unit, users in it, the owner team's
+    members and the owner role's holders and coverage — never records. A fresh stamp with no secure record yet is graded in
+    full and is `isolated` when the topology is right. `inert` means only one thing: the BFF finds NO business unit named
+    SecureRecord:BusinessUnitName, so the evaluator asserted nothing — it does not prove that no human can reach the unit.
+    H7b creates that unit before H13 (H13 ← H7b), so on a provisioned stamp inert is a broken stamp (H7b's output missing,
+    or the BFF's name differs from H7b's) → QuarantineRequired h13-secure-isolation-inert. Never a pass.
+
+    DEVIATIONS
+    - D1: the route lives in KeylessProofEndpoints.cs rather than a new file — same group, filter, caller and contract;
+      a new file would add a GovernedFile and move the route-guard file count for no isolation gain.
+    - D2: H13 reuses H13AcceptanceOptions.KeylessProofTimeout for the census call (no new option, §11).
+    - D3 (defect found, fixed in scope): ContactAadObjectIdColumnGuardTests failed on the work branch — T259 pushed
+      DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId out of the guard's 40-line systemuser window. Renamed
+      to SystemUserAzureActiveDirectoryObjectId (4 files; the column is the systemuser's).
+
+    §11 — existing: the job + admin job routes (async, SystemAdmin-only; widening them to L2 would grant every job's
+    controls); extension: the route reuses the existing filter, rate policy and the job's code; cost of doing nothing:
+    H13 cannot gate Ready on isolation and every guest could read every secure record on a run that reaches Ready.
+    Placement (§10/ADR-052): BFF — the census reads Dataverse as the BFF application user with BFF domain code.
+
+    VERIFICATION
+    - dotnet build Spaarke.sln: 0 errors / 0 warnings.
+    - ControlPlane tests: 2665 passed / 1 skipped (pre-existing).
+    - BFF unit tests (Platform, AccessControl, ExternalAccess, Filters, Scheduling, Jobs filters — 4628 tests): all pass
+      after D3 (1 failure before D3, pre-existing on the work branch).
+    - Spaarke.ArchTests: 929 / 929.
+    - BFF publish (Release, framework-dependent linux-x64, Compress-Archive Optimal, PDBs included, fresh trees at
+      C:\wt260m / C:\wt260a / C:\wt260b, 192 files each): master de03051c9 = 38,111,901 B (36.35 MB); work-branch base
+      ff70066a7 = 38,111,929 B; this task = 38,114,607 B → +2,706 B vs master (+2,678 B vs base). No package added;
+      no vulnerable package reported.
+
+    VERIFIER PASS 1 (no F1/F3/F4; two F2 test gaps fixed; K1-K3 fixed anyway)
+    - F2: foreign-tenant refusal now tested on both routes (Caller(tenantId:)); census timeout -> 200 status=error tested
+      (KeylessProofEndpoints.CensusTimeout is settable for tests).
+    - K1: the L2 parser compared a SANITISED status/outcome, so ' isolated' / 'isolated!' / zero-width-padded read as
+      isolated/proved; it now compares the raw string ordinally (altered -> unknown -> fail-closed); keyless-proof outcome
+      likewise. K2: the job now serialises ToResult(outcome) (+ attempt) - the route's type. K3: filter log lines carry the
+      request path.
+    - K4 (DELIBERATE): census findings, with principal names, are copied into the Cosmos run state by design (<= 20, each
+      <= 400 chars, control characters neutralised) - the operator needs the principal to act; the run record is the
+      operator-facing diagnostic store, same as the other H13 diagnostics.
+
+    LIVE PROOF OWED (T186): the first H13 against a real stamp — the BFF app user reads the directory, and the census is
+    `isolated` on a freshly provisioned environment (Dataverse's default users / teams included).
   </notes>
 </task>

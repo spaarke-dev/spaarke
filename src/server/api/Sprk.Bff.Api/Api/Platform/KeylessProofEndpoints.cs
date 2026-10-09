@@ -71,7 +71,7 @@ public static class KeylessProofEndpoints
     /// Bound on one synchronous census (nine paged reads). Below H13's own call timeout
     /// (<c>H13AcceptanceOptions.KeylessProofTimeout</c>, 90 s) so H13 receives <c>error</c> rather than a dropped call.
     /// </summary>
-    internal static readonly TimeSpan CensusTimeout = TimeSpan.FromSeconds(60);
+    internal static TimeSpan CensusTimeout { get; set; } = TimeSpan.FromSeconds(60); // settable so a contract test can prove the timeout path
 
     private static async Task<IResult> ProveAsync(KeylessProofService service, CancellationToken cancellationToken)
     {

@@ -526,7 +526,10 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         {
             using var doc = JsonDocument.Parse(body ?? string.Empty);
             var root = doc.RootElement;
-            status = Sanitize(root.GetProperty("status").GetString());
+            // The gate compares the RAW string ordinally: Sanitize strips characters, so ' isolated' or 'isolated!' would
+            // otherwise equal 'isolated'. An altered status is an unknown status (fail-closed below).
+            var rawStatus = root.GetProperty("status").GetString() ?? string.Empty;
+            status = string.Equals(Sanitize(rawStatus), rawStatus, StringComparison.Ordinal) ? rawStatus : "invalid";
             verdict = root.TryGetProperty("verdict", out var v) && v.ValueKind == JsonValueKind.String ? Sanitize(v.GetString()) : string.Empty;
             findings = new List<string>();
             findingCount = 0;
@@ -607,7 +610,9 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         foreach (var item in doc.RootElement.GetProperty("services").EnumerateArray())
         {
             var service = Sanitize(item.GetProperty("service").GetString());
-            var outcome = Sanitize(item.GetProperty("outcome").GetString());
+            var rawOutcome = item.GetProperty("outcome").GetString() ?? string.Empty;
+            // Compared raw for the same reason as the census status: an altered outcome is never 'proved'.
+            var outcome = string.Equals(Sanitize(rawOutcome), rawOutcome, StringComparison.Ordinal) ? rawOutcome : "invalid";
             var code = item.TryGetProperty("code", out var c) ? Sanitize(c.GetString()) : string.Empty;
             int? status = item.TryGetProperty("statusCode", out var st) && st.ValueKind == JsonValueKind.Number && st.TryGetInt32(out var s)
                 ? s : null;
