@@ -36,29 +36,6 @@ it, when it must exist, what to seed, or how H13 verifies it.
 UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
 answer into T256 handler work and T218 package content.
 
-### ISS-005 — Deploy-Release Phase 3 imports a 9-solution list that does not exist
-
-| Field | Value |
-|---|---|
-| **Status** | Scheduled — task 218f (owner 2026-10-08: canonical package only, in every environment) |
-| **Urgency** | before the next release to demo |
-| **Filed** | 2026-10-07 (found in T218b) |
-| **Source** | T218b — H6 left `Deploy-DataverseSolutions.ps1`; `Deploy-Release.ps1` still calls it |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1401 |
-
-**Description**
-
-`Deploy-Release.ps1` Phase 3 (the `deploy-new-release` skill, Spaarke's own environments) runs
-`Deploy-DataverseSolutions.ps1`, whose list names 9 solutions — 6 exist nowhere — and whose zip filter
-(`:443`) accepts every zip. A release to demo imports nothing useful or fails at the first missing solution. The legacy
-`Provision-Customer.ps1` (step 7, `:915`) calls it too; `Load-DemoSampleData.ps1` and `scripts/README.md` point operators
-to it.
-
-**Suggested fix**
-
-Package type per Spaarke environment (`config/environments.json`), then point the script at SpaarkeMaster with an
-explicit type and fix the filter — or retire Phase 3 in favour of the CI-published SpaarkeMaster zips (T218d).
-
 ### ISS-003 — A second environment for the same customer overwrites the first one's BFF app registration
 
 | Field | Value |
@@ -154,6 +131,29 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-005 — Deploy-Release Phase 3 imports a 9-solution list that does not exist
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-08 — task 218f: Deploy-Release Phase 3 imports the CI-published SpaarkeMaster (Import-SpaarkeMasterPackage.ps1, H6 rules, typed by config/environments.json); Deploy-DataverseSolutions.ps1 deleted; first publish 1.2.0.0 (run 37864623352); PR #1365 |
+| **Urgency** | before the next release to demo |
+| **Filed** | 2026-10-07 (found in T218b) |
+| **Source** | T218b — H6 left `Deploy-DataverseSolutions.ps1`; `Deploy-Release.ps1` still calls it |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1401 |
+
+**Description**
+
+`Deploy-Release.ps1` Phase 3 (the `deploy-new-release` skill, Spaarke's own environments) runs
+`Deploy-DataverseSolutions.ps1`, whose list names 9 solutions — 6 exist nowhere — and whose zip filter
+(`:443`) accepts every zip. A release to demo imports nothing useful or fails at the first missing solution. The legacy
+`Provision-Customer.ps1` (step 7, `:915`) calls it too; `Load-DemoSampleData.ps1` and `scripts/README.md` point operators
+to it.
+
+**Suggested fix**
+
+Package type per Spaarke environment (`config/environments.json`), then point the script at SpaarkeMaster with an
+explicit type and fix the filter — or retire Phase 3 in favour of the CI-published SpaarkeMaster zips (T218d).
 
 ### ISS-007 — CI identity trusts the `pull_request` OIDC subject
 
