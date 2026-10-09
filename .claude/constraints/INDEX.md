@@ -22,6 +22,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 |--------|------|-------------|--------------|---------------|--------|
 | API/BFF | [api.md](api.md) | ADR-001, 004, 008, 010, 019 | 2025-12-18 | 2026-04-05 | Verified |
 | **BFF Extensions (governance)** | [bff-extensions.md](bff-extensions.md) | ADR-001, 007, 008, 010, 013 (refined), 029 (forthcoming) | 2026-05-20 | 2026-05-20 | Active (binding) |
+| **Agent cost (sub-agents, fan-outs, context)** | [agent-cost.md](agent-cost.md) | — (owner direction 2026-10-09) | 2026-10-09 | 2026-10-09 | Active (binding) |
 | PCF Controls | [pcf.md](pcf.md) | ADR-006, 011, 012, 021, 022 | 2026-02-23 | 2026-04-05 | Verified |
 | Plugins + Write Path | [plugins.md](plugins.md) | ADR-002 | 2026-09-25 | 2026-09-25 | Verified |
 | Authentication | [auth.md](auth.md) | ADR-003, 004, 008, 009 | 2026-03-09 | 2026-04-05 | Verified |
