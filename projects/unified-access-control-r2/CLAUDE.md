@@ -192,6 +192,8 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 
 **Shared machine (2026-10-08):** many sessions and agents run tests on this machine at once. NEVER kill processes machine-wide (`taskkill /F /IM testhost.exe`, `dotnet build-server shutdown`, killing `dotnet`/`node` by name): it interrupts other sessions' runs. Kill only a PID you started, or wait for the lock to clear. A Dataverse form `GET` returns the PUBLISHED XML: publish before reading back a form write (task 153's script, PR #1473).
 
+**BFF base URL in form scripts (2026-10-09, #1488):** `sprk_BffApiBaseUrl` on dev ends in `/api`. A web resource MUST normalize it with `replace(/\/+$/, "").replace(/\/api$/i, "")` before appending `/api/...` or passing it to `Spaarke.BffAuth` (which appends `/api/config/client`); otherwise every call is `/api/api/...` → 401. Our banner, Assigned-To and No Access scripts shipped without it and failed silently on dev for days, because the live gates called BFF routes directly. **A live gate for a form script must exercise the form path, or at least the script's URL resolver against the real env var value.** Also: `Deploy-WebResourceInline.ps1` puts a NEW web resource only in Default/Active, not SpaarkeMaster. Follow it with `AddSolutionComponent` (type 61, `SpaarkeMaster`) and read the membership back (#1492).
+
 **Dataverse Web API:**
 - A lookup is `_x_value` in `$filter` AND `$select` (G-13); a test double matching on query text copies the code's mistake.
 - `RetrievePrincipalAccess` is refused on organization-owned tables (0x80040800); ask the table privilege.
