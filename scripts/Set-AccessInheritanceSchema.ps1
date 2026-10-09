@@ -238,6 +238,15 @@ function Get-ProbeProblem([string]$OperatorValue, [string]$BffValue, [string]$Us
     return $null
 }
 
+<#
+ Whether a refused field-permission grant is worth retrying: the column was JUST created or secured and the field-permission
+ service has not caught up — 0x8004f508 (not yet seen as secured), or "doesn't contain attribute" (the new column not yet
+ visible to it; dev live run 2026-10-09: the first table's grant failed at once with it). Anything else is a real refusal.
+#>
+function Test-GrantRetryable([string]$Message) {
+    return ("$Message" -match '0x8004f508') -or ("$Message" -match "does(n't| not) contain attribute")
+}
+
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 
 if ($SelfTest) {
@@ -275,7 +284,10 @@ if ($SelfTest) {
         @{ Name = 'BFF read: platform not asked is derived'; Got = (Get-BffReadProblem $false $null "$attr" 'bff' 't').Derived; Want = $true },
         @{ Name = 'probe: the BFF reads the value'; Got = (Get-ProbeProblem '{"v":1}' '{"v":1}' 'bff'); Want = $null },
         @{ Name = 'probe: the BFF reads EMPTY fails'; Got = ($null -ne (Get-ProbeProblem '{"v":1}' '' 'bff')); Want = $true },
-        @{ Name = 'probe: nothing to read'; Got = (Get-ProbeProblem '' '' 'bff'); Want = $null }
+        @{ Name = 'probe: nothing to read'; Got = (Get-ProbeProblem '' '' 'bff'); Want = $null },
+        @{ Name = 'grant retry: not yet seen as secured (0x8004f508)'; Got = (Test-GrantRetryable 'API error (POST fieldpermissions): 0x8004f508 ...'); Want = $true },
+        @{ Name = 'grant retry: new column not yet visible'; Got = (Test-GrantRetryable "API error (POST fieldpermissions): The entity doesn't contain attribute with Name = 'sprk_accessinheritance'"); Want = $true },
+        @{ Name = 'grant retry: a real refusal is not retried'; Got = (Test-GrantRetryable 'API error (POST fieldpermissions): Principal user is missing prvCreateFieldPermission'); Want = $false }
     )
     $failures = 0
     foreach ($c in $cases) {
@@ -415,9 +427,10 @@ function Grant-Writer([string]$ProfileId, [string]$Table) {
             } | Out-Null
             return
         } catch {
-            # Securing propagates asynchronously (task 141 live run): a grant right after it may be refused 0x8004f508.
-            if ("$($_.Exception.Message)" -notmatch '0x8004f508' -or $attempt -ge 12) { throw }
-            Write-Host "    $Table.$Column not yet seen as secured by the field-permission service; retrying ($attempt/12)..."
+            # Creating or securing propagates asynchronously (task 141 live run; task 175 dev run): a grant right after it may be
+            # refused 0x8004f508, or "doesn't contain attribute" for a column just created. Same bounded retry on every table.
+            if (-not (Test-GrantRetryable $_.Exception.Message) -or $attempt -ge 12) { throw }
+            Write-Host "    $Table.$Column not yet visible to the field-permission service; retrying ($attempt/12)..."
             Start-Sleep -Seconds 5
         }
     }
@@ -554,6 +567,20 @@ if ($Apply) {
                 ComponentId = $t.Column.MetadataId; ComponentType = 2; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false
             } | Out-Null
             Report 'DONE' "added $($t.Table).$Column to $SolutionUniqueName"
+        }
+
+        # A column just created or secured is published and read back as present and secured BEFORE the grant, on every
+        # table (dev live run 2026-10-09: the first table's grant was refused because the new column was not yet visible).
+        if ($secureNow) {
+            Invoke-Dv -Endpoint "PublishXml" -Method POST -Body @{ ParameterXml = "<importexportxml><entities><entity>$($t.Table)</entity></entities></importexportxml>" } | Out-Null
+            for ($wait = 1; ; $wait++) {
+                $seen = Get-Column $t.Table
+                if ($seen -and $seen.IsSecured) { break }
+                if ($wait -ge 12) { Write-GrantFailed $t.Table "the column was not visible as secured 60 s after it was published"; exit 1 }
+                Write-Host "    $($t.Table).$Column not yet visible as secured; waiting ($wait/12)..."
+                Start-Sleep -Seconds 5
+            }
+            Report 'DONE' "published $($t.Table) and read $Column back as secured"
         }
 
         # The writer's grant: at once after securing; on an already-secured column, whatever is missing (the resume path).

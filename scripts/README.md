@@ -1205,7 +1205,7 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 **Lifecycle:** ✅ Maintained (added 2026-10-09 by `unified-access-control-r2` task 175)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-09 — `-SelfTest` PASS (26 checks). Not run against any environment yet.
+**Last Used:** 2026-10-09 — `-Apply` then `-Verify` PASS on `spaarkedev1` (main session). `-SelfTest` PASS (29 checks): after creating or securing the column, `-Apply` publishes the table and waits until it reads back as secured before the grant, and it retries a grant refused with "doesn't contain attribute" or 0x8004f508 on every table.
 
 **Command:**
 ```powershell
