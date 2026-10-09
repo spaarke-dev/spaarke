@@ -997,6 +997,7 @@ public static class InternalShareEndpoints
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore ledger,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -1052,6 +1053,10 @@ public static class InternalShareEndpoints
             }
         }
 
+        // Task 175 (owner round 84; task 067's amendment): which of these a secure parent passed on (task 158's provenance rows,
+        // still in force) — shown read-only. Display only: a ledger read that fails marks nothing (logged).
+        var inherited = await InheritedSharesAsync(ledger, root.Type, root.Id, logger, ct);
+
         var listed = userShares
             .Select(s => new RecordUserShare(
                 s.SystemUserId,
@@ -1059,7 +1064,8 @@ public static class InternalShareEndpoints
                 s.Mask,
                 RecordShareLevels.LevelForMask(s.Mask),
                 s.ModifiedOn,
-                ExternalNoAccess: IsBarredOnRestricted(people.GetValueOrDefault(s.SystemUserId)?.IsExternal, restricted)))
+                ExternalNoAccess: IsBarredOnRestricted(people.GetValueOrDefault(s.SystemUserId)?.IsExternal, restricted),
+                InheritedFrom: inherited.GetValueOrDefault(s.SystemUserId)))
             .OrderBy(s => s.FullName is null)
             // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
             // host's culture configuration, or one record lists its users in different orders across hosts — or
@@ -1069,6 +1075,41 @@ public static class InternalShareEndpoints
             .ToList();
 
         return TypedResults.Ok(new RecordUserSharesResponse(listed));
+    }
+
+    /// <summary>
+    /// Task 175: the system users whose share on a work assignment or project a secure parent passed on (task 158's
+    /// inherited-share rows, not Revoked), each with that parent. Empty for a matter, and when the ledger cannot be read.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, RecordAccessParent>> InheritedSharesAsync(
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore ledger, ExternalGrantRootType rootType, Guid rootId,
+        ILogger logger, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, RecordAccessParent>();
+        if (rootType == ExternalGrantRootType.Matter)
+            return found;
+
+        try
+        {
+            foreach (var row in await ledger.ReadInheritedLedgerAsync(rootType, rootId, ct))
+            {
+                if (row.State == Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessState.Revoked)
+                    continue;
+                if (Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.InheritedPrincipalOf(row) is not { Kind: DataversePrincipalKind.SystemUser } user)
+                    continue;
+                if (Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore.InheritedSourceOf(row.SourceField) is not { } parent)
+                    continue;
+                found.TryAdd(user.Id, new RecordAccessParent(
+                    Sprk.Bff.Api.Services.Access.SecureRootInheritance.WireTokenFor(parent.Table), parent.Id, null));
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[USER-SHARE] The inherited-share provenance of {RootType} {RootId} could not be read; no share is " +
+                "marked inherited.", rootType, rootId);
+        }
+
+        return found;
     }
 
     /// <summary>

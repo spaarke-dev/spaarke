@@ -42,9 +42,7 @@ afterEach(() => {
 describe('useRelatedDocumentGraphData — thrown failures', () => {
   it('a 404 after a loaded graph clears it to an empty graph, count 0, no error', async () => {
     fetchMock.mockResolvedValueOnce(response(graph));
-    const { result, waitForNextUpdate } = renderHook(() =>
-      useRelatedDocumentGraphData(DOC_ID, undefined, API_BASE, true)
-    );
+    const { result, waitForNextUpdate } = renderHook(() => useRelatedDocumentGraphData(DOC_ID, API_BASE, true));
     await waitForNextUpdate();
     expect(result.current.nodes).toHaveLength(2);
     expect(result.current.count).toBe(1);
@@ -64,27 +62,21 @@ describe('useRelatedDocumentGraphData — thrown failures', () => {
 
   it.each([401, 403])('a %i shows the permission sentence', async status => {
     fetchMock.mockResolvedValueOnce(response({}, status));
-    const { result, waitForNextUpdate } = renderHook(() =>
-      useRelatedDocumentGraphData(DOC_ID, undefined, API_BASE, true)
-    );
+    const { result, waitForNextUpdate } = renderHook(() => useRelatedDocumentGraphData(DOC_ID, API_BASE, true));
     await waitForNextUpdate();
     expect(result.current.error).toBe("You don't have permission to view related documents.");
   });
 
   it('a 500 shows the count-load sentence', async () => {
     fetchMock.mockResolvedValueOnce(response({}, 500));
-    const { result, waitForNextUpdate } = renderHook(() =>
-      useRelatedDocumentGraphData(DOC_ID, undefined, API_BASE, true)
-    );
+    const { result, waitForNextUpdate } = renderHook(() => useRelatedDocumentGraphData(DOC_ID, API_BASE, true));
     await waitForNextUpdate();
     expect(result.current.error).toBe('Failed to load related document count.');
   });
 
   it('a network failure keeps the generic sentence', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const { result, waitForNextUpdate } = renderHook(() =>
-      useRelatedDocumentGraphData(DOC_ID, undefined, API_BASE, true)
-    );
+    const { result, waitForNextUpdate } = renderHook(() => useRelatedDocumentGraphData(DOC_ID, API_BASE, true));
     await waitForNextUpdate();
     expect(result.current.error).toBe('Unable to load related documents. Please try again.');
   });

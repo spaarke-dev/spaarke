@@ -1,0 +1,54 @@
+<form>
+  <tabs>
+    <tab name="general" id="{17500003-0000-0000-0000-000000000001}" IsUserDefined="0" visible="true">
+      <labels><label description="General" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section name="tracking" id="{17500003-0000-0000-0000-000000000002}" IsUserDefined="0" showlabel="false" columns="1">
+              <labels><label description="Tracking" languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{17500003-0000-0000-0000-000000000003}" showlabel="false">
+                    <labels><label description="Monitor" languagecode="1033" /></labels>
+                    <control id="sprk_monitor" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_monitor" uniqueid="{17500003-0000-0000-0000-000000000004}" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{17500003-0000-0000-0000-000000000007}">
+                    <labels><label description="Project Name" languagecode="1033" /></labels>
+                    <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <controlDescriptions>
+    <controlDescription forControl="{17500003-0000-0000-0000-000000000004}">
+      <customControl formFactor="0" name="sprk_Spaarke.Controls.TrackingFieldTrio">
+        <parameters>
+          <monitor type="TwoOptions">sprk_monitor</monitor>
+          <highPriority type="TwoOptions">sprk_highpriority</highPriority>
+          <accessPermission type="OptionSet">sprk_accesspermission</accessPermission>
+          <showTitle type="TwoOptions" static="true">true</showTitle>
+          <showVersion type="TwoOptions" static="true">false</showVersion>
+        </parameters>
+      </customControl>
+    </controlDescription>
+  </controlDescriptions>
+  <events>
+    <event name="onload" application="false" active="false">
+      <Handlers>
+        <Handler functionName="Spaarke.AssignedAccess.onLoad" libraryName="sprk_/scripts/assignedaccess_postsave.js" handlerUniqueId="{17500003-0000-0000-0000-000000000005}" enabled="true" parameters="" passExecutionContext="true" />
+      </Handlers>
+    </event>
+  </events>
+  <formLibraries>
+    <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{17500003-0000-0000-0000-000000000006}" />
+    <Library name="sprk_/scripts/assignedaccess_postsave.js" libraryUniqueId="{17500003-0000-0000-0000-000000000008}" />
+  </formLibraries>
+</form>

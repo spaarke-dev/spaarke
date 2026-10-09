@@ -48,6 +48,7 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
     private DocumentSearchHandler CreateHandler() => new(
         _ragServiceMock.Object,
+        PermitAllRetrievalAccessTrim.Instance,
         CreateLogger<DocumentSearchHandler>());
 
     private static AnalysisTool BuildDocumentSearchTool(string method) =>
@@ -435,7 +436,9 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
-        capturedOptions!.ParentEntityType.Should().Be("sprk_matter");
+        // Task 176 (verifier F2): the filter carries the type the index STORES ("matter"); "sprk_matter" matched no
+        // chunk, so this assertion used to pin a search that always returned nothing.
+        capturedOptions!.ParentEntityType.Should().Be("matter");
         capturedOptions.ParentEntityId.Should().Be(matterEntityId,
             because: "R6 Wave 8: SearchDiscovery scopes to the playbook's host-context parent entity when set");
     }
@@ -475,8 +478,9 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
-        capturedOptions!.TopK.Should().Be(10,
-            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearch chat-tools)");
+        // Task 176: the page size is still 10; the index is asked for the 2x candidate pool the access trim cuts back to it.
+        capturedOptions!.TopK.Should().Be(Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim.CandidatePoolSize(10),
+            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearch chat-tools), drawn from a 2x pool");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

@@ -158,7 +158,10 @@ export function parseEffectiveAccess(body: unknown, recordId: string): IEffectiv
   let accessPermission: AccessPermissionState | null | undefined;
   if (b.accessPermission === undefined) {
     accessPermission = undefined;
-  } else if (typeof b.accessPermission === 'string' && ACCESS_PERMISSION_STATES.has(b.accessPermission as AccessPermissionState)) {
+  } else if (
+    typeof b.accessPermission === 'string' &&
+    ACCESS_PERMISSION_STATES.has(b.accessPermission as AccessPermissionState)
+  ) {
     accessPermission = b.accessPermission as AccessPermissionState;
   } else {
     // 'unknown', or a value this client does not know: not established (folded in fail-closed below).
@@ -238,17 +241,36 @@ export function describeSubjectKind(entry: IRecordNoAccessEntry): string {
   }
 }
 
-/** Where the entry reaches this record from: this record itself, an organization it references, a secure parent. */
-export function describeCoverage(entry: IRecordNoAccessEntry): string {
+/** A record this one is DIRECTLY filed under, with its name when known (task 175: `followsParents`; task 174:
+ * `inheritedFrom`). Only a direct parent is ever named — a record further up may not be visible to the reader (064's
+ * contract, verifier F1-d). */
+export interface IKnownDirectParent {
+  recordId: string;
+  name: string | null;
+}
+
+/**
+ * Where the entry reaches this record from: this record itself, an organization it references, a secure parent (064's
+ * contract: `coveredRecordType`/`coveredRecordId` is the record it covers this one THROUGH — this record, or any secure
+ * record it is filed under, up the chain). The covering record is named only when it is one of `directParents` (task
+ * 175): a direct parent is already on the record's own lookup; a record further up is labelled by its type alone.
+ */
+export function describeCoverage(
+  entry: IRecordNoAccessEntry,
+  directParents: readonly IKnownDirectParent[] = []
+): string {
   let scope: string;
+  const coveredId = cleanGuid(entry.coveredRecordId);
+  const directName = directParents.find(p => p.name && cleanGuid(p.recordId) === coveredId)?.name;
+  const parentName = directName ? `: ${directName}` : '';
   if (entry.objectKind === 'organization') {
     const org = entry.objectOrganizationName ?? 'an organization';
     scope = entry.viaSecureParent
-      ? `Every record referencing ${org}, reaching this one through the secure ${tableLabel(entry.coveredRecordType)} it is filed under`
+      ? `Every record referencing ${org}, reaching this one through the secure ${tableLabel(entry.coveredRecordType)} it is filed under${parentName}`
       : `Every record referencing ${org}`;
   } else if (entry.objectKind === 'record') {
     scope = entry.viaSecureParent
-      ? `Through the secure ${tableLabel(entry.coveredRecordType)} this record is filed under`
+      ? `Through the secure ${tableLabel(entry.coveredRecordType)} this record is filed under${parentName}`
       : 'This record';
   } else {
     scope = 'Scope not set';
@@ -295,10 +317,16 @@ export function buildVetoIndex(entries: readonly IRecordNoAccessEntry[]): INoAcc
   return index;
 }
 
-/** The four kinds of Current Access row (the component classifies; these functions only read the kind). */
-export type CurrentAccessRowKind = 'share' | 'organization' | 'standing' | 'contact';
+/**
+ * The five kinds of Current Access row (the component classifies; these functions only read the kind). `'inherited'`
+ * (task 175) is a user share a secure parent passed on to the record: read-only here, and otherwise marked exactly as a
+ * user share (`'share'`) is.
+ */
+export type CurrentAccessRowKind = 'share' | 'inherited' | 'organization' | 'standing' | 'contact';
 
 export function classifyCurrentAccessRow(grant: IAccessGrantRecord): CurrentAccessRowKind {
+  // Checked before the standing branch: like a direct share, an inherited share carries no accessRecordId.
+  if (grant.provenance === 'inherited') return 'inherited';
   if (grant.provenance === 'share') return 'share';
   if (grant.provenance === 'standing' || !grant.accessRecordId) return 'standing';
   if (grant.provenance === 'organization') return 'organization';
@@ -318,7 +346,8 @@ export function vetoFor(
   contactWalledOrgs: ReadonlyMap<string, string>
 ): string | null {
   const id = cleanGuid(grant.contactId);
-  if (kind === 'share') {
+  // Task 175: an inherited share is a user share for the No Access list (matched by its system user).
+  if (kind === 'share' || kind === 'inherited') {
     // A Dataverse share still opens the record in the model-driven app until it is removed (143 removes it; owner N2
     // keeps team/role-held access), so the sentence does not claim the share gives no access anywhere.
     return index.users.has(id)
@@ -350,7 +379,8 @@ export function suppressionFor(
   state: AccessPermissionState,
   isSecureRecord: boolean
 ): string | null {
-  if (kind === 'share') return null;
+  // Internal user shares, direct or inherited from a parent (task 175), are not cancelled by the record's policy.
+  if (kind === 'share' || kind === 'inherited') return null;
   if (state === 'restricted') {
     return isSecureRecord
       ? 'No effect: this record is Secure – Restricted, so contacts get no access.'

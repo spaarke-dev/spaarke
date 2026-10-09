@@ -14,6 +14,8 @@
  * imports (`import type { NotificationItem } from "@spaarke/daily-briefing-components/types"`).
  */
 
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+
 // Re-export the notifications data-model surface so consumers can take a
 // single dep on the package's types barrel.
 export * from './notifications';
@@ -23,13 +25,12 @@ export * from './notifications';
 // ---------------------------------------------------------------------------
 
 /**
- * `authenticatedFetch` signature compatible with `@spaarke/auth`'s
- * canonical export (`(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`).
- * Declared structurally so the package does not need to take a hard build-time
- * dependency on `@spaarke/auth` for type-only callers — runtime callers still
- * resolve `@spaarke/auth` per ADR-028.
+ * `authenticatedFetch` signature — `@spaarke/auth`'s throwing `AuthenticatedFetchFn`
+ * (`(url: string, init?: RequestInit) => Promise<OkResponse>`): it resolves only with a success
+ * and throws `ApiError` / `AuthError` for a failure. This package already imports `@spaarke/auth`
+ * at runtime (`briefingService`, `DailyBriefingApp`), so the type is taken from there.
  */
-export type AuthenticatedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetch = AuthenticatedFetchFn;
 
 /**
  * Minimal `IWebApi` surface from `./notifications` is the binding shape for

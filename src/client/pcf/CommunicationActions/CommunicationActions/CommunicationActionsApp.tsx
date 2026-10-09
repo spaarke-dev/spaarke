@@ -55,6 +55,7 @@ import {
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
+import { archiveFailureMessage } from './archiveFailure';
 // Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
 // lives in `@spaarke/communication-components` — the local `./composerPrefill`,
 // `./attachmentsSource`, and `./launchCreate` copies are deleted
@@ -503,6 +504,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       try {
         // Relative path — the @spaarke/auth resolver prepends /api/.
         const resp = await authenticatedFetch(`/communications/${communicationId}/archive`, { method: 'POST' });
+        // Only a fetch that returns failures reaches this; `@spaarke/auth` throws them (see the catch).
         if (!resp.ok) {
           setError(`Save to SharePoint failed (${resp.status}).`);
           return;
@@ -515,7 +517,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         );
         await refreshHostForm();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save to SharePoint failed.');
+        setError(archiveFailureMessage(err));
       } finally {
         setBusy(false);
       }

@@ -20,7 +20,6 @@ import type {
   IDataverseClient,
   IDataService,
   INavigationService,
-  AuthenticatedFetchFn,
   RecordTypeCatalogEntry,
   IPolymorphicPickerWebApi,
   ILookupItem,
@@ -34,6 +33,9 @@ import type {
   IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
+// `@spaarke/auth`'s throwing fetch (every host is a Dataverse one) — not `@spaarke/ui-components`'
+// `AuthenticatedFetchFn`, which is the either-shape fetch of its Outlook-reachable send path.
+import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailWorkspaceVisibleState } from './EmailWorkspace.mapping';
 
 /**

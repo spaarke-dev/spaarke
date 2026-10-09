@@ -1207,13 +1207,30 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 .\Set-DocumentAccessPermissionSchema.ps1 -Apply       # operator only
 ```
 
-### `Set-InheritedAccessPermissionFormLock.ps1`
-**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Additive string insertions proven by a parse check; snapshot before every write.
-**Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
-**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
+### `Set-AccessInheritanceSchema.ps1`
+**Purpose:** Creates `sprk_accessinheritance` (Multiple lines of text, 4000) on `sprk_workassignment` and `sprk_project`, ships it in `SpaarkeCore`, and LOCKS it with field-level security (task 175, owner round 87; fix round, verifier F1-1). The BFF writes there, as versioned JSON, what each record's stored Secure / Access Permission were derived from: the parents' floor, the parents, and what was set on the record (see `docs/data-model/access-inheritance.md`). A forged value could make a hand-secured child look "inherited", so the column is created SECURED and only task 133's "Spaarke BFF-Managed Field Writers" profile (members = the BFF application users, checked) gets read/create/update; no reader profile. Preconditions: (p1) writer profile in the solution, (p3) its members exactly the `-BffApplicationIds` users, (p6) no field-mapping rule / AI topic row / email update field targets the column, (p7) a pre-existing unsecured column holds no value. `-Verify` also asserts no other profile can read or write it and that each BFF user can READ it (System Administrator, or the platform's `RetrievePrincipalAttributePrivileges`; `-AcceptDerivedReadCheck` accepts the membership derivation when the platform cannot be asked), plus a read probe as the BFF user once a record exists. A grant failure leaves the column secured (fail closed), never reverted. `COLUMN_MISMATCH` / `SOLUTION_MISSING` refuse. No data backfill: the BFF's job writes each record the first time it sees it.
+**Usage:** 🟡 Per environment, BEFORE deploying a BFF with task 175 (exit 0 from `-Verify` required); `-Verify` again after the BFF's first job run (read probe).
+**Lifecycle:** ✅ Maintained (added 2026-10-09 by `unified-access-control-r2` task 175)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-08 — `-SelfTest` PASS; dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
+**Last Used:** 2026-10-09 — `-Apply` then `-Verify` PASS on `spaarkedev1` (main session). `-SelfTest` PASS (29 checks): after creating or securing the column, `-Apply` publishes the table and waits until it reads back as secured before the grant, and it retries a grant refused with "doesn't contain attribute" or 0x8004f508 on every table.
+
+**Command:**
+```powershell
+.\Set-AccessInheritanceSchema.ps1 -SelfTest                                          # offline
+$bff = '5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c'   # dev BFF application ids
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff           # dry run
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff -Apply    # operator only
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff -Verify   # exit 0 / 1
+```
+
+### `Set-InheritedAccessPermissionFormLock.ps1`
+**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Since task 175 it also registers the library on every Work Assignment and Project MAIN form that shows `sprk_accesspermission` (the TrackingFieldTrio pill; no plain control is added there). There the lock is a FLOOR (owner round 87): a work assignment or project filed under a matter or project may not go below its parents' Access Permission (a looser pick is put back, a stricter one kept), `sprk_issecure` is disabled while it is filed, and the notification says whether the value is inherited or set on the record. Additive string insertions proven by a parse check; snapshot before every write.
+**Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173; Work Assignment / Project main forms added by task 175)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-09 — `-SelfTest` PASS (47 checks, task 175). 2026-10-08 — dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
 
 **Command:**
 ```powershell

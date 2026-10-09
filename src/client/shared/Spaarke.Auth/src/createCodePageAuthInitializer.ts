@@ -24,6 +24,7 @@
 
 import { initAuth, getAuthProvider } from './initAuth';
 import { authenticatedFetch as sharedAuthFetch } from './authenticatedFetch';
+import type { AuthenticatedFetchFn, OkResponse } from './types';
 
 /**
  * Configuration accepted by {@link createCodePageAuthInitializer}.
@@ -106,9 +107,10 @@ export interface CodePageAuthInitializer {
   ensureAuthInitialized: () => Promise<void>;
   /**
    * Performs a fetch with BFF Bearer-token authentication. Ensures auth is
-   * initialized before delegating to the shared `authenticatedFetch`.
+   * initialized before delegating to the shared `authenticatedFetch`, so it
+   * throws on failure the same way (see {@link AuthenticatedFetchFn}).
    */
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch: AuthenticatedFetchFn;
   /**
    * Resolves the Azure AD tenant ID from the MSAL account / Xrm context.
    * Ensures auth is initialized before delegating to the provider.
@@ -202,7 +204,7 @@ export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): C
     return _initPromise;
   }
 
-  async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  async function authenticatedFetch(url: string, init?: RequestInit): Promise<OkResponse> {
     await ensureAuthInitialized();
     return sharedAuthFetch(url, init);
   }

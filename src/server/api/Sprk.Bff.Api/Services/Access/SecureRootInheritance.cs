@@ -303,11 +303,14 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// unreadable parent's No Access list (owner round 31 item 1), so provisioning, a create and a re-file all refuse
 /// (<c>sdap.provision.creator_no_access_unverifiable</c>) until it can be read, and the job reports it. A parent that does
 /// not exist is not a secure parent (it confers nothing).</para>
-/// <para><b>Never auto-unsecure</b> (owner round 6 item 4): nothing here ever takes a record OUT of isolation. A record re-filed
-/// away from its secure parent, or whose parent is unsecured, stays secure; unsecuring it is the unsecure endpoint's act
-/// (F3). Its ACCESS is another matter (main-session round 39 item 1): unsecuring a parent ends the unmodified shares it passed
-/// on (<see cref="EndWhatAParentPassedOnAsync"/>, called by the unsecure after it revokes the parent's own shares) — the filed
-/// record is still secure, and a sharee's access to it came only from the parent share just revoked.</para>
+/// <para><b>Both ways — task 175, owner round 84</b> ("if parent changes, then child changes"; REPLACES round 6 item 4's "never
+/// auto-unsecure" and task 158's constraint of that name): a record re-filed away from its secure parent, or whose parent is
+/// unsecured, FOLLOWS it out of isolation when no other ancestor is secure — through the unsecure endpoint's own steps
+/// (<see cref="FollowParentsAsync"/>, SecureRootInheritance.Cascade.cs), from the parent's unsecure, the re-file writers
+/// and the job — and its Access Permission follows too. A record WITH a parent cannot be un-secured (or its Access
+/// Permission set) on its own (<see cref="AccessFollowsParent"/>); F3 applies only to a parentless record. Unsecuring a
+/// parent still ends the unmodified shares it passed on first (<see cref="EndWhatAParentPassedOnAsync"/>, main-session
+/// round 39 item 1), before its filed records follow it.</para>
 /// <para><b>Triggers.</b> (1) create: the BFF writers call <see cref="PlanCreateAsync"/> before the write and create the
 /// row INTO isolation (owner round 31 item 2), then <see cref="CompleteIsolatedCreateAsync"/>; (2) re-file: they call
 /// <see cref="CheckRefileAsync"/> before the write and <see cref="SecureAfterWriteAsync"/> after it; (3) a parent becoming
@@ -319,7 +322,7 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// <c>sprk_assignedaccess</c> ledger (owner round 30) — and a parent's UNSECURE ends them all
 /// (<see cref="EndWhatAParentPassedOnAsync"/>, round 39 item 1).</para>
 /// </remarks>
-public sealed class SecureRootInheritance
+public sealed partial class SecureRootInheritance
 {
     internal const string WorkAssignment = "sprk_workassignment";
     internal const string Project = "sprk_project";
@@ -406,6 +409,7 @@ public sealed class SecureRootInheritance
     /// (3)), so there is no cycle.</param>
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? _fileRelocator;
+    private readonly IRecordOwnershipResolver _ownership;
 
     public SecureRootInheritance(
         IGenericEntityService dataverse,
@@ -423,8 +427,13 @@ public sealed class SecureRootInheritance
         // and the Make Secure file relocation (round 26 item 3). Optional so this service's test compositions keep
         // compiling; the host registers both (IMembershipCacheInvalidator unconditionally, with its Null-Object).
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null)
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null,
+        // Task 175: the ONE ownership rule, for the owner a cascaded un-secure gives a record (its parents' business unit's
+        // team). Optional for the same reason; without it the rule is constructed over this class's own reader.
+        IRecordOwnershipResolver? ownership = null)
     {
+        _ownership = ownership ?? new RecordOwnershipResolver(dataverse, configuration,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
         _accessCacheInvalidator = accessCacheInvalidator ?? new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance);
         _fileRelocator = fileRelocator;
@@ -466,6 +475,11 @@ public sealed class SecureRootInheritance
 
     // ── (1) + (2): create and re-file ────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Task 175 fix round 2 (K3): the refusal text for a generic write of <c>sprk_issecure</c>.</summary>
+    internal const string SecureFlagRefusalText =
+        "sprk_issecure is set only by Make Secure and Remove Secure (and, for a record filed under a secure record, by Spaarke " +
+        "following its parent), so it was not written";
+
     /// <summary>
     /// BEFORE a BFF create or re-file of a work assignment or project: when the write sets or clears what the row is filed
     /// under, the records it will be filed under AFTER the write are resolved and their flags read. If one cannot be read
@@ -486,10 +500,22 @@ public sealed class SecureRootInheritance
         if (!Inherits(table))
             return null;
 
+        var materialized = writes as IReadOnlyCollection<KeyValuePair<string, object?>> ?? writes.ToList();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a caller never writes it.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke (it records what is set on the record and what is inherited), so it was not written");
+
+        // Task 175 fix round 2 (K3): the secure flag is set only by the transitions (F3 and their isolation steps) and the
+        // cascade — never by a generic writer, whatever the value.
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText);
+
         List<FilingWrite> filingWrites;
         try
         {
-            filingWrites = FilingWritesIn(table, writes);
+            filingWrites = FilingWritesIn(table, materialized);
         }
         catch (FilingValueException ex)
         {
@@ -498,7 +524,13 @@ public sealed class SecureRootInheritance
             return Refused(table, ex.Message);
         }
 
-        if (filingWrites.Count == 0)
+        // Task 175 (owner round 84): an UPDATE that sets sprk_accesspermission or sprk_issecure on a record that will have a
+        // parent after the write is refused — "if a child has a parent then the access cannot be changed manually". A create
+        // is not refused: the cascade sets its values from its parents (the job, ≤ 5 minutes; enforcement already follows the
+        // parent, task 174).
+        var setsLocked = recordId is not null
+                         && materialized.Any(w => AccessFollowsParent.LockedColumns.Contains(NormalizeColumn(w.Key)));
+        if (filingWrites.Count == 0 && !setsLocked)
             return null;
 
         FilingFacts after;
@@ -513,7 +545,20 @@ public sealed class SecureRootInheritance
             return Refused(table, "the record could not be read, so what it would be filed under cannot be checked");
         }
 
-        var answer = await DecideParentsAsync(after, ct).ConfigureAwait(false);
+        var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct).ConfigureAwait(false);
+        if (setsLocked)
+        {
+            if (!answer.IsKnown)
+                return Refused(table, answer.Unverifiable!); // what it is filed under is unknown: never "no floor" on a guess
+
+            if (filedUnder.Count > 0
+                && await FloorRefusalAsync(table, recordId!.Value, materialized, filingWrites.Count == 0, answer, filedUnder, ct)
+                    .ConfigureAwait(false) is { } belowFloor)
+                return belowFloor;
+
+            if (filingWrites.Count == 0)
+                return null; // at or above the floor (or no parent): the record's own value
+        }
 
         // Secure-if-any: a readable secure parent means the record is secured after the write whatever another parent says
         // (securing is the closed direction). Only when no parent is readably secure does an unreadable one refuse.
@@ -534,6 +579,112 @@ public sealed class SecureRootInheritance
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Task 175 (owner round 87): the refusal of a BFF write that would make a filed work assignment or project LOOSER than the
+    /// floor its parents set — an Access Permission below theirs, or its Secure flag cleared while a parent is secure — or
+    /// <c>null</c>. Tightening (or an equal value) is never refused. The floor: the whole chain (the 174 walk) when the write
+    /// does not change the filing; the new parents' own values when it does (the job raises anything their own parents
+    /// raise). A value that cannot be read is refused (never "looser is fine" on a guess).
+    /// </summary>
+    private async Task<RecordOwnerResolution?> FloorRefusalAsync(
+        string table, Guid recordId, IReadOnlyCollection<KeyValuePair<string, object?>> writes, bool filingUnchanged,
+        SecureParentsAnswer direct, IReadOnlyList<FiledParent> filedUnder, CancellationToken ct)
+    {
+        bool floorSecure;
+        int floorRank;
+        if (filingUnchanged)
+        {
+            var chain = await ReadSecureParentsAsync(_dataverse, _logger, table, recordId, ct, _recordTypes, MaxFilingDepth)
+                .ConfigureAwait(false);
+            if (!chain.IsKnown)
+                return Refused(table, chain.Unverifiable!);
+            (floorSecure, floorRank) = FloorOf(chain);
+        }
+        else
+        {
+            floorSecure = direct.HasSecureParent || filedUnder.Any(p => p.Flag == true);
+            floorRank = filedUnder.Select(p => Math.Max(0, RankOf(p.Permission))).DefaultIfEmpty(0).Max();
+        }
+
+        var noun = table.Trim().Equals(Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment";
+        var parents = AccessFollowsParent.Describe(filedUnder.Select(p => new SecureFilingParent(p.Table, p.Id, p.Name)).ToList());
+        foreach (var (key, written) in writes)
+        {
+            var column = NormalizeColumn(key);
+            if (string.Equals(column, AccessPermissionColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadOption(written, out var option) || RankOf(option) < 0)
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the Access Permission written to this {noun} could not be read, so it was not written");
+                if (RankOf(option) < floorRank)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, so its Access Permission cannot be lower than " +
+                        $"{(floorRank == 2 ? "Restricted" : "Limited")} (owner round 87); it was not written");
+                }
+            }
+            else if (string.Equals(column, IsSecureColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadBool(written, out var secure))
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the secure flag written to this {noun} could not be read, so it was not written");
+                if (secure == false && floorSecure)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, which is secure, so it cannot be made not secure (owner round 87); it " +
+                        "was not written");
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>An option value as a BFF writer spells it: an OptionSetValue, a number, a numeric string or JSON; null is Standard.</summary>
+    private static bool TryReadOption(object? value, out int? option)
+    {
+        option = null;
+        switch (value)
+        {
+            case null or DBNull:
+                return true;
+            case OptionSetValue o:
+                option = o.Value;
+                return true;
+            case int i:
+                option = i;
+                return true;
+            case long l when l is >= int.MinValue and <= int.MaxValue:
+                option = (int)l;
+                return true;
+            case string text when int.TryParse(text, out var parsed):
+                option = parsed;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Null:
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Number && json.TryGetInt32(out var number):
+                option = number;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(json.GetString(), out var fromText):
+                option = fromText;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>A Yes/No value as a BFF writer spells it; null is not a value (refused).</summary>
+    private static bool TryReadBool(object? value, out bool? flag)
+    {
+        flag = value switch
+        {
+            bool b => b,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.True } => true,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.False } => false,
+            _ => null,
+        };
+        return flag is not null;
     }
 
     /// <summary>
@@ -615,13 +766,33 @@ public sealed class SecureRootInheritance
 
         try
         {
-            var result = await SecureIfFiledUnderSecureAsync(table, recordId, traceId ?? Guid.NewGuid().ToString("N"), ct)
-                .ConfigureAwait(false);
+            var trace = traceId ?? Guid.NewGuid().ToString("N");
+            var result = await SecureIfFiledUnderSecureAsync(table, recordId, trace, ct).ConfigureAwait(false);
             if (!result.IsComplete)
             {
                 _logger.LogError(
                     "[SECURE-INHERIT] {Table} {RecordId} was written but is not secured yet ({Outcome}, {Code}: {Detail}); the " +
                     "secure-root inheritance job retries it.", table, recordId, result.Outcome, result.ReasonCode, result.Detail);
+            }
+
+            // Task 175 (owner round 87, goal 2): a re-file recomputes its stored values against the NEW floor — and never
+            // loosens: what the record held beyond the new parents' floor becomes its own (its access record says it was
+            // re-filed); it can only be raised to the new floor. A record left with no parent keeps its values (and becomes
+            // editable). Never throws; what does not complete is left at the more restrictive state for the job.
+            if (result.Outcome is not (SecureRootInheritOutcome.NotFound or SecureRootInheritOutcome.Unverifiable))
+            {
+                var follow = await FollowParentsAsync(table, recordId, trace, ct).ConfigureAwait(false);
+                if (!follow.IsComplete)
+                {
+                    _logger.LogWarning(
+                        "[FOLLOW-PARENT] {Table} {RecordId} was re-filed but is not in step with its parents yet ({Outcome}, {Code}: " +
+                        "{Detail}); the secure-root inheritance job completes it.", table, recordId, follow.Outcome, follow.ReasonCode,
+                        follow.Detail);
+                }
+
+                // A project that changed carries the change down to what is filed under it (bounded; the job does the rest).
+                if (IsParent(table) && follow.WroteAnything)
+                    await CascadeBelowAsync(table, recordId, trace, ct).ConfigureAwait(false);
             }
 
             return result;
@@ -667,6 +838,14 @@ public sealed class SecureRootInheritance
         var logical = table.Trim().ToLowerInvariant();
         var noun = logical == Project ? "project" : "work assignment";
         var materialized = writes.ToArray();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a create never carries one.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so the {noun} was not created"));
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessFollowsParent.SecureFlagReasonCode, SecureFlagRefusalText));
+
         List<FilingWrite> filingWrites;
         try
         {
@@ -2851,6 +3030,7 @@ public sealed class SecureRootInheritance
                 _logger.LogInformation(
                     "[SECURE-INHERIT] {Table} {RecordId} is filed under a secure record and is now secure (provisioned for its " +
                     "creator). TraceId={TraceId}", table, recordId, traceId);
+                await RecordInheritedSecureAsync(table, recordId, traceId, ct).ConfigureAwait(false);
                 return Result(table, recordId, SecureRootInheritOutcome.Secured, null, null);
 
             case ProblemHttpResult problem:
@@ -2876,6 +3056,30 @@ public sealed class SecureRootInheritance
                     table, recordId, result.GetType().Name, traceId);
                 return Result(table, recordId, SecureRootInheritOutcome.Failed, ReasonUnexpectedResult,
                     "provisioning answered an unexpected result");
+        }
+    }
+
+    /// <summary>
+    /// Task 175 fix round (verifier a): a record this rule has just secured gets its access record at once — its Secure is
+    /// INHERITED (the floor explains it) — so that when its parent is later un-secured it follows, even before the job has
+    /// seen it. Without a record the backfill rule would keep it secure for good. Best effort: never throws; the job writes
+    /// the same record on its next run.
+    /// </summary>
+    private async Task RecordInheritedSecureAsync(string table, Guid recordId, string traceId, CancellationToken ct)
+    {
+        try
+        {
+            var follow = await FollowParentsAsync(table, recordId, traceId, ct).ConfigureAwait(false);
+            if (!follow.IsComplete)
+            {
+                _logger.LogWarning("[SECURE-INHERIT] {Table} {RecordId}: its access record was not written after securing ({Code}); " +
+                    "the job writes it.", table, recordId, follow.ReasonCode);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId}: recording its inherited secure failed; the job writes it.",
+                table, recordId);
         }
     }
 

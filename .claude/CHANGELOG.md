@@ -13,6 +13,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
 
 ---
+###### 2026-10-09 — Agent cost controls: Sonnet sub-agents, concurrency caps, earlier compaction (agent-cost-controls-r1)
+
+Owner direction 2026-10-09 after estimated spend rose to $1–2.5k a day. The number of calls had grown about 20×, 65–92% of them from sub-agents (mostly Opus, inherited from `"model": "opus"`). Windows ran out of memory from the parallelism.
+
+- **`.claude/settings.json`:**
+  - `env` gains `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4` and `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`.
+  - New top-level `workflowSizeGuideline: "small"` and `autoCompactWindow: 400000`.
+  - The main-session `model` is unchanged. A per-call `model` still overrides the sub-agent default, for planning and reviews.
+- **`.claude/constraints/agent-cost.md`** (new, binding), with the evidence table and the settings reference (docs confirmed 2026-10-09). Seven rules:
+  1. sub-agents default to Sonnet;
+  2. one top-tier review per change set;
+  3. small, scoped agents;
+  4. don't resume an idle agent;
+  5. concurrency, including one or two heavy projects per machine;
+  6. earlier compaction;
+  7. research fans out once.
+  Indexed in `.claude/constraints/INDEX.md`.
+- **Root `CLAUDE.md`:**
+  - §8.5 gains an "Agent cost" bullet.
+  - §16 names the new settings.
+- **`.claude/FAILURE-MODES.md`:** G-19.
+
+---
 ###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
 
 `customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.

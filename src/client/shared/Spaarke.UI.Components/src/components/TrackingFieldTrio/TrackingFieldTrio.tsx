@@ -318,6 +318,7 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   accessPermissionDisabled = false,
   showAccessPermission = true,
   secureAccessPermission,
+  accessPermissionNote,
   accessStatus,
 }) => {
   const styles = useStyles();
@@ -505,24 +506,34 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
                 ? getSelectedSegmentColors(idx, selOpt)
                 : undefined;
             const pillLabel = secureAccessPermission ? secureAccessPermission.label : (selOpt?.label ?? '');
+            const pillButton = (
+              <MenuButton
+                className={styles.accessPill}
+                appearance="transparent"
+                size="small"
+                aria-label={accessPermissionLabel}
+                disabled={pillDisabled}
+                // Suppress the chevron so the fixed-width pill centers its label
+                // (owner UAT v1.0.28). The colored pill is affordance enough.
+                menuIcon={null}
+                style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
+              >
+                {pillLabel}
+              </MenuButton>
+            );
             return (
               // A disabled pill never opens: `open={false}` pins the menu shut in addition to the
               // disabled trigger, so no onAccessPermissionChange can fire on a read-only form.
               <Menu positioning="below-start" {...(pillDisabled ? { open: false } : {})}>
                 <MenuTrigger disableButtonEnhancement>
-                  <MenuButton
-                    className={styles.accessPill}
-                    appearance="transparent"
-                    size="small"
-                    aria-label={accessPermissionLabel}
-                    disabled={pillDisabled}
-                    // Suppress the chevron so the fixed-width pill centers its label
-                    // (owner UAT v1.0.28). The colored pill is affordance enough.
-                    menuIcon={null}
-                    style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
-                  >
-                    {pillLabel}
-                  </MenuButton>
+                  {/* Task 175 (round 87): where the value comes from, as the pill's tooltip and description. */}
+                  {accessPermissionNote ? (
+                    <Tooltip content={accessPermissionNote} relationship="description">
+                      {pillButton}
+                    </Tooltip>
+                  ) : (
+                    pillButton
+                  )}
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>

@@ -148,6 +148,31 @@ internal static class EffectiveRootFlags
         return Fold(own, ancestry?.GetValueOrDefault(recordId));
     }
 
+    /// <summary>
+    /// #1478 (task 175): whether a root is Restricted THROUGH what it is filed under — for the readers that decide Restricted
+    /// from the stored column (provisioning's external-flagged creator rule, the child-share mirror, SPE container membership,
+    /// Office edit), so they do not fail open between a parent's change and the cascade's write. <c>false</c> for a table
+    /// that files under nothing; <c>null</c> when the chain could not be read (each caller fails closed its own way). Never
+    /// throws a read fault. The record's OWN value is the caller's to read.
+    /// </summary>
+    internal static async Task<bool?> RestrictedThroughFilingAsync(
+        IGenericEntityService? dataverse, ILogger logger, string entityType, Guid recordId, CancellationToken ct)
+    {
+        if (!SecureRootInheritance.Inherits(entityType))
+        {
+            return false;
+        }
+
+        var ancestry = await ReadAncestryAsync(dataverse, logger, entityType, new[] { recordId }, ct).ConfigureAwait(false);
+        var answer = ancestry?.GetValueOrDefault(recordId);
+        if (answer is null || !answer.IsKnown)
+        {
+            return null;
+        }
+
+        return FilingPermission.Rank(answer.StrictestPermission?.Value) == 2;
+    }
+
     private static IReadOnlyDictionary<Guid, SecureParentsAnswer> Unverifiable(IEnumerable<Guid> ids, string why) =>
         ids.ToDictionary(id => id, _ => new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), why));
 

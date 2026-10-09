@@ -26,7 +26,7 @@ public sealed class IndexRetrieveNodeTests
         // the node maps to an InternalError NodeOutput, exactly what the catch-all path tests.
         var searchClient = new Mock<Azure.Search.Documents.Indexes.SearchIndexClient>();
         var openAi = new Mock<IOpenAiClient>();
-        return new IndexRetrieveNode(searchClient.Object, openAi.Object, NullLogger<IndexRetrieveNode>.Instance);
+        return new IndexRetrieveNode(searchClient.Object, openAi.Object, Mock.Of<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), NullLogger<IndexRetrieveNode>.Instance);
     }
 
     [Fact]
