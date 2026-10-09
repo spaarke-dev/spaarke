@@ -4,7 +4,7 @@
     <title>Migrate the remaining wizards off navigateTo: Summarize Files, Upload Documents, Find Similar, Workspace layout</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>112 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes how four more shipped wizards open from Spaarke React surfaces.</rigor-reason>
     <model-tier>sonnet</model-tier>

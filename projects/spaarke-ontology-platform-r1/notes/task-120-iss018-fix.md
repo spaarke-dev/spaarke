@@ -1,7 +1,7 @@
 # Task 120 — ISS-018 fix: notification playbooks (D-77, D-78, D-79, D-80)
 
 > Branch `fix/notification-playbooks-iss018` (worktree `C:\wts-120`), base `origin/master` @ `885d0c5f9` (includes #1413).
-> Status: PR **#1461** (head after merge of master: `8be62f413`); **stopped before the dev deploy** (owner approval). Live steps below are NOT done.
+> Status: PR **#1461** (round 2 head `afaa63aa0`); **stopped before the dev deploy** (owner approval). Live steps below are NOT done.
 > Quality: full BFF suite 18,806 pass / 0 fail / 54 skip; ArchTests 811/811; 10/10 mutations killed; one independent review pass (0 Critical; 3 Warnings + suggestions — all fix-now items fixed in `fc9960baf`, K-class noted in the PR); publish +4,925 B (38,011,616 → 38,016,541, 192 files both, Compress-Archive); no vulnerable packages.
 
 ## 1. Claims verified against code (investigation §§1–6)
@@ -25,6 +25,10 @@
 - `Deploy-NotificationPlaybooks.ps1` passed a parameter `Deploy-Playbook.ps1` does not have and took no `-DataverseUrl` (the release procedure passes one): it never deployed anything. Rebuilt as create-or-sync.
 - `Deploy-R4-Playbook-Nodes.ps1` writes the dropped `sprk_nodetype` column and only creates rows (duplicates) → retired (throws); deletion is the owner's call.
 - Live (not repo) defects the sync corrects: Emails/Events Create nodes still use OOB email/appointment fields (`activityid`, `subject`); Overdue Check/Create use `{{overdueQuery.count}}`; every live playbook-level `sprk_configjson` carries a stale `nodes` copy with `joinIds`.
+
+## 1b. Review round 2 (coordinator, 2026-10-08)
+
+Fixed in `d847cdd10`: truthful descriptions on all 7 playbooks (fixed 24 h / 3-day windows; task 131 makes them real); rendered `not-in`/`not-contain-values` with `Guid.Empty` refused; null/blank Condition `left` fails except for `exists`, authored null/absent `left` refused by lint C; `outputVariable` `item` reserved (runtime + ValidateAsync + lint C); `Deploy-NotificationPlaybooks.ps1 -RestoreFrom` rollback (dry-run proven) and `-Only` by playbook name. Not ours: read-notification re-notify after retry → task 131; ADR-034 amendment → coordinator; Docs/Emails/Events access (F3) → uac-r2 on #1355, live sync limited to the other four until answered: `-Only 'Tasks Overdue','Tasks Due Soon','New Work Assignments','Matter/Project Activity Summary'`.
 
 ## 2. Findings to become tasks in this project (not fixed here — reported)
 

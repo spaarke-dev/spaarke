@@ -110,6 +110,8 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
 | D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 | D-69 | WizardShell's skipped-step marker (dashed ring) is **opt-in** per wizard; existing wizards keep the tick for a skipped step; the 058 decision wizard opts in (from the #1386 review F1) | Binding (056, 058) |
+| D-87 | Merge #1455, #1460 and #1463 each when fully green (owner pre-approval) | Binding (121, 128, 129) |
+| D-88 | Merge #1456: the Console auto-deploys to dev on qualifying master pushes (production stays manual) (owner 2026-10-08) | Binding (127) |
 | D-85 | Move the four dev definitions (two "Open 7 Days" views, TASKS & EVENTS calendar, Matter Tasks overdue count) from `sprk_finalduedate` to `sprk_duedate`, scoped publish (owner 2026-10-08) | Binding (129) |
 | D-86 | Import VisualHost 1.4.39 to dev WITHOUT tenant-wide publish (first live test of the scoped procedure; stop if a publish-all would be needed) (owner 2026-10-08) | Binding (129, 130) |
 | D-82 | LegalWorkspace: its two deploy scripts are DELETED if nothing uses them (else retired); the orphaned `sprk_corporateworkspace` web resource is deleted from dev; task 106's LW changes are already live in the Console bundle (owner 2026-10-08) | Binding (121) |
