@@ -16,6 +16,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IUserPick } from '../types';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
@@ -45,14 +46,17 @@ function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Respon
   return {
     ok,
     status,
-    json: async () => body,
+    // A BFF ProblemDetails always carries `status`.
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
   } as unknown as Response;
 }
 
 /** Default fetch mock: /user-shares GET returns no shares; grant/revoke paths
- * succeed with realistic bodies. Individual tests override with mockImplementation. */
+ * succeed with realistic bodies. Individual tests override with mockImplementation.
+ * Like the real `@spaarke/auth` authenticatedFetch, a non-2xx answer is THROWN
+ * (ApiError / AuthError), never returned. */
 function baseAuthenticatedFetch(extra?: (url: string, init?: RequestInit) => Response | null): jest.Mock {
-  return jest.fn(async (url: string, init?: RequestInit) => {
+  return throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
     if (extra) {
       const overridden = extra(url, init);
       if (overridden) return overridden;
@@ -546,6 +550,27 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       // Existing grant list still loads (host-context read, unaffected) — the
       // deny is scoped to the BFF share surface, not the whole modal.
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Revoke' })).toBeDisabled();
+    });
+
+    it('reaches the same banner when the host fetch RETURNS the 403 instead of throwing it', async () => {
+      // Every suite above injects the production shape (authenticatedFetch THROWS); this pins the
+      // other shape a host may inject, which the modal still reads from the returned response.
+      const authenticatedFetch = jest.fn(async (url: string) =>
+        url.includes('/user-shares')
+          ? jsonResponse(
+              { title: 'Forbidden', detail: 'Write required.', reasonCode: 'sdap.access.deny.delegation_write_required' },
+              false,
+              403
+            )
+          : jsonResponse({})
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      expect(await screen.findByText('Write access required')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Revoke' })).toBeDisabled();
     });
 

@@ -313,6 +313,26 @@ export interface ReadSseStreamOptions {
 }
 
 /**
+ * The human-readable reason in a non-OK response body: the ADR-019 ProblemDetails `detail` (else
+ * `title`), a legacy `{ error }` body's `error`, or the raw text when the body is not JSON. Without
+ * this the user sees the whole JSON body in the error line.
+ */
+export function errorBodyReason(text: string): string {
+  try {
+    const body: unknown = JSON.parse(text);
+    if (typeof body === 'object' && body !== null) {
+      const { detail, title, error } = body as { detail?: unknown; title?: unknown; error?: unknown };
+      for (const candidate of [detail, error, title]) {
+        if (typeof candidate === 'string' && candidate.trim()) return candidate;
+      }
+    }
+  } catch {
+    // Not JSON — the text itself is the reason.
+  }
+  return text;
+}
+
+/**
  * Canonical SSE read loop — POST fetch + ReadableStream + `data:` line delivery.
  *
  * ai-architecture-redesign-r1 task 023 (FR-P1-04): extracted from the
@@ -390,7 +410,7 @@ export async function readSseStream(options: ReadSseStreamOptions): Promise<void
     if (response.status === 429) {
       throw new Error(describeTooManyRequests(errorText));
     }
-    throw new Error(`Chat request failed (${response.status}): ${errorText}`);
+    throw new Error(`Chat request failed (${response.status}): ${errorBodyReason(errorText)}`);
   }
 
   if (!response.body) {

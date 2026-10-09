@@ -455,6 +455,31 @@ export function buildSectionsJson(
   return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
 }
 
+/** R4 task 054 (B-5): the If-Match save lost to a concurrent edit (HTTP 412). */
+export const LAYOUT_EDITED_ELSEWHERE_MESSAGE =
+  "This workspace was edited in another tab or session since you opened the wizard. Close this dialog, reopen Manage Workspaces to refresh, then retry your edits.";
+
+/**
+ * The error the wizard shows for a failed layout save. `authenticatedFetch` THROWS ApiError (`status`)
+ * for a non-OK response, so the status cases — including the 412 concurrent-edit case, which the
+ * `response.status === 412` check only caught for a returned response — are decided here.
+ */
+export function layoutSaveError(err: unknown): Error {
+  const apiErr = err as { status?: number; message?: string };
+  if (apiErr.status === 409) {
+    return new Error("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
+  } else if (apiErr.status === 412) {
+    return new Error(LAYOUT_EDITED_ELSEWHERE_MESSAGE);
+  } else if (apiErr.status === 400) {
+    return new Error(apiErr.message ?? "Validation error. Please check your inputs and try again.");
+  } else if (apiErr.status === 403) {
+    return new Error("This layout cannot be modified.");
+  } else if (apiErr.status === 404) {
+    return new Error("The layout was not found. It may have been deleted.");
+  }
+  return new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
+}
+
 const useStyles = makeStyles({
   // ADR-050: no inline colour inside SprkModal - a token class.
   loadError: { color: tokens.colorPaletteRedForeground1 },
@@ -755,9 +780,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
       // R4 task 054 (B-5): 412 = concurrent edit — bubble a clear error.
       if (response.status === 412) {
-        throw new Error(
-          "This workspace was edited in another tab or session since you opened the wizard. Close this dialog, reopen Manage Workspaces to refresh, then retry your edits.",
-        );
+        throw new Error(LAYOUT_EDITED_ELSEWHERE_MESSAGE);
       }
 
       // Parse the created/updated layout to extract the ID
@@ -824,19 +847,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         ),
       };
     } catch (err: unknown) {
-      // Handle typed errors from authenticatedFetch (ApiError with status)
-      const apiErr = err as { status?: number; message?: string };
-      if (apiErr.status === 409) {
-        throw new Error("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
-      } else if (apiErr.status === 400) {
-        throw new Error(apiErr.message ?? "Validation error. Please check your inputs and try again.");
-      } else if (apiErr.status === 403) {
-        throw new Error("This layout cannot be modified.");
-      } else if (apiErr.status === 404) {
-        throw new Error("The layout was not found. It may have been deleted.");
-      } else {
-        throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
-      }
+      throw layoutSaveError(err);
     }
   }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, rowHeights, sectionInstances, authenticatedFetch, inApp]);
 

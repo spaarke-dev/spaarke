@@ -687,7 +687,7 @@ public static class SemanticSearchEndpoints
         // Validate scope value
         if (!SearchScope.IsValid(request.Scope))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Scope",
                 Detail = $"Invalid scope value '{request.Scope}'. Valid values: all, entity, documentIds.",
@@ -701,7 +701,7 @@ public static class SemanticSearchEndpoints
         {
             if (string.IsNullOrWhiteSpace(request.EntityType))
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Entity Type Required",
                     Detail = "entityType is required when scope=entity.",
@@ -712,7 +712,7 @@ public static class SemanticSearchEndpoints
 
             if (string.IsNullOrWhiteSpace(request.EntityId))
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Entity ID Required",
                     Detail = "entityId is required when scope=entity.",
@@ -727,7 +727,7 @@ public static class SemanticSearchEndpoints
         {
             if (request.DocumentIds == null || request.DocumentIds.Count == 0)
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Document IDs Required",
                     Detail = "documentIds is required and must not be empty when scope=documentIds.",
@@ -753,7 +753,7 @@ public static class SemanticSearchEndpoints
 
             if (invalidTypes.Count > 0)
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Invalid Entity Types",
                     Detail = $"Invalid entityTypes value(s): {string.Join(", ", invalidTypes.Select(t => $"'{t}'"))}. Valid values: {string.Join(", ", ValidEntityTypes.All)}.",

@@ -15,6 +15,12 @@
 
 export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
+// The REAL error classes and guards — pure, no MSAL. Code under test branches on what the real
+// authenticatedFetch throws, so a stub of these would let a test pass against behaviour production
+// never shows.
+export { ApiError, AuthError } from '../../../../Spaarke.Auth/src/errors';
+export { isApiError, problemOf, isAuthFailure } from '../../../../Spaarke.Auth/src/errorGuards';
+
 export function buildBffApiUrl(base: string, path: string): string {
   return `${base}${path}`;
 }

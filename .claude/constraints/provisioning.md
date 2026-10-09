@@ -85,8 +85,7 @@ App Service + KV + Dataverse-persisted config for references. Skipping the pre-c
 
 Every BFF-touching task (including provisioning tasks that modify BFF DI, register new services, or update BFF app-settings via H4b) MUST measure and report BFF publish size.
 
-- Command: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`
-- Measure: compressed size (`du -sh deploy/api-publish/`) + delta vs prior baseline (currently ~44.96 MB incl. PDBs, dotnet-10 framework-dependent linux-x64).
+- How: `.claude/rules/bff-hygiene.md` item 4 — delta against a fresh master build (both from short-path worktrees, zipped with the same tool, `Compress-Archive`), never a recorded baseline or an uncompressed `du -sh`. Procedure: `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule".
 - Thresholds: `≥+5 MB single-task delta` → explicit justification required; `≥55 MB cumulative` → architecture review; `≥60 MB` → HARD STOP.
 
 Report absolute + delta in task notes / PR description. See `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule" for full mechanic.

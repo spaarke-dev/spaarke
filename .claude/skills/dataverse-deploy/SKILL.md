@@ -426,7 +426,7 @@ When you open a Custom Page in Power Apps Studio, it may **downgrade** your PCF 
 cd src/client/pcf/{ControlName}
 pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
 
-# 2. Update version in 4 locations (manual)
+# 2. Update version in every location the pcf-deploy skill's version table lists (manual)
 
 # 3. Copy bundle to solution folder
 cp out/controls/control/bundle.js \

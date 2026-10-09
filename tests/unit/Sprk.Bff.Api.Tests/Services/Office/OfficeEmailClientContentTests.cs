@@ -94,7 +94,9 @@ public class OfficeEmailClientContentTests
         graph.Setup(g => g.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("mailbox not reachable"));
         var enricher = new OfficeEmailEnricher(graph.Object, NullLogger<OfficeEmailEnricher>.Instance);
+        // Task 121: Graph fetches by the Exchange item id, which the add-in sends in its own field.
         var request = EmailSave(body: null);
+        request = request with { Email = request.Email! with { ExchangeItemId = "AAMkAGI2TG93AAA=" } };
 
         var result = await enricher.EnrichEmailFromGraphAsync(request, new DefaultHttpContext(), CancellationToken.None);
 

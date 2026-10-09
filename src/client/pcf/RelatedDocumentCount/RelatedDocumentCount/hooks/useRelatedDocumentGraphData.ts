@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { authenticatedFetch, buildBffApiUrl } from '@spaarke/auth';
+import { authenticatedFetch, buildBffApiUrl, isApiError, isAuthFailure } from '@spaarke/auth';
 import type { MiniGraphNode, MiniGraphEdge } from '@spaarke/ui-components/dist/types/MiniGraphTypes';
 
 /** Maximum nodes to include in the mini preview (source + related). */
@@ -215,6 +215,25 @@ export function useRelatedDocumentGraphData(
       setEdges(miniEdges);
     } catch (err) {
       if (!mountedRef.current || currentFetchId !== fetchIdRef.current) {
+        return;
+      }
+
+      // authenticatedFetch THROWS for a non-OK response (the `!response.ok` branch above is for a
+      // fetch that returns it): ApiError(status), or AuthError once its 401 retries are spent.
+      if (isApiError(err, 404)) {
+        // No relationship data for this document yet — an empty graph, not an error.
+        setCount(0);
+        setNodes([]);
+        setEdges([]);
+        setLastUpdated(new Date());
+        return;
+      }
+      if (isAuthFailure(err) || isApiError(err, 403)) {
+        setError("You don't have permission to view related documents.");
+        return;
+      }
+      if (isApiError(err)) {
+        setError('Failed to load related document count.');
         return;
       }
 

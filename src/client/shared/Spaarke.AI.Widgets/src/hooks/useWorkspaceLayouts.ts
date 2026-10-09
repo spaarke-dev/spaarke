@@ -44,7 +44,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { buildBffApiUrl } from '@spaarke/auth';
+import { buildBffApiUrl, isApiError, isAuthFailure } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Types (mirror BFF WorkspaceLayoutDto shape)
@@ -330,7 +330,18 @@ export function useWorkspaceLayouts<TParsed = unknown>(
         const listUrl = buildBffApiUrl(bffBaseUrl, '/workspace/layouts');
         const defaultUrl = buildBffApiUrl(bffBaseUrl, '/workspace/layouts/default');
 
-        const [listRes, defaultRes] = await Promise.all([authenticatedFetch(listUrl), authenticatedFetch(defaultUrl)]);
+        // Each request soft-fails ON ITS OWN: an HTTP failure of one must not discard the other.
+        // `@spaarke/auth`'s authenticatedFetch THROWS for a non-OK response (ApiError / AuthError), which
+        // would reject the whole Promise.all; a host fetch that RETURNS non-OK is handled by `.ok` below.
+        // Anything else (a network failure) still rejects to the catch at the end.
+        const softFetch = (url: string): Promise<Response | { ok: false; status: number }> =>
+          authenticatedFetch(url).catch((err: unknown) => {
+            if (isApiError(err)) return { ok: false as const, status: err.status };
+            if (isAuthFailure(err)) return { ok: false as const, status: 401 };
+            throw err;
+          });
+
+        const [listRes, defaultRes] = await Promise.all([softFetch(listUrl), softFetch(defaultUrl)]);
 
         if (cancelled || !mountedRef.current) return;
 

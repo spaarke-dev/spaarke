@@ -3,7 +3,7 @@
   <metadata>
     <title>Pane email save sends the Exchange item id as internetMessageId — send the real Message-ID (and the item id separately)</title>
     <phase>6 — found by task 120 (2026-10-08)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the email save contract (client + BFF), tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -24,4 +24,5 @@
     <extension>Yes — the pane sends the right value; one optional field for the item id.</extension>
     <cost-of-doing-nothing>Pane-saved emails never link to their communication, their .eml lacks a Message-ID, and every identity lookup needs two keys.</cost-of-doing-nothing>
   </justification>
+  <notes>DONE 2026-10-09. Pane saves send the RFC Message-ID as internetMessageId and the Exchange item id as the new optional exchangeItemId (Quick Save too); server stores the RFC id in sprk_emailmessageid, writes a Message-ID header (X-Exchange-Item-Id only without one), Graph fallback fetches by the item id, old clients (item id in internetMessageId) stored and resolved exactly as before. "Related to" suggestions now looked up by the Message-ID. Idempotency key = Message-ID, so the duplicate lookup is PER CALLER (new IProcessingJobService.GetCallersProcessingJobByIdempotencyKeyAsync joins sprk_initiatedby on the caller's oid) — two recipients get separate documents; a re-save by the first is still a duplicate. Owner decision 2026-10-09 "file it if unfiled": a save that reconciles to an existing UNFILED communication files it to the picked record through IncomingAssociationResolver.ApplyToExistingRecordAsync (NarrowToRecord: only the save's record, other candidates' provenance Written=false) + SecureChildReconciler.AfterRefileAsync; Write on the communication checked with the caller's token (CallerRecordAccessProbe); never moves a filed one; never fails the save. Gates: office jest 105/1357, tsc prod 0 / 68, eslint 0; BFF build 0/0; office-scope server + communication seam 5093/0 (22 skipped); ArchTests 841 (owner-write census member entries renamed in RecordOwnerAssignmentCensusTests.cs — guard not weakened; tell UAC-r2); publish +5,107 B (192 = 192) before the final per-caller query; no CVE. One independent verifier pass: 2 F2 + F4 fixed. Issues: #1505. Known limits: pane-captured communications from before 121 keyed on the item id (a new save creates a second communication); drafts have no Message-ID.</notes>
 </task>

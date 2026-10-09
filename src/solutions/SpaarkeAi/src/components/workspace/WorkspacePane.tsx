@@ -61,7 +61,7 @@ import type {
 // Those symbols are no longer needed at this site; capability dispatchers
 // (the shared dispatchConsumer helper via its `workspaceTarget` arg +
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
-import { buildBffApiUrl } from '@spaarke/auth';
+import { buildBffApiUrl, isApiError } from '@spaarke/auth';
 import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../shell/ThreePaneShell';
 // R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
@@ -613,6 +613,9 @@ export function WorkspacePane(): React.JSX.Element {
             throw new Error(`HTTP ${response.status}`);
           }
         } catch (err) {
+          // authenticatedFetch THROWS ApiError(404) rather than returning it — the same benign
+          // "session not yet known" as above, not a save failure.
+          if (isApiError(err, 404)) return;
           logTelemetryError(TELEMETRY_TAB_RESTORE_SAVE_FAILURE, {
             sessionId: chatSessionId,
             message: err instanceof Error ? err.message : String(err),
@@ -927,10 +930,14 @@ export function WorkspacePane(): React.JSX.Element {
           // no tabs known to the BFF for this session yet).
         } catch (err) {
           if (cancelled) return;
-          logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
-            sessionId: chatSessionId,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          // authenticatedFetch THROWS ApiError(404) rather than returning it — the benign "no tabs
+          // known to the BFF yet" case above, which falls through to the local fallback silently.
+          if (!isApiError(err, 404)) {
+            logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
+              sessionId: chatSessionId,
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
           // Degrade gracefully — fall through to the local anchor-keyed fallback below.
         }
       }
