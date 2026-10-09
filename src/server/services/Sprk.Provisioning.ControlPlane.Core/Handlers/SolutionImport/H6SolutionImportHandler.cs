@@ -105,8 +105,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly ISolutionImporter _importer;
     private readonly ISolutionVerifier _verifier;
-    private readonly IRequiredApplicationsInstaller _requiredAppsInstaller;
-    private readonly IRequiredApplicationsManifest _requiredAppsManifest;
     private readonly IOrgSettingsContractApplier _orgSettingsApplier;
     private readonly IOrgSettingsContractManifest _orgSettingsManifest;
     private readonly SolutionImportOptions _options;
@@ -123,21 +121,19 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     /// docs/standards/TEST-ARCHITECTURE.md — "TimeProvider over Stopwatch")
     /// for deterministic testability.
     ///
-    /// HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) —
-    /// F13 + F14 verbatim absorption: the required-applications installer
-    /// (msft_PowerBI_Anchor) + Org Settings contract applier
-    /// (maxuploadfilesize=25MB) both run BEFORE
-    /// the package import so a missing pre-req fails H6 fast
-    /// with a specific rejection code instead of surfacing 5 min into the
-    /// solution import as MissingDependency / "Webresource content size is
-    /// too big".
+    /// HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) — F14: the Org
+    /// Settings contract applier (maxuploadfilesize=25MB) runs BEFORE the
+    /// package import so the environment fails H6 fast with a specific
+    /// rejection code instead of 5 min into the import ("Webresource content
+    /// size is too big"). Task 253: it is a Dataverse Web API client, and the
+    /// HANDLER-07 required-applications step (F13, Power BI Extensions) is
+    /// gone — the CI-built SpaarkeMaster depends on no application a fresh
+    /// environment lacks (SpaarkeMasterApplicationDependencyTests).
     /// </summary>
     public H6SolutionImportHandler(
         IProvisioningRunRepository repository,
         ISolutionImporter importer,
         ISolutionVerifier verifier,
-        IRequiredApplicationsInstaller requiredAppsInstaller,
-        IRequiredApplicationsManifest requiredAppsManifest,
         IOrgSettingsContractApplier orgSettingsApplier,
         IOrgSettingsContractManifest orgSettingsManifest,
         IOptions<SolutionImportOptions> options,
@@ -147,8 +143,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(importer);
         ArgumentNullException.ThrowIfNull(verifier);
-        ArgumentNullException.ThrowIfNull(requiredAppsInstaller);
-        ArgumentNullException.ThrowIfNull(requiredAppsManifest);
         ArgumentNullException.ThrowIfNull(orgSettingsApplier);
         ArgumentNullException.ThrowIfNull(orgSettingsManifest);
         ArgumentNullException.ThrowIfNull(options);
@@ -158,8 +152,6 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         _repository = repository;
         _importer = importer;
         _verifier = verifier;
-        _requiredAppsInstaller = requiredAppsInstaller;
-        _requiredAppsManifest = requiredAppsManifest;
         _orgSettingsApplier = orgSettingsApplier;
         _orgSettingsManifest = orgSettingsManifest;
         _options = options.Value;
@@ -298,50 +290,19 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 SolutionImportRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (7.5) HANDLER-07 (Wave 2 pre-dispatch remediation 2026-08-27) — F13:
-        //       ensure the canonical Power Platform applications (e.g.
-        //       msft_PowerBI_Anchor) are installed on the target env BEFORE
-        //       the importer fires. Fresh Production-tier envs lack this by
-        //       default → SpaarkeMaster env-var dep on powerbimashupparameter
-        //       → MissingDependency 5 min into the import. Runs BEFORE the
-        //       importer + BEFORE the org-settings apply (order matters —
-        //       admin-plane apps + admin-plane settings can be applied
-        //       independently, but co-locating both gates here keeps the
-        //       pre-import surface small + explicit).
-        try
-        {
-            var appsRequest = new RequiredApplicationsInstallRequest(
-                TenantId: tenantId,
-                ClientId: clientId,
-                ClientSecret: clientSecret,
-                TargetDataverseUrl: targetDataverseUrl,
-                RequiredApplicationNames: _requiredAppsManifest.RequiredApplicationNames);
-            var appsOutcome = await _requiredAppsInstaller
-                .EnsureInstalledAsync(appsRequest, cancellationToken).ConfigureAwait(false);
-            if (appsOutcome is RequiredApplicationsInstallOutcome.Failure appsFailure)
-            {
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    SolutionImportRejectionCodes.MissingRequiredApplication, appsFailure.Diagnostic, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "H6 required-applications installer infrastructure fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SolutionImportRejectionCodes.MissingRequiredApplication,
-                $"Required-applications installer infrastructure error: {ex.GetType().Name}: {ex.Message}.",
-                cancellationToken).ConfigureAwait(false);
-        }
+        // (7.5) Task 253: no required-applications step. F13 (Power BI Extensions,
+        //       msft_PowerBI_Anchor) came from a spurious dependency in a hand-made
+        //       SpaarkeMaster; the CI-built package depends on no application a fresh
+        //       environment lacks, and SpaarkeMasterApplicationDependencyTests fails
+        //       the build if one returns. A missing dependency would still stop the
+        //       import itself (MissingDependency → Resumable, named in the diagnostic).
 
         // (7.6) HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) — F14:
         //       apply the canonical Org Settings contract (e.g.
         //       maxuploadfilesize=25_600_000) BEFORE the importer fires.
         //       Fresh Production-tier envs default 5MB → UniversalDocumentUpload
-        //       PCF bundle exceeds this → import fails 5 min in.
+        //       PCF bundle exceeds this → import fails 5 min in. Task 253: one
+        //       organization GET + PATCH through the Dataverse Web API (no pac).
         try
         {
             var orgSettingsRequest = new OrgSettingsContractApplyRequest(
