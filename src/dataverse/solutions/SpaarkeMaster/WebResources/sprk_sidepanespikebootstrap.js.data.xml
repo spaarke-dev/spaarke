@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{9ba73956-0b97-f111-b8dc-7ced8ddc4cc6}</WebResourceId>
+  <Name>sprk_sidepanespikebootstrap.js</Name>
+  <DisplayName>Side-Pane Spike (bootstrap)</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_sidepanespikebootstrapjs9BA73956-0B97-F111-B8DC-7CED8DDC4CC6</FileName>
+</WebResource>

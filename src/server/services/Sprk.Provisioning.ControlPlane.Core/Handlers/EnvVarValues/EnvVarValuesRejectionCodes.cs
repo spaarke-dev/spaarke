@@ -64,6 +64,19 @@ public static class EnvVarValuesRejectionCodes
     public const string MissingClientSecret = "missing-client-secret";
 
     /// <summary>
+    /// Task 227g: the customer's environment reports no root business unit, or more than one — H7 cannot link the root
+    /// unit to H8's container. Classified Resumable; nothing was written.
+    /// </summary>
+    public const string RootBusinessUnitUnresolved = "root-business-unit-unresolved";
+
+    /// <summary>
+    /// Task 227g: the root business unit's <c>sprk_containerid</c> names a container other than H8's. Classified
+    /// Resumable and NOTHING is written: the operator decides which container is the customer's (the diagnostic names
+    /// both). Overwriting would silently move where the customer's non-secure files go (unified-access-control-r2 task 076).
+    /// </summary>
+    public const string RootBusinessUnitContainerConflict = "root-business-unit-container-conflict";
+
+    /// <summary>
     /// Dataverse Web API returned 401/403 while writing an environment
     /// variable value. Classified Resumable — operator verifies the BFF
     /// app-reg still has sufficient privilege on the target env + resumes.

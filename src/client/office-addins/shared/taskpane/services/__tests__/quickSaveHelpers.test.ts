@@ -61,11 +61,18 @@ describe('buildEmailSaveRequest', () => {
     expect(req.idempotencyKey).toBe('idem-key-1');
   });
 
+  it('an UNFILED save (target null, task 118) carries no targetEntity at all', () => {
+    const req = buildEmailSaveRequest(context, null, 'idem-key-1');
+
+    expect('targetEntity' in req).toBe(false);
+    expect(req.email.internetMessageId).toBe(context.internetMessageId);
+  });
+
   it('never sends the logical name as targetEntity.entityType (#1075: "sprk_matter" → 400 OFFICE_002)', () => {
     const req = buildEmailSaveRequest(context, target, 'idem-key-1');
 
-    expect(req.targetEntity.entityType).not.toBe(target.logicalName);
-    expect(req.targetEntity.entityType).toBe(target.entityType);
+    expect(req.targetEntity?.entityType).not.toBe(target.logicalName);
+    expect(req.targetEntity?.entityType).toBe(target.entityType);
   });
 
   it("marks the name system-derived: the ribbon files under the email's own subject, never a typed name (task 046)", () => {
@@ -109,7 +116,7 @@ describe('the ribbon quick-save only ever sends a type the save accepts (#1075, 
     (logicalName, entityType) => {
       const predicted: EntitySearchResult = { id: target.id, entityType, logicalName, name: 'Predicted' };
       const req = buildEmailSaveRequest(context, predicted, 'k');
-      expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(req.targetEntity.entityType.toLowerCase());
+      expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(req.targetEntity?.entityType.toLowerCase());
     }
   );
 });

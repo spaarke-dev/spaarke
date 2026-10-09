@@ -18,15 +18,15 @@
  * Mirrors `SemanticSearchControl/authInit.ts` (the canonical preview-wiring PCF).
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 
 /**
  * Initialize `@spaarke/auth` with PCF-specific configuration.
  *
- * @param tenantId Azure AD tenant ID (kept in signature; @spaarke/auth resolves
- *        tenant-specific authority via resolveTenantFromXrm(), so the explicit
- *        authority is intentionally omitted from the config).
+ * @param tenantId Azure AD tenant ID (manifest `tenantId` or `sprk_TenantId`). Validated with
+ *        `isValidTenant`; when absent or invalid it is not passed and @spaarke/auth's own
+ *        tenant discovery decides (it fails closed in a Dataverse host).
  * @param clientAppId PCF Client Application ID for MSAL authentication.
  * @param bffAppId BFF Application ID (for scope construction).
  * @param bffApiUrl BFF API base URL (host only, no /api suffix).
@@ -39,15 +39,12 @@ export async function initializeAuth(
   bffApiUrl: string,
   dataverseUrl: string
 ): Promise<void> {
-  // tenantId intentionally unused — @spaarke/auth resolves tenant-specific
-  // authority via resolveTenantFromXrm(). Passing an explicit authority bypasses
-  // that resolution (the cause of the 2026-05-13 popup regression). Kept in the
-  // signature to mirror the SemanticSearchControl contract.
-  void tenantId;
-
+  // Pass the environment's tenant so the sign-in authority is tenant-specific (a B2B guest signed
+  // in against /organizations lands in their home tenant — #1453). The 2026-05-13 popup regression
+  // was a malformed `/undefined` authority, which @spaarke/auth now rejects.
   const config: IAuthConfig = {
     clientId: clientAppId,
-    // authority intentionally omitted — see comment above.
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     // Static redirect URI matching the Azure AD app registration (Dataverse org URL).
     redirectUri: dataverseUrl,
     bffApiScope: `api://${bffAppId}/user_impersonation`,

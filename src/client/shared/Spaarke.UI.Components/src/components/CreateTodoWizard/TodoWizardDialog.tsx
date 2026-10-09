@@ -94,6 +94,11 @@ export interface ICreateTodoWizardProps {
    */
   embedded?: boolean;
   /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 112 (InAppWizardHost).
+   */
+  uiScale?: number;
+  /**
    * Resolves the SPE container ID for file uploads.
    * Called once during the finish handler. If not provided, file uploads
    * will be skipped.
@@ -124,6 +129,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   embedded,
+  uiScale,
   resolveSpeContainerId,
   defaultAssignedTo,
 }) => {
@@ -342,7 +348,14 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   );
 
   return (
-    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
+    <CreateRecordWizard
+      open={open}
+      onClose={onClose}
+      webApi={webApiAdapter}
+      config={config}
+      embedded={embedded}
+      uiScale={uiScale}
+    />
   );
 };
 

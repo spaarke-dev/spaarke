@@ -336,8 +336,8 @@ export interface FindViewProps {
    */
   itemNoun?: FindItemNoun;
   /**
-   * Task 092 (UAT-3, NFR-10): whether this host can open a browser tab
-   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `App` from the live adapter —
+   * Task 092 (UAT-3, NFR-10): whether this host can open a browser tab — task 120: `canOpenSpaarkeRecords`
+   * (ORG_URL + `openBrowserWindow` or `window.open`), decided by `App` from the live adapter —
    * never a `hostType` check here, same pattern as `SaveView`'s `canOpenRecord`). `false`/absent
    * renders every document, parent-record and matching-record row as plain, non-interactive text —
    * the fallback surface, not an error. Defaults to `false`.

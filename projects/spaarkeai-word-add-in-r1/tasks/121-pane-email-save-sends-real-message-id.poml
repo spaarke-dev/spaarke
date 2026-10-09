@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Pane email save sends the Exchange item id as internetMessageId — send the real Message-ID (and the item id separately)</title>
+    <phase>6 — found by task 120 (2026-10-08)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the email save contract (client + BFF), tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Save-contract change across client and server.</model-tier-reason>
+    <effort>high</effort>
+    <deps>116, 120</deps>
+    <tags>frontend, office-addins, bff-api, save-flow, unit-test</tags>
+  </metadata>
+  <prompt>Task 120 found (live read of the 15 newest .eml documents in dev) that every PANE email save stores the Exchange item id (`AAMk…`/`AQMk…`) in `sprk_emailmessageid`, because `useSaveFlow.ts` (~L1089) sends `internetMessageId: context.itemId`. Quick Save sends the real RFC Message-ID. Consequences: the email→communication link (`CrossPathLink`, `OfficeDocumentPersistence` ~L797) does not match; the .eml gets `X-Exchange-Item-Id` instead of `Message-ID`; task 120's resolve-email-identity has to accept both keys. Fixing it changes the save contract: the server's Graph fallback uses the same field as its message key. See `notes/120-outlook-email-identity-and-web-open.md`.</prompt>
+  <goal>Pane email saves store the real RFC Message-ID in `sprk_emailmessageid` (as Quick Save does) and carry the Exchange item id in its own field for the Graph fallback; existing rows keep resolving (resolve-email-identity already accepts both keys).</goal>
+  <acceptance-criteria>
+    <criterion testable="true">A pane email save sends the RFC Message-ID as internetMessageId and the item id separately; the stored .eml has a Message-ID header; the communication link matches.</criterion>
+    <criterion testable="true">The Graph fallback (client sent no body) still fetches by the item id.</criterion>
+    <criterion testable="true">Gates green; BFF publish size per §10; dev BFF deploy with the owner's go.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>The save request already has internetMessageId; Quick Save already sends the real one.</existing>
+    <extension>Yes — the pane sends the right value; one optional field for the item id.</extension>
+    <cost-of-doing-nothing>Pane-saved emails never link to their communication, their .eml lacks a Message-ID, and every identity lookup needs two keys.</cost-of-doing-nothing>
+  </justification>
+</task>

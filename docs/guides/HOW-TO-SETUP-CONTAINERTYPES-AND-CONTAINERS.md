@@ -259,6 +259,7 @@ route, so a container created any other way must be bound with `Backfill-SpeCont
 .\scripts\New-BusinessUnitContainer.ps1 `
     -BusinessUnitId "<bu-guid>" `
     -BusinessUnitName "New Business Unit" `
+    -CustomerId "<the BFF's Customer__Id>" `   # the spaarkeCustomerId marker (task 227g) — the BFF refuses an unmarked container
     -ContainerTypeId "<container-type-id>" `
     -DataverseUrl "https://<env>.crm.dynamics.com"
 ```

@@ -1,0 +1,50 @@
+/**
+ * Visual Host PCF Styles
+ * Base styles for the Visual Host control
+ */
+
+/* Reset and base styles */
+.visual-host-container {
+  font-family: var(--fontFamilyBase, "Segoe UI", Tahoma, Geneva, Verdana, sans-serif);
+  font-size: var(--fontSizeBase300, 14px);
+  line-height: var(--lineHeightBase300, 20px);
+  color: var(--colorNeutralForeground1, #242424);
+  background-color: transparent;
+  box-sizing: border-box;
+}
+
+/* Ensure charts fill their container */
+.visual-host-chart {
+  width: 100%;
+  height: 100%;
+  min-height: 150px;
+}
+
+/* Loading state */
+.visual-host-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+/* Error state */
+.visual-host-error {
+  padding: 16px;
+}
+
+/* Toolbar */
+.visual-host-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0;
+  gap: 8px;
+}
+
+/* Version footer */
+.visual-host-version {
+  font-size: 10px;
+  color: var(--colorNeutralForeground4, #707070);
+  text-align: right;
+  padding-top: 4px;
+}

@@ -19,6 +19,7 @@ This module contains TypeScript/React PCF controls for Dataverse model-driven ap
 - **SemanticSearchControl** - Semantic document search with natural-language queries
 - **DocumentRelationshipViewer** - Document relationship visualization
 - **RelatedDocumentCount** - Semantically-related document count + drill-through
+- **SpeDocumentViewer** - Document main form preview (SPE file via BFF `/view-url`). Source restored 2026-10-08 (task 124) after being wrongly deleted as an orphan; it is form-bound and ships in SpaarkeMaster
 - **RegardingResolver** - Polymorphic "set-regarding" parent picker on child forms; writes the denormalized `sprk_regarding*` fields + subgrid auto-detect (Xrm.WebApi, no BFF). Supplies the source parent that the Field Mapping Framework inherits from — see `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`
 - **AssociationResolver** - ⛔ RETIRED (SRFR-045, 2026-07). Folded into RegardingResolver; no longer in the repo. Do not reference
 - **ScopeConfigEditor** - Scope entity admin (Action / Skill / Knowledge / Tool)

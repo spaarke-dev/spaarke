@@ -1,0 +1,328 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{2da25f11-1009-f111-8407-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{7943413d-89d7-4cc2-ab8e-9ee38e7b51d2}" IsUserDefined="1" labelid="{f8693872-e28b-4a2c-bc4a-4f6d8e193375}" name="tab_overview">
+          <labels>
+            <label description="OVERVIEW" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="66%">
+              <sections>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{bbed8cec-1ed7-4448-a6f5-3a068b1d2a2a}" labelid="{83fdcbda-38f9-4885-878b-b18afd49a91e}" columns="1111" celllabelposition="Top" name="section_budgetinformation">
+                  <labels>
+                    <label description="BUDGET INFORMATION" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{4c06b574-c49f-43ec-8053-a37f87b39789}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetnumber" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_budgetnumber" disabled="false" />
+                      </cell>
+                      <cell id="{d30c5660-ee76-41c6-890b-e42bcedfccf0}" labelid="{3ffa4116-5864-4b6d-a12c-a3e2542351bf}" colspan="3" rowspan="1">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_overview_section_budgetamount" id="0972fc7a-7e1b-4aa8-a35b-5756d7aedcbc" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="11" labelwidth="115">
+                  <labels>
+                    <label description="BUDGET AMOUNT" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{8f3f340f-bb03-4fcf-a587-c4b413ea0cbf}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalbudget" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalbudget" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{51bea799-91dc-4102-a8e0-5c23a43ee7bd}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1383bb36-5d1d-434b-b488-f07aedfef797}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_currency" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_currency" disabled="false" />
+                      </cell>
+                      <cell id="{66c41121-1c8d-4005-b9bf-60ef0df05aba}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalbudget_base" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalbudget_base" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{d03480f0-0c49-4db8-9a23-203a74e58d20}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="exchangerate" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="exchangerate" disabled="false" />
+                      </cell>
+                      <cell id="{d9d00956-223e-4e00-84ff-6a390b4f9876}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="transactioncurrencyid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="transactioncurrencyid" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="overview_section_budgetbuckets" id="500698e6-e631-46a8-b0a6-a49aec7945be" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="BUDGET BUCKETS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{52b3db28-581d-463a-b0fb-3efad5490f46}" rowspan="4" colspan="1" auto="true" showlabel="false">
+                        <labels>
+                          <label description="Budget Bucket Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_BudgetBucket" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_sprk_budget_sprk_budgetbucket_sprk_budget</RelationshipName>
+                            <TargetEntityType>sprk_budgetbucket</TargetEntityType>
+                            <ViewId>{A4A86B18-A415-4BC9-A1E9-43B3C7187971}</ViewId>
+                            <ViewIds>{A4A86B18-A415-4BC9-A1E9-43B3C7187971}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="tab_overview_section_documents" id="b10b3480-5eb4-4ea9-83d4-22349faa384a" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="DOCUMENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{0b10d560-e063-4bd2-b8a4-70e29f183008}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="SEMANTIC SEARCH" languagecode="1033" />
+                        </labels>
+                        <control id="cc_1781116431090" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" isunbound="true" isrequired="false" uniqueid="{074cd7dd-5386-46bc-bee6-a4e1f6518b40}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="34%">
+              <sections>
+                <section name="_section_26" id="bef31823-c705-4dd7-acc9-5fc5404d9b79" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{b5c1a606-954c-42fa-9191-e2da15bef4ac}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetcategory" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_budgetcategory" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{56e6bc30-7639-4959-acb1-757b020a4f97}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetyear" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_budgetyear" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{fd54f8bb-89a9-412a-b4e7-f99e82708ea4}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetstartdate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_budgetstartdate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{f0eda50d-ea6a-4e6b-ad45-c00698f1c8cf}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetenddate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_budgetenddate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{02a3c8aa-2b41-45a5-957c-499d45130440}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_budgetperiod" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_budgetperiod" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{8d0028df-02dd-4381-bec5-7f34bbc0c4e9}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_matter" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{25f6caac-f43a-44b3-bf8a-ee5521afc0aa}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_project" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_project" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_todos_sprk_budget" id="f01ff7ed-4c32-466f-b870-4da07ef14773" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="To Dos" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_todos_section" id="6bb9eba7-8b85-4af3-a7f7-385431b6dcb2" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="TO DOS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{c8dae3eb-2312-4ba5-b0e5-7da641908533}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{8be430c1-96b4-4aeb-a27d-96480aaf4fcf}">
+                        <labels>
+                          <label description="To Dos Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_todos" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>30</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>true</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Both</ChartGridMode>
+                            <RelationshipName>sprk_sprk_budget_sprk_todo_RegardingBudget</RelationshipName>
+                            <TargetEntityType>sprk_todo</TargetEntityType>
+                            <ViewId>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewId>
+                            <ViewIds>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{989fdcc2-864c-4ae7-a21d-713e69cc0dfd}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{f5625ee8-0530-4b5f-ac7d-e638a5179cb1}" showlabel="false" labelid="{81041c5a-acdb-4a3c-9919-d8460eb585a3}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{9fda81f5-6911-41eb-9b02-4c567c804e24}" showlabel="false" labelid="{e3173432-cef1-4ddb-a3e8-21107d48c6d0}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{940cb30d-b72a-46ba-b8b1-a5bd0a88160f}" showlabel="false" labelid="{405c7ca9-a400-47c9-af24-f141e952facb}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{e6f53182-3b16-4135-bd2c-a7ed0c56deeb}" labelid="{498b8d87-045f-49ff-b217-85aebde0e424}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+            <cell id="{9438802d-2fc7-4dd3-96f9-dbf31399a81d}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_sprk_budgetstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_budgetstatus" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{6f27c58c-c028-4961-ba59-79cc7b68ca84}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{c9e08efa-0407-4deb-a271-126577bf8f73}" showlabel="false" labelid="{4a5d4900-2445-41e9-8db0-bbe78771fc4e}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{420d7e85-0ec9-4960-a98f-8fa237c37c33}" showlabel="false" labelid="{de239cae-1eaf-44c7-ac77-a46099f4f211}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{c0c7476c-a177-4e8d-8cf1-a33faf6a21ed}" showlabel="false" labelid="{d340a4a6-ff2b-434d-ba05-5ac86abe5d18}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+      <controlDescriptions>
+        <controlDescription forControl="{074cd7dd-5386-46bc-bee6-a4e1f6518b40}">
+          <customControl formFactor="2" name="sprk_Sprk.SemanticSearchControl">
+            <parameters />
+          </customControl>
+          <customControl formFactor="1" name="sprk_Sprk.SemanticSearchControl">
+            <parameters />
+          </customControl>
+          <customControl formFactor="0" name="sprk_Sprk.SemanticSearchControl">
+            <parameters />
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Budget main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

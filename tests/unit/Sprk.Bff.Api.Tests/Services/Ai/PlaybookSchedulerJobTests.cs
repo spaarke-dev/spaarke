@@ -271,7 +271,9 @@ public class PlaybookSchedulerJobTests
 
         var result = await _sut.ExecuteAsync(BuildContext(), CancellationToken.None);
 
-        result.Success.Should().BeTrue("outer try/catch only fails the run on unhandled exceptions ABOVE the per-playbook loop");
+        // ISS-018 (D-78): a failed playbook fails the job run — it no longer reads "succeeded" — but the others still run.
+        result.Success.Should().BeFalse("a playbook that produced nothing is a failed run (D-78)");
+        result.ErrorMessage.Should().Contain("Fail").And.Contain("Simulated user query failure");
         result.ProcessedItems.Should().Be(2);
 
         var children = ParseChildren(result.ResultJson!);
@@ -280,6 +282,111 @@ public class PlaybookSchedulerJobTests
         children.Should().ContainSingle(c => c.Status == "Succeeded");
         children.Single(c => c.Status == "Failed").ErrorMessage.Should().Contain("Simulated user query failure");
     }
+
+    // ── ISS-018 (#1452), owner decision D-78: a total failure is loud and retried ────────────
+    // All 7 notification playbooks failed for every user for 89+ days in dev while this job logged Warnings, reported
+    // success and advanced sprk_lastrundate (so nothing retried).
+
+    [Fact]
+    public async Task ExecuteAsync_EveryUserFails_LogsError_MarksFailed_FailsTheRun_AndDoesNotAdvanceLastRunDate()
+    {
+        var playbook = CreatePlaybookEntity(Guid.NewGuid(), "Tasks Overdue");
+        SetupPlaybookQuery(new List<Entity> { playbook });
+        SetupActiveUsers(Enumerable.Range(1, 3).Select(i => CreateUserEntity(Guid.NewGuid(), $"User {i}")).ToList());
+        SetupUpdateNoop();
+        SetupOrchestrationFailingFor(_ => true);
+
+        var result = await _sut.ExecuteAsync(BuildContext(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Tasks Overdue");
+        var child = ParseChildren(result.ResultJson!).Single();
+        child.Status.Should().Be("Failed");
+        child.FailureCount.Should().Be(3);
+        child.ErrorMessage.Should().Contain("All 3 user run(s) failed");
+        VerifyLastRunPersisted(playbook.Id, Times.Never());
+        VerifyLogged(LogLevel.Error, PlaybookSchedulerJob.TotalFailureEventId, Times.Once());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SomeUsersFail_LogsEachPerUser_OthersComplete_AndTheRunAdvances()
+    {
+        var playbook = CreatePlaybookEntity(Guid.NewGuid(), "New Emails");
+        var users = Enumerable.Range(1, 3).Select(i => CreateUserEntity(Guid.NewGuid(), $"User {i}")).ToList();
+        SetupPlaybookQuery(new List<Entity> { playbook });
+        SetupActiveUsers(users);
+        SetupUpdateNoop();
+        var failing = users[1].Id.ToString();
+        SetupOrchestrationFailingFor(userId => userId == failing);
+
+        var result = await _sut.ExecuteAsync(BuildContext(), CancellationToken.None);
+
+        result.Success.Should().BeTrue("a partial failure does not fail the run");
+        var child = ParseChildren(result.ResultJson!).Single();
+        child.Status.Should().Be("PartialFailure");
+        child.SuccessCount.Should().Be(2);
+        child.FailureCount.Should().Be(1);
+        VerifyLastRunPersisted(playbook.Id, Times.Once());
+        VerifyLogged(LogLevel.Warning, null, Times.Once(), "the one failing user is logged", "failed for user");
+        VerifyLogged(LogLevel.Error, PlaybookSchedulerJob.TotalFailureEventId, Times.Never());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OnePlaybookFailsForEveryone_TheOtherStillRunsAndAdvances()
+    {
+        var broken = CreatePlaybookEntity(Guid.NewGuid(), "Broken");
+        var healthy = CreatePlaybookEntity(Guid.NewGuid(), "Healthy");
+        SetupPlaybookQuery(new List<Entity> { broken, healthy });
+        SetupActiveUsers(new List<Entity> { CreateUserEntity(Guid.NewGuid(), "Only User") });
+        SetupUpdateNoop();
+        _orchestrationServiceMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((req, _, _) =>
+                req.PlaybookId == broken.Id ? FailedStreamEvents(req.PlaybookId) : EmptyStreamEvents());
+
+        var result = await _sut.ExecuteAsync(BuildContext(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        var children = ParseChildren(result.ResultJson!);
+        children.Single(c => c.PlaybookId == broken.Id).Status.Should().Be("Failed");
+        children.Single(c => c.PlaybookId == healthy.Id).Status.Should().Be("Succeeded");
+        VerifyLastRunPersisted(broken.Id, Times.Never());
+        VerifyLastRunPersisted(healthy.Id, Times.Once());
+    }
+
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(3, 3, true)]
+    [InlineData(3, 2, false)]
+    public void IsTotalFailure_OnlyWhenEveryTargetedUserFailed(int users, int failures, bool expected) =>
+        PlaybookSchedulerJob.IsTotalFailure(users, failures).Should().Be(expected);
+
+    private void SetupOrchestrationFailingFor(Func<string, bool> fails) =>
+        _orchestrationServiceMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((req, _, _) =>
+                fails(req.Parameters!["userId"]) ? FailedStreamEvents(req.PlaybookId) : EmptyStreamEvents());
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> FailedStreamEvents(
+        Guid playbookId, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.CompletedTask;
+        yield return PlaybookStreamEvent.RunFailed(Guid.NewGuid(), playbookId, "Query Matter Activity: ConditionOperator.In is empty");
+    }
+
+    private void VerifyLastRunPersisted(Guid playbookId, Times times) =>
+        _entityServiceMock.Verify(s => s.UpdateAsync(
+            "sprk_analysisplaybook", playbookId,
+            It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_lastrundate")),
+            It.IsAny<CancellationToken>()), times);
+
+    private void VerifyLogged(LogLevel level, EventId? eventId, Times times, string because = "", string? messageFragment = null) =>
+        _loggerMock.Verify(l => l.Log(
+            level,
+            It.Is<EventId>(e => eventId == null || e.Id == eventId.Value.Id),
+            It.Is<It.IsAnyType>((v, _) => messageFragment == null || (v.ToString() ?? string.Empty).Contains(messageFragment)),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), times, because);
 
     // ── Per-user fan-out tracking ────────────────────────────────────────────────────────
 
@@ -495,6 +602,36 @@ public class PlaybookSchedulerJobTests
                 It.Is<QueryExpression>(q => q.EntityName == "sprk_analysisplaybook"),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(playbooks));
+    }
+
+    // Task 098: {{todayUtc}} feeds "Query Overdue Tasks" (`sprk_duedate lt {{todayUtc}}` on a Date Only column). The run
+    // is FOR this user, so it is THIS USER's local date. Pinned at 2026-10-06T01:00Z = 21:00 on Oct 5 in New York: the
+    // former value was the UTC timestamp "2026-10-06T01:00:00Z" — a task due Oct 5 was already "overdue".
+    [Fact]
+    public async Task ExecuteAsync_TodayParameters_AreTheUsersLocalDate()
+    {
+        var user = CreateUserEntity(Guid.NewGuid(), "Eastern User");
+        SetupPlaybookQuery(new List<Entity> { CreatePlaybookEntity(Guid.NewGuid(), "Overdue Tasks") });
+        SetupActiveUsers(new List<Entity> { user });
+        SetupUpdateNoop();
+        _entityServiceMock
+            .Setup(s => s.RetrieveAsync("usersettings", user.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("usersettings", user.Id) { ["timezonecode"] = 35 });
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "timezonedefinition"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("timezonedefinition") { ["standardname"] = "Eastern Standard Time" } }));
+        PlaybookRunRequest? captured = null;
+        _orchestrationServiceMock
+            .Setup(o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, string, CancellationToken>((req, _, _) => { captured = req; return EmptyStreamEvents(); });
+        var sut = new PlaybookSchedulerJob(_scopeFactoryMock.Object, _configuration, _loggerMock.Object,
+            new Microsoft.Extensions.Time.Testing.FakeTimeProvider(
+                DateTimeOffset.Parse("2026-10-06T01:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+
+        await sut.ExecuteAsync(BuildContext(), CancellationToken.None);
+
+        captured!.Parameters!["todayUtc"].Should().Be("2026-10-05", "the recipient's local today, a calendar date");
+        captured.Parameters!["dueSoonWindowUtc"].Should().Be("2026-10-08");
     }
 
     private void SetupActiveUsers(List<Entity> users)

@@ -21,7 +21,9 @@
 
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -596,7 +598,7 @@ public sealed class DailyBriefingCollectorTests
         query.Add("sprk_matters", FlaggedRow("sprk_matterid", "sprk_mattername", matterId, "Zeta Matter"), matterId);
         query.Add("sprk_projects", FlaggedRow("sprk_projectid", "sprk_projectname", projectId, "Alpha Project"), projectId);
         query.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", eventId, "Earliest-Due Task",
-            ("sprk_finalduedate", DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ssZ"))), eventId);
+            ("sprk_duedate", DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-dd"))), eventId);
         var sets = new Dictionary<string, Guid[]>
         {
             ["sprk_matter"] = new[] { matterId }, ["sprk_project"] = new[] { projectId }, ["sprk_event"] = new[] { eventId },
@@ -737,6 +739,290 @@ public sealed class DailyBriefingCollectorTests
             }
             return _inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
         }
+    }
+    // ── Task 098: "today" is the CALLER's local day, not the UTC day ────────────────────────────────────────────────
+    // Pinned at 2026-10-06T01:00Z = 21:00 on Oct 5 in New York: the UTC day is already Oct 6. sprk_event's due dates
+    // are Dataverse Date Only ("yyyy-MM-dd"). The former code took "today" from DateTime.UtcNow, so at this instant a
+    // task due Oct 5 read as Overdue, the overdue cutoff moved a day, and a to-do due Oct 5 dropped out of the digest.
+
+    private static readonly DateTimeOffset EveningEastern = DateTimeOffset.Parse("2026-10-06T01:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The caller-context seam, answering the caller's own usersettings / time-zone reads as an Eastern user.</summary>
+    private sealed class EasternCallerQuery(IImpersonatedCommunicationQuery inner) : IImpersonatedCommunicationQuery
+    {
+        public List<string> ZoneReads { get; } = new();
+
+        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
+        {
+            IReadOnlyList<Dictionary<string, JsonElement>> one(string key, object value) =>
+                new List<Dictionary<string, JsonElement>> { Row(new Dictionary<string, object?> { [key] = value }) };
+            switch (entitySetName)
+            {
+                case "usersettingscollection":
+                    ZoneReads.Add($"{entitySetName}?{odataQuery} as {callerSystemUserId}");
+                    return Task.FromResult(one("timezonecode", 35));
+                case "timezonedefinitions":
+                    ZoneReads.Add($"{entitySetName}?{odataQuery} as {callerSystemUserId}");
+                    return Task.FromResult(one("standardname", "Eastern Standard Time"));
+                default:
+                    return inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+            }
+        }
+    }
+
+    private static DailyBriefingCollector SutAt(IImpersonatedCommunicationQuery query, Mock<IMembershipResolverService> resolver) =>
+        new(query, resolver.Object, NullLogger<DailyBriefingCollector>.Instance, new FakeTimeProvider(EveningEastern));
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ClassifiesAgainstTheCallersLocalToday()
+    {
+        var dueToday = Guid.NewGuid();
+        var dueYesterday = Guid.NewGuid();
+        var dueTomorrow = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "due today (Eastern)", ("sprk_duedate", "2026-10-05")), dueToday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "due yesterday", ("sprk_duedate", "2026-10-04")), dueYesterday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueTomorrow, "due tomorrow", ("sprk_duedate", "2026-10-06")), dueTomorrow);
+        var query = new EasternCallerQuery(inner);
+
+        var result = await SutAt(query, PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { dueToday, dueYesterday, dueTomorrow },
+        })).CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        string ActionOf(Guid id) => result.Items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(dueToday).Should().Be("DueToday", "Oct 5 is TODAY for the caller at 21:00 Eastern; the UTC day (Oct 6) made it Overdue");
+        ActionOf(dueYesterday).Should().Be("Overdue");
+        ActionOf(dueTomorrow).Should().Be("DueSoon");
+        query.ZoneReads.Should().OnlyContain(r => r.EndsWith($"as {SystemUserId}"), "the time zone is read AS the caller (no app-only client)");
+    }
+
+    [Fact]
+    public async Task CollectAsync_OverdueCutoffAndToDoFloor_AreTheCallersLocalDay()
+    {
+        var inner = AllChannelsQuery();
+        var query = new EasternCallerQuery(inner);
+
+        await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-04'"),
+                "overdue = due before the local today Oct 5 (D-43), i.e. on or before Oct 4; the UTC day gave 2026-10-05");
+        inner.Calls.Where(c => c.EntitySet == "sprk_todos")
+            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("OnOrAfter(PropertyName='sprk_duedate',PropertyValue='2026-10-05')"),
+                "a to-do due today (Oct 5 for the caller) stays in the digest");
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheCallersZoneCannotBeRead_UsesTheUtcDay()
+    {
+        var query = AllChannelsQuery(); // no usersettings row for the caller → no-timezonecode → UTC fallback
+
+        await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        query.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-05'"));
+    }
+
+    /// <summary>A caller-context seam whose time-zone read times out (HttpClient: a TaskCanceledException nobody requested).</summary>
+    private sealed class TimingOutZoneQuery(IImpersonatedCommunicationQuery inner) : IImpersonatedCommunicationQuery
+    {
+        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct) =>
+            entitySetName == "usersettingscollection"
+                ? throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout")
+                : inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheZoneReadTimesOut_FallsBackToTheUtcDay_InsteadOfFailingTheBriefing()
+    {
+        var inner = AllChannelsQuery();
+
+        var act = () => SutAt(new TimingOutZoneQuery(inner), PeopleResolver(AllSets))
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        await act.Should().NotThrowAsync("only the caller's own cancellation may propagate; a timeout dates by UTC");
+        inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-05'"));
+    }
+
+    /// <summary>Collects every formatted log line.</summary>
+    private sealed class ListLogger : ILogger<DailyBriefingCollector>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheZoneReadFails_TheFallbackWarningCarriesTheReasonAndErrorKind()
+    {
+        var logger = new ListLogger();
+        var sut = new DailyBriefingCollector(
+            new TimingOutZoneQuery(AllChannelsQuery()), PeopleResolver(AllSets).Object, logger, new FakeTimeProvider(EveningEastern));
+
+        await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        logger.Entries.Where(e => e.Level == LogLevel.Warning && e.Message.Contains("time zone could not be read")).Should().ContainSingle()
+            .Which.Message.Should().Contain("lookup-failed").And.Contain("TaskCanceledException");
+    }
+
+    [Theory]
+    [InlineData("2026-10-05", "2026-10-05")]          // Date Only value: the day as written
+    [InlineData("2026-10-06T03:30:00Z", "2026-10-05")] // UserLocal instant: 23:30 Oct 5 in the caller's zone
+    public void DueDayOf_IsTheCalendarDayInTheCallersZone(string raw, string expected) =>
+        DailyBriefingCollector.DueDayOf(raw, TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"))
+            .Should().Be(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // D-27 (task 065, folded into 098): sprk_duedate is THE due date — the one the Do lane shows and Reschedule
+    // writes. sprk_finalduedate is informational and decides nothing: not membership, not order, not the date shown.
+    // The caller's local today is 2026-10-05 (EveningEastern); every event below has two DIFFERENT dates.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ClassifiesAndOrdersTaskEventsBySprkDuedate_NotTheFinalDueDate()
+    {
+        var overdue = Guid.NewGuid();
+        var rescheduled = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", overdue, "due yesterday, final due later",
+            ("sprk_duedate", "2026-10-04"), ("sprk_finalduedate", "2026-10-20")), overdue);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", rescheduled, "rescheduled to Oct 8, final due passed",
+            ("sprk_duedate", "2026-10-08"), ("sprk_finalduedate", "2026-10-01")), rescheduled);
+
+        var items = (await SutAt(new EasternCallerQuery(inner), PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { overdue, rescheduled },
+        })).CollectHighPriorityAsync(SystemUserId, CancellationToken.None)).Items;
+
+        string ActionOf(Guid id) => items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(overdue).Should().Be("Overdue", "sprk_duedate (Oct 4) has passed; the later final due date does not rescue it");
+        ActionOf(rescheduled).Should().Be("DueSoon", "a reschedule moved sprk_duedate to Oct 8; the passed final due date is informational");
+        items.Select(i => i.EntityId).Should().ContainInOrder(new[] { overdue.ToString(), rescheduled.ToString() },
+            "ordered by sprk_duedate (Oct 4 before Oct 8); the final due dates would order them the other way");
+    }
+
+    /// <summary>
+    /// Evaluates the task channels' date clauses on sprk_events the way Dataverse would, for a caller whose local
+    /// today is <paramref name="today"/>: <c>NextXDays(X, N)</c> is today ≤ X ≤ today + N, <c>OnOrBefore(X, D)</c> is
+    /// X ≤ D, clauses joined by <c>or</c>. A fake that ignored the filter could not tell which column decides.
+    /// </summary>
+    private sealed class DateEvaluatingEventsQuery(IImpersonatedCommunicationQuery inner, DateOnly today) : IImpersonatedCommunicationQuery
+    {
+        private static readonly System.Text.RegularExpressions.Regex Clause = new(
+            @"Microsoft\.Dynamics\.CRM\.(?<op>NextXDays|OnOrBefore)\(PropertyName='(?<col>\w+)',PropertyValue='?(?<val>[^')]+)'?\)");
+
+        public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
+        {
+            var rows = await inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+            var clauses = Clause.Matches(odataQuery ?? string.Empty);
+            if (entitySetName != "sprk_events" || clauses.Count == 0)
+                return rows;
+
+            bool Holds(Dictionary<string, JsonElement> row, System.Text.RegularExpressions.Match m)
+            {
+                if (!row.TryGetValue(m.Groups["col"].Value, out var v) || v.ValueKind != JsonValueKind.String)
+                    return false;
+                var day = DateOnly.Parse(v.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+                var arg = m.Groups["val"].Value;
+                return m.Groups["op"].Value == "NextXDays"
+                    ? day >= today && day <= today.AddDays(int.Parse(arg, System.Globalization.CultureInfo.InvariantCulture))
+                    : day <= DateOnly.Parse(arg, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return rows.Where(r => clauses.Any(m => Holds(r, m))).ToList();
+        }
+    }
+
+    private static Dictionary<string, JsonElement> DatedEventRow(Guid id, string name, string dueDate, string finalDueDate) =>
+        Row(new Dictionary<string, object?>
+        {
+            ["sprk_eventid"] = id.ToString("D"),
+            ["sprk_eventname"] = name,
+            ["sprk_duedate"] = dueDate,
+            ["sprk_finalduedate"] = finalDueDate,
+        });
+
+    /// <summary>
+    /// D-43 (owner decision): "overdue" starts at 1 day. A task due yesterday or three days ago is in the Overdue Tasks
+    /// channel — before D-43 the channel took only tasks due 5+ days ago and Upcoming starts today, so these two were in
+    /// NEITHER channel. A task due today stays in Upcoming. Same boundary as High Priority's "Overdue" (due &lt; today).
+    /// </summary>
+    [Fact]
+    public async Task CollectAsync_OverdueTasks_StartsTheDayAfterTheDueDate_NoGapBeforeUpcoming()
+    {
+        var dueYesterday = Guid.NewGuid();
+        var dueThreeDaysAgo = Guid.NewGuid();
+        var dueToday = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", DatedEventRow(dueYesterday, "Due yesterday", "2026-10-04", "2026-10-20"), dueYesterday);
+        inner.Add("sprk_events", DatedEventRow(dueThreeDaysAgo, "Due three days ago", "2026-10-02", "2026-10-20"), dueThreeDaysAgo);
+        inner.Add("sprk_events", DatedEventRow(dueToday, "Due today", "2026-10-05", "2026-10-20"), dueToday);
+        var query = new EasternCallerQuery(new DateEvaluatingEventsQuery(inner, new DateOnly(2026, 10, 5)));
+        var resolver = PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { dueYesterday, dueThreeDaysAgo, dueToday },
+        });
+
+        var request = await SutAt(query, resolver)
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        string[] Ids(string category) =>
+            request.Channels.SingleOrDefault(c => c.Category == category)?.Items.Select(i => i.Id).ToArray() ?? Array.Empty<string>();
+        Ids(DailyBriefingCollector.ChannelOverdueTasks).Should().BeEquivalentTo(
+            new[] { dueYesterday.ToString(), dueThreeDaysAgo.ToString() },
+            "anything past due is Overdue (D-43); the former 5-day threshold left these two in neither task channel");
+        Ids(DailyBriefingCollector.ChannelUpcomingTasks).Should().Equal(new[] { dueToday.ToString() },
+            "a task due today is not overdue yet");
+
+        // High Priority classifies the same days the same way: before today is Overdue, today is DueToday.
+        var flagged = new FakeCallerQuery();
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "Due yesterday", ("sprk_duedate", "2026-10-04")), dueYesterday);
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueThreeDaysAgo, "Due three days ago", ("sprk_duedate", "2026-10-02")), dueThreeDaysAgo);
+        flagged.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "Due today", ("sprk_duedate", "2026-10-05")), dueToday);
+        var items = (await SutAt(new EasternCallerQuery(flagged), resolver).CollectHighPriorityAsync(SystemUserId, CancellationToken.None)).Items;
+        string ActionOf(Guid id) => items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(dueYesterday).Should().Be("Overdue");
+        ActionOf(dueThreeDaysAgo).Should().Be("Overdue");
+        ActionOf(dueToday).Should().Be("DueToday");
+    }
+
+    [Fact]
+    public async Task CollectAsync_TaskChannels_SelectOrderAndShowBySprkDuedate_NotTheFinalDueDate()
+    {
+        var overdue = Guid.NewGuid();     // due Sep 28 (before today, Oct 5); final due Oct 7 (in the window)
+        var rescheduled = Guid.NewGuid(); // a reschedule moved sprk_duedate to Oct 8; the final due date Sep 20 has passed
+        var dueOct9 = Guid.NewGuid();     // due Oct 9, final due Oct 6
+        var dueOct7 = Guid.NewGuid();     // due Oct 7, final due Oct 30 (outside the window)
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", DatedEventRow(overdue, "Overdue by its due date", "2026-09-28", "2026-10-07"), overdue);
+        inner.Add("sprk_events", DatedEventRow(rescheduled, "Rescheduled", "2026-10-08", "2026-09-20"), rescheduled);
+        inner.Add("sprk_events", DatedEventRow(dueOct9, "Due Oct 9", "2026-10-09", "2026-10-06"), dueOct9);
+        inner.Add("sprk_events", DatedEventRow(dueOct7, "Due Oct 7", "2026-10-07", "2026-10-30"), dueOct7);
+        var query = new EasternCallerQuery(new DateEvaluatingEventsQuery(inner, new DateOnly(2026, 10, 5)));
+
+        var request = await SutAt(query, PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { overdue, rescheduled, dueOct9, dueOct7 },
+        })).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        string[] Ids(string category) =>
+            request.Channels.SingleOrDefault(c => c.Category == category)?.Items.Select(i => i.Id).ToArray() ?? Array.Empty<string>();
+
+        Ids(DailyBriefingCollector.ChannelOverdueTasks).Should().Equal(new[] { overdue.ToString() },
+            "overdue by sprk_duedate; the rescheduled task's passed final due date does not make it overdue");
+        Ids(DailyBriefingCollector.ChannelUpcomingTasks).Should().Equal(
+            new[] { dueOct7.ToString(), rescheduled.ToString(), dueOct9.ToString() },
+            "upcoming = sprk_duedate within 5 days, ordered by sprk_duedate (Oct 7, 8, 9); the overdue task's final due "
+            + "date (Oct 7) does not pull it in");
+        request.PriorityItems.Single(p => p.Title == "Due Oct 7").DueDate!.Value.Date
+            .Should().Be(new DateTime(2026, 10, 7), "the date shown is sprk_duedate, not the final due date (Oct 30)");
     }
 }
 

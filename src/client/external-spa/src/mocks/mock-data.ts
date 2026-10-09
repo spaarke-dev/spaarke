@@ -92,7 +92,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-001',
       sprk_name: 'Signing Deadline',
-      sprk_duedate: '2026-04-15T00:00:00Z',
+      sprk_duedate: '2026-04-15',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-01-10T09:00:00Z',
@@ -100,7 +100,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-004',
       sprk_name: 'Regulatory approval — EU filing',
-      sprk_duedate: '2026-05-01T00:00:00Z',
+      sprk_duedate: '2026-05-01',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-02-01T09:00:00Z',
@@ -110,7 +110,7 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
     {
       sprk_eventid: 'evt-005',
       sprk_name: 'Lender consent deadline',
-      sprk_duedate: '2026-04-30T00:00:00Z',
+      sprk_duedate: '2026-04-30',
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-002',
       createdon: '2026-02-01T09:00:00Z',
@@ -131,7 +131,7 @@ export const MOCK_TODOS: Record<string, ODataTodo[]> = {
       sprk_todoid: 'todo-001',
       sprk_name: 'Review SPA redline from counterparty',
       sprk_notes: 'Mark up changes against base draft and circulate to deal team.',
-      sprk_duedate: '2026-03-28T00:00:00Z',
+      sprk_duedate: '2026-03-28',
       sprk_priorityscore: 75,
       sprk_effortscore: 40,
       sprk_todocolumn: 100000000, // Today
@@ -148,7 +148,7 @@ export const MOCK_TODOS: Record<string, ODataTodo[]> = {
       sprk_todoid: 'todo-002',
       sprk_name: 'Provide tax structuring comments',
       sprk_notes: null,
-      sprk_duedate: '2026-04-02T00:00:00Z',
+      sprk_duedate: '2026-04-02',
       sprk_priorityscore: 50,
       sprk_effortscore: 25,
       sprk_todocolumn: 100000001, // Tomorrow

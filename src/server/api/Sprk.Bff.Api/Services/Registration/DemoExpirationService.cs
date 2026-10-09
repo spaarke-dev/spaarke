@@ -20,7 +20,7 @@ public sealed class DemoExpirationService : BackgroundService
     private readonly GraphUserService _graphUserService;
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly DataverseEnvironmentService _environmentService;
     private readonly DemoProvisioningOptions _options;
     private readonly ILogger<DemoExpirationService> _logger;
@@ -29,7 +29,7 @@ public sealed class DemoExpirationService : BackgroundService
         GraphUserService graphUserService,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
-        IGraphClientFactory graphClientFactory,
+        SpeContainerOwnershipGuard ownership,
         DataverseEnvironmentService environmentService,
         IOptions<DemoProvisioningOptions> options,
         ILogger<DemoExpirationService> logger)
@@ -37,7 +37,7 @@ public sealed class DemoExpirationService : BackgroundService
         _graphUserService = graphUserService ?? throw new ArgumentNullException(nameof(graphUserService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
-        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -308,7 +308,8 @@ public sealed class DemoExpirationService : BackgroundService
     private async Task RevokeSpeContainerAccessAsync(
         string containerId, string userId, CancellationToken ct)
     {
-        var graphClient = _graphClientFactory.ForApp();
+        // Refuses a container this BFF does not own before Graph is called (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
 
         // List all permissions on the container
         var permissions = await graphClient.Storage.FileStorage.Containers[containerId].Permissions

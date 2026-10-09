@@ -433,8 +433,7 @@ public sealed class QuarantineClearServiceTests
     }
 
     // FrozenTimeProvider — no wall-clock dependency; parity with the
-    // TestTimeProvider in StateReconcilerServiceTests + the "MutableTimeProvider"
-    // in InMemoryTenantTokenLedgerTests (tests/CLAUDE.md-approved pattern).
+    // TestTimeProvider in StateReconcilerServiceTests (tests/CLAUDE.md-approved pattern).
     private sealed class FrozenTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;

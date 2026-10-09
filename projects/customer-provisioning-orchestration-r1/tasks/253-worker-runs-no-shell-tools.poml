@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="253" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>The L2 Worker runs no shell tool: H4b writes app settings through ARM, H6 applies org settings through the Dataverse Web API and installs required applications without pac — nothing depends on pwsh, pac or a scripts folder on the host</title>
+    <phase>Model 1 dedicated-stamp remediation — new gap G38 (found by T230a, 2026-10-06)</phase>
+    <gate>after 230a; before T186</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H4b + H6 handler collaborators replaced; Worker DI; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Live-path correctness for the first E2E run; Power Platform application install API may need research.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>L2 Core/Worker/Tests only.</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, model1-dedicated, testing</tags>
+    <deps>230a</deps>
+  </metadata>
+
+  <prompt>Remove every runtime shell-out from the L2 Worker so H4b and H6 work on the host they are deployed to.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, ARM SDK, Dataverse Web API, Power Platform admin API).</role>
+
+  <goal>
+    The Worker runs on App Service `linuxFxVersion: 'DOTNETCORE|10.0'` (infrastructure/bicep/modules/controlplane-worker-app-service.bicep:226)
+    — no PowerShell, no pac CLI, and its publish output has no `scripts/` folder. Three live collaborators still start
+    processes there, so H4b and H6 would fail on the first live run: H4b runs `pwsh -File
+    scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1` (H4bBulkAppSettingsHandler
+    :298-330, PwshProcessRunner registered at Worker/Program.cs:549); H6 registers PacRequiredApplicationsInstaller and
+    PacOrgSettingsContractApplier (Program.cs:653/655). After this task no registered Worker collaborator starts a process.
+  </goal>
+
+  <context>
+    <background>
+      Found 2026-10-06 by T230a while checking which repo files H13's checks read at runtime. The project's "zero-shell L2
+      Worker" direction (section D: H6 import, H12a/H12b seeds, H14a sidecar, R3 gate already ported) left these three.
+      H4b's script is generated from scripts/canonical-secret-catalog/manifest.yaml (per_env_settings) — the handler already
+      reads the embedded manifest (IPerEnvSettingsManifest), so the settings can be computed in C# and written with the ARM
+      SDK (both slots; merge, never drop unrelated settings). Org settings (maxuploadfilesize etc., F14) are an
+      `organization` PATCH in the Dataverse Web API as the Worker identity. Required applications (F13 Power BI Extensions
+      `msft_PowerBI_Anchor`) need the Power Platform application-install API — establish the endpoint, identity and
+      permission (researcher agent if needed) before coding.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/** (H4b, IProcessRunner, PwshProcessRunner, BulkAppSettingsOptions)</file>
+      <file>Core/Handlers/SolutionImport/{PacRequiredApplicationsInstaller,PacOrgSettingsContractApplier,IRequiredApplicationsInstaller,IOrgSettingsContractApplier,StaticRequiredApplicationsManifest}.cs</file>
+      <file>scripts/canonical-secret-catalog/{manifest.yaml,generated/Configure-AppServiceSettings.generated.ps1, generator}</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs; infrastructure/bicep/modules/controlplane-worker-app-service.bicep</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="needed-or-remove">The process runner, Pwsh*/Pac* collaborators and their options go once nothing registered uses them; no dead option remains.</constraint>
+    <constraint source="parity">H4b writes exactly the settings the generated script wrote (same names, same KV-reference values, both slots) — a parity test against the manifest.</constraint>
+    <constraint source="forcing-function">An ArchTest (or Worker composition test) fails if a registered Worker type starts a process (ProcessStartInfo / Process.Start).</constraint>
+    <constraint source="owner">No live call or deployment; the first live proof is T186.</constraint>
+    <constraint source="T254 (2026-10-06)">H4b's ARM write must keep the `required: false` behaviour the generated script has since T254: an optional per_env entry the run does not carry (today `AiSpendLimit__MonthlyLimitUsd`, intake `openAiMonthlyLimitUsd`) is NOT written, and an existing value on the site is left alone (merge, never replace the whole settings set — the operator may have set it with scripts/Set-AiSpendLimit.ps1). Both slots.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H4b: compute settings from the embedded manifest; ARM SDK app-settings merge on site + staging slot; tests; remove the pwsh path.</step>
+    <step order="2">H6 org settings: Dataverse Web API organization PATCH as the Worker identity; tests.</step>
+    <step order="3">H6 required applications: research the Power Platform install API + permission; implement or, if it needs an owner/tenant action, make it a prerequisite (prereqs.yaml) and verify-only in H6.</step>
+    <step order="4">Remove dead runners/options; forcing-function test; docs (guide H4b/H6 rows, inventory, constraints).</step>
+    <step order="5">Verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">No registered Worker collaborator references ProcessStartInfo/Process.Start (forcing-function test).</criterion>
+    <criterion testable="true">H4b's ARM write equals the generated script's settings for the manifest (parity test), on both slots, without removing unrelated settings.</criterion>
+    <criterion testable="true">H6 applies org settings and ensures required applications without pac (or verifies a documented prerequisite).</criterion>
+    <criterion testable="true">ControlPlane tests + ArchTests pass; Worker 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The application-install API needs a permission or license the Worker identity cannot be given by the operator.</trigger>
+  </escalation>
+
+  <notes/>
+</task>

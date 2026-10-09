@@ -62,7 +62,7 @@
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)                  │ Resumable                 │
 //   │ Missing bffAppRegId/miClientId/miObjectId/  │ Resumable (upstream       │
-//   │ dataverseEnvUrl (H3/H2a/H5-H6 not done yet) │ handler hasn't run yet)   │
+//   │ dataverseEnvUrl (H3/H2a/H5 not done yet)    │ handler hasn't run yet)   │
 //   │ Run not found in Cosmos partition          │ Resumable                 │
 //   │ H10 escalation gate (null AppRoleId)       │ Resumable (no write yet)  │
 //   │ BFF/UAMI App User creation call failed     │ Resumable (idempotent op) │
@@ -101,7 +101,7 @@
 //     - Model 1 (dedicated stamp in Spaarke's Azure tenant — D-12/D-13, 2026-09-28):
 //       the same shape as Model 2 below — a per-customer BFF app-reg (H3) and a
 //       per-stamp UAMI (H2a), so H10 writes this customer's own systemuser rows.
-//       (H2a refuses Model 1 runs until tasks 225b + 228 land — task 225a.)
+//       (H2a deploys Model 1 stamps since task 228.)
 //       The former shared shape (one multitenant app-reg + `sprk-{env}-shared-bff-uami`
 //       registered once per DV environment for every Model 1 customer) is retired:
 //       H3's shared branch by task 222, the shared stack by task 225a.
@@ -271,7 +271,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,
-                "InterStepState.dataverseEnvUrl is not populated — H5/H6 (Dataverse env) must complete before H10.",
+                "InterStepState.dataverseEnvUrl is not populated — H5 (Dataverse env adoption) must complete before H10.",
                 cancellationToken).ConfigureAwait(false);
         }
 

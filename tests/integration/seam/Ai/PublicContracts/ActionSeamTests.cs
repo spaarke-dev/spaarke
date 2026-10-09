@@ -253,6 +253,36 @@ public class ActionSeamTests
         captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().NotBe(ownerId);
     }
 
+    // Task 098: sprk_duedate / sprk_finalduedate are Date Only. The SDK stores a Local-kind DateTime's UTC date
+    // (probed live: 22:00 EDT on 10-20 was stored as 10-21), and ToUniversalTime() moved any non-UTC midnight by the
+    // machine offset. The calendar date AS WRITTEN is what reaches the column: midnight, Unspecified. On a UTC machine
+    // the Local case shows the pre-fix defect only through the time component; on any machine west or east of UTC
+    // it shows the day change itself. CreateTaskNodeExecutorSeamTests' offset case changes the day on every machine.
+    [Theory]
+    [InlineData(DateTimeKind.Local, 22)]
+    [InlineData(DateTimeKind.Unspecified, 0)]
+    [InlineData(DateTimeKind.Utc, 23)]
+    public async Task CreateTaskAsync_WritesTheCalendarDateAsWritten(DateTimeKind kind, int hour)
+    {
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        await CreateSeam().CreateTaskAsync(new CreateTaskRequest
+        {
+            Subject = "Calendar date",
+            DueDate = new DateTime(2026, 10, 20, hour, 0, 0, kind),
+            FinalDueDate = new DateTime(2026, 10, 22, hour, 0, 0, kind),
+        }, CancellationToken.None);
+
+        var due = captured!.GetAttributeValue<DateTime>("sprk_duedate");
+        due.Should().Be(new DateTime(2026, 10, 20));
+        due.Kind.Should().Be(DateTimeKind.Unspecified);
+        captured.GetAttributeValue<DateTime>("sprk_finalduedate").Should().Be(new DateTime(2026, 10, 22));
+    }
+
     [Fact]
     public async Task CreateTaskAsync_WhenCreateThrows_ReturnsDegradedSuccessWithEmptyTaskId()
     {

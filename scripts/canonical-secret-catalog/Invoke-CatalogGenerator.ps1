@@ -133,12 +133,12 @@ $script:RequiredSecretFields = @(
     'never_delete', 'exception_note', 'aliases', 'value_source', 'app_settings', 'tags'
 )
 # 'from-shared-service' (task 200 H4-shared) retired T226 (2026-09-30); 'from-topology-constants'
-# (task 214, SPE-ContainerTypeId) accepted from T226 — H4 writes it from the run's non-secret parameter.
+# (task 214, SPE-ContainerTypeId) retired with that secret by T227e (2026-10-06) — nothing read it.
 # Task 245a (G25): 'from-intake-parameter' (H4 writes a non-secret intake value, e.g. TenantId) and
 # 'written-by-h3' (H3 commits it to the vault itself, after H4 — H4 skips it). Task 225b (owner D18,
 # 2026-10-02) removed task 245b's platform-vault copy source with the vendor keys that used it.
 # The C# reader (FileKvSecretManifest.TryMapValueSource) accepts exactly this set.
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'from-intake-parameter', 'written-by-h3', 'generated')
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-intake-parameter', 'written-by-h3', 'generated')
 
 # Task 201 — per_env_settings schema (H4b BulkAppSettings handler).
 # Optional top-level list; when present, each entry MUST carry these fields.
@@ -158,11 +158,14 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:uami_client_id',
     'from-h2a-output:service_bus_fqns',
     'from-h2a-output:redis_endpoint',
+    'from-h2a-output:content_safety_endpoint',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
+    'from-h8-output:spe_container_id',
     'from-intake-parameter:tenant_id',
     'from-intake-parameter:container_type_id',
-    'from-intake-parameter:customer_id'
+    'from-intake-parameter:customer_id',
+    'from-intake-parameter:openai_monthly_limit_usd'
 )
 
 # ---------------------------------------------------------------------------
@@ -397,9 +400,12 @@ function Get-UniquePerEnvSources {
         script's param(...) block. `literal` sources do NOT contribute
         parameters (their value is embedded verbatim).
 
-        Returns objects: { Kind='literal' | 'from-*'; SourceKey; PsVarName }
+        Returns objects: { SourceKey; PsVarName; RawSource; Optional }
         where PsVarName is the PascalCase transform of SourceKey (e.g.
-        'kv_vault_uri' -> 'KvVaultUri', 'tenant_id' -> 'TenantId').
+        'kv_vault_uri' -> 'KvVaultUri', 'tenant_id' -> 'TenantId'), and
+        Optional (task 254) is true when EVERY entry reading the source is
+        `required: false` — H4b passes no argument for such a source when the
+        run has no value, so its parameter must not be mandatory.
     #>
     param([System.Object[]]$SortedPerEnvSettings)
 
@@ -415,10 +421,12 @@ function Get-UniquePerEnvSources {
         if ($unique.Contains($sourceKey)) { continue }
 
         $psVar = ConvertTo-PascalCase -SnakeOrKebabName $sourceKey
+        $readers = @($SortedPerEnvSettings | Where-Object { [string]$_.per_env_source -ceq $src })
         $unique[$sourceKey] = [pscustomobject]@{
             SourceKey = $sourceKey
             PsVarName = $psVar
             RawSource = $src
+            Optional  = (@($readers | Where-Object { $_.required -ne $false }).Count -eq 0)
         }
     }
     return @($unique.Values)
@@ -729,8 +737,8 @@ Write-Host ''
 
         # Emit either an unconditional seed (for from-existing-kv - never
         # overwrite live value; require -SeedPlaceholders explicitly for
-        # placeholder creation), a from-topology-constants marker (NO
-        # placeholder — H4 writes it from the run parameter), or a conditional
+        # placeholder creation), a SKIP marker for values written at run time
+        # (NO placeholder — it would be served as a real value), or a conditional
         # placeholder seed for the other value_sources.
         if ($source -eq 'from-existing-kv') {
             [void]$sb.Append("if (`$SeedPlaceholders -and -not `$SkipExisting) {`n")
@@ -738,11 +746,6 @@ Write-Host ''
             [void]$sb.Append("} else {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-value-source-is-existing-kv' -Description '$($purpose -replace "'","''") [BINDING never-delete: skip in seed]' -Category '$category'`n")
             [void]$sb.Append("}`n")
-        } elseif ($source -eq 'from-topology-constants') {
-            # Topology constant (e.g. SPE-ContainerTypeId from spaarke-constants.yaml per_env_constants):
-            # written by H4 at run time from the run's non-secret parameter. No placeholder — a placeholder
-            # would be served to the BFF as a real container-type id.
-            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray`n")
         } elseif ($source -eq 'from-intake-parameter') {
             # Task 245a: a non-secret intake value (e.g. TenantId) written by H4 at run time. No
             # placeholder — it would be served to the BFF as a real value.
@@ -798,6 +801,10 @@ function New-ConfigureArtifact {
     $sourceToVar = @{}
     foreach ($s in $perEnvSources) { $sourceToVar[$s.SourceKey] = $s.PsVarName }
 
+    # Task 254: a `required: false` entry is written only when the run supplies its value (H4b skips it otherwise and
+    # passes no argument). Its source parameter is optional (default '') and its line is appended conditionally below.
+    $optionalLines = [System.Collections.Generic.List[pscustomobject]]::new()
+
     # Compose the parameter block. Fixed params (RG / AppService / VaultName /
     # IncludeSlots) plus one per unique per-env source.
     $paramLines = [System.Collections.Generic.List[string]]::new()
@@ -811,8 +818,13 @@ function New-ConfigureArtifact {
     [void]$paramLines.Add("    [string]`$VaultName,")
     foreach ($src in $perEnvSources) {
         [void]$paramLines.Add("")
-        [void]$paramLines.Add("    [Parameter(Mandatory = `$true)]")
-        [void]$paramLines.Add("    [string]`$$($src.PsVarName),")
+        if ($src.Optional) {
+            [void]$paramLines.Add("    [Parameter(Mandatory = `$false)]")
+            [void]$paramLines.Add("    [string]`$$($src.PsVarName) = '',")
+        } else {
+            [void]$paramLines.Add("    [Parameter(Mandatory = `$true)]")
+            [void]$paramLines.Add("    [string]`$$($src.PsVarName),")
+        }
     }
     [void]$paramLines.Add("")
     [void]$paramLines.Add("    [bool]`$IncludeSlots = `$true")
@@ -865,6 +877,10 @@ function New-ConfigureArtifact {
             $colon = $src.IndexOf(':')
             $sourceKey = $src.Substring($colon + 1)
             $var = $sourceToVar[$sourceKey]
+            if ($entry.required -eq $false) {
+                [void]$optionalLines.Add([pscustomobject]@{ Key = $key; Var = $var })
+                continue
+            }
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
                 Seq  = $settingLines.Count
@@ -936,6 +952,19 @@ function Format-KvRef {
     [void]$sb.Append(@"
 
 )
+
+"@)
+
+    # Task 254: optional per-env settings — written only when a value was supplied (sorted for determinism).
+    foreach ($opt in @($optionalLines | Sort-Object -Property Key -Culture 'en-US')) {
+        [void]$sb.Append(@"
+
+if (-not [string]::IsNullOrWhiteSpace(`$$($opt.Var))) { `$settings += "$($opt.Key)=`$$($opt.Var)" }
+
+"@)
+    }
+
+    [void]$sb.Append(@"
 
 Write-Host ''
 Write-Host '=================================================================='

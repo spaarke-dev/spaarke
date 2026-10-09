@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_MsalClientId">
+  <defaultvalue>1e40baad-e065-4aea-a8d4-4b7ab273458c</defaultvalue>
+  <description default="MSAL client ID used by Code Page web resources for OAuth token acquisition.">
+    <label description="MSAL client ID used by Code Page web resources for OAuth token acquisition." languagecode="1033" />
+  </description>
+  <displayname default="MSAL Client ID for Code Pages">
+    <label description="MSAL Client ID for Code Pages" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

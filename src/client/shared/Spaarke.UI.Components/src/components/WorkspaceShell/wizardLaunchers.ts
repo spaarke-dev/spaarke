@@ -2,7 +2,9 @@
  * wizardLaunchers.ts
  *
  * Shared Xrm.Navigation.navigateTo launchers for the seven Get Started wizards
- * used by both LegalWorkspace and SpaarkeAi. Hoisted in Round 4 Fix 2 (task 085)
+ * used by both LegalWorkspace and SpaarkeAi. Since task 112 (ontology-platform-r1,
+ * D-26) the five Create wizards open IN-APP instead when an `InAppWizardHost` is
+ * mounted — see "In-app routing seam" below. Hoisted in Round 4 Fix 2 (task 085)
  * to STOP the parallel-implementation bug — previously SpaarkeAi had its own
  * `launchCodePagePopup` helper (Round 3 task 068) and `launchAssignWorkWizard`
  * (task 045) and widget-load dispatchers (tasks 043/044) that subtly diverged
@@ -79,6 +81,65 @@ export function resolveXrmNavigation(): any | null {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
+// In-app routing seam (spaarke-ontology-platform-r1 task 112; D-26; ADR-050 as
+// amended 2026-10-07, launch rule (a)).
+//
+// When a Spaarke React surface has mounted `InAppWizardHost` (the Console /
+// SpaarkeAi does, and LegalWorkspace runs inside it), these five Create wizards
+// open IN-APP, in SprkModal, instead of in a `navigateTo(webresource)` dialog
+// whose white title bar is platform chrome that cannot be themed. With no host
+// mounted, every launcher below keeps calling `navigateTo` exactly as before.
+// The ribbon scripts (`sprk_wizard_commands.js`) do not use this module and stay
+// on `navigateTo` (launch rule (b)); the code pages stay deployable for them.
+// ---------------------------------------------------------------------------
+
+/** The web resources whose launches route to a mounted in-app host (task 112 scope). */
+const IN_APP_WIZARD_NAMES = [
+  'sprk_creatematterwizard',
+  'sprk_createprojectwizard',
+  'sprk_createeventwizard',
+  'sprk_createtodowizard',
+  'sprk_createworkassignmentwizard',
+] as const;
+
+/** A wizard web resource the in-app host can mount. */
+export type InAppWizardName = (typeof IN_APP_WIZARD_NAMES)[number];
+
+/** `true` when `name` is one of the wizards the in-app host mounts. */
+export function isInAppWizardName(name: string): name is InAppWizardName {
+  return (IN_APP_WIZARD_NAMES as readonly string[]).includes(name);
+}
+
+/** One in-app launch: the wizard and the launch `data` string its code page would receive. */
+export interface InAppWizardRequest {
+  readonly webresourceName: InAppWizardName;
+  /** The `key=value&…` launch data (e.g. `handoffId=…&bffBaseUrl=…`). */
+  readonly data: string;
+}
+
+/** Opens a wizard in-app; the promise resolves when it closes (the `navigateTo` promise equivalent). */
+export type InAppWizardOpener = (request: InAppWizardRequest) => Promise<void>;
+
+let inAppWizardOpener: InAppWizardOpener | null = null;
+
+/**
+ * Register the mounted in-app host. Called by `InAppWizardHost` on mount; the
+ * returned function unregisters it (only if it is still the registered one).
+ */
+export function registerInAppWizardHost(opener: InAppWizardOpener): () => void {
+  inAppWizardOpener = opener;
+  return () => {
+    if (inAppWizardOpener === opener) inAppWizardOpener = null;
+  };
+}
+
+/** Open in-app when a host is mounted and the wizard is in scope; `null` → use `navigateTo`. */
+function tryOpenInApp(webresourceName: string, data: string): Promise<void> | null {
+  if (inAppWizardOpener === null || !isInAppWizardName(webresourceName)) return null;
+  return inAppWizardOpener({ webresourceName, data });
+}
+
+// ---------------------------------------------------------------------------
 // Common dialog options (matches LegalWorkspace WorkspaceGrid.tsx verbatim)
 // ---------------------------------------------------------------------------
 
@@ -133,10 +194,13 @@ export interface PlaybookIntentLauncherOptions extends BaseLauncherOptions {
 interface NavigateToParams {
   webresourceName: string;
   data: string;
-  title: string;
+  /** Platform dialog title. Omitted → no `title` navOption (the dialog shows none). */
+  title?: string;
 }
 
 function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): void {
+  // Task 112: a mounted in-app host opens the five Create wizards itself.
+  if (tryOpenInApp(webresourceName, data) !== null) return;
   const nav = resolveXrmNavigation();
   if (nav === null) {
     return; // Non-host environment (Vite dev, jsdom) — silent no-op.
@@ -153,7 +217,7 @@ function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): voi
           target: DEFAULT_TARGET,
           width: DEFAULT_WIDTH,
           height: DEFAULT_HEIGHT,
-          title,
+          ...(title !== undefined ? { title } : {}),
         }
       )
       .catch(() => {
@@ -335,6 +399,13 @@ export interface NavigateToOutcome {
  * bffBaseUrl (the payload rides sessionStorage, not the URL — design §2).
  */
 export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams): Promise<NavigateToOutcome> {
+  // Task 112: a mounted in-app host opens the five Create wizards itself; the
+  // promise resolves when the wizard closes, exactly like the `navigateTo` one.
+  const inApp = tryOpenInApp(params.webresourceName, params.data);
+  if (inApp !== null) {
+    await inApp;
+    return { launched: true };
+  }
   const nav = resolveXrmNavigation();
   if (nav === null) {
     return { launched: false };
@@ -342,7 +413,12 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
   try {
     await nav.navigateTo(
       { pageType: 'webresource', webresourceName: params.webresourceName, data: params.data },
-      { target: DEFAULT_TARGET, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, title: params.title }
+      {
+        target: DEFAULT_TARGET,
+        width: DEFAULT_WIDTH,
+        height: DEFAULT_HEIGHT,
+        ...(params.title !== undefined ? { title: params.title } : {}),
+      }
     );
     return { launched: true };
   } catch {

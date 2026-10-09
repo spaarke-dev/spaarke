@@ -32,6 +32,9 @@ export function ensureAuthInitialized(): Promise<void> {
         const config = await resolveRuntimeConfig();
         await initAuth({
           clientId: config.msalClientId,
+          // The environment's tenant (sprk_TenantId) — a tenant-specific authority is required for B2B guests (#1453).
+          // The library validates it and ignores an invalid value.
+          tenantId: config.tenantId,
           bffBaseUrl: config.bffBaseUrl,
           bffApiScope: config.bffOAuthScope,
         });

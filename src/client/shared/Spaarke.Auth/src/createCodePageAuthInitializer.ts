@@ -12,7 +12,8 @@
  *   - once-only `_initPromise` (safe to call N times; reuses same promise).
  *   - On failure: `console.warn`, null out `_initPromise` (allow retry), re-throw.
  *   - On success: `console.info` with the supplied `logLabel`.
- *   - Optional `tenantId` (omit for Xrm fallback — DailyBriefing case).
+ *   - Optional `tenantId` (when omitted, `initAuth` resolves the tenant itself —
+ *     Xrm / published runtime config, then `sprk_TenantId`, then the BFF — #1453).
  *   - Configurable `proactiveRefresh` (default `true`; `false` for short-lived dialogs).
  *   - Optional `beforeInit` async hook (e.g. `await waitForConfig()` — DailyBriefing case).
  *
@@ -41,13 +42,20 @@ export interface CodePageAuthInitConfig {
   /**
    * Azure AD tenant GUID (from runtime config).
    *
-   * When omitted, `@spaarke/auth` falls back to `resolveDefaultAuthority()`
-   * (tries `Xrm.organizationSettings.tenantId` then `/organizations`). Pass
-   * explicitly for tenant-specific authority — required to avoid the
-   * "Pick an account" popup in iframes / multi-account browsers
+   * When omitted (or invalid), `initAuth` resolves the tenant itself, in the
+   * order under "TENANT PRECEDENCE" in tenant.ts: `window.__SPAARKE_TENANT_ID__`
+   * → persisted runtime config → `Xrm.organizationSettings.tenantId`, then the
+   * `sprk_TenantId` env var → the BFF's `/api/config/client`. Inside Dataverse it never falls back to
+   * `/organizations` (that fails for B2B guests — #1453); it throws instead.
+   * Passing it explicitly is still preferred: it skips the lookups
    * (INV-3 per `spaarke-sso-binding.md`).
    */
   tenantId?: string;
+  /**
+   * Forwarded to `initAuth` when set. Default: true inside a Dataverse host,
+   * false elsewhere — see `IAuthConfig.requireTenantAuthority`.
+   */
+  requireTenantAuthority?: boolean;
   /**
    * If true, start a proactive token refresh interval. Default `true`.
    * Set `false` for short-lived dialogs where the proactive interval would
@@ -156,6 +164,7 @@ export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): C
     bffBaseUrl,
     bffApiScope,
     tenantId,
+    requireTenantAuthority,
     proactiveRefresh = true,
     requireSilentOnly = false,
     logLabel,
@@ -175,9 +184,10 @@ export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): C
             clientId,
             bffBaseUrl,
             bffApiScope,
-            // Only forward tenantId when provided — preserves DailyBriefing's
-            // "omit and let resolveDefaultAuthority fall back to Xrm" behavior.
+            // Only forward tenantId when provided — when omitted, initAuth runs
+            // its own tenant discovery (DailyBriefing case).
             ...(tenantId ? { tenantId } : {}),
+            ...(requireTenantAuthority !== undefined ? { requireTenantAuthority } : {}),
             proactiveRefresh,
             requireSilentOnly,
           });

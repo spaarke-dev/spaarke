@@ -385,6 +385,7 @@ export function ConversationPane(): React.JSX.Element {
     clearChatSession,
     playbookId,
     setPlaybookId,
+    clearPlaybookId,
     entityContext,
     streaming,
   } = useAiSession();
@@ -2663,8 +2664,12 @@ export function ConversationPane(): React.JSX.Element {
   const { startNewSession } = commands;
   const handleNewSession = React.useCallback(() => {
     clearChatSession();
+    // R4 UAT 2026-10-08: a new session starts with NO playbook focus. The persisted playbookId
+    // (localStorage) otherwise survives forever — it suppresses the Quick Start welcome cards
+    // (showWelcomeCards requires playbookId === undefined) and binds every new session to it.
+    clearPlaybookId();
     startNewSession();
-  }, [clearChatSession, startNewSession]);
+  }, [clearChatSession, clearPlaybookId, startNewSession]);
 
   // R5-5 (UAT 2026-07-20): selecting a History entry must LOAD that session's transcript.
   // Previously `onSelectSession={setChatSessionId}` only updated the id in state — nothing

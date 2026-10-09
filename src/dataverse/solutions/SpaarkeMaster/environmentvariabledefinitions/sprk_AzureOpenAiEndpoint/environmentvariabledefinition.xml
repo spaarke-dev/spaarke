@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_AzureOpenAiEndpoint">
+  <description default="Customer's Azure OpenAI resource endpoint for GPT model access. Format: https://{resource-name}.openai.azure.com/">
+    <label description="Customer's Azure OpenAI resource endpoint for GPT model access. Format: https://{resource-name}.openai.azure.com/" languagecode="1033" />
+  </description>
+  <displayname default="Azure OpenAI Endpoint">
+    <label description="Azure OpenAI Endpoint" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>
