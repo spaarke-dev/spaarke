@@ -87,7 +87,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 
 **How the owner wants work done**
 - 2026-10-05 — **Fix found defects now; never defer.** Defects unrelated to the ontology ship as their **own PR** to master.
-- 2026-10-05 — **Merging is the owner's call**, per PR ("merge when green" approvals are recorded in the task). Never merge without one.
+- 2026-10-09 — **Merging (D-107 + D-115):** reviewed ontology PRs are merged by the main session once independent review and re-checks pass and CI is green — into the project branch (D-107) and into **master** (D-115; uac-r2 approval required when their files change). Tell the owner afterwards. (Superseded: 2026-10-05 per-PR owner merges.)
 - 2026-10-05 — Every rework round gets a **focused independent review** before merge; every review so far found something real.
 - 2026-10-05 — Role edits, Azure changes and Dataverse schema changes need **explicit owner approval** (the approved set is in spec §9).
 - 2026-10-05 — v4 is the UI baseline; **flag** inconsistencies with the real solution for the owner to resolve.
