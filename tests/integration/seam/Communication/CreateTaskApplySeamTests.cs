@@ -50,8 +50,10 @@ public sealed class CreateTaskApplySeamTests
     private const int ActionApplied = 100000005;
     private const int ActionDismissed = 100000004;
     private const int ActorTypeHuman = 100000001;
-    private const int EventStatusOpen = 1;
-    private const int EventStatusCompleted = 2;
+    // Task 066 (D-28): the LIVE sprk_event.statuscode values (Spaarke.Dataverse.EventStatusCode), not the deprecated 0-7 set.
+    private const int EventStatusOpen = 659490001;
+    private const int EventStatusCompleted = 659490002;
+    private const int EventStatusCancelled = 659490004;
 
     private readonly Mock<ICallerSystemUserResolver> _callerResolver = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _generic = new(MockBehavior.Strict);
@@ -98,7 +100,7 @@ public sealed class CreateTaskApplySeamTests
 
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "sprk_eventstatus" }, null));
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "statuscode", "statecode" }, null));
 
         _envelopeReader
             .Setup(r => r.ReconstructEnvelopeAsync(CommunicationId, It.IsAny<CancellationToken>()))
@@ -125,7 +127,7 @@ public sealed class CreateTaskApplySeamTests
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
-            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "sprk_eventstatus" }, null));
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "statuscode", "statecode" }, null));
 
         var result = await sut.ApplyAsync(ReviewLogId, DefaultRequest(), new ClaimsPrincipal(), CancellationToken.None);
 
@@ -148,7 +150,9 @@ public sealed class CreateTaskApplySeamTests
         patched.RecordId.Should().Be(CreatedTaskId);
         patched.FieldMappings.Should().Contain(m => m.Field == "sprk_basedate")
             .And.Contain(m => m.Field == "sprk_finalduedate")
-            .And.Contain(m => m.Field == "sprk_eventstatus");
+            .And.Contain(m => m.Field == "statuscode" && m.Value == "659490001")
+            .And.Contain(m => m.Field == "statecode" && m.Value == "0")
+            .And.NotContain(m => m.Field == "sprk_eventstatus");
 
         // Exactly one append-only Applied audit row (actor = the confirming human), keyed by the sentinel so the
         // create-task proposal is closed.
@@ -285,7 +289,7 @@ public sealed class CreateTaskApplySeamTests
         var sut = BuildSut();
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "sprk_eventstatus: value '99' is not a valid option."));
+            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "statuscode: value '99' is not a valid option."));
 
         var act = () => sut.ApplyAsync(ReviewLogId, DefaultRequest(), new ClaimsPrincipal(), CancellationToken.None);
 
@@ -338,7 +342,7 @@ public sealed class CreateTaskApplySeamTests
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
-            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "sprk_eventstatus" }, null));
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "statuscode", "statecode" }, null));
 
         var result = await sut.CreateAdHocAsync(CommunicationId, AdHocRequest(), new ClaimsPrincipal(), CancellationToken.None);
 
@@ -386,13 +390,14 @@ public sealed class CreateTaskApplySeamTests
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
-            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_eventstatus", "sprk_completeddate" }, null));
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "statuscode", "statecode", "sprk_completeddate" }, null));
 
         var request = AdHocRequest() with { Status = EventStatusCompleted, CompletedDate = new DateOnly(2026, 8, 7) };
         await sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
 
         patched.Should().NotBeNull();
-        patched!.FieldMappings.Should().Contain(m => m.Field == "sprk_eventstatus" && m.Value == "2")
+        patched!.FieldMappings.Should().Contain(m => m.Field == "statuscode" && m.Value == "659490002")
+            .And.Contain(m => m.Field == "statecode" && m.Value == "0") // Completed is an ACTIVE status
             .And.Contain(m => m.Field == "sprk_completeddate");
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -464,7 +469,7 @@ public sealed class CreateTaskApplySeamTests
         var sut = BuildSut();
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "sprk_eventstatus: value '99' is not a valid option."));
+            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "statuscode: value '99' is not a valid option."));
 
         var act = () => sut.CreateAdHocAsync(CommunicationId, AdHocRequest(), new ClaimsPrincipal(), CancellationToken.None);
 
@@ -473,7 +478,7 @@ public sealed class CreateTaskApplySeamTests
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once, "the create is audited even when the follow-on PATCH fails");
     }
 
-    // B2.2 UNDO — soft-cancels a just-created task (sprk_eventstatus=Cancelled=5) UNDER THE CALLER'S impersonation
+    // B2.2 UNDO — soft-cancels a just-created task (statuscode=Cancelled=659490004, statecode=Inactive) UNDER THE CALLER'S impersonation
     // (never app-only — impersonation gates the write to the caller, so there is no "cancel any event by id" hole),
     // and writes ONE append-only compensating (Dismissed) audit row tying the cancel to the communication.
     [Fact]
@@ -484,7 +489,7 @@ public sealed class CreateTaskApplySeamTests
         _actionSeam
             .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateRecordRequest, CancellationToken>((r, _) => cancelled = r)
-            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_eventstatus" }, null));
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "statuscode", "statecode" }, null));
 
         var result = await sut.UndoCreateTaskAsync(CommunicationId, CreatedTaskId, new ClaimsPrincipal(), CancellationToken.None);
 
@@ -492,8 +497,9 @@ public sealed class CreateTaskApplySeamTests
         cancelled!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
         cancelled.EntityLogicalName.Should().Be("sprk_event");
         cancelled.RecordId.Should().Be(CreatedTaskId);
-        cancelled.FieldMappings.Should().ContainSingle(m =>
-            m.Field == "sprk_eventstatus" && m.Type == ActionFieldType.String && m.Value == "5");
+        cancelled.FieldMappings.Should().HaveCount(2)
+            .And.Contain(m => m.Field == "statuscode" && m.Type == ActionFieldType.Number && m.Value == "659490004")
+            .And.Contain(m => m.Field == "statecode" && m.Type == ActionFieldType.Number && m.Value == "1");
 
         // Exactly one append-only compensating audit row (Dismissed, actor = the caller), tying the cancel to the
         // communication + the cancelled task via a distinct sentinel field (never collides with a proposal open-walk).
@@ -511,7 +517,7 @@ public sealed class CreateTaskApplySeamTests
             Times.Once);
 
         result.TaskId.Should().Be(CreatedTaskId);
-        result.NewStatus.Should().Be(5);
+        result.NewStatus.Should().Be(EventStatusCancelled);
     }
 
     // B2.2 UNDO NEGATIVE — auth: an unresolved caller fails closed (403); no cancel write + no audit row run.

@@ -594,7 +594,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
                 "sprk_event",
                 taskId,
-                It.Is<Dictionary<string, object?>>(d => d.ContainsKey("sprk_eventstatus")),
+                // Task 066 (D-28): the soft-cancel writes statuscode = Cancelled WITH its statecode (Inactive); never the deprecated column.
+                It.Is<Dictionary<string, object?>>(d => d.Count == 2 && Equals(d["statuscode"], 659490004) && Equals(d["statecode"], 1)),
                 It.IsAny<CancellationToken>(),
                 CallerSystemUserId),
             Times.Once);

@@ -436,14 +436,14 @@ public static class CommunicationEndpoints
 
         // POST /api/communications/{communicationId}/tasks/{taskId}/undo — Job C UNDO (email-communication-intelligence-r2
         // B2.2). The Tasks reconcile tab POSTs a just-created task's CreatedTaskId here on Undo. The service SOFT-CANCELS
-        // the sprk_event (sprk_eventstatus = Cancelled) under the caller's MSCRMCallerID impersonation — impersonation
+        // the sprk_event (statuscode = Cancelled) under the caller's MSCRMCallerID impersonation — impersonation
         // gates the write to the caller (no app-only "delete any event by id"), reversible, preserves the audit trail —
         // then writes ONE append-only compensating audit row tying the cancel to the communication (provenance + W1/W2).
         group.MapPost("/{communicationId:guid}/tasks/{taskId:guid}/undo", UndoCreateTaskAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.TaskUndo)
             .WithName("UndoCommunicationCreateTask")
-            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. The caller must see the communication (otherwise — and for a missing bearer token or an unresolved caller — the same 404 COMMUNICATION_NOT_FOUND an unknown id gets); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
+            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (statuscode=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. The caller must see the communication (otherwise — and for a missing bearer token or an unresolved caller — the same 404 COMMUNICATION_NOT_FOUND an unknown id gets); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
             .Produces<UndoCreateTaskResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -1188,7 +1188,7 @@ public static class CommunicationEndpoints
         return TypedResults.Ok(result);
     }
 
-    // Job C undo (B2.2). Soft-cancels a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID
+    // Job C undo (B2.2). Soft-cancels a just-created task (statuscode=Cancelled) under the caller's MSCRMCallerID
     // impersonation (fail-closed 403) + writes one compensating audit row for the communication; failures surface as
     // RFC 7807 ProblemDetails (403/422/500). No request body.
     private static async Task<IResult> UndoCreateTaskAsync(

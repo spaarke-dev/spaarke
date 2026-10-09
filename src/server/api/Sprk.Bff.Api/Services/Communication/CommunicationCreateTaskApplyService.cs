@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 ///   (Subject / Description / DueDate / Regarding / Owner=assigned-to) — app-only, the only create the facade
 ///   exposes;</item>
 ///   <item>the remaining FR-E5 fields the human supplied at reconcile time
-///   (<c>sprk_eventstatus</c> / <c>sprk_completeddate</c> / <c>sprk_basedate</c> / <c>sprk_finalduedate</c>) are
+///   (<c>statuscode</c> / <c>sprk_completeddate</c> / <c>sprk_basedate</c> / <c>sprk_finalduedate</c>) are
 ///   PATCHed on the created task via the caller-impersonated <see cref="IActionSeam.UpdateRecordAsync"/> — so those
 ///   deadline-bearing / status fields carry the confirming user's <c>modifiedby</c> and privilege intersection.</item>
 /// </list>
@@ -91,7 +91,7 @@ public interface ICommunicationCreateTaskApplyService
     /// <summary>
     /// UNDO a just-created task (email-communication-intelligence-r2 B2.2): soft-cancels the <c>sprk_event</c>
     /// identified by <paramref name="taskId"/> (the <c>CreatedTaskId</c> the apply/ad-hoc create returned) by setting
-    /// <c>sprk_eventstatus</c> = Cancelled UNDER THE CALLER'S IMPERSONATION, then writes ONE append-only compensating
+    /// <c>statuscode</c> = Cancelled UNDER THE CALLER'S IMPERSONATION, then writes ONE append-only compensating
     /// audit row for <paramref name="communicationId"/> (provenance + append-only-audit symmetry with the field-undo).
     /// Soft-cancel (not hard delete) so the write is gated by the caller's Dataverse access (a caller who cannot write
     /// the event cannot cancel it — no app-only "delete any event by id" hole), it is reversible, and it preserves the
@@ -114,7 +114,7 @@ public sealed record ApplyCreateTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_eventstatus</c> Choice value (e.g. Completed=2 for the create-and-complete case).</summary>
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28): the deprecated 0-7 status column's values are no longer accepted.</summary>
     public int? Status { get; init; }
 
     /// <summary>The task Owner (<c>ownerid</c> systemuser) — set at create via
@@ -152,7 +152,7 @@ public sealed record CreateAdHocTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_eventstatus</c> Choice value (e.g. Completed=2 for the create-and-complete case).</summary>
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28): the deprecated 0-7 status column's values are no longer accepted.</summary>
     public int? Status { get; init; }
     /// <summary>The task Owner (<c>ownerid</c> systemuser).</summary>
     public Guid? AssignedTo { get; init; }
@@ -167,7 +167,7 @@ public sealed record CreateAdHocTaskResult(
     IReadOnlyList<string> FieldsPatched);
 
 /// <summary>Result of a successful <see cref="ICommunicationCreateTaskApplyService.UndoCreateTaskAsync"/> (B2.2). The
-/// task was soft-cancelled (<c>sprk_eventstatus</c> = Cancelled) — carries the task id + the new status value.</summary>
+/// task was soft-cancelled (<c>statuscode</c> = Cancelled) — carries the task id + the new status value.</summary>
 public sealed record UndoCreateTaskResult(Guid TaskId, int NewStatus);
 
 /// <inheritdoc />
@@ -186,15 +186,15 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private const string EventEntity = "sprk_event";
 
     // sprk_event FR-E5 fields PATCHed under impersonation (dataverse-describe-verified 2026-08-06): base/final-due/
-    // completed are Date-Only; eventstatus is a Choice (Completed=2). due + owner are set at create via the facade.
+    // completed are Date-Only; status is statuscode + its paired statecode (task 066, D-28). due + owner are set at create via the facade.
     private const string EventBaseDateField = "sprk_basedate";
     private const string EventFinalDueDateField = "sprk_finalduedate";
     private const string EventCompletedDateField = "sprk_completeddate";
-    private const string EventStatusField = "sprk_eventstatus";
+    private const string EventStatusField = "statuscode";
+    private const string EventStateField = "statecode";
 
-    // sprk_eventstatus Choice value for a soft-cancel undo (canonical Events status set: Draft=0, Open=1,
-    // Completed=2, Closed=3, On Hold=4, Cancelled=5, Reassigned=6, Archived=7 — mirrors the client EVENT_STATUS map).
-    private const int EventStatusCancelled = 5;
+    // Soft-cancel undo target: the live statuscode (task 066, D-28; the deprecated 0-7 status column is not written).
+    private const int EventStatusCancelled = EventStatusCode.Cancelled;
 
     /// <summary>The <c>sprk_targetfield</c> sentinel PREFIX Job C writes for a create-task proposal — mirrored from
     /// <c>CommunicationEnrichmentService.CreateTaskSentinelFieldPrefix</c> (duplicated with a "mirrored from" note the
@@ -610,11 +610,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
             {
                 EntityLogicalName = EventEntity,
                 RecordId = taskId,
-                FieldMappings = new[]
-                {
-                    new ActionFieldMapping(EventStatusField, ActionFieldType.String,
-                        EventStatusCancelled.ToString(CultureInfo.InvariantCulture)),
-                },
+                FieldMappings = StatusMappings(EventStatusCancelled),
                 ImpersonateSystemUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
@@ -663,7 +659,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         }
 
         _logger.LogInformation(
-            "Job C undo: sprk_event {TaskId} soft-cancelled (sprk_eventstatus=Cancelled) under caller {Caller} impersonation; audit row {AuditLogId} written.",
+            "Job C undo: sprk_event {TaskId} soft-cancelled (statuscode=Cancelled) under caller {Caller} impersonation; audit row {AuditLogId} written.",
             taskId, callerSystemUserId, auditLogId);
 
         return new UndoCreateTaskResult(taskId, EventStatusCancelled);
@@ -687,10 +683,30 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         if (completedDate is { } c)
             mappings.Add(new ActionFieldMapping(EventCompletedDateField, ActionFieldType.String, FormatDate(c)));
         if (status is { } s)
-            mappings.Add(new ActionFieldMapping(EventStatusField, ActionFieldType.String, s.ToString(CultureInfo.InvariantCulture)));
+            mappings.AddRange(StatusMappings(s));
 
         return mappings;
     }
+
+    /// <summary>
+    /// The status write for an event: <c>statuscode</c> PLUS the <c>statecode</c> it belongs to (Dataverse rejects a
+    /// status change that leaves the pair inconsistent; Completed/Closed are Active, Cancelled is Inactive —
+    /// <see cref="EventStatusCode.GetStateCode"/>). Task 066 (D-28): <c>statuscode</c> is the one status column.
+    /// A value outside the live option set is sent as a String mapping so the metadata-driven coercion rejects it
+    /// fail-loud (the same 422 an invalid status always produced) instead of writing a guess. Internal for tests.
+    /// </summary>
+    internal static ActionFieldMapping[] StatusMappings(int status) =>
+        EventStatusCode.IsDefined(status)
+            ? new[]
+            {
+                new ActionFieldMapping(EventStatusField, ActionFieldType.Number, status.ToString(CultureInfo.InvariantCulture)),
+                new ActionFieldMapping(EventStateField, ActionFieldType.Number,
+                    EventStatusCode.GetStateCode(status).ToString(CultureInfo.InvariantCulture)),
+            }
+            : new[]
+            {
+                new ActionFieldMapping(EventStatusField, ActionFieldType.String, status.ToString(CultureInfo.InvariantCulture)),
+            };
 
     private async Task<Entity?> LoadReviewLogRowAsync(Guid reviewLogId, CancellationToken ct)
     {

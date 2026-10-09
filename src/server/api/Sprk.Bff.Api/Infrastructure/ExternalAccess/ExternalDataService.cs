@@ -172,8 +172,8 @@ public class ExternalDataService
     // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
     // 'sprk_name'" — so the external events list and create always failed). The live columns are sprk_eventname (the
     // primary name) and, for status, statuscode — the column the rest of the BFF (and POST /events/{id}/complete) writes.
-    // Review F2 (coordinator interim decision, pending the owner's two-status-columns decision): statuscode is the status
-    // of record; sprk_eventstatus is neither read nor written here. The SPA wire names (sprk_name / sprk_status on
+    // D-28 (task 066): statuscode is the status
+    // of record; the deprecated second status column is neither read nor written here. The SPA wire names (sprk_name / sprk_status on
     // ExternalEventDto) are unchanged; only the Dataverse side is mapped here.
     internal const string EventNameColumn = "sprk_eventname";
     internal const string EventStatusColumn = "statuscode";
