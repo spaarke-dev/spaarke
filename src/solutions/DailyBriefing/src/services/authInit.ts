@@ -24,6 +24,7 @@
 import {
   createCodePageAuthInitializer,
   type CodePageAuthInitializer,
+  type OkResponse,
 } from "@spaarke/auth";
 import {
   getBffBaseUrl,
@@ -69,7 +70,7 @@ export function ensureAuthInitialized(): Promise<void> {
   return getInitializer().ensureAuthInitialized();
 }
 
-export function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+export function authenticatedFetch(url: string, init?: RequestInit): Promise<OkResponse> {
   return getInitializer().authenticatedFetch(url, init);
 }
 

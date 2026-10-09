@@ -26,36 +26,55 @@ jest.mock('@spaarke/auth', () => ({
   authenticatedFetch: jest.fn(),
 }));
 
-import { ApiError, AuthError, authenticatedFetch } from '@spaarke/auth';
+import { ApiError, AuthError, authenticatedFetch, type OkResponse, type OkStatus } from '@spaarke/auth';
 import { useDocumentActions } from '../../src/hooks/useDocumentActions';
 
 const BFF = 'https://bff.example.com';
 const mockedFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
+/**
+ * The same mock, typed as a fetch that RETURNS failures — only for the "returned-shape control" tests,
+ * which feed it a non-OK Response. `authenticatedFetch` never does that (it throws; its type,
+ * `Promise<OkResponse>`, rejects such a mock), but the hook still has that branch, and these
+ * controls pin it until it is removed.
+ */
+const returningFetch = mockedFetch as unknown as jest.MockedFunction<
+  (url: string, init?: RequestInit) => Promise<Response>
+>;
 
-// Minimal Response-like shape that satisfies the hook's reads (.ok, .status,
+// Minimal SUCCESS Response-like shape that satisfies the hook's reads (.ok, .status,
 // .json, .blob, .headers.get). Using a typed factory keeps assertions honest
 // without forcing us to construct full Response objects.
-function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {}): Response {
-  const status = init.status ?? 200;
-  const ok = init.ok ?? (status >= 200 && status < 300);
+function jsonResponse(body: unknown, init: { status?: OkStatus } = {}): OkResponse {
   return {
-    ok,
-    status,
-    statusText: ok ? 'OK' : 'Error',
+    ok: true,
+    status: init.status ?? 200,
+    statusText: 'OK',
     json: jest.fn().mockResolvedValue(body),
+    blob: jest.fn().mockResolvedValue(new Blob(['x'])),
+    headers: { get: () => null },
+  } as unknown as OkResponse;
+}
+
+/** A RETURNED non-OK response, for the returned-shape controls (see `returningFetch`). */
+function returnedFailure(status: number): Response {
+  return {
+    ok: false,
+    status,
+    statusText: 'Error',
+    json: jest.fn().mockResolvedValue({}),
     blob: jest.fn().mockResolvedValue(new Blob(['x'])),
     headers: { get: () => null },
   } as unknown as Response;
 }
 
-function blobResponse(disposition: string | null = null): Response {
+function blobResponse(disposition: string | null = null): OkResponse {
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
     blob: jest.fn().mockResolvedValue(new Blob(['x'])),
     headers: { get: (name: string) => (name === 'Content-Disposition' ? disposition : null) },
-  } as unknown as Response;
+  } as unknown as OkResponse;
 }
 
 beforeEach(() => {
@@ -114,7 +133,7 @@ describe('useDocumentActions — openInWeb', () => {
   });
 
   test('a RETURNED non-OK response (a fetch that does not throw) gets the same sentence', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 500, ok: false }));
+    returningFetch.mockResolvedValueOnce(returnedFailure(500));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
@@ -250,7 +269,7 @@ describe('useDocumentActions — deleteDocuments', () => {
   });
 
   test('sets actionError when DELETE returns non-OK (returned-shape control)', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 403, ok: false }));
+    returningFetch.mockResolvedValueOnce(returnedFailure(403));
 
     const onSuccess = jest.fn();
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
@@ -299,7 +318,7 @@ describe('useDocumentActions — emailLink', () => {
   });
 
   test('sets actionError when open-links returns non-OK (returned-shape control)', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 404, ok: false }));
+    returningFetch.mockResolvedValueOnce(returnedFailure(404));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
@@ -316,8 +335,8 @@ describe('useDocumentActions — emailLink', () => {
 describe('useDocumentActions — sendToIndex', () => {
   test('POSTs analyze per id and treats 202 as success', async () => {
     mockedFetch
-      .mockResolvedValueOnce(jsonResponse({}, { status: 202, ok: false }))
-      .mockResolvedValueOnce(jsonResponse({}, { status: 202, ok: false }));
+      .mockResolvedValueOnce(jsonResponse({}, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({}, { status: 202 }));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 
@@ -331,7 +350,7 @@ describe('useDocumentActions — sendToIndex', () => {
   });
 
   test('sets actionError when analyze returns non-success status (returned-shape control)', async () => {
-    mockedFetch.mockResolvedValueOnce(jsonResponse({}, { status: 500, ok: false }));
+    returningFetch.mockResolvedValueOnce(returnedFailure(500));
 
     const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
 

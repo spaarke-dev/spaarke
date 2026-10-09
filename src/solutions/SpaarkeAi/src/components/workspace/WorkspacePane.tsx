@@ -600,7 +600,7 @@ export function WorkspacePane(): React.JSX.Element {
 
         try {
           const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
-          const response = await authenticatedFetch(url, {
+          await authenticatedFetch(url, {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -608,13 +608,9 @@ export function WorkspacePane(): React.JSX.Element {
             },
             body: JSON.stringify(snap),
           });
-          // 404 = session not yet known to BFF — treat as benign (best-effort).
-          if (!response.ok && response.status !== 404) {
-            throw new Error(`HTTP ${response.status}`);
-          }
         } catch (err) {
-          // authenticatedFetch THROWS ApiError(404) rather than returning it — the same benign
-          // "session not yet known" as above, not a save failure.
+          // authenticatedFetch THROWS ApiError(404) rather than returning it: the session is not yet
+          // known to the BFF — benign (best-effort), not a save failure.
           if (isApiError(err, 404)) return;
           logTelemetryError(TELEMETRY_TAB_RESTORE_SAVE_FAILURE, {
             sessionId: chatSessionId,
@@ -912,26 +908,21 @@ export function WorkspacePane(): React.JSX.Element {
           });
           if (cancelled) return;
 
-          if (response.ok) {
-            const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
-            if (cancelled) return;
+          const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
+          if (cancelled) return;
 
-            await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
-            if (cancelled) return;
+          await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
+          if (cancelled) return;
 
-            // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
-            // the user opened a tab during the restore window) — treat that as a
-            // successful server restore too, since a widget tab is present either way.
-            restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
-          } else if (response.status !== 404) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          // 404 falls through to the local anchor-keyed fallback below (benign —
-          // no tabs known to the BFF for this session yet).
+          // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
+          // the user opened a tab during the restore window) — treat that as a
+          // successful server restore too, since a widget tab is present either way.
+          restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
         } catch (err) {
           if (cancelled) return;
           // authenticatedFetch THROWS ApiError(404) rather than returning it — the benign "no tabs
-          // known to the BFF yet" case above, which falls through to the local fallback silently.
+          // known to the BFF yet" case, which falls through to the local anchor-keyed fallback
+          // below silently.
           if (!isApiError(err, 404)) {
             logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
               sessionId: chatSessionId,

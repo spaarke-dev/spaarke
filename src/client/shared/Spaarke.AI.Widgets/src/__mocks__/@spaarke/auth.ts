@@ -13,7 +13,12 @@
  * fetch is short-circuited by passing entityContext=null.
  */
 
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+import type { AuthenticatedFetchFn, OkResponse } from '../../../../Spaarke.Auth/src/types';
+import { ApiError } from '../../../../Spaarke.Auth/src/errors';
+
+// The REAL fetch types: `authenticatedFetch` resolves only with a success (`OkResponse`) and throws
+// every failure.
+export type { AuthenticatedFetchFn, ResponseFetchFn, OkResponse, OkStatus } from '../../../../Spaarke.Auth/src/types';
 
 // The REAL error classes and guards — pure, no MSAL. Code under test branches on what the real
 // authenticatedFetch throws, so a stub of these would let a test pass against behaviour production
@@ -25,13 +30,14 @@ export function buildBffApiUrl(base: string, path: string): string {
   return `${base}${path}`;
 }
 
+/**
+ * Default: the BFF is unavailable — THROWN as the real `authenticatedFetch` throws it
+ * (`ApiError('HTTP 503', 503)`), never resolved as `{ ok: false }` (a shape that fetch never
+ * returns). Tests that need a success or another failure override it per call.
+ */
 export const authenticatedFetch: jest.MockedFunction<AuthenticatedFetchFn> = jest
-  .fn<Promise<Response>, Parameters<AuthenticatedFetchFn>>()
-  .mockResolvedValue({
-    ok: false,
-    status: 503,
-    json: async () => ({}),
-  } as Response);
+  .fn<Promise<OkResponse>, Parameters<AuthenticatedFetchFn>>()
+  .mockRejectedValue(new ApiError('HTTP 503', 503, null));
 
 /**
  * Minimal runtime-config store stub (ai-architecture-redesign-r1 task 023).
