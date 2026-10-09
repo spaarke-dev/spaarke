@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-96/D-101: fix the Matter Health insights playbook (matter-health-single) so the card returns real answers; deactivate the broken demo and junk playbooks</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live AI playbook used by a production card; engine skip semantics; dev playbook data changes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR. Never edit system playbooks through the Designer (CLAUDE.md section 6).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,dataverse,bug,separate-pr</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Make the Matter Health insights card return grounded answers, not its permanent fallback decline, and remove the broken demo and junk playbooks from use.</prompt>
+  <role>SPAARKE AI engineer.</role>
+  <goal>With evidence, matter-health-single produces a grounded answer when observations exist and a correct decline (with real numbers, not literal placeholders) when they don't. The repo definition matches the live one. The broken demo and junk playbooks are inactive in dev.</goal>
+
+  <context>
+    <background>notes/playbook-engine-defect-sweep.md AI-01 and the AI-side report:
+- retrieveObservations filters on `matterId`, but the index field is `scope/matterId` (INFERRED 400: verify the deployed index schema read-only).
+- The `synthesize` AgentService node has no prompt. D-98: AgentService nodes read the prompt from the linked Action.
+- from-fields use node names instead of output-variable names (synthesis, observations, sufficiency, groundedSynthesis).
+- sourceChunksJsonPath should be `artifacts`.
+- On the decline path, `groundCitations` still runs because a branch-skipped dependency returns OK. This is engine PB-02: fix it in the engine with a test.
+- The persistEnvelope template is malformed.
+- The repo JSON (Services/Ai/Insights/Playbooks/matter-health-single.playbook.json) has the same errors.
+D-101: fix Matter Health only. No wider AI-playbook programme; the workspace ai-summary fallback and executor-contract issues stay out of scope by owner decision.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-96/D-101: the live node update of matter-health-single in spaarkedev1 is approved. Deactivating the broken demo playbooks and the six junk rows in dev is approved (D-99). Use FULL GUIDs only: the junk row 4369cab2-5f2d-f111-88b5-7c1e520aa4df and Tasks Overdue 4369cab2-5f2d-f111-88b5-7ced8d1dc988 share a prefix. List every row you will deactivate, with its full GUID and name, in the PR before doing it. Record before and after for every change.</constraint>
+    <constraint source="project">The engine fix (skipped-node outputs, PB-02) and the AgentService prompt-from-Action change come with tests that fail on the old code. The playbook engine has no dry run: prove with unit and e2e tests first, then one live call of the Insights card for one matter, recorded. Own worktree off origin/master, own PR, do not merge. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. Never save a system playbook in the Designer. No parking.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">For a matter with observations, the Insights card returns a grounded answer with citations; for one without, it returns a decline with real numbers. Proven live in dev for one matter each (recorded).</criterion>
+    <criterion testable="true">A branch-skipped node's dependents do not run on an empty input (engine test fails on the old code); AgentService takes its prompt from the linked Action (test).</criterion>
+    <criterion testable="true">Repo and live matter-health-single definitions match (programmatic diff recorded).</criterion>
+    <criterion testable="true">The listed demo and junk playbooks are inactive in dev; nothing else changed state (before/after recorded, full GUIDs).</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 by the main session on D-96/D-101.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

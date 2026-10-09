@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="134" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>uac-r2 follow-through: MembershipResolverService credits a role whenever its column is populated (PB-07); the AiAnalysis executor is labelled read-only but can call write tools (AI-EX7)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>blocked: uac-r2 answer on #1355 (comment 6074035905)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Access-model code owned by unified-access-control-r2; security classification of an executor.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree; own PR; uac-r2 reviews.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,auth,security,uac,separate-pr</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make sure the two access-model defects the playbook sweep found get fixed: by uac-r2, or by us with their review.</prompt>
+  <role>SPAARKE engineer coordinating with unified-access-control-r2.</role>
+  <goal>Membership roles are credited only when the column actually names the user, and no caller labelled read-only can reach a write tool through the AiAnalysis executor. Both are proven with tests and agreed by uac-r2.</goal>
+
+  <context>
+    <background>notes/playbook-engine-defect-sweep.md:
+- PB-07: MembershipResolverService.cs ~1323-1336 credits a role whenever its column is populated, instead of comparing it against the user's identity values. Live rows list 4 roles; a team-owned matter lists an "ownerid" membership for a non-owner. Suggested fix: compare identity values and bump CacheVersion.
+- AI-EX7 (INFERRED): ExecutorSideEffects (INodeExecutor.cs ~314) classifies AiAnalysis as read-only, yet it dispatches any registered tool handler, including Dataverse create/update/delete, MemoryWrite and SendWorkspaceArtifact.
+Both were posted to uac-r2 on #1355 (comment 6074035905). PB-28 (records in notifications) is moot after D-100.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Coordinate per project CLAUDE.md section 4. Re-read uac-r2's latest code on master first. Follow their answer on #1355: if they fix it, verify their PR and close this task with that evidence; if they ask us to, fix it in our own PR with their review. Do not change access behaviour beyond the two defects. No parking.</constraint>
+    <constraint source="project">Each fix needs a test that fails on the current code. AI-EX7 needs proof (a test or a code trace) of whether any read-only path really reaches a write tool before anything changes; if none does, record that and only correct the classification. Own worktree off origin/master; never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A user is credited a membership role only when the role column names one of the user's identities (test with a team-owned matter); CacheVersion is bumped.</criterion>
+    <criterion testable="true">The AiAnalysis side-effect classification matches what it can actually dispatch, and no read-only caller can reach a write tool (test or trace recorded).</criterion>
+    <criterion testable="true">uac-r2 has reviewed or authored the fix (link recorded).</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 by the main session from the playbook-engine sweep (no-parking rule), after D-100 narrowed the playbook work.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

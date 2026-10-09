@@ -4,7 +4,7 @@
     <title>ISS-018: restore notification playbooks (FetchXML id lists, Condition operands, item templates, Due Soon nodes, scheduler failure handling) — own PR + dev node updates</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Every notification playbook in dev has failed silently since at least 2026-07-11; BFF executor + scheduler code, live Dataverse node data, membership scope (access-adjacent).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -64,5 +64,6 @@ Owner decisions (2026-10-08): D-77 (fix design), D-78 (scheduler), D-79 (restore
 
   <notes>Created 2026-10-08 by the main session on owner decisions D-77..D-80 after the ISS-018 investigation (#1452). Owning domain: notification spine / daily-update-service; this project owns the fix (no parking).</notes>
 
+  <completion>COMPLETED 2026-10-09: PR #1461 merged e9f08b764 (ISS-018 fix: fetchInGuids + shape validator + Condition operands + item templates + scheduler total-failure handling; ADR-034 amended). Deployed to dev (D-89 steps 1-4). The notification playbooks themselves were then RETIRED by owner decision D-100 (the Briefing never reads appnotification); retirement is task 131. Remaining engine and AI work: tasks 133-135.</completion>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -2,13 +2,13 @@
 
 > **Last Updated**: 2026-10-09 ~03:30 UTC, checkpoint 4 (main session, `/context-handoff`). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md) (§3
-> includes the **no-parking rule, D-81**). Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-93). Sub-agents never edit this file.
+> includes the **no-parking rule, D-81**). Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-101). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 109 tasks, **54 ✅** (board synced). |
+| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 113 tasks, **55 ✅** (board synced). |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. **206 commits behind origin/master** → first action next session: merge master (expect route-ledger / write-path-doc conflicts; see CLAUDE.md §6 gotchas). |
 | **Critical context** | Every PR gets an independent review + fix-round re-check before the owner's merge; owner pre-approves "merge when green" per PR (I build/merge-tree against current master first). No tenant-wide publish (D-83). Dev deploys/data changes need an owner decision. Never park an issue (D-81): every defect found becomes a task here. |
 | **Next Action** | (1) Merge origin/master into this branch. (2) Act on agent notifications below as they arrive. (3) Bring the owner the open questions at the bottom. |
@@ -17,19 +17,14 @@
 
 | ID | What | Then |
 |---|---|---|
-| `a3550ab443978aa5b` | **D-92 full playbook-engine sweep** (Opus, read-only) → `notes/playbook-engine-defect-sweep.md` | Owner reviews findings → ONE follow-up PR (task 120 author `aae6c79edd0f863de`, worktree `C:\wt120d`) → review → owner merge → redeploy BFF, re-sync, re-run zz-120 proof, un-pause (D-91) |
+| — | Next to launch: 131, 132, 133, 135 (parallel; own worktrees) | Each stops at owner-approval steps |
 | `aae6c79edd0f863de` | Task 120 author — **D-91 pause DONE** 02:42Z (statecode 1/2 on Overdue, Matter Activity, Documents, Emails, Events; scheduler honours statecode only; 03:00Z tick skipped them). Resume = statecode 0 / statuscode 1. Due Soon + Work Assignments stay on (daily, next run ~02:34Z 10-10) | Idle; waits for the sweep |
 | `afa95b62d109541c3` | Task 130 author: round-3 re-check APPROVED pending CI; fixing the last items on **#1467** (per-chunk read-back for entities/forms/views/charts + site maps; chunk order option sets/web resources first, app modules last; resume command; app-setting parent-app pre-flight; workflow activation step documented; 0x80060888 probe rationale) | Light re-check by `afead9298bddac72a` → owner merge + live proofs (4 listed by reviewer: NoAccessEntryRibbon -Apply, FieldMappingAdminSolution scoped import, small app module + sitemap + app setting, first unmanaged SpaarkeMaster import) → main session applies `notes/task-130-skill-amendments.md` to the 3 skills, removing the 3 allow-list lines in the same commit |
 | `a6aba9e72ed9b1343` | Task 113 author: last 3 small fixes on **#1480** (busy-warning text, name-read failure test, lock churn) | bg `bcpu6whdj` merges #1480 when green (**D-93 pre-approved**) → Console auto-deploys to dev → mark 113 ✅ → task 114 = live checklist only |
 
-## Task 120 (ISS-018 notifications) — state
+## Playbooks — state (D-100 / D-101)
 
-#1461 merged `e9f08b764` (ADR-034 amended with it). In dev: BFF `e9f08b764` deployed, `sprk_playbooknode` auditing on (D-80),
-4 playbooks synced (records in `notes/task-120-records/`), alert `notification-playbook-total-failure-dev` live → `ag-spaarke-oncall-dev`.
-First live run: Due Soon + Work Assignments deliver correctly; Overdue + Matter Activity fail (Condition false-branch not skipped,
-`PlaybookOrchestrationService` ~:993; invalid `appnotification` priority 300000000/100000000). Docs/Emails/Events NOT synced:
-wait for uac-r2 answer on #1355 (comment 6069926720: app-only executors can reveal records a member can't open). Task 131
-(schedules/windows, dedup incl. read-then-retry, Designer overwrite) depends on 120.
+Task 120 ✅ (#1461 merged; engine fix stays). Owner decided **D-100: retire the notification playbooks** (bell-only; the Briefing never reads appnotification) — author `aae6c79edd0f863de` is turning the last two off in dev. Then: **131** retire (deploy path, alert removal, code-deletion inventory — approvals needed), **132** non-playbook appnotification option fix, **133** Designer read-only for system playbooks, **134** uac-r2 membership/AiAnalysis follow-through (blocked on #1355), **135** Matter Health fix + deactivate demo/junk playbooks (D-101). Sweep report: `notes/playbook-engine-defect-sweep.md` (PB-06 was wrong: based on dead Briefing code).
 
 ## Waiting on others
 

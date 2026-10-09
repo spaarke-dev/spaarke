@@ -1,55 +1,44 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="131" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Notification playbooks after ISS-018: honour each playbook's schedule and window, make the dedup config real or remove it, and stop Designer saves overwriting runtime node config</title>
+    <title>D-100: retire the seven notification playbooks (bell notifications are not wanted); remove their deploy path and alert; propose deletion of now-unused code</title>
     <phase>8 Remaining cleanup and repairs</phase>
-    <gate>after task 120 (PR #1461) merges</gate>
+    <gate>startable</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Scheduler behaviour (when and how often users are notified) and Designer save paths for live playbook data.</rigor-reason>
-    <model-tier>opus</model-tier>
+    <rigor-reason>Removes a live scheduled feature (dev data), a deploy script, an Azure alert rule and possibly BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
     <effort>high</effort>
-    <parallel-group>F</parallel-group>
+    <parallel-group>S1</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Own worktree off origin/master after #1461; own PR.</parallel-reason>
-    <deps>120</deps>
-    <tags>bff-api,ai,jobs,bug,separate-pr</tags>
-    <estimated-effort>1 day</estimated-effort>
+    <parallel-reason>Own worktree off origin/master; own PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,jobs,deletion,separate-pr,dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
-  <prompt>Fix the three notification defects task 120 found and reported, so they aren't parked.</prompt>
-  <role>SPAARKE senior backend engineer.</role>
-  <goal>Every notification playbook runs on the schedule and over the time window its definition declares. Duplicate notifications are prevented by real code, or the dead config is removed. A Playbook Designer save can no longer silently replace the runtime configuration of the seven notification nodes.</goal>
+  <prompt>Retire the notification playbooks cleanly. The owner decided (D-100, 2026-10-09) that model-driven bell notifications aren't wanted. The Daily Briefing never reads appnotification (DailyBriefingCollector bypasses it), and the ontology worklist and Do lane are where users see overdue and due-soon work.</prompt>
+  <role>SPAARKE engineer. A retirement that leaves no dead path, no misleading doc and no alert that can never fire.</role>
+  <goal>No notification playbook runs or can be redeployed by accident. Nothing in the repo or the docs describes them as a live feature, and every piece of code that only existed for them has been either deleted (with the owner's approval) or recorded as kept, with a reason.</goal>
 
   <context>
-    <background>Task 120 (PR #1461, notes/task-120-iss018-fix.md) found:
-(1) PlaybookSchedulerJob ignores each playbook's dueWithinDays / timeWindow parameters and its cronExpression schedules. Matter Activity and Work Assignments say "every 2 hours" but run daily.
-(2) The `deduplication` blocks in the seven repo playbook JSONs are never read.
-(3) A Playbook Designer save can overwrite a node's runtime config with a canvas stub. On 2026-06-30 this replaced the Due Soon nodes with empty stubs (the ISS-018 investigation).
-Deploy lint C (task 120) now refuses canvas stubs at deploy time, but nothing protects live rows.</background>
+    <background>Superseded by D-100: the original 131 scope (schedules, dedup, Designer for notifications) and decisions D-76/D-79 (matter scope), D-89 steps 3 and 5 (sync and proof), D-94, D-95, and D-98 items 1-7 and 10 for notifications. In dev, all seven playbooks (Tasks Overdue, Tasks Due Soon, New Work Assignments, Matter/Project Activity Summary, New Documents, New Emails, New Events) are inactive: statecode 1 / statuscode 2 (D-91 + D-100, recorded in notes/deploy-log.md). Evidence: notes/playbook-engine-defect-sweep.md, notes/task-120-iss018-fix.md.</background>
   </context>
 
   <constraints>
-    <constraint source="project">Read the investigation report, the task 120 note, docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md and the scheduler code before you design anything. Use ADR-036 for scheduled work. For (1), decide with evidence whether each playbook's declared cadence is the intended product behaviour. Where it isn't clear, STOP and report the options so the main session can ask the owner. For (2), implement dedup only if notifications can really duplicate (prove it with a test); otherwise remove the dead blocks and document why. For (3), find the Designer save path, make it refuse to replace a non-canvas runtime config (or preserve the runtime fields), and test it.</constraint>
-    <constraint source="project">Code goes in a NEW worktree off origin/master after #1461 merges, with its own PR to master. Do not merge it. Follow BFF hygiene per root CLAUDE.md section 10. Any live change to node configs in dev needs owner approval: STOP and report first. Never use --no-verify or bare git stash. You cannot write to .claude/. No parking.</constraint>
+    <constraint source="owner">D-100: retire, don't fix. Remove the alert rule `notification-playbook-total-failure-dev` in Azure (task 120 deployed it), because it can no longer fire meaningfully. Make `Deploy-NotificationPlaybooks.ps1` and the seven `notification-*.json` definitions unable to redeploy the playbooks: delete them if nothing else uses them (the D-82 rule), or retire them with a guard. Update docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md and any guide that presents them as live.</constraint>
+    <constraint source="project">Inventory the code that exists only for the notification playbooks: the type-2 path in PlaybookSchedulerJob, the CreateNotification and LookupUserMembership executors, NotificationActionCore usage, the D-78 total-failure handling. For each item, show by grep whether anything else uses it (other playbook types, the Insights playbooks, backend alerts that write appnotification directly). Do NOT delete code yourself. Put the deletion list in the PR body as "proposed, owner approval required", and the main session will ask. Keep the engine itself: the Insights playbooks (task 135) use it.</constraint>
+    <constraint source="project">Do not touch the two non-playbook appnotification writers (task 132) or the Designer protection (task 133). Own worktree off origin/master, own PR, do not merge. Never use --no-verify or bare git stash. You cannot write .claude/; report any skill or ADR text to change, for example ADR-034's notification references. The Azure alert deletion needs the owner's approval: STOP and report the exact az command first.</constraint>
   </constraints>
 
-  <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Declare rigor; read the inputs.</step>
-    <step order="1">Prove each defect with a failing test.</step>
-    <step order="2">Fix (1) to (3); write tests that fail on the old code.</step>
-    <step order="3">Run the full BFF suite, build ArchTests explicitly, measure publish size; open the PR; get CI green; report.</step>
-  </steps>
-
   <acceptance-criteria>
-    <criterion testable="true">A playbook declaring an N-hour cadence runs at that cadence, and one declaring a due-within or time window queries that window (tests that fail on the old scheduler).</criterion>
-    <criterion testable="true">ADDED 2026-10-08 (#1461 review K3): after a total-failure retry (D-78 keeps sprk_lastrundate so the next tick retries), a notification the user already READ for the same item is not created again. Dedup today checks unread rows only; a test covers read-then-retry.</criterion>
-    <criterion testable="true">Dedup is either enforced (a test proves no duplicate notification for the same item and user in a window) or the dead blocks are removed with a documented reason.</criterion>
-    <criterion testable="true">A Designer save that would replace a runtime config with a canvas stub is refused or preserves the runtime fields (test).</criterion>
-    <criterion testable="true">Negative: no change to the seven playbooks' membership scope or list form (task 120's), and no live change without owner approval.</criterion>
+    <criterion testable="true">All seven notification playbooks are inactive in spaarkedev1 and a scheduler tick runs none of them (evidence recorded).</criterion>
+    <criterion testable="true">No script or workflow in the repo can redeploy them; git grep evidence in the PR body.</criterion>
+    <criterion testable="true">Docs no longer describe them as live; the alert rule is removed (after approval) or explicitly kept with a reason.</criterion>
+    <criterion testable="true">The PR body carries a code-deletion inventory, each item marked used-elsewhere (keep) or unused (proposed delete).</criterion>
   </acceptance-criteria>
 
-  <notes>Created 2026-10-08 by the main session from task 120's reported findings (no-parking rule, D-81).</notes>
+  <notes>Repurposed 2026-10-09 by the main session on D-100. The original scope (schedules/dedup/Designer for notification playbooks) is superseded.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
