@@ -116,6 +116,7 @@ export {
   navigateToEntityRecordSurfaceAsync,
   // Task 112 (ontology-platform-r1): in-app routing seam for the five Create wizards.
   isInAppWizardName,
+  canOpenInApp,
   registerInAppWizardHost,
 } from './wizardLaunchers';
 export type {

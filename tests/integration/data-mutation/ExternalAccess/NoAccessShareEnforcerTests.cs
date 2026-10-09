@@ -834,6 +834,89 @@ public class NoAccessShareEnforcerTests
         _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().Be(CollaborateMask, "nothing is removed on a guess");
     }
 
+    /// <summary>
+    /// Task 174 (owner rounds 82/84; verifier F2): an entry whose OWN object record is a not-yet-flagged work assignment filed
+    /// under a secure matter — the record is secure through its parent (Q4's "secure"), so the walled user's direct share on
+    /// it is removed, not reported NotSecure.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnEntryOnANotYetFlaggedChildOfASecureMatter_RemovesTheWalledShare()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Participations.Flags[FiledWorkAssignment] = RootRecordFlags.None;
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (WorkAssignment, FiledWorkAssignment), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.NotEnforced.Should().NotContain(n => n.RecordId == FiledWorkAssignment && n.Reason == NoAccessEnforcementReason.NotSecure);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("secure through the matter");
+    }
+
+    /// <summary>
+    /// Task 174 (verifier pass 2 F1): an ORGANIZATION-object entry covers a not-yet-flagged work assignment that references
+    /// the organization and is filed under a secure matter (the matter itself does not reference it). The record is secure
+    /// through its parent, so the walled user's direct share on it is removed — as 064, the read veto and the guard already
+    /// say.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnOrganizationEntry_CoversANotYetFlaggedChildOfASecureMatterThatReferencesIt()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Participations.Flags[FiledWorkAssignment] = RootRecordFlags.None;
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { Firm };
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectOrganization: Firm, modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("secure through the matter");
+    }
+
+    /// <summary>
+    /// Task 174 (pass 2 re-check): the same child with a BLANK <c>sprk_issecure</c> (an environment before task 150's backfill,
+    /// or an import). Dataverse's <c>ne true</c> skips nulls, so the reverse read must ask for them explicitly; the record is
+    /// secure through its parent and the walled user's share is removed.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnOrganizationEntry_CoversABlankFlaggedChildOfASecureMatterThatReferencesIt()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.ChildWorld.Set(WorkAssignment, FiledWorkAssignment, "sprk_issecure", null);
+        _h.Participations.BlankSecureFlags[FiledWorkAssignment] = true;
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { Firm };
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectOrganization: Firm, modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("a blank flag is never 'not covered'");
+    }
+
+    /// <summary>Task 174 (verifier pass 2 F1): that child's filing cannot be read — a failure on it, nothing removed on a guess.</summary>
+    [Fact]
+    public async Task Enforce_AnOrganizationEntry_OnANotYetFlaggedChildWhoseFilingIsUnreadable_FailsAndRemovesNothing()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Participations.Flags[FiledWorkAssignment] = RootRecordFlags.None;
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { Firm };
+        _h.ChildWorld.FailingRowReadsOf(WorkAssignment, FiledWorkAssignment);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectOrganization: Firm, modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().Contain(f => f.Kind == "covered-records-unreadable" && f.RecordId == FiledWorkAssignment);
+        report.Complete.Should().BeFalse();
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
     /// <summary>Round 82, N5 still holds: an author without Write on the not-yet-secure filed record removes nothing there.</summary>
     [Fact]
     public async Task Enforce_ANotYetSecureFiledRecord_WhenTheAuthorLacksWriteOnIt_KeepsTheShare()

@@ -148,7 +148,7 @@ function load(
   };
   inject(SCRIPT);
   const api = win.Spaarke.NoAccessEntry;
-  expect(api.Config.version).toBe('1.1.0'); // the real script ran
+  expect(api.Config.version).toBe('1.1.1'); // the real script ran
   return { api, retrieveRecord, lookupObjects };
 }
 
@@ -713,5 +713,64 @@ describe('task 154 verifier pass 1', () => {
     const [text, level] = f.formContext.ui.setFormNotification.mock.calls.at(-1);
     expect(level).toBe('WARNING');
     expect(text).toContain('enforced within 5 minutes');
+  });
+});
+
+describe('the BFF base URL (#1488: sprk_BffApiBaseUrl ending in /api called /api/api/... and got 401)', () => {
+  const HOST = 'https://bff.example.test';
+  const ENFORCE_URL = `${HOST}/api/v1/external-access/no-access/enforce`;
+
+  /** The env-var reads getApiBaseUrl makes: a definition, then its value. */
+  function envVar(value: string) {
+    return jest.fn(async (entity: string) =>
+      entity === 'environmentvariabledefinition'
+        ? { entities: [{ environmentvariabledefinitionid: 'def-1', defaultvalue: null }] }
+        : { entities: [{ value }] }
+    );
+  }
+
+  /** Saves the entry once and returns the URL enforced and the base URL handed to Spaarke.BffAuth.getToken. */
+  async function enforceUrls(api: any) {
+    const getToken = jest.fn().mockResolvedValue('token');
+    win.Spaarke.BffAuth = { getToken };
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    (global as any).fetch = fetchMock;
+    api.onPostSave(makeForm({}).ctx);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    return { url: fetchMock.mock.calls[0][0] as string, tokenBase: getToken.mock.calls[0][0] as string };
+  }
+
+  it.each([`${HOST}/api`, `${HOST}/api/`, `${HOST}/API`])(
+    'env var %s → getApiBaseUrl is the host, and the enforce URL has exactly one /api segment',
+    async value => {
+      const { api } = load();
+      win.Xrm.WebApi.retrieveMultipleRecords = envVar(value);
+
+      await expect(api.getApiBaseUrl()).resolves.toBe(HOST);
+      const { url, tokenBase } = await enforceUrls(api);
+      expect(url).toBe(ENFORCE_URL);
+      expect(url.match(/\/api\//g)).toHaveLength(1);
+      expect(tokenBase).toBe(HOST); // bff_auth.js appends /api/config/client to this
+    }
+  );
+
+  it.each([HOST, `${HOST}/`, `${HOST}/apis`])(
+    'env var %s without /api → unchanged (trailing slash only)',
+    async value => {
+      const { api } = load();
+      win.Xrm.WebApi.retrieveMultipleRecords = envVar(value);
+
+      await expect(api.getApiBaseUrl()).resolves.toBe(value.replace(/\/+$/, ''));
+    }
+  );
+
+  it('a Config.apiBaseUrl override ending in /api is normalised the same way', async () => {
+    const { api } = load();
+    api.Config.apiBaseUrl = `${HOST}/api/`;
+
+    const { url, tokenBase } = await enforceUrls(api);
+    expect(url).toBe(ENFORCE_URL);
+    expect(tokenBase).toBe(HOST);
   });
 });

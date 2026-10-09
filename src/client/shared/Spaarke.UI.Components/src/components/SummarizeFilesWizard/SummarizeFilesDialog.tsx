@@ -99,6 +99,11 @@ export interface ISummarizeFilesDialogProps {
   /** When true, hides the built-in dialog chrome (for Dataverse embedded mode). */
   embedded?: boolean;
   /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 113 (InAppWizardHost).
+   */
+  uiScale?: number;
+  /**
    * Assistant hand-off FILE references (UAT R5-8 — the create-flow file leg). When launched from
    * the Assistant "Summarize Files" Quick Start card via the surface-launch envelope, `main.tsx`
    * passes the hand-off seed's `{ sessionId, fileIds, fileNames }` here; the dialog fetches each
@@ -182,6 +187,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   embedded,
+  uiScale,
   initialFileRefs,
 }) => {
   const styles = useStyles();
@@ -757,6 +763,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       finishLabel="Done"
       embedded={embedded}
       hideTitle={embedded}
+      {...(uiScale !== undefined ? { uiScale } : {})}
     />
   );
 };

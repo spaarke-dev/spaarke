@@ -119,6 +119,37 @@ Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/Cal
 
 ---
 
+## A Filed Child's Access Follows Its Parent (owner round 84, task 174)
+
+**Rule (binding).** A work assignment or project that has a parent is enforced with its EFFECTIVE Secure flag and Access
+Permission: the most restrictive of its own `sprk_issecure` / `sprk_accesspermission` and those of every matter or
+project above it in the filing chain (secure-if-any; Restricted over Limited over Standard). A matter files under nothing
+and is unchanged. Task 175 makes the STORED values cascade and locks them on the child; until a stored value catches up
+(inheritance pending, Refused or Failed, or a cascade in flight) enforcement computes the value from the chain and fails
+closed.
+
+- **One walk.** `SecureRootInheritance.ReadSecureParentsAsync` / `ReadSecureParentsOfManyAsync` (#1410) climbs the chain
+  (bounded by `MaxFilingDepth`, cycle-safe) and reads each ancestor's Access Permission in the same parent read as its
+  Secure flag. `EffectiveRootFlags` folds that answer into the record's own `RootRecordFlags`.
+- **Where it applies.** The read path (`AccessibleRecordSetService`: direct-only cancellation, Restricted, the systemuser
+  plane's Restricted survivor — one walk per composition shared with the No Access veto) and every access caller of the
+  flag read through `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync`: the write-time grant policy, the
+  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the share-link refusal, the
+  Restricted share remover and the Assigned-To materializer. The No Access guard and enforcer treat a record with a secure
+  ancestor as secure (Q4's "secure" is the record or any filing ancestor, round 82).
+- **The contact plane honours a secure parent's No Access list (#1425).** The read-time contact veto and the write-time
+  grantee check ask every secure ancestor's list, each carrying its own referenced organizations, in the same deny-list
+  query.
+- **Fails closed.** An unreadable filing row, pair type or ancestor flag, an EMPTY ancestor flag, or a chain past the bound
+  makes the record `RootRecordFlags.Unreadable` (secure AND Restricted): removed on the read path, refused as "could not be
+  read" at grant time.
+- **Display.** Task 064's per-record read (`GET /api/v1/records/{table}/{id}/no-access`) reports the effective `secure`,
+  `accessPermission` and `inheritedFrom`; Manage Access gates and marks "No effect" from the stricter of those and the
+  record's stored values.
+- **Not routed (own values on purpose).** `/unshare-user`'s last-reader rule (S5) follows the stored ownership. Readers
+  outside the flag read (provisioning's creator rule, the secure-child share synchronizer's Restricted read, SPE container
+  membership, Office edit, the Restricted sweep) are task 175's: the stored cascade makes them right.
+
 ## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
 
 **The gate is Write.** `DelegationRuleFilter` admits a caller to every `/api/v1/external-access/*` route (grant, invite, share, revoke, `/can-manage-access`) only when the caller holds **Write** on the record, evaluated as the caller over OBO (owner decision B-14, retained). Share is never consulted by the gate, and the record's Access Permission / Secure flags do not change it — they govern WHICH grant types apply, at write time (task 138).

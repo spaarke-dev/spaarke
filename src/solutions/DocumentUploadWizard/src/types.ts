@@ -95,6 +95,22 @@ export interface IDocumentUploadWizardDialogProps {
     // envelope that used to append `&containerId=…` had it removed in the same change.
     /** Callback invoked when the wizard is closed or cancelled. */
     onClose: () => void;
+    /**
+     * Task 113 (ontology-platform-r1 D-26). `true` (default) = the code-page layout: embedded under
+     * the Dataverse `navigateTo` dialog's chrome (no envelope, no title), closing may fall back to
+     * `window.close()`. `false` = IN-APP: `WizardShell` renders inside `SprkModal` (named size,
+     * explicit dismiss, title), and `window.close()` is never called — the Console's own window must
+     * not close; `onClose` is the only way out.
+     */
+    embedded?: boolean;
+    /** App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (in-app only). */
+    uiScale?: number;
+    /**
+     * BFF base URL. The code page sets `window.__SPAARKE_BFF_BASE_URL__` in `main.tsx` before render
+     * and this falls back to it; the in-app host passes it directly so the Console window's globals
+     * are never written.
+     */
+    bffBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -232,6 +232,9 @@ export function DocumentUploadWizardDialog({
     parentEntityId,
     parentEntityName,
     onClose,
+    embedded = true,
+    uiScale,
+    bffBaseUrl: bffBaseUrlProp,
 }: IDocumentUploadWizardDialogProps): JSX.Element {
     const styles = useStyles();
 
@@ -240,7 +243,7 @@ export function DocumentUploadWizardDialog({
     // NOTE: Must be inside the component body — module-level code runs synchronously
     // at bundle parse time, before the async bootstrap() in main.tsx can set this.
     // ---------------------------------------------------------------------------
-    const bffBaseUrl = window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
+    const bffBaseUrl = bffBaseUrlProp ?? window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
         throw new Error(
             '[DocumentUploadWizard] window.__SPAARKE_BFF_BASE_URL__ is not set. ' +
             'resolveRuntimeConfig() must be called in main.tsx before rendering.'
@@ -695,18 +698,20 @@ export function DocumentUploadWizardDialog({
         return buildSuccessConfig({
             uploadResults: uploadResultRef.current,
             onClose,
+            closeWindow: embedded,
         });
-    }, [onClose]);
+    }, [onClose, embedded]);
 
     // ── Render ──────────────────────────────────────────────────────────────
 
-    return (
-        <div className={styles.root}>
+    const content = (
+        <>
             <WizardShell
                 ref={wizardRef}
                 open={true}
-                embedded={true}
-                hideTitle={true}
+                embedded={embedded}
+                hideTitle={embedded}
+                {...(uiScale !== undefined ? { uiScale } : {})}
                 title={
                     effectiveParentEntityName
                         ? `Upload Files \u2014 ${effectiveParentEntityName}`
@@ -748,6 +753,10 @@ export function DocumentUploadWizardDialog({
             )}
 
             {/* Find Similar now opens in a new tab via nextStepLauncher */}
-        </div>
+        </>
     );
+
+    // In-app (embedded=false) the wizard and its prompt portal out of the host tree (SprkModal /
+    // ChoiceModal), so no layout wrapper may be left behind in the shell the host is mounted in.
+    return embedded ? <div className={styles.root}>{content}</div> : content;
 }

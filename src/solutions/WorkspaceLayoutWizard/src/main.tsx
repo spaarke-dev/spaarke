@@ -17,47 +17,14 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 import { AppErrorBoundary, getXrm } from "@spaarke/ui-components";
-import type { LayoutTemplateId } from "@spaarke/ui-components";
+import { parseLayoutWizardData } from "./launchParams";
+import type { DataParams, WizardMode } from "./launchParams";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** Wizard mode determines the wizard behavior */
-type WizardMode = "create" | "edit" | "saveAs";
-
-/** Parsed data parameters from the URL / Xrm.Page.data */
-interface DataParams {
-  mode: WizardMode;
-  layoutId: string | null;
-  /** Template ID from the source layout (saveAs mode) */
-  layoutTemplateId: string | null;
-  /** JSON-encoded sections from the source layout (saveAs mode) */
-  sectionsJson: string | null;
-  /** Display name of the source layout (saveAs mode) */
-  sourceName: string | null;
-  /**
-   * Optional comma-separated list of `LayoutTemplateId` values used by the
-   * SpaarkeAi `WorkspacePaneMenu` (task 032) to restrict the wizard's Step 1
-   * template selector to a 6-template subset per FR-14. When absent the
-   * wizard renders all 9 canonical templates for FR-25 backwards-compat.
-   *
-   * Values are NOT validated here against the `LayoutTemplateId` union —
-   * `TemplateStep` simply skips any IDs that aren't in `LAYOUT_TEMPLATES`,
-   * so an unknown value is a no-op (visually equivalent to absence).
-   */
-  templateFilter: readonly LayoutTemplateId[] | undefined;
-  /**
-   * Optional step id to open the wizard at (R2 UAT §3.1 + §4.1). Accepts
-   * "choose-layout" | "configure-sections" | "review-save". When absent,
-   * App.tsx defaults to review-save for edit/saveAs and to first step for
-   * create. Used by SpaarkeAi gear-icon flow to force Choose Layout on edit.
-   */
-  startAtStep: string | null;
-}
-
 /**
- * Parse the URL data parameter passed via Xrm.Navigation.navigateTo.
- * Expected format: "mode=create" or "mode=edit&layoutId=<guid>"
- * SaveAs format: "mode=saveAs&layoutId=<guid>&layoutTemplateId=<id>&sectionsJson=<json>&name=<name>"
+ * Resolve the launch data string passed via Xrm.Navigation.navigateTo, then parse it with the
+ * shared contract (`launchParams.ts`, also used by the in-app host).
  */
 function parseDataParams(): DataParams {
   let dataString = "";
@@ -79,38 +46,7 @@ function parseDataParams(): DataParams {
     dataString = params.get("data") || params.toString();
   }
 
-  const parsed = new URLSearchParams(dataString);
-  const modeParam = parsed.get("mode");
-  const mode: WizardMode =
-    modeParam === "edit" || modeParam === "saveAs" ? modeParam : "create";
-  const layoutId = parsed.get("layoutId") || null;
-  const layoutTemplateId = parsed.get("layoutTemplateId") || null;
-  const sectionsJson = parsed.get("sectionsJson") || null;
-  const sourceName = parsed.get("name") || null;
-
-  // ---------------------------------------------------------------------------
-  // templateFilter — optional comma-separated LayoutTemplateId list (FR-14)
-  //
-  // When present, restricts Step 1's template selector to the listed IDs.
-  // When absent / empty, undefined is returned so the wizard renders all 9
-  // canonical templates (FR-25 backwards-compat for standalone LegalWorkspace).
-  // The value is cast to `readonly LayoutTemplateId[]` — TemplateStep is
-  // already defensive against unknown IDs (it intersects with LAYOUT_TEMPLATES).
-  // ---------------------------------------------------------------------------
-  const templateFilterRaw = parsed.get("templateFilter") || "";
-  const templateFilter: readonly LayoutTemplateId[] | undefined =
-    templateFilterRaw
-      ? (templateFilterRaw
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0) as readonly LayoutTemplateId[])
-      : undefined;
-
-  // startAtStep — R2 UAT §3.1 + §4.1 (2026-07-03). Passed through as opaque
-  // string; App.tsx validates against its STEP_ constants.
-  const startAtStep = parsed.get("startAtStep") || null;
-
-  return { mode, layoutId, layoutTemplateId, sectionsJson, sourceName, templateFilter, startAtStep };
+  return parseLayoutWizardData(dataString);
 }
 
 /**

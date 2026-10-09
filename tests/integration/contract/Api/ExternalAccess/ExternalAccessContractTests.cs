@@ -1067,6 +1067,12 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
             DataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            // Task 174: every work assignment or project the external routes compose is walked for what it is filed under
+            // (the effective flags, owner round 84). This Dataverse has no filing rows, so nothing is filed under anything —
+            // an empty answer, never the loose mock's null (which the walk reads as a fault and fails closed).
+            DataverseServiceMock
+                .Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(DataverseServiceMock.Object);
 
@@ -1299,7 +1305,8 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
 
     public StubExternalParticipationService(IHttpContextAccessor accessor, ITenantCache? cache = null)
         : base(new HttpClient(), cache ?? Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(),
-               Mock.Of<TokenCredential>(), accessor, NullLogger<ExternalParticipationService>.Instance)
+               Mock.Of<TokenCredential>(), accessor, NullLogger<ExternalParticipationService>.Instance,
+               filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
     {
         _accessor = accessor;
     }

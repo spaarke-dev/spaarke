@@ -922,6 +922,25 @@ public class ExternalAccessReconciliationTests
         AssertIssuerKept(row);
     }
 
+    /// <summary>
+    /// Pre-existing defect found by the task 174 verifier: on a RESTRICTED record no organization-wide row confers (the read
+    /// path removes every contact-sourced contribution), so the issuer's firm grant must not count toward the cap — the row
+    /// ends as it does on a Secure record. Before, Restricted was not direct-only here and the firm's date capped it.
+    /// </summary>
+    [Fact]
+    public async Task R1_AnIssuerHoldingARestrictedRecordOnlyThroughItsFirmsGrant_HoldsNothingThere()
+    {
+        _participations.ContactOrganizations[Issuer] = new[] { IssuersFirm };
+        _grants.SeedOrganization(IssuersFirm, Project, Collaborate, Today.AddDays(40));
+        _participations.Flags[Project] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate);
+
+        await RunAsync(writes: true);
+
+        State(Grant(row)).Should().Be(1, "the firm's row confers nothing on a Restricted record");
+        AssertIssuerKept(row);
+    }
+
     // ── R1 on a row whose issuing contact was DELETED (session 27 round 50 item 2) ─────────────────────────────────────
     //
     // The BFF writes the issuer's id as text (sprk_grantedbycontactid) beside the lookup, in the same write, every time; the

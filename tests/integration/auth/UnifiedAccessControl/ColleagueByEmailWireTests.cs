@@ -200,7 +200,8 @@ public sealed class ColleagueByEmailWireTests : IAsyncLifetime
         client.Timeout = TimeSpan.FromSeconds(30);
         return new ExternalParticipationService(
             client, Mock.Of<ITenantCache>(), configuration, new StaticTokenCredential(), accessor.Object,
-            NullLogger<ExternalParticipationService>.Instance);
+            NullLogger<ExternalParticipationService>.Instance,
+            filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
     }
 
     private sealed record SeenRequest(string Filter, string Select, string Expand, string Prefer, string SkipToken);

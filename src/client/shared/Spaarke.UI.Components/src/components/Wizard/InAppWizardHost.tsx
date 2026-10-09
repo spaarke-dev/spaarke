@@ -10,7 +10,15 @@
  * platform chrome that cannot be themed:
  *
  *   sprk_creatematterwizard · sprk_createprojectwizard · sprk_createeventwizard ·
- *   sprk_createtodowizard · sprk_createworkassignmentwizard
+ *   sprk_createtodowizard · sprk_createworkassignmentwizard · sprk_summarizefileswizard
+ *
+ * Task 113 (D-26) adds three more that live in code-page solutions this library cannot import
+ * (`DocumentUploadWizard`, `FindSimilarCodePage`, `WorkspaceLayoutWizard`):
+ *
+ *   sprk_documentuploadwizard · sprk_findsimilar · sprk_workspacelayoutwizard
+ *
+ * The mounting app passes their `renderers`; the host registers only the names it can actually open,
+ * so a launch it has no renderer for keeps using `navigateTo`.
  *
  * Without a mounted host the launchers keep calling `navigateTo` exactly as before, and the
  * ribbon scripts (`sprk_wizard_commands.js`) never reach this code: they stay on `navigateTo` and
@@ -45,7 +53,9 @@ import { mapEventHandoffSeed } from '../CreateEventWizard/handoffSeedMapping';
 import TodoWizardDialog from '../CreateTodoWizard/TodoWizardDialog';
 import { resolveCurrentUserContact, withTodoCreatedBroadcast } from '../CreateTodoWizard/todoWizardHostSupport';
 import WorkAssignmentWizardDialog from '../CreateWorkAssignmentWizard/WorkAssignmentWizardDialog';
+import { SummarizeFilesDialog } from '../SummarizeFilesWizard/SummarizeFilesDialog';
 import {
+  DEFAULT_IN_APP_WIZARD_NAMES,
   registerInAppWizardHost,
   type InAppWizardName,
   type InAppWizardRequest,
@@ -57,11 +67,36 @@ import { getXrm } from '../../utils/xrmContext';
 import { cleanGuid } from '../../utils/guid';
 import { EntityCreationService, type IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { completeHandoff, handoffSeed, readHandoffFromUrl } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+/** The wizards a mounting app renders itself (they live in code-page solutions, not this library). */
+export type InAppHostedWizardName = 'sprk_documentuploadwizard' | 'sprk_findsimilar' | 'sprk_workspacelayoutwizard';
+
+/** Everything a supplied renderer needs to mount its wizard non-embedded inside the host's modal. */
+export interface IInAppWizardRenderContext {
+  /** The launch `data` string exactly as the wizard's `navigateTo` call would carry it. */
+  readonly data: string;
+  /** Close the wizard (resolves the launcher's promise). The ONLY way a hosted wizard may close. */
+  readonly onClose: () => void;
+  readonly authenticatedFetch: AuthenticatedFetchFn;
+  readonly bffBaseUrl: string;
+  readonly tenantId?: string;
+  readonly uiScale?: number;
+  readonly dataService: IDataService;
+  readonly navigationService: INavigationService;
+  /** The Assistant hand-off file refs when `data` carries a `handoffId` (else `undefined`). */
+  readonly initialFileRefs?: { sessionId: string; fileIds: readonly string[]; fileNames?: readonly string[] };
+}
+
+/** Renders one hosted wizard. Called on every render of the open wizard; keep it pure. */
+export type InAppWizardRenderer = (context: IInAppWizardRenderContext) => React.ReactNode;
+
+export type InAppWizardRenderers = Partial<Record<InAppHostedWizardName, InAppWizardRenderer>>;
 
 export interface IInAppWizardHostProps {
   /** `@spaarke/auth` authenticated fetch (ADR-028: a function, never a token). */
@@ -72,6 +107,12 @@ export interface IInAppWizardHostProps {
   tenantId?: string;
   /** The app-shell `--sprk-ui-scale` (`useUiScale()`), forwarded to the wizard's SprkModal. */
   uiScale?: number;
+  /**
+   * Renderers for the wizards that live in code-page solutions (Upload Documents, Find Similar,
+   * Workspace layout). The host opens a name only if it has a renderer for it; the rest keep
+   * using `navigateTo`.
+   */
+  renderers?: InAppWizardRenderers;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,16 +149,31 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
   bffBaseUrl,
   tenantId,
   uiScale,
+  renderers,
 }) => {
   const [active, setActive] = React.useState<IActiveWizard | null>(null);
   const activeRef = React.useRef<IActiveWizard | null>(null);
   const sequenceRef = React.useRef(0);
 
+  // Renderers are read at render time (a ref), but the names the host can open are part of the
+  // registration — so the registration is keyed by the renderer NAMES, not the object identity.
+  const renderersRef = React.useRef<InAppWizardRenderers | undefined>(renderers);
+  renderersRef.current = renderers;
+  const rendererNamesKey = Object.keys(renderers ?? {})
+    .filter(name => typeof renderers?.[name as InAppHostedWizardName] === 'function')
+    .sort()
+    .join(',');
+
   React.useEffect(() => {
+    const supported: InAppWizardName[] = [
+      ...DEFAULT_IN_APP_WIZARD_NAMES,
+      ...(rendererNamesKey ? (rendererNamesKey.split(',') as InAppHostedWizardName[]) : []),
+    ];
     const unregister = registerInAppWizardHost((request: InAppWizardRequest) => {
-      // One wizard at a time: a second launch while one is open is ignored (it resolves at once,
-      // as a cancelled launch) rather than replacing — and losing — the open one.
-      if (activeRef.current) return Promise.resolve();
+      // One wizard at a time: a second launch while one is open is ignored rather than replacing -
+      // and losing - the open one. It resolves at once, flagged busy, so the launcher reports
+      // "opened nothing" instead of "opened and closed".
+      if (activeRef.current) return Promise.resolve({ busy: true as const });
       return new Promise<void>(resolve => {
         sequenceRef.current += 1;
         const next: IActiveWizard = {
@@ -129,14 +185,15 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
         activeRef.current = next;
         setActive(next);
       });
-    });
+    }, supported);
     return () => {
       unregister();
       // Never leave a launcher awaiting a wizard that can no longer close.
       activeRef.current?.settle();
       activeRef.current = null;
+      setActive(null);
     };
-  }, []);
+  }, [rendererNamesKey]);
 
   const close = React.useCallback(() => {
     const current = activeRef.current;
@@ -168,6 +225,7 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
       bffBaseUrl={bffBaseUrl}
       tenantId={tenantId}
       uiScale={uiScale}
+      renderers={renderersRef.current}
       dataService={dataService}
       todoDataService={todoDataService}
       navigationService={navigationService}
@@ -194,6 +252,7 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
   bffBaseUrl,
   tenantId,
   uiScale,
+  renderers,
   dataService,
   todoDataService,
   navigationService,
@@ -238,7 +297,7 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
   }, [active.name, todoDataService]);
 
   const common = { open: true, embedded: false, uiScale, onClose, navigationService, bffBaseUrl };
-  // CreateProjectWizard / CreateEventWizard type the prop as `typeof fetch`; the `@spaarke/auth`
+  // CreateProjectWizard / CreateEventWizard / SummarizeFilesDialog type the prop as `typeof fetch`; the `@spaarke/auth`
   // function their code pages pass is the same `(url, init)` shape (string URLs only).
   const fetchForFetchTyped = authenticatedFetch as typeof fetch;
 
@@ -300,11 +359,48 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
           {...common}
           authenticatedFetch={authenticatedFetch}
           dataService={dataService}
+          // #1420: a successful create writes the committed hand-off result (the new record id) and
+          // closes, so `launchSurface` resolves committed and Quick Start's `onRecordCreated` fires.
+          onComplete={onComplete}
           resolveSpeContainerId={resolveSpeContainerId}
           tenantId={tenantId}
           initialFileRefs={initialFileRefs}
         />
       );
+    case 'sprk_summarizefileswizard':
+      // Parity with the code page (`SummarizeFilesWizard/main.tsx`): it writes no hand-off result
+      // (the wizard commits no single record), so a hand-off launch reads back as cancelled there too.
+      return (
+        <SummarizeFilesDialog
+          {...common}
+          authenticatedFetch={fetchForFetchTyped}
+          dataService={dataService}
+          initialFileRefs={initialFileRefs}
+        />
+      );
+    case 'sprk_documentuploadwizard':
+    case 'sprk_findsimilar':
+    case 'sprk_workspacelayoutwizard': {
+      // Supplied by the mounting app (these wizards live in code-page solutions). The registration
+      // only declares names that have a renderer, so a missing one is a defensive no-op.
+      const render = renderers?.[active.name];
+      if (!render) return null;
+      return (
+        <>
+          {render({
+            data: active.data,
+            onClose,
+            authenticatedFetch,
+            bffBaseUrl,
+            tenantId,
+            uiScale,
+            dataService,
+            navigationService,
+            initialFileRefs,
+          })}
+        </>
+      );
+    }
     default: {
       const exhaustive: never = active.name;
       void exhaustive;

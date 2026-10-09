@@ -59,13 +59,43 @@ public static class NoAccessEntryNotInForceReason
 /// <param name="EntriesState">A <see cref="NoAccessEntriesState"/> value.</param>
 /// <param name="Entries">The covering entries, for a caller who also holds Write on the record; otherwise null. Never the
 /// entry's Reason.</param>
+/// <param name="AccessPermission">Task 174 (owner round 84; task 067's amendment): the record's EFFECTIVE Access Permission —
+/// the most restrictive <c>sprk_accesspermission</c> of the record and every record it is filed under — an
+/// <see cref="EffectiveAccessPermission"/> value; <c>unknown</c> when it could not be established. <see cref="Secure"/> is the
+/// effective Secure flag likewise (the record or any filing ancestor).</param>
+/// <param name="InheritedFrom">Task 174: the record the effective Secure / Access Permission comes from when an ancestor makes
+/// it stricter than the record's own values; null when the record's own values govern.</param>
 public sealed record RecordNoAccessStatus(
     string RecordType,
     Guid RecordId,
     string Secure,
     string NoAccess,
     string EntriesState,
-    IReadOnlyList<RecordNoAccessEntry>? Entries);
+    IReadOnlyList<RecordNoAccessEntry>? Entries,
+    string AccessPermission = EffectiveAccessPermission.Unknown,
+    RecordAccessInheritedFrom? InheritedFrom = null);
+
+/// <summary>Task 174: the values of <see cref="RecordNoAccessStatus.AccessPermission"/>.</summary>
+public static class EffectiveAccessPermission
+{
+    /// <summary>Standard (or no value): every grant type.</summary>
+    public const string Standard = "standard";
+
+    /// <summary>Limited: named, direct contact grants only.</summary>
+    public const string Limited = "limited";
+
+    /// <summary>Restricted: no contact-based access at all; no external-flagged user.</summary>
+    public const string Restricted = "restricted";
+
+    /// <summary>Could not be established (an unreadable record or filing). A client treats it as the strictest it can show.</summary>
+    public const string Unknown = "unknown";
+}
+
+/// <summary>Task 174: the record a filed child's effective access is inherited from.</summary>
+/// <param name="RecordType">Its table logical name (<c>sprk_matter</c> or <c>sprk_project</c>).</param>
+/// <param name="RecordId">Its id.</param>
+/// <param name="Name">Its name, when it could be read.</param>
+public sealed record RecordAccessInheritedFrom(string RecordType, Guid RecordId, string? Name);
 
 /// <summary>
 /// One active No Access entry covering the record (shown to a caller with Write on the record only).

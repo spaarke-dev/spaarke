@@ -7,7 +7,7 @@ import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { WorkAssignmentWizardDialog } from "@spaarke/ui-components/components/CreateWorkAssignmentWizard";
-import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
+import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -53,11 +53,12 @@ function App() {
   // UAT R5-8 (the create-flow file leg): when launched from the Assistant "Assign Work" Quick Start
   // card via the surface-launch envelope, read this page's hand-off and pass the session file refs
   // so the wizard fetches + pre-attaches them. `undefined` on a direct open (no handoffId on the URL).
+  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
   const initialFileRefs = React.useMemo(() => {
-    const seed = computeHandoffSeed(readHandoffFromUrl());
+    const seed = computeHandoffSeed(handoff);
     if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
-  }, []);
+  }, [handoff]);
 
   // Resolve SPE container ID from the user's business unit
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
@@ -79,6 +80,15 @@ function App() {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
 
+  // #1420 honest-ack (parity with the Create Matter/Project/Event code pages): on a SUCCESSFUL
+  // create, write the committed SurfaceHandoffResult (the new record id) for the active hand-off,
+  // then close. Just closes when opened directly (no hand-off). Cancellation is INFERRED by the
+  // orchestrator from the absence of a written result, so the cancel path (handleClose) writes nothing.
+  const handleComplete = React.useCallback((recordId?: string) => {
+    if (handoff?.handoffId) writeCompleteHandoff(handoff.handoffId, recordId);
+    navigationService.closeDialog({ confirmed: true });
+  }, [handoff, navigationService]);
+
   if (!isAuthReady) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -97,6 +107,7 @@ function App() {
         embedded={true}
         open={true}
         onClose={handleClose}
+        onComplete={handleComplete}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}

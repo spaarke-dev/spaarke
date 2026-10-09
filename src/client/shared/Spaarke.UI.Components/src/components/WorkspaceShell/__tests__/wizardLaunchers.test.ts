@@ -31,7 +31,11 @@
  * checks, no ctor null-checks, no coverage-as-gate.
  */
 
-import { navigateToEntityRecordSurfaceAsync } from '../wizardLaunchers';
+import {
+  launchCreateMatterWizard,
+  navigateToEntityRecordSurfaceAsync,
+  navigateToWebResourceSurfaceAsync,
+} from '../wizardLaunchers';
 
 // ---------------------------------------------------------------------------
 // Test fixtures — a minimal `window.Xrm.Navigation.navigateTo` stub. Assigned
@@ -270,5 +274,63 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
 
       expect(outcome).toEqual({ launched: false });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 113 (#1479 sweep): a real navigateTo failure is logged with the surface name; a cancel is silent.
+// ---------------------------------------------------------------------------
+
+describe('navigateTo failure logging', () => {
+  let consoleError: jest.SpyInstance;
+
+  beforeEach(() => {
+    consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  function installRejectingXrm(error: unknown): jest.Mock {
+    const navigateTo = jest.fn().mockRejectedValue(error);
+    (window as unknown as { Xrm?: StubXrm }).Xrm = { WebApi: {}, Navigation: { navigateTo } };
+    return navigateTo;
+  }
+
+  it('navigateToWebResourceSurfaceAsync logs a non-cancel failure with the surface name and still resolves cancelled', async () => {
+    installRejectingXrm(new Error('dialog blew up'));
+
+    const outcome = await navigateToWebResourceSurfaceAsync({
+      webresourceName: 'sprk_documentuploadwizard',
+      data: 'x=1',
+    });
+
+    expect(outcome).toEqual({ launched: true, cancelled: true, failed: true });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0][0])).toContain('sprk_documentuploadwizard');
+  });
+
+  it('navigateToWebResourceSurfaceAsync is silent when the user cancels (errorCode 2)', async () => {
+    installRejectingXrm({ errorCode: 2 });
+
+    const outcome = await navigateToWebResourceSurfaceAsync({ webresourceName: 'sprk_findsimilar', data: '' });
+
+    expect(outcome).toEqual({ launched: true, cancelled: true });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('the fire-and-forget launchers log a real failure with the surface name and stay silent on cancel', async () => {
+    installRejectingXrm(new Error('boom'));
+    launchCreateMatterWizard({ bffBaseUrl: 'https://bff.example' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0][0])).toContain('sprk_creatematterwizard');
+
+    consoleError.mockClear();
+    installRejectingXrm({ errorCode: 2 });
+    launchCreateMatterWizard({ bffBaseUrl: 'https://bff.example' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

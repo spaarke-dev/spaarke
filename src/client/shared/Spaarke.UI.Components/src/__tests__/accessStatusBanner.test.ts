@@ -504,4 +504,46 @@ describe('sprk_accessstatus_banner.js (task 153)', () => {
       expect(ids(form)).toEqual(['sprk_access_unavailable']);
     });
   });
+
+  describe('the BFF base URL (#1488: sprk_BffApiBaseUrl ending in /api called /api/api/... and got 401)', () => {
+    it.each([`${BASE}/api`, `${BASE}/api/`, `${BASE}/API`, `${BASE}/api//`])(
+      'env var %s → exactly one /api segment, and the host alone for Spaarke.BffAuth',
+      async value => {
+        installXrm(value);
+        await load();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url, , baseUrl] = fetchMock.mock.calls[0];
+        expect(url).toBe(`${BASE}/api/v1/records/sprk_matter/${RECORD_ID}/no-access`);
+        expect(baseUrl).toBe(BASE); // bff_auth.js appends /api/config/client to this
+        expect(url.match(/\/api\//g)).toHaveLength(1);
+      }
+    );
+
+    it.each([BASE, `${BASE}/`, `${BASE}/apis`, `${BASE}/bff`])(
+      'env var %s without /api → unchanged (trailing slash only)',
+      async value => {
+        installXrm(value);
+        await load();
+        const expected = value.replace(/\/+$/, '');
+        const [url, , baseUrl] = fetchMock.mock.calls[0];
+        expect(baseUrl).toBe(expected);
+        expect(url).toBe(`${expected}/api/v1/records/sprk_matter/${RECORD_ID}/no-access`);
+      }
+    );
+
+    it('a Config.apiBaseUrl override ending in /api is normalised the same way', async () => {
+      win.Spaarke.AccessStatus.Config.apiBaseUrl = `${BASE}/api/`;
+      await load();
+      const [url, , baseUrl] = fetchMock.mock.calls[0];
+      expect(url).toBe(`${BASE}/api/v1/records/sprk_matter/${RECORD_ID}/no-access`);
+      expect(baseUrl).toBe(BASE);
+    });
+
+    it('an env var that is only "/api" is no URL → only the unavailable notice', async () => {
+      installXrm('/api');
+      const form = await load();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(ids(form)).toEqual(['sprk_access_unavailable']);
+    });
+  });
 });

@@ -185,7 +185,8 @@ public sealed class RestrictedExternalShareRemover
         RootRecordFlags flags;
         try
         {
-            var read = await _participations.GetRootRecordFlagsAsync(logical, new[] { recordId }, ct).ConfigureAwait(false);
+            // Task 174 (owner round 84): Restricted through a parent counts — the EFFECTIVE flags.
+            var read = await _participations.GetEffectiveRootRecordFlagsAsync(logical, new[] { recordId }, ct).ConfigureAwait(false);
             if (!read.TryGetValue(recordId, out flags) || flags.IsUnreadable)
                 return FlagsUnreadable(logical, recordId, null);
         }

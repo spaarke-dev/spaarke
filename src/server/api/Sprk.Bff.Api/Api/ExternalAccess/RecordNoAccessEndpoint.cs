@@ -132,39 +132,51 @@ public static class RecordNoAccessEndpoint
         }
 
         var canSeeEntries = (rights & AccessRights.Write) == AccessRights.Write;
-        var secure = await ReadSecureAsync(logicalName, recordId, participations, logger, ct).ConfigureAwait(false);
+        var (secure, accessPermission, inheritedFrom) =
+            await ReadEffectiveAccessAsync(logicalName, recordId, participations, logger, ct).ConfigureAwait(false);
         var (noAccess, entriesState, entries) =
             await ReadNoAccessAsync(logicalName, recordId, secure, canSeeEntries, enforcer, store, logger, ct).ConfigureAwait(false);
 
         logger.LogInformation(
-            "[NO-ACCESS-READ] {Type} {RecordId}: secure {Secure}, no access {NoAccess}, entries {EntriesState} ({Count}).",
-            logicalName, recordId, secure, noAccess, entriesState, entries?.Count ?? 0);
+            "[NO-ACCESS-READ] {Type} {RecordId}: secure {Secure}, access permission {AccessPermission} (inherited from " +
+            "{InheritedFrom}), no access {NoAccess}, entries {EntriesState} ({Count}).",
+            logicalName, recordId, secure, accessPermission, inheritedFrom?.RecordId, noAccess, entriesState, entries?.Count ?? 0);
 
-        return TypedResults.Ok(new RecordNoAccessStatus(logicalName, recordId, secure, noAccess, entriesState, entries));
+        return TypedResults.Ok(new RecordNoAccessStatus(
+            logicalName, recordId, secure, noAccess, entriesState, entries, accessPermission, inheritedFrom));
     }
 
     /// <summary>
-    /// The Secure signal from the one batched flag read every veto uses. An unreadable, unreturned or EMPTY
-    /// <c>sprk_issecure</c> comes back <see cref="RootRecordFlags.IsUnreadable"/> (task 150: an empty value means the
-    /// field-level Read was lost and a true value may be masked), which is <c>unknown</c> here — never "not secure".
+    /// The Secure signal and the Access Permission, EFFECTIVE (task 174, owner round 84: the Manage Access display and the
+    /// banner show what enforcement applies): the record's own flags from the one batched flag read every veto uses, folded
+    /// with every record it is filed under (<see cref="ExternalParticipationService.GetEffectiveRootAccessAsync"/>). An
+    /// unreadable, unreturned or EMPTY <c>sprk_issecure</c> comes back <see cref="RootRecordFlags.IsUnreadable"/> (task 150:
+    /// an empty value means the field-level Read was lost and a true value may be masked), and so does a filing chain that
+    /// cannot be decided; both are <c>unknown</c> here — never "not secure", never "standard".
     /// </summary>
-    private static async Task<string> ReadSecureAsync(
+    private static async Task<(string Secure, string AccessPermission, RecordAccessInheritedFrom? InheritedFrom)> ReadEffectiveAccessAsync(
         string logicalName, Guid recordId, ExternalParticipationService participations, ILogger logger, CancellationToken ct)
     {
         try
         {
-            var flags = await participations.GetRootRecordFlagsAsync(logicalName, new[] { recordId }, ct).ConfigureAwait(false);
-            if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
+            var access = await participations.GetEffectiveRootAccessAsync(logicalName, recordId, ct).ConfigureAwait(false);
+            var f = access.Flags;
+            if (f.IsUnreadable)
             {
-                return AccessSignalState.Unknown;
+                return (AccessSignalState.Unknown, EffectiveAccessPermission.Unknown, null);
             }
 
-            return f.IsSecure ? AccessSignalState.Applies : AccessSignalState.DoesNotApply;
+            return (
+                f.IsSecure ? AccessSignalState.Applies : AccessSignalState.DoesNotApply,
+                f.IsRestricted ? EffectiveAccessPermission.Restricted
+                    : f.IsLimited ? EffectiveAccessPermission.Limited
+                    : EffectiveAccessPermission.Standard,
+                access.InheritedFrom is { } from ? new RecordAccessInheritedFrom(from.Table, from.Id, from.Name) : null);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex, "[NO-ACCESS-READ] Whether {Type} {RecordId} is secure could not be read.", logicalName, recordId);
-            return AccessSignalState.Unknown;
+            return (AccessSignalState.Unknown, EffectiveAccessPermission.Unknown, null);
         }
     }
 

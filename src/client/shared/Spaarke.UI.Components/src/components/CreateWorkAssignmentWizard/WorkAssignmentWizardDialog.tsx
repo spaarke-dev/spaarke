@@ -55,6 +55,7 @@ import type { IDataService, INavigationService } from '../../types/serviceInterf
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -63,6 +64,14 @@ import { getXrm } from '../../utils/xrmContext';
 export interface IWorkAssignmentWizardDialogProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Surface-launch honest-ack seam (#1420; parity with `CreateMatterWizard.onComplete`). Called with
+   * the new work assignment's id when the user leaves the SUCCESS screen (Close or View Record), in
+   * place of `onClose`, so a launched create reads back as committed. The host writes the committed
+   * `SurfaceHandoffResult` and closes. The cancel path (× / Cancel / the error screen's Close) always
+   * calls `onClose` and writes nothing, so cancellation stays inferred from the absent result.
+   */
+  onComplete?: (recordId: string) => void;
   /** IDataService for Dataverse operations. */
   dataService: IDataService;
   /**
@@ -122,6 +131,7 @@ export interface IWorkAssignmentWizardDialogProps {
 const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = ({
   open,
   onClose,
+  onComplete,
   dataService,
   authenticatedFetch,
   bffBaseUrl,
@@ -599,11 +609,15 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     const hasWarnings = warnings.length > 0;
 
+    // #1420: on the SUCCESS path a real record exists, so route the close through
+    // `onComplete(waId)` (honest-ack) when the host supplied it; otherwise plain `onClose`.
+    const finishSuccess = () => completeOrClose(waId, onClose, onComplete);
+
     const viewRecord = () => {
       if (navigationService) {
         navigationService.openRecord('sprk_workassignment', waId);
       }
-      onClose();
+      finishSuccess();
     };
 
     return {
@@ -623,14 +637,14 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
           <Button appearance="primary" onClick={viewRecord} aria-label={`View record: ${form.name}`}>
             View Record
           </Button>
-          <Button appearance="secondary" onClick={onClose}>
+          <Button appearance="secondary" onClick={finishSuccess}>
             Close
           </Button>
         </>
       ),
       warnings: hasWarnings ? warnings : undefined,
     };
-  }, [onClose, navigationService]);
+  }, [onClose, onComplete, navigationService]);
 
   // -- Determine finishing label based on whether files exist -----------------
   const hasFiles = uploadedFiles.length > 0;

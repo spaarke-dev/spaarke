@@ -676,7 +676,8 @@ public sealed class AccessCacheFaultCachingTests
                 ServiceUrlConfig(),
                 new StaticTokenCredential(),
                 RequestWithTenant(),
-                NullLogger<ExternalParticipationService>.Instance);
+                NullLogger<ExternalParticipationService>.Instance,
+                filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
             return new GrantWorld(dataverse, cache, service);
         }
 
@@ -1309,7 +1310,8 @@ public sealed class AccessCacheFaultCachingTests
     {
         public QuietParticipations()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

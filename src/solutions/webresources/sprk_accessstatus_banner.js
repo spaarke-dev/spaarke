@@ -54,7 +54,7 @@ Spaarke.AccessStatus.Config = {
     apiBaseUrl: null,
     /** A request that has not answered by then shows "unavailable" (a hung call must not leave the form silent). */
     timeoutMs: 20000,
-    version: "1.0.0"
+    version: "1.0.1"
 };
 
 /** The tables 064's route answers for (the route segment is the table's logical name). */
@@ -133,6 +133,16 @@ Spaarke.AccessStatus._within = function (promise, ms, fallback, onTimeout) {
     });
 };
 
+/**
+ * The BFF base URL as the HOST only (#1488): trailing slashes removed, then a trailing "/api" (any case). Every path
+ * this script and sprk_/scripts/bff_auth.js append starts with "/api/", and sprk_BffApiBaseUrl carries "/api" on some
+ * environments (dev: https://spaarke-bff-dev.azurewebsites.net/api), so an unnormalised value called /api/api/... (401).
+ * The repo rule (sprk_emailactions.js, Spaarke.Auth resolveRuntimeConfig.ts). An empty value gives "".
+ */
+Spaarke.AccessStatus._normalizeBaseUrl = function (value) {
+    return value ? String(value).replace(/\/+$/, "").replace(/\/api$/i, "") : "";
+};
+
 /** Resolves the BFF base URL from the sprk_BffApiBaseUrl environment variable (value override, else default). */
 Spaarke.AccessStatus.getApiBaseUrl = function () {
     if (Spaarke.AccessStatus._cachedApiBaseUrl) {
@@ -154,11 +164,12 @@ Spaarke.AccessStatus.getApiBaseUrl = function () {
             "'&$select=value"
         ).then(function (values) {
             var value = values.entities && values.entities.length > 0 ? values.entities[0].value : definition.defaultvalue;
-            if (!value) {
+            var baseUrl = Spaarke.AccessStatus._normalizeBaseUrl(value);
+            if (!baseUrl) {
                 throw new Error("Environment variable sprk_BffApiBaseUrl has no value.");
             }
 
-            Spaarke.AccessStatus._cachedApiBaseUrl = value.replace(/\/+$/, "");
+            Spaarke.AccessStatus._cachedApiBaseUrl = baseUrl;
             return Spaarke.AccessStatus._cachedApiBaseUrl;
         });
     });
@@ -238,7 +249,8 @@ Spaarke.AccessStatus._fetchSignals = async function (record, signal) {
             return null;
         }
 
-        var baseUrl = Spaarke.AccessStatus.Config.apiBaseUrl || await Spaarke.AccessStatus.getApiBaseUrl();
+        var baseUrl = Spaarke.AccessStatus._normalizeBaseUrl(Spaarke.AccessStatus.Config.apiBaseUrl) ||
+            await Spaarke.AccessStatus.getApiBaseUrl();
         if (!baseUrl) {
             return null;
         }
