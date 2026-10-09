@@ -774,17 +774,25 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 - If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
-#### 1a-bis. `displayName` (optional — the customer's full name)
+#### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
 
 - The customer's full name, e.g. `Northwind Traders`. Written to `sprk_dataverseenvironment.sprk_name` next to
   `sprk_customerid` by the Step 1f placeholder create, so the id ↔ name decision is **recorded once on the
   registry row** (T237 / INCOMING-CUSTOMERID-STANDARD §3.3). Defaults to `customerId`.
+- **T259 (ISS-010, owner 2026-10-09):** also sent to `POST /api/runs` (Step 4.0), where it is REQUIRED — H10 creates the
+  customer's own business unit with this name directly under the Dataverse root (a sibling of `Secure Record`) and puts
+  the BFF's application users and every guest in it. Rule (same at `POST /api/runs`, `CustomerBusinessUnitIntake`):
+  1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` in any case.
 - Batch mode: `intake.displayName` (pre-filled above). Interactive mode:
 
   ```powershell
   if (-not $script:SkipInteractiveIntake) {
     $displayName = Read-Host "displayName (customer's full name) [$customerId]"
     if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
+    while ($displayName.Length -gt 160 -or $displayName -ne $displayName.Trim() -or $displayName -match '\p{Cc}' -or $displayName -ieq 'Secure Record') {
+      $displayName = Read-Host "displayName must be 1-160 characters, no leading/trailing space or control character, not 'Secure Record' [$customerId]"
+      if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
+    }
   }
   ```
 
@@ -980,6 +988,7 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+| `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
 
 **Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
@@ -1235,12 +1244,13 @@ Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
 ```powershell
 # --attributes is a ';'/'='-delimited string: a display name containing either character would corrupt it.
 # Fall back to the id for sprk_name and say so; the full name can be set on the row afterwards.
+$registryName = $displayName
 if ($displayName -match '[;=]') {
   Write-Warning "displayName '$displayName' contains ';' or '=' — the pac fallback writes sprk_name=$customerId instead. Set the full name on the registry row afterwards."
-  $displayName = $customerId
+  $registryName = $customerId   # $displayName itself is kept: Step 4.0 sends it as the customer business unit's name (T259)
 }
 $environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_name=$displayName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
+  --attributes "sprk_name=$registryName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
@@ -1632,6 +1642,7 @@ $runRequest = @{
     emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
     communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
     customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
+    displayName                 = $displayName            # T259 (ISS-010) — REQUIRED: H10 names the customer's business unit with it (directly under the root, sibling of Secure Record); h10-customer-display-name-required / -invalid. The full name, never the pac fallback's substitute (Step 1f)
     # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
     # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
     # Any other key — a typo, `notes`, a value some handler produces — is a 400 with

@@ -3,7 +3,7 @@
   <metadata>
     <title>Customer business-unit topology: H10 creates the customer's unit (sibling of Secure Record) with the BFF app users in it; H11 puts guests in it; H13 requires the isolation census (ISS-010 / #1486)</title>
     <phase>Model 1 dedicated-stamp remediation — T186 blocker (ISS-010)</phase>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security topology of every customer environment; a wrong placement exposes every secure record (F1).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -28,8 +28,8 @@
       §6 T1). It cannot be the Dataverse root itself: `Spaarke Basic User` holds Deep read on sprk_project / sprk_matter /
       sprk_workassignment, and Deep at the root reaches the Secure Record unit (a child of the root), which would violate
       the first sentence. As siblings, Deep in the customer unit does not reach the Secure Record unit.
-      ISS-010's recommended fix is accepted: intake `customerDisplayName`; H10 (T1+T3); H11 (T5); H7b checks T1/T3; H13
-      census.
+      ISS-010's recommended fix is accepted: intake display name (reuse T237 `displayName` — see deviation D1); H10 (T1+T3);
+      H11 (T5); H7b checks T1/T3; H13 census.
     </background>
     <relevant-files>
       <file>projects/customer-provisioning-orchestration-r1/notes/defer-issues.md (ISS-010)</file>
@@ -51,7 +51,7 @@
   </constraints>
 
   <steps mode="directional">
-    <step order="1">Intake `customerDisplayName` (required, validated at POST /api/runs: non-empty, ≤ 160 chars, no control characters); carried to H10.</step>
+    <step order="1">Carry the EXISTING intake `displayName` (T237 — the customer's full name, the registry row's sprk_name; the skill defaults it to customerId) into the run under the same key (IntakeParameterCatalog.DisplayName), required and validated at POST /api/runs (non-empty, ≤ 160 chars, no control characters); H10 names the customer unit with it. No new intake key (coordinator correction 2026-10-09, CLAUDE.md §11 reuse).</step>
     <step order="2">H10 creates (or finds by name under the root) the customer unit, records `InterStepState.CustomerBusinessUnitId` ([ProducedBy(H10)]), and creates both application users IN it with System Administrator. Existing users found in another unit: quarantine with a clear code (no move).</step>
     <step order="3">H11 creates each guest in the customer unit (not the root, never Secure Record).</step>
     <step order="4">H7b additionally checks: the customer unit exists under the root; both application users' businessunitid = customer unit; the Secure Record unit holds no enabled user (refuse, quarantined).</step>
@@ -60,11 +60,54 @@
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">POST /api/runs without customerDisplayName → 400 with the intake error code.</criterion>
+    <criterion testable="true">POST /api/runs without displayName → 400 with the intake error code.</criterion>
     <criterion testable="true">H10 creates the unit under the root and both app users with businessunitid = that unit (unit test on the Web API calls).</criterion>
     <criterion testable="true">H11 creates guests with businessunitid = customer unit; never the root or Secure Record unit.</criterion>
     <criterion testable="true">H7b quarantines when an enabled user is in the Secure Record unit, or an app user is outside the customer unit.</criterion>
     <criterion testable="true">H13 fails when the census returns anything but `isolated`.</criterion>
     <criterion testable="true">Solution build 0 errors / 0 warnings; ControlPlane tests and ArchTests pass.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-10-09 (sub-agent worktree, FULL rigor, no live action). Status completed-with-escalation: steps 1–4 and 6
+    are built; step 5 (H13 requires the census) was STOPPED per the dispatch rule and is filed as ISS-014 (owner decision).
+
+    DEVIATIONS
+    - D1 (coordinator correction 2026-10-09): no new key `customerDisplayName`. The existing T237 intake `displayName` is
+      carried into the run (IntakeParameterCatalog.DisplayName), required at POST /api/runs and validated by
+      CustomerBusinessUnitIntake (H10's folder; codes h10-customer-display-name-required / -invalid). The intake schema
+      keeps it optional (the skill defaults it to customerId) but now states the same bounds (maxLength 160 — was 200 —
+      a no-leading/trailing-whitespace + no-control-character pattern, not 'Secure Record' in any case).
+    - D2: the rule also refuses leading/trailing whitespace and the Secure Record unit's name (any case) — without them H10
+      could adopt the Secure Record unit as the customer's (Dataverse compares names without case) or a later run could
+      create a second unit.
+    - D3: step 5 not built — the census is only reachable through /api/admin/jobs/{id}/trigger + /status behind the
+      "SystemAdmin" policy (Admin/SystemAdmin app role); the stamp BFF registration defines only Provisioning.KeylessProof
+      (L2-only). Narrowest fix proposed in ISS-014 (a read-only POST /api/platform/secure-record-isolation-census behind
+      the existing KeylessProofAuthorizationFilter, sharing the job's evaluator; H13 requires `isolated`).
+    - D4: H7b's "no enabled user in the Secure Record unit" was already S2 (any user, enabled or not → bu_has_users,
+      Quarantine); kept as is. Added T1 (customer unit exists, direct child of root) and T3 (both app users in it), both
+      Quarantine. H7b procedure version 2 → 3 (an older completed H7b re-applies).
+    - D5: H11 places guests by moving the Dataverse-added (root) user into the customer unit (PATCH businessunitid,
+      If-Match *, read back) BEFORE associating roles — the alternate-key read always adds to the root. A guest in any
+      other unit is Quarantine (userprov-guest-in-foreign-business-unit), never moved. Roles resolve to the customer
+      unit's copies (no root roles on guests).
+    - D6: H10's creator lost its name-only role fallback (it could pick another unit's copy) and the `Prefer:
+      return=representation` header on creates (ids come from OData-EntityId, which Dataverse sends on a 204 create — the
+      shape H7b's verified creates use). It became HTTP-testable (internal credential-factory constructor).
+
+    - D7 (review F1, fixed): H7 now links the CUSTOMER unit to H8's container right after the root (same equal / empty →
+      PATCH + read back / conflict rules; customer-business-unit-unresolved / -container-conflict, Resumable). Without it
+      every non-secure record owned in the customer unit resolved to no container in the BFF (RecordContainerResolver
+      reads the OWNING unit only). H7 declares CustomerBusinessUnitId; its config hash version gained
+      customer-business-unit-link=1.
+    - D8 (review F1-plausible, fixed): H11 reads every role a guest holds with its unit and refuses (Quarantine,
+      userprov-guest-holds-role-outside-customer-unit) one of another unit — an org that keeps roles on a unit change
+      would otherwise leave a root role's Deep read. No role is removed.
+
+    LIVE PROOF OWED (T186): the PATCH systemusers businessunitid move (H11) and the customer-unit creates (H10) have only
+    HTTP-shape tests; H11's read-back fails closed if the move does not land.
+
+    VERIFICATION: ControlPlane tests 2598 passed / 1 skipped (pre-existing); Spaarke.ArchTests 889/889 (built explicitly);
+    dotnet build Spaarke.sln 0 errors / 0 warnings.
+  </notes>
 </task>

@@ -66,6 +66,10 @@
 //   │ Run not found in Cosmos partition          │ Resumable                 │
 //   │ H10 escalation gate (null AppRoleId)       │ Resumable (no write yet)  │
 //   │ BFF/UAMI App User creation call failed     │ Resumable (idempotent op) │
+//   │ T259 displayName missing/invalid           │ Resumable (no write yet)  │
+//   │ T259 customer unit ambiguous / read fault  │ Resumable                 │
+//   │ T259 customer unit not under the root      │ QuarantineRequired        │
+//   │ T259 App User already in another unit      │ QuarantineRequired        │
 //   │ T2 post-condition mismatch (count != 1)    │ QuarantineRequired        │
 //   │ Graph role grant call(s) failed            │ RetryableWithCleanup      │
 //   │ T3 post-condition partial (still missing   │ QuarantineRequired        │
@@ -92,6 +96,15 @@
 //   successors (H12c/H14 per the plan.md critical path). This handler mutates
 //   Cosmos state (advancing CurrentPhase + CompletedPhases + InterStepState +
 //   GateStates) and returns Success; it does not enqueue anything directly.
+//
+// CUSTOMER BUSINESS UNIT (T259 — ISS-010 / #1486, owner decision 2026-10-09; INCOMING-145 §6 T1/T3):
+//   "For secure records, only users explicitly granted access should have access; no users are added to the secure
+//   business unit." Before registering anyone H10 finds or creates the customer's OWN business unit — named by intake
+//   displayName (CustomerBusinessUnitIntake), a DIRECT child of the Dataverse root and so a SIBLING of the Secure Record
+//   unit — and creates both App Users IN it with System Administrator (the unit's copy of the role). Deep depth in the
+//   customer unit never reaches its sibling. An App User found in another unit is QuarantineRequired, never moved (a
+//   business-unit change strips every role, and H6/H7/H7b sign in as the BFF App User). The unit id is written to
+//   InterStepState.CustomerBusinessUnitId for H7b (checks it) and H11 (puts guests in it).
 //
 // MODEL 1 / MODEL 2 CODE PATH (task 205d / punch row A41 — auth-v4 §10.1 Δ5):
 //   H10 itself is DELIBERATELY tenancy-model-agnostic — it always registers
@@ -120,6 +133,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
@@ -275,6 +289,15 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // T259: the customer unit's name — the intake rule POST /api/runs applied, re-checked (defence in depth).
+        var displayName = CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName);
+        if (displayName is CustomerBusinessUnitIntakeOutcome.Invalid invalidName)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, invalidName.RejectionCode,
+                $"Run parameter {invalidName.Diagnostic} Nothing was written.", cancellationToken).ConfigureAwait(false);
+        }
+        var customerUnitName = ((CustomerBusinessUnitIntakeOutcome.Valid)displayName).Name;
+
         var bffAppRegId = interStep.BffAppRegId!;
         var uamiClientId = interStep.MiClientId!;
         var uamiObjectId = interStep.MiObjectId!;
@@ -297,10 +320,43 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.EscalationGateNullAppRoleId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (9) Register the BFF app-reg as a Dataverse System Administrator App User.
+        // (8b) T259 — the customer's own business unit, directly under the root (INCOMING-145 §6 T1).
+        var unitOutcome = await _appUserCreator.EnsureCustomerBusinessUnitAsync(
+            dataverseEnvUrl, tenantId, customerUnitName, cancellationToken).ConfigureAwait(false);
+        Guid customerUnitId;
+        switch (unitOutcome)
+        {
+            case CustomerBusinessUnitOutcome.Success found:
+                customerUnitId = found.BusinessUnitId;
+                break;
+            case CustomerBusinessUnitOutcome.Ambiguous ambiguous:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitAmbiguous,
+                    $"{ambiguous.Count} business units are named '{customerUnitName}' — H10 does not guess which one is the " +
+                    "customer's. Rename or remove the extra one, then resume. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.WrongParent wrong:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.CustomerBusinessUnitWrongParent,
+                    $"Business unit '{customerUnitName}' ({wrong.BusinessUnitId}) has parent " +
+                    $"{wrong.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {wrong.RootBusinessUnitId}. " +
+                    "The customer's unit must be a DIRECT child of the root, a sibling of the Secure Record unit (INCOMING-145 " +
+                    "§6 T1); re-parenting a unit is an owner decision. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+            default:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitFailed,
+                    $"The customer business unit '{customerUnitName}' could not be read or created: " +
+                    $"{((CustomerBusinessUnitOutcome.Failure)unitOutcome).Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+        }
+
+        // (9) Register the BFF app-reg as a Dataverse System Administrator App User — IN the customer unit (T3).
         var bffOutcome = await _appUserCreator.EnsureAppUserAsync(
-            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, bffAppRegId, _options.SecurityRoleName),
+            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, bffAppRegId, _options.SecurityRoleName, customerUnitId),
             cancellationToken).ConfigureAwait(false);
+        if (bffOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit bffElsewhere)
+        {
+            return await ForeignUnitAsync(run, etag, "BFF app-reg", bffAppRegId, bffElsewhere, customerUnitId, cancellationToken)
+                .ConfigureAwait(false);
+        }
         if (bffOutcome is DataverseAppUserCreationOutcome.Failure bffFailure)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.BffAppUserCreationFailed,
@@ -323,9 +379,14 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // remarks + mi-proof-dataverse-side.md for the full trap shape.
         var uamiOutcome = await _appUserCreator.EnsureAppUserAsync(
             new DataverseAppUserCreationRequest(
-                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName,
+                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName, customerUnitId,
                 AzureActiveDirectoryObjectId: uamiObjectId),
             cancellationToken).ConfigureAwait(false);
+        if (uamiOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit uamiElsewhere)
+        {
+            return await ForeignUnitAsync(run, etag, "UAMI", uamiClientId, uamiElsewhere, customerUnitId, cancellationToken)
+                .ConfigureAwait(false);
+        }
         if (uamiOutcome is DataverseAppUserCreationOutcome.Failure uamiFailure)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.UamiAppUserCreationFailed,
@@ -390,9 +451,20 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate,
+            run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate, customerUnitId,
             envelope, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>T259: an App User already in another business unit — QuarantineRequired, nothing moved.</summary>
+    private Task<HandlerResult> ForeignUnitAsync(
+        ProvisioningRun run, string etag, string label, string applicationId,
+        DataverseAppUserCreationOutcome.InForeignBusinessUnit elsewhere, Guid customerUnitId, CancellationToken cancellationToken)
+        => FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.AppUserInForeignBusinessUnit,
+            $"The {label} App User (applicationid {applicationId}, systemuser {elsewhere.SystemUserId}) already exists in business " +
+            $"unit {elsewhere.BusinessUnitId}, not the customer's unit {customerUnitId}. H10 never moves it: a business-unit " +
+            "change strips every role, and H6/H7/H7b sign in as the BFF App User. Moving it (and re-granting System " +
+            "Administrator in the customer unit) is an owner decision; then resume.",
+            cancellationToken);
 
     /// <summary>
     /// Computes the deterministic H10 idempotency key: <c>appuser-{customerId}</c>.
@@ -475,6 +547,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         string idempotencyKey,
         string uamiSystemUserId,
         string bffSystemUserId,
+        Guid customerUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -497,6 +570,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // returned by Dataverse Web API — no brace-wrapping to strip.
         run.InterStepState.SystemUserId = uamiSystemUserId;
         run.InterStepState.BffAppRegSystemUserId = bffSystemUserId;
+        run.InterStepState.CustomerBusinessUnitId = customerUnitId.ToString("D");   // T259 — read by H7b and H11
 
         run.GateStates[H10Gates.AppUserCreated] = new GateEntry
         {

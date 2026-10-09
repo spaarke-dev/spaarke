@@ -51,7 +51,8 @@ public sealed class H11UserProvisioningOptions
     public const string DefaultGuestSecurityRoleName = "Spaarke Basic User";
 
     /// <summary>
-    /// Task 232: Dataverse security roles (root business unit, by name) each B2B guest receives. The roles ship in the
+    /// Task 232: Dataverse security roles (by name; T259: the copy in the customer's business unit, where every guest is
+    /// placed) each B2B guest receives. The roles ship in the
     /// Spaarke solution (H6; the package is being redefined by T218) — a name the environment lacks stops H11 with
     /// <c>userprov-security-role-not-found</c> naming it. Empty by default (the configuration binder APPENDS to an
     /// initialised list, so a default here could never be replaced) — read <see cref="EffectiveGuestSecurityRoleNames"/>.

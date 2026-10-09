@@ -32,9 +32,10 @@
     "displayName": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 200,
-      "pattern": "\\S",
-      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. Optional; defaults to customerId."
+      "maxLength": 160,
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F-\\u009F](?:[^\\u0000-\\u001F\\u007F-\\u009F]*[^\\s\\u0000-\\u001F\\u007F-\\u009F])?$",
+      "not": { "pattern": "^[Ss][Ee][Cc][Uu][Rr][Ee] [Rr][Ee][Cc][Oo][Rr][Dd]$" },
+      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. T259 (ISS-010, owner 2026-10-09): also sent to POST /api/runs as nonSecretParameters.displayName, which is REQUIRED there — H10 creates the customer's own Dataverse business unit with this name directly under the root (a sibling of the Secure Record unit) and creates the BFF's application users in it; H11 puts every guest in it. Optional in this file; the skill defaults it to customerId. 1-160 characters (Dataverse businessunit.name), no leading or trailing whitespace, no control character, and never 'Secure Record' in any case — the same rule POST /api/runs applies (CustomerBusinessUnitIntake: h10-customer-display-name-required / -invalid)."
     },
     "tenantId": {
       "type": "string",
