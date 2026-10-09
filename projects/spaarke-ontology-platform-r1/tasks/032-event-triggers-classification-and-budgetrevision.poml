@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The three event triggers: classification, budget-revision create, association confirmed (D-48)</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>031 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a shipped consumer path; a mistake here either misses signals or asserts something untrue in the UI.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two well-specified hooks onto an existing queue seam.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same consumer file that task 042 also touches.</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api,job-handler,signals</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two ADR-004 IJobHandler triggers that run the same evaluator for one matter: on communication classification, and on sprk_budgetrevision create.</prompt>
+  <role>SPAARKE backend developer. Reuse the evaluator; do not fork it.</role>
+  <goal>A classified fee or scope email surfaces a Work Item within about a minute, and recording a budget revision clears it immediately rather than up to 24 hours later.</goal>
+
+  <context>
+    <background>Two of the four state transitions DO have events. Hooking them is what makes the Decide lane feel live, and the budget-revision hook is not an optimization: without it a Work Item keeps asserting no budget revision was recorded for up to 24 hours after one was, which is a sentence that is no longer true in the surface the product credibility rests on.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationTriggerHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: both triggers are IJobHandler implementations on the existing queue seam (58 files already use it). Do not invoke the evaluator synchronously from the classification path, which would couple enrichment latency to evaluation.</constraint>
+    <constraint source="project">Scope: the triggers run the SAME evaluator as the nightly job, scoped to one matter. Do not duplicate evaluation logic: a second code path is how the two come to disagree.</constraint>
+    <constraint source="project">Scope: the triggers are for DECIDE-lane policies. Do-lane policies run nightly only (cadence from sprk_lane).</constraint>
+    <constraint source="project">Scope: a trigger failure must not lose the event silently. Swallow-and-log paths are undiagnosable without App Insights; emit there if a throw is swallowed.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER-DERIVED GATE (2026-10-04, task 022 review F6): obtain every compiled predicate ONLY through PolicyVersionValidator.TryPrepareForEvaluation(snapshot, subjectId, out compiled). Never call PredicateCompiler.Compile directly and never skip the gate: it is what logs EventId 50301 + meters an invalid policy and continues with the others (owner rule: validate at evaluation, fail closed, no silent failure). Build FactValues for the sentence ONLY from values read for the firing subject from POSITIVE fields (the subject's when filter and exists clauses), never from notExists clause fields (task 022 F5, section 0.3).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13, D-33): the triggers call task 031's Evaluate(version, scope) for the one matter and its writing path, so the episode-scoped key, the re-raise rule and the secure-child ownership (task 039; no Restricted/Limited skip) apply here exactly as nightly.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17, D-18; reconciliation X-6, #15): a budget revision recorded THROUGH a decision has already closed its Signal as Acted via the commit route (task 043). The budget-revision trigger must not close that Signal again as ConditionCleared: it only touches Signals that are still Open or Acknowledged.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-48): add a THIRD trigger, association confirmed: the SAME handler, a third enqueue site, called when a communication is filed (association confirmed) to a core record, so a classified email filed later raises its Work Item without waiting for the nightly pass. The email-communication-intelligence project owns the filing path and makes the call; this task exposes the enqueue and agrees the call site with that project (link the agreement in notes; /conflict-check first).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Queue-triggered background work</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Queue job handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">Follow the IJobHandler registration and dispatch convention used by the existing 58 handlers.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement a single trigger handler that takes a matter id and evaluates Decide-lane policies for that matter only, delegating to the same evaluator as task 031.</step>
+    <step order="2">Enqueue it from the communication classification path. RuleGatedAssessedConsumer already holds the assessed object; enqueue after the classification is persisted.</step>
+    <step order="3">Enqueue it on sprk_budgetrevision create, so the notExists conjunct is re-tested immediately and the Signal closes as ConditionCleared.</step>
+    <step order="4">Add App Insights emission on any swallowed exception in either path.</step>
+    <step order="5">Add tests: classification enqueues and produces a Signal; budget-revision create enqueues and closes the open Signal; a failure is observable rather than silent.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_budgetrevision create cannot be hooked (for example rows are written by a path with no event), STOP and escalate. Without that hook the Work Item asserts something untrue for up to 24 hours, and that is a section 0.3 failure in the product primary surface, not a latency nicety.</trigger>
+    <trigger>If the email project does not accept calling the association-confirmed enqueue from its filing path, STOP and escalate rather than adding a polling substitute.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No handler evaluates policies on an event; the 58 existing IJobHandler implementations are unrelated domains.</existing>
+    <extension>No, but the queue SEAM is reused rather than a new mechanism built, and the evaluator itself is reused rather than duplicated.</extension>
+    <cost-of-doing-nothing>Without the classification trigger a fee-change email surfaces the next morning, so criterion 2 can only be demonstrated by running a job by hand. Without the budget-revision trigger the Work Item keeps asserting no revision was recorded after one was.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationTriggerHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a communication classified as a fee or scope change, when the classification is persisted, then the trigger is enqueued and a Signal exists for that matter shortly after.</criterion>
+    <criterion testable="true">Given an open Path B Signal and a new sprk_budgetrevision inside the window, when the revision is created, then the Signal is closed as ConditionCleared without waiting for the nightly pass.</criterion>
+    <criterion testable="true">Given a Do-lane policy, when either trigger fires, then it is NOT evaluated by the trigger (nightly only).</criterion>
+    <criterion testable="true">Negative: a trigger handler failure is observable in App Insights rather than silently swallowed.</criterion>
+    <criterion testable="true">Negative: evaluation logic is not duplicated; both the job and the triggers call the same evaluator.</criterion>
+    <criterion testable="true">Given a Signal already closed as Acted by a decision that recorded a budget revision, when the budget-revision trigger runs, then the Signal stays Acted.</criterion>
+    <criterion testable="true">Given a classification on a Secure matter, when the trigger runs, then the Signal is owned by the Secure Record Owners team; on a Restricted or Limited matter it is written normally (D-33).</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a communication classified as a fee or scope change BEFORE it had a core record, when it is filed (association confirmed), then the trigger is enqueued and the Signal exists for that core record shortly after (D-48).</criterion>
+    <criterion testable="true">Negative: the association-confirmed path calls the same handler; no second evaluation path exists.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-13, FR-14a (amended, D-33), FR-16 (amended). design.md section 8.3 explains why the budget-revision hook is correctness rather than polish. Amended 2026-10-07 for D-13, D-15, D-17, D-18.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

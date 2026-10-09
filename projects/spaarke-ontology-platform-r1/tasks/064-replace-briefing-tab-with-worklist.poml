@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Replace the Daily Briefing tab with the worklist</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>062, 063, 055, 059, 065 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Replaces a shipped user surface; premature replacement leaves users worse off.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Registration swap once both lanes exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes the Console default surface; must not race another widget change.</parallel-reason>
+    <deps>062, 063, 055, 059, 065</deps>
+    <tags>frontend,configuration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the Workspace Daily Briefing tab with the worklist, now that both the Decide and Do lanes exist.</prompt>
+  <role>SPAARKE front-end developer.</role>
+  <goal>The Console opens on the worklist with the narrative on, and the old Briefing widget is retired.</goal>
+
+  <context>
+    <background>BR-4: replace the tab ONCE Decide and Do lanes BOTH exist; keep the old widget until then. Replacing earlier would remove working awareness before the replacement covers it.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/workspace</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: do NOT replace until both lanes exist and render. This task gate depends on 062 and 063 for exactly that reason.</constraint>
+    <constraint source="project">Scope: Decide ALWAYS above Do. On the production Briefing own numbers, 11 overdue tasks would push 5 decisions off the screen.</constraint>
+    <constraint source="project">Scope: each lane carries its own count filters; the narrative summarises Do volume rather than listing it.</constraint>
+    <constraint source="project">Scope: keep the old widget available behind a flag for one release rather than deleting it outright, so a regression is recoverable without a deploy.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-15, D-26): the Workspace tab points at task 059's worklist widget, which reads Signals only through the BFF read route (each reader sees only their own Do-lane work and only matters they can read) and opens decisions in the in-app wizard. Verify both on dev as a non-admin reader before the swap.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-27): the old Briefing kept behind the flag is the task 065 version (due date = sprk_duedate), so reverting does not reintroduce the finalduedate disagreement.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation B.6): use HANDOFF v4 section 1.4 (the full list) as the cutover check, recorded in notes/briefing-cutover.md, against real Dataverse.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the cutover check covers project cards and the reader's "Not filed" group as well as matter cards, verified with a non-admin reader who owns a Not filed To Do and one who does not.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): the cutover check also covers work-assignment and service-request cards.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-43): the Do lane fires at 1 day overdue while the old Briefing used 5 days, so Do volume after the cutover is higher by design; record the before/after counts in notes/briefing-cutover.md and tell users in the cutover note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Console surface replacement</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Confirm both lanes render with real data before changing any registration.</step>
+    <step order="2">Point the Workspace tab at the worklist widget with the narrative enabled.</step>
+    <step order="3">Verify Decide renders above Do and each lane has its own count filters.</step>
+    <step order="4">Keep the old Briefing widget registered behind a flag for one release.</step>
+    <step order="5">Record the cutover in notes/, including how to revert without a deploy.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If either lane is not rendering real data, STOP and do not perform the replacement. Replacing early removes working awareness before its replacement covers it, which is a user-visible regression.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Worklist is the Workspace tab">
+      <steps>
+        <step>Open the Console Workspace</step>
+      </steps>
+      <expected>The worklist renders with the narrative on, in place of the old Briefing.</expected>
+    </test>
+    <test name="Decide above Do">
+      <steps>
+        <step>Seed several overdue tasks and at least one decision</step>
+        <step>Open the worklist</step>
+      </steps>
+      <expected>Decide items appear above Do items and the decisions are not pushed off screen.</expected>
+    </test>
+    <test name="Revert path works">
+      <steps>
+        <step>Toggle the flag back</step>
+      </steps>
+      <expected>The old Briefing widget renders again with no deploy.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Open the Workspace</step>
+      </steps>
+      <expected>The worklist adapts via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/briefing-cutover.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Console Workspace, when opened, then the worklist renders with the narrative on.</criterion>
+    <criterion testable="true">Given both lanes populated, when rendered, then Decide appears above Do.</criterion>
+    <criterion testable="true">Given many Do items and few Decide items, when rendered, then the Decide items remain visible.</criterion>
+    <criterion testable="true">Negative: the old widget is still reachable behind a flag, so a regression is recoverable without a deploy.</criterion>
+    <criterion testable="true">The client builds and the cutover is documented.</criterion>
+    <criterion testable="true">Given a non-admin reader on dev, when the worklist opens, then the Do lane shows only that reader's own work and no Signal on a matter they cannot read.</criterion>
+    <criterion testable="true">Given the cutover notes, when read, then every HANDOFF section 1.4 rule has a pass or a recorded refinement.</criterion>
+    <criterion testable="true">Given a non-admin reader on dev, when the worklist opens, then project-grouped items appear under their project, and Not filed items appear only for their owner.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-35, FR-54, FR-55, FR-61. design.md BR-4, BR-5. Amended 2026-10-07 for D-15, D-26, D-27 and reconciliation B.6.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

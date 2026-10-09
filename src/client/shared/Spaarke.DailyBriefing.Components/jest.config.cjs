@@ -1,10 +1,12 @@
 /**
  * Jest configuration for @spaarke/daily-briefing-components.
  *
- * R2 task 019 / NFR-05: Adds Jest test infrastructure for the 3 split hooks
- * (`useBriefingNotifications`, `useBriefingPreferences`, `useBriefingActions`)
- * + smoke test mounting `DailyBriefingApp` with mocked `Xrm` and asserting the
- * BFF `/narrate` call fires with a non-empty payload.
+ * R2 task 019 / NFR-05: Adds Jest test infrastructure for the split hooks
+ * (originally `useBriefingNotifications`, `useBriefingPreferences`,
+ * `useBriefingActions`; the first and third were deleted as dead code by
+ * ontology-platform-r1 task 010 / C-1, 2026-10-03 — `useBriefingPreferences`
+ * remains) + smoke test mounting `DailyBriefingApp` with mocked `Xrm` and
+ * asserting the BFF `/narrate` call fires with a non-empty payload.
  *
  * Mirrors `@spaarke/auth` Jest setup (the canonical Jest pattern in
  * `src/client/shared/`). Smart Todo's __tests__ folder is intentionally
@@ -61,9 +63,8 @@ module.exports = {
   // Coverage thresholds left empty in the initial 0.1.0 release — NFR-05
   // requires test existence + a measurable report, not a hard floor.
   collectCoverageFrom: [
-    "src/hooks/useBriefingNotifications.ts",
+    "src/hooks/useBriefingRender.ts",
     "src/hooks/useBriefingPreferences.ts",
-    "src/hooks/useBriefingActions.ts",
     "src/components/DailyBriefingApp.tsx",
   ],
   // jsdom polyfills (window.matchMedia is referenced by Fluent v9 in some paths).

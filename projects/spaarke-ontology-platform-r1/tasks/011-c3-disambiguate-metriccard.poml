@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>C-3: disambiguate the two MetricCard components</title>
+    <phase>1 Cleanup that gates the row</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Rename or re-document to remove an import ambiguity; no behavior change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical disambiguation.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,cleanup,technical-debt</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove the ambiguity between the two unrelated components both named MetricCard, so the worklist row cannot import the wrong one.</prompt>
+  <role>SPAARKE front-end developer.</role>
+  <goal>A developer reaching for a clickable count-filter card cannot accidentally import the VisualHost one.</goal>
+
+  <context>
+    <background>WorkspaceShell/MetricCard.tsx:24-222 is the clickable, square, badge-capable card the worklist count filters must extend. A second, unrelated MetricCard exists at Spaarke.Visuals/src/components/MetricCard.tsx serving the VisualHost PCF. The name collision is item C-3.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Visuals/src/components/MetricCard.tsx</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: prefer documenting plus a barrel-level alias over a wide rename if the rename would touch many consumers. Measure the consumer count first and state it.</constraint>
+    <constraint source="project">Scope: do NOT change the behavior or props of either component in this task. Disambiguation only.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Component naming and import ambiguity</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Grep for every import of each MetricCard and count consumers of each.</step>
+    <step order="2">Choose the cheapest disambiguation that actually removes the hazard: a rename of the lower-consumer one, or an explicit barrel export name plus a header comment in both files naming the other.</step>
+    <step order="3">Apply it, and add a one-line header comment to each file naming its counterpart and its intended use.</step>
+    <step order="4">Build both packages and run their tests.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="VisualHost still renders its metric cards">
+      <steps>
+        <step>Open a form hosting the VisualHost PCF</step>
+        <step>Confirm metric visuals render</step>
+      </steps>
+      <expected>No regression in the VisualHost PCF.</expected>
+    </test>
+    <test name="WorkspaceShell metric cards still clickable">
+      <steps>
+        <step>Open a workspace surface using MetricCardRow</step>
+        <step>Click a card</step>
+      </steps>
+      <expected>The card responds as before; role=button behavior intact.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Visuals/src/components/MetricCard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the two components, when each file is opened, then its header names the other and states which to use when.</criterion>
+    <criterion testable="true">Given a grep for MetricCard imports, when reviewed, then every import unambiguously resolves to the intended component.</criterion>
+    <criterion testable="true">Negative: neither component behavior or prop surface changed; existing tests pass unmodified.</criterion>
+    <criterion testable="true">Both packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-41 (C-3). Gates the worklist row because FR-27 requires extending the WorkspaceShell one.
+
+Completed 2026-10-03. Measured consumer counts first (per constraint): WorkspaceShell/MetricCard had 1
+real consumer (MetricCardRow.tsx, intra-package, zero cross-package); Spaarke.Visuals/MetricCard had 1 real
+cross-package consumer (VisualHost/control/components/ChartRenderer.tsx). Not "many" by any reading, so did
+a real rename of the lower-value side instead of doc-only: Spaarke.Visuals's `MetricCard` -> `VisualMetricCard`
+(and `IMetricCardProps` -> `IVisualMetricCardProps`), keeping the canonical `MetricCard` name on the
+WorkspaceShell component FR-27 wants extended. Added the required header comment (naming the counterpart)
+to both files. Updated the Visuals barrel (components/index.ts), its own test
+(__tests__/MetricCard.test.tsx, 14 assertions renamed mechanically), and the one real cross-package consumer
+(ChartRenderer.tsx: import + one JSX tag). No prop or behavior change in either component.
+
+Verified: `tsc --noEmit` clean on Spaarke.Visuals; full Jest suite 71/71 passed (14/14 on MetricCard.test.tsx);
+`pcf-scripts build --buildMode production` on VisualHost PCF succeeded (webpack + ESLint + TS, exit 0) —
+confirms ChartRenderer.tsx's renamed import/usage compiles end-to-end. Spaarke.UI.Components's own `tsc`
+build fails on 9 PRE-EXISTING errors unrelated to this task (missing dist for sibling `file:` packages
+@spaarke/auth / @spaarke/sdap-client, never installed in this fresh worktree) — zero errors reference
+MetricCard or WorkspaceShell; there is no existing test for WorkspaceShell/MetricCard.tsx to regress.
+
+Deviations + a third (unrelated, untouched) MetricCard in LegalWorkspace, and a pre-existing broken
+Storybook stories file found but out of scope, are recorded in
+projects/spaarke-ontology-platform-r1/notes/task-011-metriccard-disambiguation-deviations.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

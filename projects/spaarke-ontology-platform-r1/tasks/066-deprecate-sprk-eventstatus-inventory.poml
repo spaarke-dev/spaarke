@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deprecate sprk_eventstatus: inventory its readers and writers, then move them to statuscode</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>098 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches event status reads across the BFF and clients; the column itself is removed only with owner sign-off.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Inventory-first cleanup with an explicit stop before removal.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>098</deps>
+    <tags>bff-api,frontend,events,cleanup</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>List every reader and writer of sprk_event.sprk_eventstatus in src/, move each reader to statuscode (the authoritative status), stop each writer, and report the result to the owner before anyone removes the column.</prompt>
+  <role>SPAARKE engineer. Inventory before removal.</role>
+  <goal>No code decides anything from sprk_eventstatus; an inventory with file:line and the change made to each is recorded; the column remains until the owner approves its removal.</goal>
+
+  <context>
+    <background>D-28 (spec section 9): statuscode is authoritative; sprk_eventstatus is deprecated; a task checks remaining readers before removal; Completed stays an Active-state status. 13 files under src/ on master mention sprk_eventstatus (grep, 2026-10-07). Task 097 established one open-work predicate (EventStatusCode.IsOpenWork) over statuscode; task 097 review found an external-SPA status read from the wrong column.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/066-eventstatus-inventory.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-28): readers move to statuscode, using the existing EventStatusCode values and IsOpenWork predicate; writers stop writing sprk_eventstatus. Completed (659490002) stays an Active-state statuscode.</constraint>
+    <constraint source="project">Scope: do NOT delete the sprk_eventstatus column, its form placements or views in Dataverse. Removal is a separate owner decision after this inventory.</constraint>
+    <constraint source="project">Scope: generated bundles (bundle.js) are not edited by hand; they change when their source rebuilds.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: each moved reader has a test using real statuscode values paired with a live describe of sprk_event's statuscode options.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Event status</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Inventory every reference (server, client, PCF source, ribbon JS, docs) into notes/066-eventstatus-inventory.md with file:line and read/write.</step>
+    <step order="2">Move each reader to statuscode; stop each writer.</step>
+    <step order="3">Tests per moved reader; rebuild affected packages.</step>
+    <step order="4">Report the inventory to the owner with a removal recommendation.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a reader depends on a sprk_eventstatus value that has no statuscode equivalent, STOP and bring the mapping question to the owner.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Event status still shown correctly">
+      <steps>
+        <step>Open an Open, a Completed and a Reassigned event in each surface whose reader moved</step>
+      </steps>
+      <expected>Each shows the status statuscode holds.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat in dark mode</step>
+      </steps>
+      <expected>Unchanged token-based rendering.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="npm">Build affected client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/066-eventstatus-inventory.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the inventory, when read, then every src/ reference to sprk_eventstatus is listed with file:line, read or write, and the change made.</criterion>
+    <criterion testable="true">Given the changed code, when grepped, then no source file (excluding generated bundles and the inventory) reads or writes sprk_eventstatus.</criterion>
+    <criterion testable="true">Negative: the Dataverse column, its form placements and views still exist.</criterion>
+    <criterion testable="true">Tests cover each moved reader; all tests pass; affected packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>Input from task 060 (2026-10-08): sprk_eventstatus disagrees with statuscode on many sprk_event rows in spaarkedev1 (e.g. a0cb27af-992e-f111-88b5-7ced8d1dc988 is Completed in sprk_eventstatus but Draft in statuscode; most Draft rows have it null); not fixed in 060. spec.md FR-62; D-28.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

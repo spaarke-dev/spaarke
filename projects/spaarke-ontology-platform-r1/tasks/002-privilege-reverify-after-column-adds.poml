@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Re-verify privileges after the column adds</title>
+    <phase>0 Foundations</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification task over a security guarantee; no code, but the guarantee is what everything else rests on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Query and compare against a recorded matrix.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001, 006</deps>
+    <tags>dataverse,security,verification</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Confirm the append-only guarantee still holds after the task 001 column adds, including the union check across every role in the environment.</prompt>
+  <role>SPAARKE platform developer. Treat security as fail-closed.</role>
+  <goal>A recorded, query-backed statement that the four guarantee-bearing privileges remain absent and that no human or Spaarke identity holds Write or Delete on the two ledger tables.</goal>
+
+  <context>
+    <background>Append-only on sprk_decisionrecord is enforced by PRIVILEGE, not by column or plugin (ADR-002 forbids plugins). Dataverse privileges are ADDITIVE across every role a user holds, the effective depth is the MAXIMUM, and there is no deny. So the guarantee is a property of the UNION of a user roles, not of any one role. A column add touches the table the guarantee protects, so the check is repeated.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: enumerate ALL business-unit copies of each role. A top 1 read of roles filtered by name returns an arbitrary one of six copies and reports no privileges, which is a measurement artifact, not a defect.</constraint>
+    <constraint source="project">Scope: before treating any zero as a defect, re-run the Spaarke Core User control. That role is long-established and working, and it shows the identical shape: 744 privileges on the root-BU copy and 0 on all five child copies.</constraint>
+    <constraint source="project">Scope: do NOT strip privileges from Service Writer or Service Deleter. Their membership is exclusively Microsoft first-party application identities, and removing them breaks Power Pages, AI Builder and solution deployment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse security roles and privileges</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+    </files>
+    <patterns>
+      <pattern name="Union privilege check" location="projects/spaarke-ontology-platform-r1/notes/security-roles.md">Section 6 records the method and the benign result; section 7.3 records the per-BU-copy measurement artifact and its control.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Query every business-unit copy of Spaarke Console User, Spaarke Ontology Administrator and Spaarke Ontology Service, and list their privileges on all five ontology tables.</step>
+    <step order="2">Confirm ABSENT on every copy: prvCreatesprk_Signal, prvWritesprk_DecisionRecord, prvDeletesprk_DecisionRecord, prvWritesprk_PolicyVersion.</step>
+    <step order="3">Confirm PRESENT on Spaarke Ontology Service: prvCreatesprk_Signal, prvCreatesprk_DecisionRecord and prvAssignsprk_Signal. The last is what makes the task 030 ownership requirement executable without a privilege change.</step>
+    <step order="4">Run the union check: every role in the environment holding Write or Delete on sprk_decisionrecord or Write on sprk_policyversion. Classify each holder as platform, admin, human or Spaarke identity.</step>
+    <step order="5">Append the results to notes/security-roles.md with the date, as section 6 and section 7 already do.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any HUMAN user or any Spaarke application identity holds Write or Delete on sprk_decisionrecord, STOP and escalate. That breaks the append-only guarantee the whole defensibility story rests on, and it is not a thing to work around in code.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all BU copies of the three roles, when privileges are listed, then the four guarantee-bearing privileges are absent from every copy.</criterion>
+    <criterion testable="true">Given Spaarke Ontology Service, when privileges are listed, then Create on sprk_signal, Create on sprk_decisionrecord and Assign on sprk_signal are all present.</criterion>
+    <criterion testable="true">Given every role in the environment, when filtered to Write or Delete on the two ledger tables, then every holder is either a platform role held only by first-party application identities or an admin role, and the finding is recorded with that classification.</criterion>
+    <criterion testable="true">Negative: a non-admin user holding only the Spaarke roles cannot update a sprk_decisionrecord row (attempt it and confirm refusal).</criterion>
+    <criterion testable="true">notes/security-roles.md carries the dated result.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-04. notes/security-roles.md section 7 is the prior pass; append rather than rewrite.</notes>
+
+  <completion>COMPLETED 2026-10-04. Escalation (append-only did not bind the writer) resolved by owner option A via task 006. Criterion 3: the writer principal is now # mi-ontology-writer-dev, which holds no Write/Delete on sprk_decisionrecord in its effective union; the sysadmin BFF identities still hold it, classified as admin roles, and the writer must never use them (030 constraint). Criterion 4: executed on the wire as the writer (update and delete both 403 0x80040220; admin control 204; test rows removed). Evidence: notes/security-roles.md sections 8 and 9.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

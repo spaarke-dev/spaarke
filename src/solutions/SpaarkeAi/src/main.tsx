@@ -249,10 +249,14 @@ async function bootstrap(): Promise<void> {
   //
   // Track-B batch 2 (spaarke-ai-architecture-redesign-r1 task 071): the
   // R2 task 002 notification-context loader injection was removed here.
-  // `DailyBriefingApp` (post-R2.1 Fix A) self-resolves Xrm and reads
-  // `appnotification` directly via `useBriefingNotifications(webApi)` — the
-  // `dailyBriefing.loadNotificationContext` option is @deprecated and ignored
-  // by the factory (see dailyBriefing.registration.ts), so the loader was dead.
+  // `DailyBriefingApp` (post-R2.1 Fix A) self-resolves Xrm and fetches via
+  // `useBriefingRender`, which calls `fetchBriefingLive` (behind
+  // `USE_LIVE_RENDER` in `briefingService.ts`) — not via appnotification
+  // read-state (ontology-platform-r1 task 010 / C-1, 2026-10-03: corrected
+  // from a stale reference to the now-deleted `useBriefingNotifications`).
+  // The `dailyBriefing.loadNotificationContext` option is @deprecated and
+  // ignored by the factory (see dailyBriefing.registration.ts), so the
+  // loader was dead.
   const sectionsForSpaarkeAi = createLegalWorkspaceSectionRegistry({});
   // R4-2 (2026-07-07): `launchData.compose` (from a chat-opened workspace tab's
   // widgetData — server-resolved sprk_document → SPE pointer) becomes a

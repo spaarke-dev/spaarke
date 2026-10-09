@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Copy scope semantics verbatim and apply policy authoring defaults</title>
+    <phase>2 Policy and rule bodies</phase>
+    <gate>003 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-adjacent: fail-closed behavior and scope matching decide which matters a rule touches.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copying verified, tested semantics from a shipped gate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>bff-api,policy,security</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Copy CommunicationRuleGate scope-matching, ordering and fail-closed semantics verbatim into the policy evaluator, and apply the policy authoring defaults.</prompt>
+  <role>SPAARKE backend developer. Copy proven semantics rather than re-deriving them.</role>
+  <goal>Scope matching, ordering and failure behavior are identical to the shipped gate, and policy rows default to inert.</goal>
+
+  <context>
+    <background>CommunicationRuleGate already settled these semantics and they are tested. Re-deriving them is how they drift. The specific line references are known.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: blank sprk_tenant matches ALL tenants (CommunicationRuleGate.cs:175-181). Empty sprk_matter matches ALL matters (:183-188). Copy these verbatim, including the blank-means-all semantics, which are easy to invert.</constraint>
+    <constraint source="project">Scope: ordering is OrderBy(sprk_priority ?? 500).ThenBy(Id) (:129-133). LOWEST priority wins, ties broken by record id.</constraint>
+    <constraint source="project">Scope: a rule-store read failure FAILS CLOSED with the rule-store-read-failed reason (:108-126). It must not proceed with an empty rule set, which would silently evaluate nothing and look like no signals today.</constraint>
+    <constraint source="project">Scope: sprk_enabled defaults No; sprk_priority defaults 500.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule scope matching and fail-closed behavior</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scope match, ordering, fail-closed" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs">Lines 108-188 carry all four behaviors. Copy, do not reinterpret.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read CommunicationRuleGate.cs:108-188 and enumerate the four behaviors precisely: tenant blank-means-all, matter empty-means-all, ordering, fail-closed.</step>
+    <step order="2">Implement the same four in the policy evaluator path.</step>
+    <step order="3">Add tests for each, including the two blank-means-all cases, which are the ones most likely to be inverted.</step>
+    <step order="4">Add a fail-closed test: with the rule store unavailable, evaluation denies with a stated reason rather than returning an empty rule set.</step>
+    <step order="5">Confirm the policy authoring defaults are enforced (enabled No, priority 500).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If copying the fail-closed behavior would make the nightly evaluator abort the whole run on a transient read failure, STOP and escalate to agree the granularity (per-policy versus whole-run) rather than quietly softening fail-closed into fail-open.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a policy with blank sprk_tenant, when evaluated, then it matches every tenant.</criterion>
+    <criterion testable="true">Given a policy with empty sprk_matter, when evaluated, then it matches every matter.</criterion>
+    <criterion testable="true">Given two policies with equal priority, when ordered, then the tie is broken by record id deterministically.</criterion>
+    <criterion testable="true">Given a policy with no priority set, when ordered, then it is treated as 500.</criterion>
+    <criterion testable="true">Negative: given an unavailable rule store, when evaluation runs, then it FAILS CLOSED with a stated reason and does NOT proceed with an empty rule set.</criterion>
+    <criterion testable="true">Negative: a newly authored policy row is inert until sprk_enabled is set to Yes.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-09, FR-10 and NFR-03.
+
+  Completed 2026-10-03. Implemented PolicyScopeResolver (src/server/api/Sprk.Bff.Api/Services/Signals/PolicyScopeResolver.cs)
+  copying CommunicationRuleGate.cs:108-188 scope-match/ordering/fail-closed semantics verbatim, plus
+  SignalsModule.cs DI registration and 7 seam tests (tests/integration/seam/Signals/PolicyScopeResolverSeamTests.cs),
+  all passing. Verified sprk_policy schema empirically against spaarkedev1 (sprk_enabled defaults No at the
+  Dataverse level; sprk_priority has NO Dataverse default, confirming the ?? 500 fallback belongs in code).
+  Publish-size delta +0.01 MB (45.67 MB branch vs 45.66 MB fresh master, 212 files both sides, PowerShell
+  Compress-Archive). Deviations (test placed under tests/integration/seam/ per ADR-038 seam-KEEP precedent
+  rather than tests/unit/; resolver returns an ordered list, not a single winner) recorded in
+  notes/023-scope-semantics-deviations.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

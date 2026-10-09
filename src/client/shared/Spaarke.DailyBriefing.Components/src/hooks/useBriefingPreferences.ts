@@ -21,7 +21,7 @@
  *
  * Coordination example (consumer-layer effect — Option A):
  *   const { preferences, ... } = useBriefingPreferences(webApi, userId);
- *   const { refetch, ... } = useBriefingNotifications(webApi);
+ *   const { refetch, ... } = useBriefingRender();
  *   useEffect(() => { refetch(); }, [preferences.disabledChannels]);
  */
 

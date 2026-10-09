@@ -380,6 +380,16 @@ public sealed class AssociationStatusMapper
             return $"Deterministic reinforced confidence {topDet:F2} ≥ threshold {settings.Threshold:F2}, but auto-file kill-switch is OFF ⇒ suggest-only.";
         if (topDet < settings.Threshold && topFull >= settings.Threshold && aiInvolved)
             return $"Reinforced confidence {topFull:F2} ≥ threshold {settings.Threshold:F2} only with an AI rung; AI never auto-files ⇒ Suggested.";
+        // AP-12 fix (task 083): topFull can clear the threshold on its OWN even when no AI rung is
+        // involved — e.g. C-1-narrowed rung 2/3 (participant/structural) or a surface-only rung
+        // (RecordNameMatch/ContactNameMatch/Affinity) reinforcing above threshold while the
+        // auto-file-eligible subset (topDet) stays below it. The prior code fell through to the
+        // generic "in [SuggestFloor, Threshold)" message below in this case, which is false whenever
+        // topFull ≥ Threshold (reported a confidence outside the very band it named). This branch is
+        // the ONLY one that can report topFull ≥ Threshold once the AI-rung branch above is excluded,
+        // so the generic fallback now only runs when topFull is genuinely < Threshold.
+        if (topDet < settings.Threshold && topFull >= settings.Threshold)
+            return $"Reinforced confidence {topFull:F2} ≥ threshold {settings.Threshold:F2} only via rung(s) outside the auto-file-eligible set (e.g. participant/structural correlation, record/contact name match, or affinity); those rungs do not clear the auto-file bar alone ⇒ Suggested.";
         return $"Reinforced confidence {topFull:F2} in [{SuggestFloor:F2}, {settings.Threshold:F2}) ⇒ Suggested.";
     }
 

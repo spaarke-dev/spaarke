@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision Record tab in the Console (D-47)</title>
+    <phase>5 The worklist surface</phase>
+    <gate>058, 043 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>A DataGrid configuration plus one registration, reusing the read-only wizard.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration on the shipped DataGrid framework.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>058, 043</deps>
+    <tags>frontend,configuration,decision-record</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add (D-47: in R1) a Console tab listing Decision Records filtered by record class, where each row's Open reopens the item in the decision wizard read-only.</prompt>
+  <role>SPAARKE front-end developer.</role>
+  <goal>A Decision Record tab with an All / Judgements / Routine / Dismissals filter whose Open action reopens the decided item read-only.</goal>
+
+  <context>
+    <background>v4 has a Decision Record tab (HANDOFF section 1.2 L84-85; reconciliation W-18). Design D-3 left auditing to the model-driven app. Reconciliation C-14 asked the owner whether a Console tab is in R1; D-13..D-29 do not answer it (spec section 11.1 O-8). D-47 (2026-10-07): the tab is in R1.</background>
+    <relevant-files>
+      <file role="new">Dataverse: sprk_gridconfiguration row for the Decision Record tab</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the list is a sprk_gridconfiguration row on the shipped DataGrid framework; reads go through a caller-authorized path. Decision Records on Secure matters are secure children (D-33, tasks 039/040) and reach only the matter's sharees through mirrored shares; the tab must not read them with a service identity.</constraint>
+    <constraint source="project">Scope: no edit or delete affordance on any row (FR-21, R-13).</constraint>
+    <constraint source="project">Scope: Open opens task 058's wizard read-only on that record's item; nothing else is built.</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DataGrid configuration</topic>
+    <files>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8. D-47 put the tab in R1.</step>
+    <step order="1">Author the grid configuration with the record-class filter.</step>
+    <step order="2">Register the tab; wire Open to the read-only wizard.</step>
+    <step order="3">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="4">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the tab cannot read Decision Records through a caller-authorized path that respects secure-child and owner-only records, STOP and escalate.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The DataGrid framework and sprk_gridconfiguration rows are the shipped list mechanism; the model-driven app holds Decision Record views (D-3).</existing>
+    <extension>Yes: one configuration row and one registration; no new component.</extension>
+    <cost-of-doing-nothing>A decided item's read-only wizard is reachable only from the worklist's Closed disclosures, not from history (W-18). Whether that matters in R1 is the owner's C-14.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Class filter and Open">
+      <steps>
+        <step>Open the tab, filter Dismissals, click Open on a row</step>
+      </steps>
+      <expected>Only Dismissal records show; Open reopens the item read-only under the status bar.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>The grid adapts via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the client</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: Decision Record tab grid configuration row</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the tab, when a class filter is chosen, then only records of that class show.</criterion>
+    <criterion testable="true">Given a row, when Open is clicked, then the item opens in the decision wizard read-only.</criterion>
+    <criterion testable="true">Negative: no row offers edit or delete.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reconciliation W-18; D-47 (O-8 decided).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

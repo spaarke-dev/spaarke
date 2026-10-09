@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/ontology/existence-rule.schema.json",
+  "title": "Existence rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Existence (spec FR-05; design.md section 8.0.1(a) / CM-7). An 'all' array of independent EXISTS / NOT EXISTS clauses over a fixed window, each expressible as a single Dataverse FetchXML link-entity filter (design.md CM-3). Task 024 (D-16, D-40, D-13): 'all' may be empty for a subject-only body scoped by a non-empty 'when'; relative dates include now+Nd; a date field may take one lower plus one upper relative-date bound; 'quietWindowDays' is an optional knob. Cross-clause variable binding is REFUSED at this schema level, not merely by review: clauses additionalProperties=false forbids a 'bind' property outright, and every filter value is pattern-restricted to reject a leading '$' variable-dereference token (e.g. '$commitment.sprk_receiveddate').",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "subject", "all"],
+  "properties": {
+    "type": {
+      "const": "Existence"
+    },
+    "subject": {
+      "description": "The subject entity's logical name this rule evaluates against (e.g. sprk_matter).",
+      "type": "string",
+      "minLength": 1
+    },
+    "when": {
+      "description": "Optional scope filter over the subject. Empty object = all subjects, allowed only when 'all' holds at least one clause (a subject-only body needs at least one condition here; task 024). Shares the clause filters' per-value grammar (#/$defs/filterConditions): the same scalar/array/operator shapes, the same leading-'$' refusal and the same numeric evaluation, so a 'when' value cannot carry what a clause value may not.",
+      "$ref": "#/$defs/filterConditions"
+    },
+    "all": {
+      "description": "Every clause must hold (AND). No cross-clause references between elements. May be EMPTY only for a subject-only rule (task 024, spec FR-45(a), D-16): then 'when' must hold at least one condition (see the root if/then), so an empty body can never mean 'every row of the subject'.",
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "#/$defs/clause"
+      }
+    },
+    "quietWindowDays": {
+      "description": "Per-rule quiet window in days after a dismissal before the subject may re-raise (D-13, spec FR-17a). Optional; absent means the 14-day default. Integer, 0..3650.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    "then": {
+      "description": "RESERVED, and refused (task 022 rework round 3, L2): no task defines 'then' and no code reads it. Early drafts put signalType/severity/messageTemplate/proposedAction here; those now live in their own sprk_policyversion columns (the sentence template's single source is sprk_messagetemplate, the only template checked against the predicate's read set, section 0.3). Listed here only so the refusal is explicit rather than an anonymous additionalProperties failure; RuleBodySchemaValidator reports it with its own message before schema evaluation.",
+      "not": {}
+    }
+  },
+  "if": {
+    "description": "Root-level JSON Schema conditional (not the reserved 'then' PROPERTY above): a subject-only body (zero clauses)...",
+    "required": ["all"],
+    "properties": { "all": { "maxItems": 0 } }
+  },
+  "then": {
+    "description": "...must scope the subject with at least one 'when' condition (task 024).",
+    "required": ["when"],
+    "properties": { "when": { "minProperties": 1 } }
+  },
+  "$defs": {
+    "clause": {
+      "description": "Exactly one of 'exists' or 'notExists' naming a related entity, reached via 'path' (the relationship/lookup field), bounded by 'filter'. No other property is permitted on a clause -- this is what makes a 'bind' (variable-binding) property a schema-level refusal rather than a review-time catch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filter"],
+      "properties": {
+        "exists": {
+          "description": "The related entity logical name that must exist for this clause to hold.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notExists": {
+          "description": "The related entity logical name that must NOT exist for this clause to hold.",
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "description": "The relationship/lookup field on the related entity pointing back to the subject.",
+          "type": "string",
+          "minLength": 1
+        },
+        "filter": {
+          "$ref": "#/$defs/filter"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["exists"],
+          "not": { "required": ["notExists"] }
+        },
+        {
+          "required": ["notExists"],
+          "not": { "required": ["exists"] }
+        }
+      ]
+    },
+    "filter": {
+      "description": "A clause's bounded Dataverse-filter-shaped bag of field -> value/operator constraints: the shared filterConditions grammar plus at least one condition. Filter values are ids, never labels (mvp-technical-spec.md section 3.4a).",
+      "$ref": "#/$defs/filterConditions",
+      "minProperties": 1
+    },
+    "filterConditions": {
+      "description": "The field -> value/operator grammar shared by every clause 'filter' and by the subject's 'when' scope (task 022 rework round 2, F7: 'when' previously accepted any object, so its values skipped the per-value rules below).",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/filterValue"
+      }
+    },
+    "filterValue": {
+      "description": "A scalar, an array of scalars (e.g. an id list), a single-operator comparison object, or a two-bound relative-date range. No variant admits a cross-clause variable reference.",
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scalar" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "patternProperties": {
+            "^(>=|<=|>|<|<>|=)$": { "$ref": "#/$defs/scalar" }
+          }
+        },
+        { "$ref": "#/$defs/dateRange" }
+      ]
+    },
+    "dateRange": {
+      "description": "Owner decision D-40 (task 024): a date field may take exactly ONE lower bound ('>=' or '>') plus ONE upper bound ('<=' or '<'), both relative dates, e.g. {\">=\": \"now\", \"<=\": \"now+3d\"}. Compiles to two conditions in the same AND filter -- still one Dataverse filter (CM-3). Nothing more: no third bound, no two lower or two upper bounds, no '=' or '<>', no absolute or numeric bound.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        ">=": { "$ref": "#/$defs/relativeDate" },
+        ">": { "$ref": "#/$defs/relativeDate" },
+        "<=": { "$ref": "#/$defs/relativeDate" },
+        "<": { "$ref": "#/$defs/relativeDate" }
+      },
+      "not": {
+        "anyOf": [{ "required": [">=", ">"] }, { "required": ["<=", "<"] }]
+      }
+    },
+    "relativeDate": {
+      "description": "'now', 'now-{N}d' or 'now+{N}d' (N = 1-4 digits), resolved by the compiler against one window anchor (UTC). The lookahead refuses a newline anywhere: this library's '$' also matches before a trailing newline (review F3).",
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\n)now(?:[-+][0-9]{1,4}d)?$"
+    },
+    "scalar": {
+      "description": "A literal string, number or boolean. Strings MUST NOT begin with '$' -- that token is reserved for cross-clause variable dereferencing (e.g. '$commitment.sprk_receiveddate'), which this grammar does not support (design.md section 8.0.1(a)).",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?!\\$).*$"
+        },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    }
+  }
+}

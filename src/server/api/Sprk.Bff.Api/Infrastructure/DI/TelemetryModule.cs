@@ -52,6 +52,13 @@ public static class TelemetryModule
                 // unregistered meter is silently dropped from the App Insights export (the trap the AI
                 // redesign's task 054 found for the Event Rules meter, which existed unregistered).
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.ComposeSaveTelemetry.MeterName);
+                // Signal-writer failure counter (spaarke-ontology-platform-r1 task 030 rework, owner
+                // directive 2026-10-04): ontology.writer.failures{reason}. The writer fails closed by
+                // design, so a broken credential or a refused write must be observable, not silently
+                // indistinguishable from "no conditions found". MUST stay registered — an unregistered
+                // meter is silently dropped from the App Insights export (the same trap the two comments
+                // above this one each record for a different meter).
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.OntologyWriterTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {

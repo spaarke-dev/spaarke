@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>SUPERSEDED: the gate host and the action that changes something (now tasks 058 + 043)</title>
+    <phase>5 The worklist surface</phase>
+    <gate>superseded 2026-10-07; do not execute</gate>
+    <status>cancelled</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires the human-confirmation boundary; this is where a Work Item becomes an effect in the world.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Hosting a shipped gate in a new surface.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>051</deps>
+    <tags>frontend,bff-api,gate</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Host the confirmation gate in the row so acting on a Work Item passes through it, writes a Decision Record and closes the Signal.</prompt>
+  <role>SPAARKE full-stack developer. The gate is the audit boundary.</role>
+  <goal>Acting on a Work Item goes through the shipped gate, produces a Decision Record and closes the Signal, with dismissal requiring a reason.</goal>
+
+  <context>
+    <background>Row-contract requirement 5: acting writes the Decision Record and closes the Signal; dismissing writes one too, with a reason. The gate (ConfirmationPolicyEngine then GateDecisionV2) already ships.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">Scope: any modal uses SprkModal and its presets. Check MODAL-DECISION-CRITERIA first: OOB navigateTo before a proprietary dialog.</constraint>
+    <constraint source="project">Scope: dismissal REQUIRES a reason in the UI. The schema allows null, but the clustered reasons are the input to the insight that already-approved-offline forty times is a missing fact, not a bad rule.</constraint>
+    <constraint source="project">Scope: every human resolution writes a Decision Record, including a bare completion. Do not add a client-side carve-out that the server does not have.</constraint>
+    <constraint source="project">Scope: nothing is sent or executed without human confirmation. Every action is confirmed in the MVP, which is why the human IS the authority (decision 8).</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Human confirmation gate</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Wire the row action area to the gate endpoint so acting requires confirmation.</step>
+    <step order="2">On confirm, call the Decision Record path and close the Signal with Acted.</step>
+    <step order="3">On dismiss, require a reason, then write a Dismissal-class record and close with Dismissed.</step>
+    <step order="4">Use SprkModal presets for the confirmation and dismissal dialogs.</step>
+    <step order="5">Add tests including the reason-required negative case.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If acting cannot pass through the existing gate without modifying it, STOP and escalate. The gate is the audit boundary and changing it is out of scope here.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Acting requires confirmation">
+      <steps>
+        <step>Click a state-changing action on a Work Item</step>
+      </steps>
+      <expected>A confirmation appears via SprkModal; nothing executes until confirmed.</expected>
+    </test>
+    <test name="Dismissal requires a reason">
+      <steps>
+        <step>Click Dismiss</step>
+        <step>Attempt to submit with an empty reason</step>
+      </steps>
+      <expected>Submission is blocked until a reason is supplied.</expected>
+    </test>
+    <test name="Acting closes the row">
+      <steps>
+        <step>Confirm an action</step>
+      </steps>
+      <expected>The Work Item closes and the outcome surface appears.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Open both dialogs</step>
+      </steps>
+      <expected>Both adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client</tool>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.gate.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a state-changing action, when clicked, then a confirmation is required before anything executes.</criterion>
+    <criterion testable="true">Given a confirmed action, when it completes, then a Decision Record exists and the Signal is closed as Acted.</criterion>
+    <criterion testable="true">Given a dismissal, when submitted with a reason, then a Dismissal-class record exists and the Signal closes as Dismissed.</criterion>
+    <criterion testable="true">Negative: a dismissal with an empty reason is refused by the UI.</criterion>
+    <criterion testable="true">Negative: nothing is sent or executed without human confirmation.</criterion>
+    <criterion testable="true">Negative: a bare completion still writes a record (no client-side carve-out).</criterion>
+    <criterion testable="true">All tests pass; both sides build.</criterion>
+  </acceptance-criteria>
+
+  <notes>SUPERSEDED 2026-10-07 by task 058 (decision wizard UI) and task 043 (decision commit route): D-17 (one BFF commit route, record last) and D-26 (WizardShell in-app) replace a per-action gate host in the row; v4 has no action area in a row (reconciliation W-5, Z-1, Z-6, Z-8 and B.2 row 053). Its reason-required dismissal and "no client-side carve-out" criteria are carried into 058 and 043. Do not run task-execute on this file. spec.md FR-26 requirement 5 and FR-18.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

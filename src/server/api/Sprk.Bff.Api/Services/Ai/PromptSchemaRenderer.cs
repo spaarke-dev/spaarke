@@ -221,6 +221,12 @@ public sealed class PromptSchemaRenderer
             sb.AppendLine();
         }
 
+        // 4.2. Category guidance (spaarke-ontology-platform-r1 task 072 / FR-38). The lookup resolver supplies
+        //      "name — guidance" lines on a side-channel key next to each reference's bare names. They are
+        //      rendered into the PROMPT for BOTH structured and text output; the output schema enum (built from
+        //      the bare names only) is never touched, so constrained decoding still binds to the names.
+        RenderChoiceGuidance(sb, schema.Output?.Fields, preResolvedLookupChoices);
+
         // 4.5. Runtime Input (R7 Wave 11 task 111 / Option B): structured data passed in from
         //      the playbook node's `inputBinding` (resolved by Layer 1). Rendered as a "## Input"
         //      section so the Action JPS prompt body stays pure instructions and the data lives
@@ -953,6 +959,34 @@ public sealed class PromptSchemaRenderer
         }
 
         return resolved;
+    }
+
+    private static void RenderChoiceGuidance(
+        StringBuilder sb,
+        IReadOnlyList<OutputFieldDefinition>? fields,
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices)
+    {
+        if (fields is null || preResolvedLookupChoices is not { Count: > 0 })
+            return;
+
+        foreach (var field in fields)
+        {
+            if (string.IsNullOrWhiteSpace(field.Choices)
+                || !preResolvedLookupChoices.TryGetValue(LookupChoicesResolver.GuidanceKey(field.Choices), out var lines)
+                || lines.Length == 0)
+            {
+                continue;
+            }
+
+            sb.AppendLine($"## Allowed values for '{field.Name}'");
+            sb.AppendLine();
+            sb.AppendLine($"Choose exactly one. Emit only the name before the dash, exactly as written; the text after it describes when to use it.");
+            foreach (var line in lines)
+            {
+                sb.AppendLine($"- {line}");
+            }
+            sb.AppendLine();
+        }
     }
 
     /// <summary>

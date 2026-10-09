@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Event "complete" status code and To Do reassign lookup target, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs and client .ts/.tsx write paths against live Dataverse metadata.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two suspected live defects found by reading code; each must be proven against the real schema before any change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and branch off origin/master; event + To Do write paths only.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,dataverse,frontend,separate-pr</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt097, branch fix/event-complete-and-todo-reassign (off origin/master). Prove, then fix, two suspected broken write paths that the Console's Do lane will rely on.</prompt>
+  <role>SPAARKE engineer. A write path that always fails is a defect to diagnose, never noise (ADR-038 project rule 2).</role>
+  <goal>Completing a task event and reassigning a To Do each write values the live Dataverse schema accepts, proven by a real create-read against spaarkedev1, with tests that would have caught the original defects.</goal>
+
+  <context>
+    <background>Found 2026-10-05 while checking the v4 prototype's actions against the real solution (main session, notes/v4-prototype-vs-solution.md). (1) POST /api/v1/events/{id}/complete (EventEndpoints.cs:92) writes statuscode 5 (EventDto.cs constants: Completed = 5; DataverseWebApiService.cs:530-541), but the live sprk_event statuscode option set reportedly has Completed = 659490002 and no 5. (2) TodoDetail.tsx (~line 645) binds sprk_AssignedTo to /systemusers(...), but the live sprk_todo.sprk_assignedto column reportedly targets contact. Both claims come from code reading only.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: own PR against master. Prove each defect against the LIVE schema first (Dataverse MCP describe / read_query, or Web API metadata, read-only), and if possible reproduce the failure (e.g. a create + update + read on a throwaway record in spaarkedev1, deleted afterwards). Report evidence; if a claim is false, say so and change nothing for it.</constraint>
+    <constraint source="project">Scope: fix the cause, not the symptom. Find every other place that uses the same wrong constant or binding (grep all of src/ for the status constants, statuscode 5 on sprk_event, and sprk_AssignedTo/systemusers binds) and fix each, or list why not. Prefer the existing shared option-set constants if any exist; do not invent a second source of truth.</constraint>
+    <constraint source="ADR-038">Scope: tests asserting an option-set value or a lookup target must be paired with something touching the real schema (project testing rule 1): add or extend a test that reads the live metadata, or a schema-parity test against the checked-in data-model doc that itself was verified live today.</constraint>
+    <constraint source="project">Scope: CLAUDE.md section 10 applies to BFF changes (placement statement, publish size vs a fresh master build from short paths, vulnerable-package check). Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Read both code paths and the live metadata; prove or disprove each defect.</step>
+    <step order="2">Fix every occurrence; add tests that would have caught them.</step>
+    <step order="3">Real create-read (and update) against spaarkedev1 for each fixed path; clean up test records.</step>
+    <step order="4">Build, targeted tests, full BFF suite once (report contention honestly), publish size, open the PR, report back.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each defect is proven or disproven against the live schema, with evidence in the PR body.</criterion>
+    <criterion testable="true">Every occurrence of a proven defect is fixed, or listed with a reason.</criterion>
+    <criterion testable="true">A real write against spaarkedev1 succeeds for each fixed path and is read back with the expected value.</criterion>
+    <criterion testable="true">A test fails on the old code and passes on the new.</criterion>
+    <criterion testable="true">A PR against master is open with the evidence in its body.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-05 by the main session. Owner rule: fix found defects now, in their own PR when unrelated to ontology.</notes>
+
+  <completion>COMPLETED 2026-10-07 (recorded by main session). PR #1302 squash-merged as 87665c3da after 11 rounds and 6 independent reviews (two FAILs, four PASS-WITH-FINDINGS, every finding fixed). Outcome: the BFF events API, broken end to end on master (invented status/priority codes, bad $expand, nonexistent sprk_eventlog.sprk_description column → create/get/list/complete returned 500), works on the real routes against spaarkedev1. Reconciled in round 8 with uac-r2's #1312 route-authorization sweep: ONE mechanism (master's RecordRouteAccessAuthorizationFilter, uniform 404 for no-read), #1312's route deletions (PUT/DELETE/cancel/logs) stand, PATCH /filing is the re-file route. Owner decisions 2026-10-06: (A) Reassigned is completable — one predicate EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned) drives the complete gate and all To Do generation rules; (B) "my events" = owner OR assigned to caller's linked contact OR sprk_createdbyperson = caller, query runs as the caller. Also fixed: live priority values 100000000+, To Do Dismissed value + server-side exclusion, Rule 5 limited to assigned events (would otherwise create a To Do for every Draft event; 0 stale To Dos in dev), all five To Do rules paged (were silently capped at 100; 5,000/rule cap with an honest warning), cancellation propagates, regarding number read from sprk_recordtype_ref for every type (event create, inbound email resolver, analysis stager) with catalog-fault guards and one retry in event create, no caching of missing catalog rows, one shared display-name map. Publish size +5,234 B (36.14 MB both sides, 192 files each), no vulnerable packages. Final CI 41 pass / 0 fail; full BFF suite 18165/0. Owner follow-ups: 401/503 split for unresolved callers (#1312's single 403 contract); Tier 2 ADR Compliance job's 3-minute cap; three other test files still set TodoGenerationService fields by reflection (moved to task 098, which touches the service).</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

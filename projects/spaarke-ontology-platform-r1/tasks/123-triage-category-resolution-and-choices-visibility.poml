@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-010 + ISS-002: triage category resolution honours enabled/active (#1387); every $choices degrade path is counted and logged as an error (#1049) — on this branch</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code (.cs) on the classification path the whole ontology rests on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped changes with named reference implementations (072's AdditionalFilterFor and ChoicesResolutionTelemetry).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only CommunicationEnrichmentService.cs, ActionRunner.cs, LookupChoicesResolver.cs, ChoicesResolutionTelemetry.cs and their tests; no other open task edits them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,bug,email</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close two defects on the triage-classification path. (1) #1387: a disabled or inactive sprk_triagecategory the model still names must never be saved on a communication. (2) #1049: the remaining silent ways $choices resolution can degrade must be visible as a metric and an Error log.</prompt>
+  <role>SPAARKE backend engineer. One predicate for "which categories exist", used everywhere.</role>
+  <goal>ResolveTriageCategoryIdAsync selects only rows the $choices read would offer (statecode 0 AND sprk_enabled true), from ONE shared definition; every path in ActionRunner that leaves $choices unresolved increments ai_choices_resolution_failures_total with a reason and logs at Error; NFR-04 (best-effort, never fatal) is unchanged.</goal>
+
+  <context>
+    <background>Why on THIS branch (not master): task 072 (done, on the ontology branch / Draft PR #1111) added the classifier's enabled filter LookupChoicesResolver.AdditionalFilterFor("sprk_triagecategory") = "sprk_enabled eq true" (ScopeResolverService.cs ~:708 adds "statecode eq 0") and the counter Telemetry/ChoicesResolutionTelemetry.cs (meter Sprk.Bff.Api.Ai, already exported to App Insights). Neither exists on master; on master the classifier still sees disabled rows, so #1387 only bites once this branch lands.
+#1387: CommunicationEnrichmentService.ResolveTriageCategoryIdAsync (~:634-675 on master) runs an exact-name QueryExpression and a normalized fallback over up to 200 rows; neither filters statecode or sprk_enabled.
+#1049: ChoicesResolutionTelemetry.RecordFailure is called only inside LookupChoicesResolver. ActionRunner.ResolveLookupChoicesAsync and EnrichOutputSchemaWithResolvedChoices (src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs, LogWarning + return null at ~:271, :279, :319, :347, :384, :393, :401, :492) degrade with a Warning only. Issue text: defer-issues.md ISS-002, ISS-010.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Telemetry/ChoicesResolutionTelemetry.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs (only if the shared predicate must be exposed in QueryExpression form)</file>
+      <file role="canonical-reference">LookupChoicesResolver.AdditionalFilterFor and ChoicesResolutionTelemetry.RecordFailure call sites</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (#1387): both queries in ResolveTriageCategoryIdAsync add statecode = 0 and sprk_enabled = true, taken from one definition shared with the $choices read (expose it from LookupChoicesResolver or a constant beside it); never a second hand-written copy of the predicate. An unmatched or disabled name leaves the category unset (as today); never fabricate a row (ADR-024).</constraint>
+    <constraint source="project">Scope (#1049): every degrade path in ActionRunner listed above records ChoicesResolutionTelemetry.RecordFailure with a reason constant (add constants for missing-scope-factory, missing-resolver, non-JPS, schema-enum-injection) and logs at Error with the action id and reference. Do NOT make resolution fatal and do not change what is returned (NFR-04). The intentional "no $choices in this prompt" case is not a failure and must not count.</constraint>
+    <constraint source="owner">Owner approval required for the alert: creating an Azure Monitor alert rule on ai_choices_resolution_failures_total is an Azure change. Draft the rule (query, threshold, action group) in the task notes and ask; reuse whatever alerting task 120 sets up for D-78 if it exists by then.</constraint>
+    <constraint source="project">Lands on this branch (docs/ontology-platform-design / Draft PR #1111), not master. CommunicationEnrichmentService.cs belongs to the email project: run /conflict-check and name its open PRs in the completion record. BFF hygiene: publish size vs a fresh build of this branch's base, file counts, no new CVE. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; read the files above.</step>
+    <step order="1">#1387: shared predicate, both queries, tests: a disabled row and an inactive row named exactly and by a formatting variant resolve to null; an enabled active row still resolves.</step>
+    <step order="2">#1049: counters + Error logs on each ActionRunner degrade path; tests assert each path records its reason and still returns the degraded (non-fatal) result; the intentional no-$choices case records nothing.</step>
+    <step order="3">Live (spaarkedev1, read-only): confirm the shared predicate's OData form returns the same category set as the classifier's $choices read; record counts.</step>
+    <step order="4">Full BFF unit suite once (run_in_background); publish size; commit on this branch; ask for the alert approval.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A category name matching only a disabled (sprk_enabled false) or inactive (statecode 1) row resolves to no category, by exact and by normalized match; an enabled active row resolves as before (tests fail on the old code).</criterion>
+    <criterion testable="true">The enrichment queries and the $choices read take their row predicate from one definition (no duplicated "sprk_enabled" literal in CommunicationEnrichmentService.cs).</criterion>
+    <criterion testable="true">Each ActionRunner degrade path increments ai_choices_resolution_failures_total with its own reason and logs at Error; resolution stays non-fatal (tests); a prompt without $choices records nothing.</criterion>
+    <criterion testable="true">Full BFF suite green; publish-size delta recorded; the alert rule is drafted and either created after owner approval or left awaiting it in the task record.</criterion>
+    <criterion testable="true">Negative: no change to the classifier's prompt, schema enum or the 072 resolver behaviour; no Azure resource created without approval. Cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Closes #1387 and #1049 when this branch merges (put "Closes #1387, #1049" in PR #1111's body).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

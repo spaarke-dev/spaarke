@@ -1,0 +1,18 @@
+# Task 111 - deviations and findings (2026-10-08)
+
+1. **DocumentRelationshipViewer never passed maxWidth/height.** The POML/modal note says 1280px/85vh -> `lg`; App.tsx:830 passes none, so it already renders at the default `wizard` size. Left unchanged (mapping to `lg` would be a visual change, not a preservation). Same for external-spa DocumentUploadPage (no overrides).
+2. **Prop plumbing.** Removing the raw strings required removing them from `CreateRecordWizard` (props + types) and `DocumentEmailWizard`; `DocumentEmailWizard` gained a `size?: SprkModalSize` pass-through so the PCF can use `lg` (CLAUDE.md 11: cost of doing nothing = the PCF would lose its preview-matching footprint). Consumer 1 needs no prop (default).
+3. **Test.** `WizardShell.sprkModal.test.tsx`: the two legacy-prop tests replaced by guard tests (raw props ignored; the removed SprkModal prop ignored; type files do not declare them). Mutation-checked. The removed prop name is built at runtime so `git grep legacySize src` is empty, per the criterion.
+4. **Characterization snapshot** regenerated: only atomic class hashes changed (stepper token swap), no structural change.
+5. **External SPA NOT deployed (stopped, needs owner).** (a) The current source requires CIAM config (`VITE_MSAL_AUTHORITY`, tenant, client, BFF scope); the repo has only `#{...}#` placeholders and the gitignored `.env.production.local` does not exist. The skill's value list predates the CIAM authority variable. (b) The portal's deployed `app.js` is 1,012,979 B and predates CIAM config; master's is 1,342,659 B, so this would be a multi-month jump of unrelated SPA changes with no ability to log in and verify. Needs the owner to supply CIAM values / confirm the jump.
+6. **CI.** PR #1415: all client gates pass (Client Quality, Lint, Compose gates, Arch, Xrm guard, Security). Red: Tier 1 Compile (Debug), Build & Test, Router - caused by master itself (CS0411 in tests/integration/.../Events/EventRoutesLiveTests.cs:407; master CI on 23c359eaf is red too). Filed #1418. Not caused by this PR (no C# changed).
+7. **PublishAll.** `pac solution import --publish-changes` (the pcf-deploy skill command) publishes all customizations in dev. Flagged because the brief said no tenant-wide PublishAllXml.
+8. **Deploy-vs-master safety.** Dev copies were last modified 2026-10-06 (and 2026-05-19 for DRV), before the latest master commits touching these surfaces; no evidence of a newer-than-master deploy. Could not prove byte-wise (builds are not reproducible).
+9. **Pre-existing, not fixed here:** `SemanticSearchControl/Solution/pack.ps1` was stale at 1.1.80 (bumped to 1.1.82).
+
+## Owner decisions 2026-10-08 (main session)
+
+- **External SPA:** not deployed by 111. The owner asked whether the SPA project should do it. Answer: yes. The SPA's wizard size is unchanged, nothing in R1 depends on the SPA deploy, and deploying it means CIAM config plus months of other projects' changes. Handed off as #1428 for the SPA project's next dev deploy.
+- **Live rows 1-3, 5 + one ribbon wizard:** the owner runs them through the checklist page https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV (db `results/<r1..r5>`, `status/final`). The main session reads the results back into `deploy-log.md`.
+- **Tenant-wide publish:** `pac solution import --publish-changes` published all customizations in spaarkedev1. This was reported to the owner and recorded as a project gotcha.
+- **Master compile error #1418:** caused by #1359 merging after #1408. Fixed by PR #1424 (owner pre-approved the merge when green).

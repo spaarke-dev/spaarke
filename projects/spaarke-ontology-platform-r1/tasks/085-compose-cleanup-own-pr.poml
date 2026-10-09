@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Compose cleanup, own PR (C-5, C-16)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified cleanup with named files and a verification path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree or the other wave-I tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt085, branch fix/compose-dead-annotation-helpers (already created off origin/master). Land C-5 and fix C-16.</prompt>
+  <role>SPAARKE full-stack developer. Cleanup is convergence and deletion with evidence, never a behaviour change in disguise.</role>
+  <goal>The function that already lost comment data on save is gone, and the stale comment claiming a live hook is unreachable tells the truth.</goal>
+
+  <context>
+    <background>C-5: composeCommentThreadsToDocxAnnotations already caused silent comment loss on save and was still barrel-exported. Task 080 deleted it, its thin wrapper and anchoredAnnotationsToDocxAnnotations on the ontology branch (commit 1c56cd29b) after confirming zero production callers. C-16: ComposeEditor.tsx (around lines 4085-4089 when audited) claims useComposeCommentThreads is unreachable; it is live.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111. Owner decision 2026-10-03: cleanup unrelated to ontology is fixed now (never deferred to an issue) but kept off the ontology branch so that PR stays reviewable.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: run the affected package tests BEFORE applying any change (that run is the master baseline) and AFTER. Report both. A failure is pre-existing only if it appears in the baseline run; never assert pre-existing without that evidence.</constraint>
+    <constraint source="project">Scope: install dependencies with npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md section 12). Discard every package-lock.json diff that npm install produces; lockfile churn is never part of this PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify. If a pre-commit hook fails, fix the cause (usually a missing node_modules).</constraint>
+    <constraint source="project">Scope: you CANNOT write .claude/ paths. If one is needed, stop and report the exact text for the main session.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup with evidence</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/cleanup-placement-plan.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
+    <step order="2">Apply the C-5 changes already written and verified on the ontology branch: git diff 1c56cd29b~1 1c56cd29b -- &lt;paths below&gt; | git apply. The commit is in the shared object store, so it is reachable from this worktree. Path: src/client/shared/Spaarke.Compose.Components/</step>
+    <step order="3">C-16: find the comment in ComposeEditor.tsx claiming useComposeCommentThreads is unreachable (line numbers may have moved), confirm the hook is live by tracing its callers, and correct the comment to state what is true.</step>
+    <step order="4">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
+    <step order="5">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="6">Report back: the PR URL, each acceptance criterion with evidence, files changed, the baseline and after test output, and any escalation.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install and run package tests</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A repo-wide grep finds no composeCommentThreadsToDocxAnnotations, composeSessionCommentThreadsToDocxAnnotations or anchoredAnnotationsToDocxAnnotations outside git history.</criterion>
+    <criterion testable="true">The ComposeEditor.tsx comment about useComposeCommentThreads matches the hook's real reachability, with the caller cited.</criterion>
+    <criterion testable="true">A pull request against master is open, ready for review, with the item ids in its body.</criterion>
+    <criterion testable="true">Negative: the PR contains no package-lock.json changes and no file outside this task's scope.</criterion>
+    <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">PR #1117 (30f364ad3 + 01ae006c3). C-5 helpers deleted with zero production callers re-confirmed; C-16 comment corrected to cite the live caller (toolbar Add Comment toggle, ComposeEditor.tsx ~3820). Follow-up removed stale anchoredAnnotationsToDocxAnnotations mock keys from 7 ComposeWorkspace test suites; remaining grep hits are doc-comments only. Baseline 61/110 suites failed to load (unbuilt @spaarke/auth dist), after 56/110: five suites newly load because a dead import chain was cut; 0 test failures either run. The 7 edited suites do not load locally, so PR #1117 CI is where they actually execute.</completion>
+  <notes>Compose is governed by ADR-049; this PR deletes dead helpers and corrects a comment, and changes no save-path behaviour.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

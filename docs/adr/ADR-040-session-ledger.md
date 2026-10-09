@@ -1,6 +1,7 @@
 # ADR-040: Session Ledger
 
 - **Status**: **Accepted** (2026-07-05, at gate G-P0 of `spaarke-ai-architecture-redesign-r1`, per this ADR's own promotion condition — "moves to Accepted when migration phase P0 ships"). Evidence: typed ledger model + Redis/Cosmos persistence deployed to `spaarke-bff-dev`; ledger round-trip incl. file references test-proven; boot reconciliation live. Full package: `projects/spaarke-ai-architecture-redesign-r1/notes/g-p0-evidence.md`. (Originally Proposed 2026-07-05, accepted-in-principle by operator with the v0.4 converged target.)
+- **Amended**: 2026-07-08 (inline size-cap enforcement) · **2026-10-03** (a durable, matter-scoped decision ledger — `sprk_decisionrecord` — is a **sibling** of `SessionGate`, linked by `sprk_decisionrecord.sprk_gatesessionid`; `spaarke-ontology-platform-r1` D-9, path B per root `CLAUDE.md` §6.5)
 - **Deciders**: Operator + `spaarke-ai-code-audit-r1` convergence review (2026-07-05)
 - **Concise version**: [`.claude/adr/ADR-040-session-ledger.md`](../../.claude/adr/ADR-040-session-ledger.md) (the operational MUST/MUST-NOT surface — binding)
 
@@ -38,6 +39,22 @@ Enforced behavior (`SessionLedger.CapInlinePayload`, applied by BOTH Output writ
 - When the blob/SPE-pointer offload lands, the marker becomes a pointer and the content stops being lossy; the enforcement seam and cap constant are unchanged by that upgrade.
 
 Memory model: in-turn context = digest + last-N turns + referenced entries; beyond-window recall is a tool call (`session.recall`, `memory.*` over existing pins) — memory scales by retrieval, not by prompt growth.
+
+### Sibling durable decision ledger (amended 2026-10-03, `spaarke-ontology-platform-r1` D-9, path B)
+
+**What prompted the amendment.** `spaarke-ontology-platform-r1` needed a record answering *"who decided what about this matter, under which policy version, on what evidence — and why did nothing happen?"* The Decision Record it designed (`sprk_decisionrecord`, built 2026-10) visibly overlapped ADR-040's `Gate` entry, and root CLAUDE.md §6.5 forbids proceeding past that kind of overlap silently. The owner deferred the path on 2026-09-30 with an explicit condition — *"evaluate/revise this ADR once we get the solution actually decided"* — and chose **path B (amendment)** on 2026-10-03 once the Decision Record's shape (D-2) was settled and the table existed.
+
+**The actual relationship.** This ledger is **session-scoped**: it answers *what happened in this chat*. `SessionGate` carries `GateId`, `Kind`, `Status`, `Turn`, `BindingId`, `SideEffectClass`, `MissingFields` and `OutputKey` — and **no authority, no policy version, no evidence snapshot, no confirmer identity and no record scope**. That is not an oversight in ADR-040; a gate marker exists to run a turn's approval state machine, and it does that correctly. But it means the session ledger **structurally cannot** answer an object-scoped question, and no amount of querying it will produce *"everything ever decided about Matter 4471."* Its hot tier has also expired by the time anyone asks.
+
+So the two are **siblings over one decision**, each owning a different half: `SessionGate` owns the **gate state machine** (`pending → confirmed | rejected | expired | superseded`, keyed by session and turn, TTL-bounded); `sprk_decisionrecord` owns **decision authority** (`sprk_authority`, `sprk_policyversion`, `sprk_factsnapshot`, `sprk_confirmedby`, `sprk_recordclass`, keyed by matter, durable). Neither owns the other's half, and neither is a projection of the other. The join is `sprk_decisionrecord.sprk_gatesessionid` → `SessionGate.GateId`, **nullable by design**: most Decision Records originate in the worklist rather than in chat, and a decision with no gate is a normal decision, not a broken one.
+
+The operational MUST / MUST NOT surface is in the [concise version](../../.claude/adr/ADR-040-session-ledger.md#amendment-2026-10-03--a-durable-decision-ledger-is-a-sibling-not-a-competitor) and is binding. In summary: authority fields go to the durable record and never to `SessionGate`; `sprk_gatesessionid` is set when a gate did originate the decision; the Decision Record is never read as session context (the `ledger_resolution` seam does not reach it); and the existing "no second session-state store" MUST NOT does not reach a matter-scoped durable record, which has a different key, lifetime and consumer.
+
+**Deliberately out of scope.** This amendment does not make `SessionGate` durable, does not add any field to any ledger entry type, does not touch storage-precedes-rendering / addressability / `disposition` / the 128 KB inline cap / the ADR-015 tier mapping, and does not generalize ADR-040 into a ledger ADR. It names **one** sibling and **one** link. A second durable-ledger consumer should extend this section rather than re-argue the principle.
+
+**Alternatives considered for this amendment.** (A) A project-scoped exception under §6.5 — rejected because a second durable-ledger consumer is foreseeable and an exception would have to be re-argued each time it appeared. (C) Comply as written — rejected because complying means writing decision authority into a chat-session ledger that has no fields for it and expires, which is a worse system than the documented deviation. Broadening ADR-040 into a general ledger ADR was also rejected: the project needs one named sibling, and a wide ADR change made to unblock one project is the failure mode §6.5 exists to prevent.
+
+**Precedent, not invention.** `sprk_emailreviewlog` has shipped as a durable, append-only, per-decision authority record since the email proposal-apply path landed — a durable sibling already exists in production, written by code that re-validates at apply time and resolves the caller server-side. This amendment names an established pattern rather than introducing one, which is also why its blast radius is documentation rather than migration: **no existing consumer depends on `SessionGate` being the only record of a decision**, because it already is not.
 
 ## Alternatives considered
 

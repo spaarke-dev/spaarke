@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin slice (a): Rules list and rule page read-only, On/Off, Retire</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>104, 033, 034, 057, 026 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Admin write routes (enable, retire) that close live Signals, plus new UI.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read views plus two writes over closure semantics task 033 already owns.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>104, 033, 034, 057, 026</deps>
+    <tags>bff-api,frontend,admin,endpoints</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Rules area of Ontology admin: a list (All, Decide, Do, Needs a look) and a read-only rule page, plus On/Off and Retire, with every write going through the BFF as the caller.</prompt>
+  <role>SPAARKE full-stack developer.</role>
+  <goal>An administrator can see every rule, read its condition in words and formal form, wording, plan, scope and noise, behaviour, versions and change history, switch it On or Off, and retire it with a reason.</goal>
+
+  <context>
+    <background>D-22 slice (a) and owner decision 2 (2026-10-05): read-only Rules plus On/Off and Retire. Reconciliation M-3..M-5: Off stops raising and open items close at the next run; Retire requires a reason, closes open items at once as PolicyRetired, writes no Decision Record, and is an audited admin change (FR-16 as amended). #43: change history is built from the immutable sprk_policyversion rows (sprk_authoredby, createdon) plus sprk_policy's modifiedon/modifiedby, not from the audit log no Spaarke role can read. #44: Health-style numbers are limited to what is captured (action rate per version from sprk_resolutiontype per H-7, open items, last fired).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminRulesService.cs</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/Rules</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-22): every write (enable, disable, retire) runs AS THE CALLER (IDataverseUserClient), so Dataverse enforces the Spaarke Ontology Administrator role and audit names the human; no service-identity write.</constraint>
+    <constraint source="project">Scope: Retire sets statuscode Retired with sprk_retiredreason (task 007) and then calls task 033's PolicyRetired closure immediately; Off sets sprk_enabled = No only (closure at the next pass). Neither writes a Decision Record.</constraint>
+    <constraint source="project">Scope: the rule page's condition text comes from task 026's describer; wording, plan and versions are read from the rows; nothing on the page is editable except On/Off and Retire.</constraint>
+    <constraint source="project">Scope: "Needs a look" = action rate below one half over the version in force, using v4's definition acted / (acted + dismissed), 90 days, "too few to judge" below 5 (reconciliation H-7). No calibration or recall metrics here.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entries for every new route; single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Ontology admin</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 8 L301) in notes.</step>
+    <step order="1">Implement the read service and routes (list, rule page) and the enable/disable/retire writes as the caller.</step>
+    <step order="2">Build the Rules list and rule page with the task 057 kit.</step>
+    <step order="3">Integration tests as the admin and as a Console User; a retire closing an open Signal immediately.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If retiring needs a privilege the administrator role does not hold after task 008, STOP and report it; do not write with the service identity.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No route reads or writes sprk_policy for administration (022-progress: "No BFF write path for sprk_policyversion exists today"); the model-driven app is read-only inspection (D-22).</existing>
+    <extension>Closure reuses task 033; text reuses task 026; UI reuses task 057's kit. The routes are new because no admin surface exists.</extension>
+    <cost-of-doing-nothing>Rules can only be switched or retired by editing rows in the model-driven app, which D-22 made read-only; Retire with a reason and immediate closure has no path.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Retire closes at once">
+      <steps>
+        <step>Retire a rule with an open item, giving a reason</step>
+      </steps>
+      <expected>The rule shows Retired with the reason; the open item closes as rule retired immediately.</expected>
+    </test>
+    <test name="Read-only page">
+      <steps>
+        <step>Open a rule page</step>
+      </steps>
+      <expected>Condition in words and formal form, wording, plan, versions and change history; no edit controls except On/Off and Retire.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>All surfaces adapt.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="npm">Build the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminRulesService.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/Rules</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the admin, when the Rules list loads, then every policy appears with lane, On/Off, version in force and the All / Decide / Do / Needs a look filters.</criterion>
+    <criterion testable="true">Given Off, when set, then sprk_enabled is No and open Signals are left for the next pass; given Retire with a reason, then statuscode is Retired, sprk_retiredreason is set and open Signals are PolicyRetired immediately with no Decision Record.</criterion>
+    <criterion testable="true">Negative: Retire without a reason is refused.</criterion>
+    <criterion testable="true">Negative: a Console User calling any write route is refused by Dataverse (403 from the route); an unresolved caller gets 403; every route is in the census.</criterion>
+    <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-16 (amended), FR-57; D-22; reconciliation M-3..M-5, H-7; #43, #44.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

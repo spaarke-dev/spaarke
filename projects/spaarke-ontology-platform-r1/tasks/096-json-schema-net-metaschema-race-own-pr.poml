@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Json.Schema.Net concurrent Evaluate race in AI tool-schema validation, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs code on a validation path; quality gates apply.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency defect in a third-party library; the fix must be proven, not assumed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and branch off origin/master; AI tool-schema files only.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,concurrency,separate-pr</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt096, branch fix/json-schema-metaschema-race (off origin/master). Make every Json.Schema.Net Evaluate call on a shared JsonSchema instance safe under concurrency.</prompt>
+  <role>SPAARKE engineer. A validator that can return a false "valid" under load is a fail-open defect.</role>
+  <goal>No Json.Schema.Net Evaluate call in Sprk.Bff.Api can return a false IsValid=true, or throw from inside the library, because another thread is evaluating the same schema instance.</goal>
+
+  <context>
+    <background>Found 2026-10-05 by the independent re-review of task 022. Json.Schema.Net 7.3.4 JsonSchema.Evaluate is not thread-safe on a shared instance: against the Existence rule schema about 40-48% of 2,000 concurrent evaluations of an invalid body returned IsValid=true, and one run threw IndexOutOfRangeException from SchemaConstraint.BuildEvaluation. Task 022 fixed its own call with a lock (RuleBodySchemaValidator.EvaluationGate). The reviewer reproduced the same race on MetaSchemas.Draft202012.Evaluate (3 false-valid out of 2,000 unlocked concurrent evaluations of an invalid schema document), which is called without a lock at Services/Ai/AnalysisToolService.cs:527 and Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs:919. Malformed tool schemas can therefore pass validation under concurrency.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: own PR against master. Inventory EVERY Evaluate call on a JsonSchema instance in src/server/api/Sprk.Bff.Api (and shared libraries it uses), not only the two named sites; for each, say whether the instance is shared across threads.</constraint>
+    <constraint source="project">Scope: prove the race on master first with a repro outside the repo (or a permanent concurrent regression test), then fix, then show the same repro is clean.</constraint>
+    <constraint source="project">Scope: prefer one shared, small mechanism over a hand-rolled lock per call site, but do not create a new abstraction if a lock at each of two sites is simpler; justify per CLAUDE.md section 11. Check whether a newer Json.Schema.Net (JsonSchema.Net) version documents thread safety; a package bump is acceptable only with a CVE check and publish-size measurement per CLAUDE.md section 10.</constraint>
+    <constraint source="project">Scope: do NOT touch the ontology branch or Services/Signals; task 022 owns RuleBodySchemaValidator. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Inventory all Evaluate call sites and the lifetime of each schema instance.</step>
+    <step order="2">Reproduce the race on master.</step>
+    <step order="3">Fix every shared-instance site; add a permanent concurrent regression test per fixed site (ADR-038 KEEP path).</step>
+    <step order="4">Build, run the affected tests and the full BFF suite once (report contention honestly), measure publish size if a package changed, open the PR, report back.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The race is shown on master with evidence, at each fixed site or its shared schema instance.</criterion>
+    <criterion testable="true">Every shared-instance Evaluate call is serialized or otherwise made safe; the inventory is in the PR body.</criterion>
+    <criterion testable="true">A concurrent regression test fails without the fix and passes with it.</criterion>
+    <criterion testable="true">A PR against master is open with the evidence in its body.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-05 by the main session. Owner rule: fix found defects now, in their own PR when unrelated to ontology.</notes>
+
+  <completion>COMPLETED 2026-10-05 (recorded by main session). PR #1294 merged as 23bdc5679, fixes issue #1295. Both Json.Schema.Net meta-schema Evaluate sites (AnalysisToolService.MapJsonSchema, ToolHandlerToAIFunctionAdapter.ValidateAgainstMetaSchema) share one MetaSchemas.Draft202012 instance, so per-site locks still leaked 75-111/1000; one shared gate in Draft202012MetaSchemaValidator gave 0 false-valid over 18 rounds. Independent review PASS-WITH-FINDINGS, all fixed: the gate is on the per-chat-message path (not session start), so a bounded verdict cache keyed by exact schema text (1,024 entries / 2M chars) checked before the lock (owner approved ADR-009 path A, spec ADR Tensions); regression tests renamed Issue1295_*; ArchTests guard against direct MetaSchemas use; publish size +437 bytes; full suite 3 unrelated timeouts that passed alone and on master.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
