@@ -568,7 +568,7 @@ if ($BatchIntakeFile) {
   $schemaPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/intake.schema.json'
 
   # Validate against schema with ajv-cli + ajv-formats via npx (no global install needed; same invocation as the
-  # provisioning-prereqs-validate CI workflow). ajv-formats makes `format: uuid` on tenantId / subscriptionId
+  # `prereqs` job in ci-router.yml). ajv-formats makes `format: uuid` on tenantId / subscriptionId
   # actually checked — the previous `--strict false` silently skipped it (fixed 2026-09-30).
   # Fallback if npx is unavailable: any Draft 2020-12 validator that checks formats (e.g., check-jsonschema).
   $validationOutput = & npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv validate `
