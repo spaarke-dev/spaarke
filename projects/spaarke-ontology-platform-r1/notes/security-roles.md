@@ -736,3 +736,11 @@ Rule for every other environment: apply these role edits **before** deploying a 
    "Delete = None even for the admin".
 7. **Not done here:** the read-only form was not checked in a browser (no Chrome session). It was verified from the
    published form XML.
+
+## 2026-10-09 — D-108: writer role grants for revise-budget (task 044)
+
+Owner-approved (2026-10-09) after the #1515 review. Applied by the main session to the root copy of **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc` (BU `06fbf21c-…`) via `AddPrivilegesRole` at 2026-10-09T15:04:10Z (HTTP 204). Read back with `RetrieveRolePrivilegesRole` before and after: **46 → 50; added exactly** `prvAppendsprk_BudgetRevision`, `prvAppendTosprk_Budget`, `prvAppendToUser`, `prvAssignsprk_BudgetRevision`, all **Global** (matching the role's other 46, all Global); nothing removed, no depth changed. No other role touched. Repo `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` updated to match.
+
+- Why: the writer creates the revision with lookups to the budget (AppendTo budget, Append revision) and to the reviser (`sprk_revisedby` → systemuser; the writer's AppendToUser was Local via Basic User, so revisers in another BU failed), and must own a Secure-matter revision inside the wall (Assign revision).
+- Supersedes task 008's "no privilege on `sprk_budget`" for **AppendTo only**: AppendTo links to a budget and cannot change its amount; Write on `sprk_budget` is still not granted (the amount is written as the signed-in user, D-18).
+- Decision Record append-only is unaffected (no Write/Delete on `sprk_decisionrecord` added).

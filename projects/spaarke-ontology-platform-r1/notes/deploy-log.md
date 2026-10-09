@@ -161,3 +161,7 @@ Owner D-100: retire the notification playbooks (the Daily Briefing does not read
 - Before (11:37Z, `az monitor scheduled-query show`): `notification-playbook-total-failure-dev` in `spe-infrastructure-westus2`, enabled, severity 1.
 - Action: `az monitor scheduled-query delete -g spe-infrastructure-westus2 -n notification-playbook-total-failure-dev --yes` at 2026-10-09T11:37:11Z.
 - After: `show` returns `ResourceNotFound`. The bicep that created it is deleted by PR #1493 (task 131), so no deploy recreates it.
+
+## 2026-10-09 - D-108: writer role grants (spaarkedev1, main session)
+
+Spaarke Ontology Service (root copy `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`): 46 -> 50 privileges at 15:04:10Z (`AddPrivilegesRole`, HTTP 204): Append budget revision, AppendTo budget, AppendTo User, Assign budget revision, all Global. Before/after read back with `RetrieveRolePrivilegesRole`: only those four added. Details: notes/security-roles.md.

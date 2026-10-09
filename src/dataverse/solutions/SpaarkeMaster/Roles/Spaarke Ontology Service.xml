@@ -6,8 +6,10 @@
   <Description>Spaarke ontology service</Description>
   <SummaryOfCoreTablePermissions>Create, read, write, append</SummaryOfCoreTablePermissions>
   <RolePrivileges>
+    <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Global" />
     <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Global" />
     <RolePrivilege name="prvAppendsprk_Signal" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Budget" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Communication" level="Global" />
     <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Global" />
@@ -16,6 +18,8 @@
     <RolePrivilege name="prvAppendTosprk_Signal" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Global" />
     <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Global" />
+    <RolePrivilege name="prvAppendToUser" level="Global" />
+    <RolePrivilege name="prvAssignsprk_BudgetRevision" level="Global" />
     <RolePrivilege name="prvAssignsprk_DecisionRecord" level="Global" />
     <RolePrivilege name="prvAssignsprk_Signal" level="Global" />
     <RolePrivilege name="prvCreateSharePointData" level="Global" />
