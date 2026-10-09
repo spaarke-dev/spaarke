@@ -108,13 +108,14 @@ public static class AnalysisServicesModule
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
         services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
-        // unified-access-control-r2 task 177 (#1510) — the ONE derivation of an index chunk's parent from the document
-        // row, for Send-to-Index and every index request that carries no parent (the enqueuer above on its OBO path,
-        // RagIndexingJobHandler on the app-only path). TRULY UNCONDITIONAL like the enqueuer that consumes it (§10 F.1).
-        // Singleton over singletons; AddCoreAncestorResolver is TryAdd-only and is called here so no composition has the
-        // enqueuer without the event hop's resolver.
+        // unified-access-control-r2 task 177 (#1510) — the ONE decision of an index chunk's parent (the record that governs
+        // the document), for Send-to-Index, /index-file, the communication grounding and every index request that carries
+        // no parent (the enqueuer above on its OBO path, RagIndexingJobHandler on the app-only path). TRULY UNCONDITIONAL
+        // like the enqueuer that consumes it (§10 F.1). Scoped: it reads secure flags through ExternalParticipationService,
+        // a typed HttpClient (AddExternalAccess, unconditional in Program.cs). AddCoreAncestorResolver is TryAdd-only and is
+        // called here so no composition has the enqueuer without the event hop's resolver.
         Sprk.Bff.Api.Services.Dataverse.Extensions.MetadataServiceExtensions.AddCoreAncestorResolver(services);
-        services.TryAddSingleton<DocumentIndexParentResolver>();
+        services.TryAddScoped<Sprk.Bff.Api.Services.Dataverse.DocumentIndexParentResolver>();
 
         // unified-access-control-r2 task 166 f1-v1 (owner round 37 item 1) — the PublicContracts facade through which
         // DocumentContainerRelocator (CRUD code, ADR-013) re-indexes a MOVED file and removes the old item's chunks.
