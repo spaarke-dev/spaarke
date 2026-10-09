@@ -18,7 +18,14 @@ jest.mock('../../config/runtimeConfig', () => ({
   getBffBaseUrl: () => 'https://bff.example.test',
 }));
 
-import { createReport, deleteReport, exportReport, fetchEmbedToken, fetchReports } from '../reportingApi';
+import {
+  createReport,
+  deleteReport,
+  exportReport,
+  fetchEmbedToken,
+  fetchReports,
+  fetchUserPrivilege,
+} from '../reportingApi';
 
 describe('reportingApi failures', () => {
   let error: jest.SpyInstance;
@@ -104,5 +111,31 @@ describe('reportingApi failures', () => {
     const result = await deleteReport('r1');
 
     expect(result).toEqual({ ok: false, error: detail, status: 404 });
+  });
+
+  // A bare 404 (no ProblemDetails detail) means different things per call: a missing report for the
+  // per-report calls, the reporting module gate for the catalog list and the privilege probe.
+  it('a bare 404 on a report call reads "The report was not found."', async () => {
+    mockFetch.mockRejectedValue(new ApiError('HTTP 404', 404));
+
+    const result = await fetchEmbedToken('r1');
+
+    expect(result).toEqual({ ok: false, error: 'The report was not found.', status: 404 });
+  });
+
+  it('a bare 404 on the catalog list reads "Reporting is not available", not "report not found"', async () => {
+    mockFetch.mockRejectedValue(new ApiError('HTTP 404', 404));
+
+    const result = await fetchReports();
+
+    expect(result).toEqual({ ok: false, error: 'Reporting is not available in this environment.', status: 404 });
+  });
+
+  it('a bare 404 on the privilege probe reads "Reporting is not available"', async () => {
+    mockFetch.mockRejectedValue(new ApiError('Not Found', 404, { title: 'Not Found', status: 404 }));
+
+    const result = await fetchUserPrivilege();
+
+    expect(result).toEqual({ ok: false, error: 'Reporting is not available in this environment.', status: 404 });
   });
 });

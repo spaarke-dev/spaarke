@@ -78,11 +78,20 @@ export type ApiFailure = Extract<ApiResult<never>, { ok: false }>;
 
 const SIGN_IN_EXPIRED = "Your sign-in has expired. Refresh the page to sign in again.";
 
+/** The 404 sentence for a call about one report (embed token, export, create, update, delete). */
+const REPORT_NOT_FOUND = "The report was not found.";
+
+/**
+ * The 404 sentence for the module-level calls (catalog list, privilege/status): there the 404 is the reporting
+ * module gate (sprk_ReportingModuleEnabled off — see ModuleGate), not a missing report.
+ */
+const REPORTING_NOT_AVAILABLE = "Reporting is not available in this environment.";
+
 /** The sentence for an HTTP failure the server did not explain (no ProblemDetails `detail`). */
-function statusSentence(status: number): string | null {
+function statusSentence(status: number, notFound: string): string | null {
   if (status === 401) return SIGN_IN_EXPIRED;
   if (status === 403) return "You do not have permission to do this.";
-  if (status === 404) return "The report was not found.";
+  if (status === 404) return notFound;
   if (status === 409) return "The report was changed at the same time by someone else. Refresh and try again.";
   if (status === 429) return "Too many requests. Wait a moment and try again.";
   if (status >= 500) return "The reporting service is temporarily unavailable. Try again in a few minutes.";
@@ -90,10 +99,10 @@ function statusSentence(status: number): string | null {
 }
 
 /** The server's `detail`, else the status sentence, else its `title`, else "Request failed (HTTP n)." */
-function httpFailure(status: number, problem: IProblemDetails | null): ApiFailure {
+function httpFailure(status: number, problem: IProblemDetails | null, notFound: string): ApiFailure {
   const detail = typeof problem?.detail === "string" ? problem.detail.trim() : "";
   const title = typeof problem?.title === "string" ? problem.title.trim() : "";
-  const error = detail || statusSentence(status) || title || `Request failed (HTTP ${status}).`;
+  const error = detail || statusSentence(status, notFound) || title || `Request failed (HTTP ${status}).`;
   return { ok: false, error, status };
 }
 
@@ -101,15 +110,17 @@ function httpFailure(status: number, problem: IProblemDetails | null): ApiFailur
  * The result for a failure `authenticatedFetch` THREW. It never returns a non-2xx Response: it throws
  * `ApiError` (status + ProblemDetails) or, once its 401 retries are spent, `AuthError`. Never the error's
  * class name or `String(err)` — the components put `error` straight into the message the user reads.
+ *
+ * @param notFound  The sentence for a 404 the server did not explain — what "not found" means for this call.
  */
-export function failureFromError(err: unknown): ApiFailure {
-  if (isApiError(err)) return httpFailure(err.status, problemOf(err));
+export function failureFromError(err: unknown, notFound: string = REPORT_NOT_FOUND): ApiFailure {
+  if (isApiError(err)) return httpFailure(err.status, problemOf(err), notFound);
   if (isAuthFailure(err)) return { ok: false, error: SIGN_IN_EXPIRED, status: 401 };
   return { ok: false, error: "The reporting service could not be reached. Check your connection and try again." };
 }
 
 /** The result for a non-2xx Response from a fetch that returns failures instead of throwing. */
-async function failureFromResponse(response: Response): Promise<ApiFailure> {
+async function failureFromResponse(response: Response, notFound: string = REPORT_NOT_FOUND): Promise<ApiFailure> {
   let problem: IProblemDetails | null = null;
   try {
     const body: unknown = await response.json();
@@ -117,7 +128,7 @@ async function failureFromResponse(response: Response): Promise<ApiFailure> {
   } catch {
     // Not JSON — the status sentence stands in for the body.
   }
-  return httpFailure(response.status, problem);
+  return httpFailure(response.status, problem, notFound);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,13 +178,13 @@ export async function fetchReports(): Promise<ApiResult<ReportCatalogItem[]>> {
     const response = await authenticatedFetch(url, { method: "GET" });
 
     // A fetch that returns failures (not `@spaarke/auth`'s, which throws — see the catch).
-    if (!response.ok) return failureFromResponse(response);
+    if (!response.ok) return failureFromResponse(response, REPORTING_NOT_AVAILABLE);
 
     const data = (await response.json()) as ReportCatalogItem[];
     return { ok: true, data };
   } catch (err) {
     console.error("[reportingApi] fetchReports failed", err);
-    return failureFromError(err);
+    return failureFromError(err, REPORTING_NOT_AVAILABLE);
   }
 }
 
@@ -348,13 +359,13 @@ export async function fetchUserPrivilege(): Promise<ApiResult<{ privilege: UserP
     const response = await authenticatedFetch(url, { method: "GET" });
 
     // A fetch that returns failures (not `@spaarke/auth`'s, which throws — see the catch).
-    if (!response.ok) return failureFromResponse(response);
+    if (!response.ok) return failureFromResponse(response, REPORTING_NOT_AVAILABLE);
 
     const data = (await response.json()) as { privilege: UserPrivilege };
     return { ok: true, data };
   } catch (err) {
     console.error("[reportingApi] fetchUserPrivilege failed", err);
-    return failureFromError(err);
+    return failureFromError(err, REPORTING_NOT_AVAILABLE);
   }
 }
 
