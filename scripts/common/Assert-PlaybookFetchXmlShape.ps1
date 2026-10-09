@@ -109,7 +109,8 @@ function Assert-PlaybookFetchXmlShape {
 
         # `item` is the per-item template root CreateNotification binds; a node output with that name would make the
         # orchestrator render the per-item templates early (ISS-018). The orchestrator refuses it at run time too.
-        if ([string]$node.outputVariable -ceq 'item') {
+        # Same comparison as the orchestrator's IsReservedOutputVariable: trimmed, ordinal (case-sensitive).
+        if (([string]$node.outputVariable).Trim() -ceq 'item') {
             $problems.Add("node '$name': outputVariable 'item' is reserved (the per-item root of CreateNotification); rename it.")
         }
 

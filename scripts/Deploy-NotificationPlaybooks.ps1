@@ -231,11 +231,15 @@ function Sync-Playbook {
     $after = Get-LiveState -PlaybookId $PlaybookId
     if ($RecordPath) { $after | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath (Join-Path $RecordPath "$File.after.json") -Encoding utf8 }
     $mismatches = @()
+    $expectedOrder = 0
     foreach ($node in $Definition.nodes) {
+        $expectedOrder++
         $live = $after.nodes | Where-Object name -eq ([string]$node.name)
         if ($null -eq $live) { $mismatches += "$($node.name): missing after sync"; continue }
         if ((ConvertTo-CanonicalJson $live.configjson) -ne (ConvertTo-CanonicalJson $node.configJson)) { $mismatches += "$($node.name): configjson differs" }
         if ($live.executortype -ne [int]$node.executorType) { $mismatches += "$($node.name): executortype $($live.executortype)" }
+        if ($live.executionorder -ne $expectedOrder) { $mismatches += "$($node.name): executionorder $($live.executionorder) <> $expectedOrder" }
+        if ($live.outputvariable -ne [string]$node.outputVariable) { $mismatches += "$($node.name): outputvariable $($live.outputvariable)" }
         if (-not $live.isactive) { $mismatches += "$($node.name): inactive" }
         $expectedDeps = @($node.dependsOn | Where-Object { $_ } | ForEach-Object { $idByName[[string]$_] })
         $liveDeps = if ($live.dependsonjson) { @($live.dependsonjson | ConvertFrom-Json) } else { @() }
@@ -243,8 +247,32 @@ function Sync-Playbook {
     }
     if (@($after.nodes).Count -ne @($Definition.nodes).Count) { $mismatches += "node count $(@($after.nodes).Count) <> $(@($Definition.nodes).Count)" }
     if ((ConvertTo-CanonicalJson $after.playbook.configjson) -ne (ConvertTo-CanonicalJson $Definition.playbook.sprk_configjson)) { $mismatches += 'playbook configjson differs' }
+    if ([string]$after.playbook.description -ne [string]$Definition.playbook.description) { $mismatches += 'playbook description differs' }
     if ($mismatches.Count -gt 0) { throw "$File : read-back differs from the definition: $($mismatches -join ' | ')" }
     Write-Host "    read-back: all $(@($after.nodes).Count) nodes and the playbook row equal the definition" -ForegroundColor Green
+}
+
+function Get-RestoreMismatches {
+    # Every column the restore writes, compared between a live state and the record (plus: nodes created after the
+    # record must be inactive). Used for the read-back and, in a dry run, to report what differs now.
+    param($Live, $Record, $Created)
+    $mismatches = @()
+    foreach ($n in $Record.nodes) {
+        $a = $Live.nodes | Where-Object { [string]$_.id -eq [string]$n.id }
+        if ($null -eq $a) { $mismatches += "$($n.name): missing"; continue }
+        if ((ConvertTo-CanonicalJson $a.configjson) -ne (ConvertTo-CanonicalJson $n.configjson)) { $mismatches += "$($n.name): configjson" }
+        if ($a.executortype -ne $n.executortype) { $mismatches += "$($n.name): executortype" }
+        if ($a.executionorder -ne $n.executionorder) { $mismatches += "$($n.name): executionorder $($a.executionorder) <> $($n.executionorder)" }
+        if ($a.outputvariable -ne $n.outputvariable) { $mismatches += "$($n.name): outputvariable" }
+        if ([bool]$a.isactive -ne [bool]$n.isactive) { $mismatches += "$($n.name): isactive" }
+        if ([string]$a.dependsonjson -ne [string]$n.dependsonjson) { $mismatches += "$($n.name): dependsonjson" }
+    }
+    foreach ($n in @($Created)) {
+        if (($Live.nodes | Where-Object { [string]$_.id -eq [string]$n.id }).isactive) { $mismatches += "$($n.name): still active" }
+    }
+    if ((ConvertTo-CanonicalJson $Live.playbook.configjson) -ne (ConvertTo-CanonicalJson $Record.playbook.configjson)) { $mismatches += 'playbook configjson' }
+    if ([string]$Live.playbook.description -ne [string]$Record.playbook.description) { $mismatches += 'playbook description' }
+    return , $mismatches
 }
 
 function Restore-Playbook {
@@ -308,19 +336,16 @@ function Restore-Playbook {
         Write-Host '    = playbook row already as recorded' -ForegroundColor Gray
     }
 
-    if ($DryRun) { Write-Host '    (dry run: nothing written, read-back skipped)' -ForegroundColor Gray; return }
+    if ($DryRun) {
+        # The read-back comparison, run against the CURRENT live state: what would differ if nothing were restored.
+        $pending = Get-RestoreMismatches -Live $live -Record $record -Created $created
+        $summary = if ($pending.Count -eq 0) { 'none' } else { $pending -join ' | ' }
+        Write-Host "    (dry run: nothing written) live vs record now: $($pending.Count) difference(s): $summary" -ForegroundColor Gray
+        return
+    }
 
     $after = Get-LiveState -PlaybookId $PlaybookId
-    $mismatches = @()
-    foreach ($n in $record.nodes) {
-        $a = $after.nodes | Where-Object { [string]$_.id -eq [string]$n.id }
-        if ((ConvertTo-CanonicalJson $a.configjson) -ne (ConvertTo-CanonicalJson $n.configjson)) { $mismatches += "$($n.name): configjson" }
-        if ($a.executortype -ne $n.executortype -or $a.outputvariable -ne $n.outputvariable -or [bool]$a.isactive -ne [bool]$n.isactive -or [string]$a.dependsonjson -ne [string]$n.dependsonjson) { $mismatches += "$($n.name): columns" }
-    }
-    foreach ($n in $created) {
-        if (($after.nodes | Where-Object { [string]$_.id -eq [string]$n.id }).isactive) { $mismatches += "$($n.name): still active" }
-    }
-    if ((ConvertTo-CanonicalJson $after.playbook.configjson) -ne (ConvertTo-CanonicalJson $record.playbook.configjson)) { $mismatches += 'playbook configjson' }
+    $mismatches = Get-RestoreMismatches -Live $after -Record $record -Created $created
     if ($mismatches.Count -gt 0) { throw "$File : restore read-back differs from the record: $($mismatches -join ' | ')" }
     Write-Host "    read-back: all $(@($record.nodes).Count) recorded nodes and the playbook row equal the record" -ForegroundColor Green
 }
