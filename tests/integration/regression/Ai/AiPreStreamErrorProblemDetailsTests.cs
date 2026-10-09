@@ -38,6 +38,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Metering;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.Regression.Ai;
@@ -76,6 +77,14 @@ public class AiPreStreamErrorProblemDetailsTests
     private static ChatSessionManager EmptySessionManager() =>
         new(new Mock<ITenantCache>().Object, new Mock<IChatDataverseRepository>().Object, NullLogger<ChatSessionManager>.Instance);
 
+    private static AiSpendLimit NoSpendLimit()
+    {
+        var options = new Mock<IOptionsMonitor<AiSpendLimitOptions>>();
+        options.Setup(o => o.CurrentValue).Returns(new AiSpendLimitOptions());
+        return new AiSpendLimit(options.Object, new Mock<IAiSpendLedger>().Object, TimeProvider.System,
+            NullLogger<AiSpendLimit>.Instance);
+    }
+
     private static async Task InvokeAsync(Type endpoints, string method, HttpContext httpContext, params object[] supplied)
     {
         var info = endpoints.GetMethod(method, BindingFlags.NonPublic | BindingFlags.Static)
@@ -87,6 +96,8 @@ public class AiPreStreamErrorProblemDetailsTests
             var match = supplied.FirstOrDefault(s => p.ParameterType.IsInstanceOfType(s));
             if (match is not null) return match;
             if (p.ParameterType == typeof(ILoggerFactory)) return NullLoggerFactory.Instance;
+            // SendMessageAsync checks the monthly spend limit before the session lookup; no limit configured = no-op.
+            if (p.ParameterType == typeof(AiSpendLimit)) return NoSpendLimit();
             if (p.ParameterType.IsGenericType && p.ParameterType.GetGenericTypeDefinition() == typeof(ILogger<>))
             {
                 var nullLogger = typeof(NullLogger<>).MakeGenericType(p.ParameterType.GetGenericArguments());
