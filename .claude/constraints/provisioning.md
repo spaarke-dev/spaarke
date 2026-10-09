@@ -206,8 +206,14 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
 - **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
   it every Model 1 run fails at H3.
+- **H3 keeps two federated credentials on every Spaarke-tenant customer BFF registration (ISS-015):** `spaarke-uami-trust`
+  (subject = the stamp BFF UAMI) and `spaarke-l2-worker` (subject = `ControlPlaneIdentity__PrincipalObjectId`, the L2 Worker
+  UAMI's **principalId**, issuer Spaarke's tenant, audience `api://AzureADTokenExchange`). H6/H7/H7b sign in as the
+  registration through the second (D-13, secret-free). Never remove it, never replace it with a secret, never set its
+  subject to the UAMI's clientId (AADSTS700213). A blank/invalid Worker principal refuses H3 before any write
+  (`appreg-worker-fic-identity-missing`). `customer-owned-model2`: stamp credential only (MI-FIC cannot cross tenants).
 - **H3 adopts an existing `spaarke-bff-api-{customerId}` only if nobody but the control plane can act as it** (one match,
-  no secret or certificate, no foreign FIC, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
+  no secret or certificate, no FIC other than `spaarke-uami-trust` / `spaarke-l2-worker`, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
   written. Never relax this to "adopt by name".
 - **One environment per customer (D6).** The registration is per customer (D-13) while H3 sets its redirect, FIC and
   pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
