@@ -31,6 +31,7 @@ export {
 } from './BffDataverseClient';
 
 export { AppInsightsService } from './AppInsightsService';
+export type { TelemetryConnectionStringProvider } from './AppInsightsService';
 export { reportClientError, setClientErrorTelemetryHook } from './reportClientError';
 export type { ClientErrorContext } from './reportClientError';
 // Record-aware SPE container resolution — unified-access-control-r2 task 075.
