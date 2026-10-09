@@ -4,7 +4,7 @@
     <title>Child records show their parent's Access Permission: To Do, Event, Communication and Document carry the parent's sprk_accesspermission, written once in the shared stamp path and kept in step by the secure-child reconcile; a parentless child keeps its own value (owner round 81)</title>
     <phase>Session 27 — UAC defect remediation (owner round 81, 2026-10-08)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the shared child write path (CoreAncestorResolver / RecordOwnershipResolver callers) and the SecureChildReconciliationJob, adds a form library and a schema script, and modifies tests (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

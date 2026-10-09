@@ -4,7 +4,7 @@
     <title>Enforcement uses the parent-derived access: a filed work assignment or project is treated with its parents' Secure and Access Permission (most restrictive), and the contact plane honours a secure parent's No Access list (owner rounds 82 and 84; closes #1442 and #1425)</title>
     <phase>Session 27 — UAC defect remediation (owner round 84, 2026-10-08)</phase>
     <gate>startable after PR #1419 (#1410) merges: it reuses that PR's batched ancestry walk (SecureRootInheritance.ReadSecureParentsOfManyAsync) and edits the same AccessibleRecordSetService regions</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes access decisions on the external read path and at grant time (auth/security), modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>

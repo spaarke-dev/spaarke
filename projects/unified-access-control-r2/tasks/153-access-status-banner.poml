@@ -4,7 +4,7 @@
     <title>Access-status indicator — a red form banner when a project, matter or work assignment is SECURE and/or under a No Access restriction, a No Access banner on Organization and Contact forms that entries name, and a clickable indicator in TrackingFieldTrio that opens Manage Access; fed by one read-tier BFF summary that renders "unavailable", never "not restricted", when it cannot answer</title>
     <phase>Register-driven (authored 2026-10-01, session 27; owner round 3b UX requirements; disposition row 3 of notes/session27-ux-research-ethical-wall-secure.md)</phase>
     <gate>blocked — requires 064 (with its UX amendment: the record-scoped No Access read AND its Read-gated SUMMARY route, which covers organization and contact records), 067 (with its UX amendment: open Manage Access directly at the No Access section), 150 (sprk_issecure field-level security, readers unmasked) and 154 (the Organization/Contact NO ACCESS sections the org/contact banner points at) merged. Rebase after 138 (edits TrackingFieldTrio.tsx :335-367 and the PCF index.ts :945-963). Escalation trigger (O1) needs the owner's answer before step 4 and step 6 (O1 is under owner investigation, research note :75-77). (O2) was ACCEPTED as recommended on 2026-10-01 (research note :74); step 0 confirms the recorded answer still stands.</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends a BFF route on the authorization read path (disclosure to readers), .ts/.tsx changes to a shared component and a PCF, a new form web resource; tags bff-api, auth, security, pcf, frontend.</rigor-reason>
     <model-tier>opus</model-tier>
