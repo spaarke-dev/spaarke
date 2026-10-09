@@ -120,7 +120,8 @@ public sealed record AssignedAccessListEntry(
 /// The ONE invariant owner of the Assigned-To auto-grants (unified-access-control-r2 task 142 · owner round 2 item 5 +
 /// Q5; round 3 A1/A2/R3; round 3 A3–A6/A8 accepted as recommended): every registry-listed "Assigned *" contact or
 /// organization on a project, matter or work assignment holds Collaborate access — a removable grant on the record's
-/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible internal user — unless an
+/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible user (an enabled person —
+/// <see cref="InternalShareEndpoints.ClassifyEligibility"/>, the rule <c>/share-user</c> applies) — unless an
 /// operator declined it, a veto forbids it, or the record's policy says otherwise.
 /// </summary>
 /// <remarks>
@@ -134,7 +135,10 @@ public sealed record AssignedAccessListEntry(
 /// <item>Level: Collaborate, uncapped (A1 / rule 5) — <see cref="GrantCeiling.AssignedToRule"/>; the share mask comes from
 /// <see cref="RecordShareLevels"/>, never a new constant. An absent expiry is today + 90 through the core's
 /// <c>DefaultExpiry</c>.</item>
-/// <item>Restricted: no contact or organization grant; a linked internal user's share is unaffected (round 2 item 3).
+/// <item>Restricted: no contact or organization grant; a linked user's share is unaffected (round 2 item 3) — unless the
+/// user is flagged external (<c>sprk_isexternal = true</c>): then no share either, and one the Restricted remover took
+/// away is recorded Skipped(restricted), never Declined, so it comes back when the record stops being Restricted (owner
+/// round 67).
 /// Secure or Limited: no organization grant. Secure: contact grants and shares are SUGGESTED, not written
 /// (A3 = prompt: <see cref="AssignedAccessState.PendingConfirmation"/>); an auto grant that existed before the record
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
@@ -696,7 +700,7 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        var target = await ResolveTargetAsync(subject, ct).ConfigureAwait(false);
+        var target = await ResolveTargetAsync(subject, flags, ct).ConfigureAwait(false);
 
         // (3) Access this owner created: verify it, convert it (141 link), renew it.
         if (live.FirstOrDefault(r => r.State is AssignedAccessState.Granted or AssignedAccessState.Shared) is { } ours)
@@ -753,7 +757,20 @@ public sealed class AssignedAccessMaterializer
             var modified = IsModified(ours, row);
 
             // ── Task 141 link appeared: the contact is an internal user — convert grant → share ──
-            if (target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive)
+            // GitHub #1410 / owner round 82 ("the parent permissions control"): the record is not flagged secure, but it may be
+            // filed under a secure matter or project whose No Access list governs it. A walled user is NOT converted (the
+            // grant is left exactly as it is, and converts once the wall lifts); a check that cannot be completed is a fault
+            // (reported, the run red) and nothing is converted this pass.
+            var convertWall = target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive
+                ? await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    run.Logical, run.RootId, target.SystemUserId!.Value, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false)
+                : null;
+            if (convertWall?.Outcome == SecureShareWallOutcome.Unverifiable)
+            {
+                DenyListFault(run, subject, "the conversion of its grant to a share", detail: convertWall.Fault);
+            }
+
+            if (convertWall is not null && !convertWall.RefusesShare)
             {
                 var written = await WriteShareAsync(run, subject, target.SystemUserId!.Value, ct).ConfigureAwait(false);
                 if (written is not { } mask)
@@ -815,14 +832,29 @@ public sealed class AssignedAccessMaterializer
             return false; // a malformed row: decide fresh
 
         var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+        if (current == 0 && target.Kind == TargetKind.Skip && target.SkipReason == AssignedAccessReason.Restricted
+            && target.SystemUserId == user)
+        {
+            // Owner round 67: the record became Restricted and this user is flagged external, so the Restricted remover
+            // (RestrictedExternalShareRemover) took the share away — a KNOWN cause, never an operator's removal (which
+            // would stick as Declined). Recorded as Restricted, so the share is given back once the record is not.
+            await EnsureRowsAsync(run, subject, byField,
+                new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.Restricted, null, user,
+                    ours.GrantedLevel), ct).ConfigureAwait(false);
+            run.Entry(subject, fields, user, AssignedAccessState.Skipped, AssignedAccessReason.Restricted,
+                AssignedAccessAction.Ledger);
+            return true;
+        }
+
         if (current == 0)
         {
             // Task 143's enforcer removes a WALLED user's share on a secure record: a known cause, restored once the wall
             // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks. Task 158
             // final round (main-session round 58 item 1): on a work assignment or project filed under a secure record the
             // enforcer also removes it for a person on that PARENT's list, so the parents' lists are asked too — the guard's
-            // one entry point, as the suggestion below asks it.
-            if (flags.IsSecure)
+            // one entry point, as the suggestion below asks it. GitHub #1410 / owner round 82: asked WHATEVER the record's flag
+            // — the enforcer also removes it on a not-yet-secure record filed under a walled secure parent (the guard answers
+            // NotSecure for a record with no secure parent, which falls through to the operator's removal as before).
             {
                 var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                     run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
@@ -1064,19 +1096,21 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        run.Writes++;
         if (outcome.Warning is { } warning)
         {
-            // ADR-003: the core wrote, but the grant does not confer access (a row lapsed between this read and the
-            // core's). Never reported as Granted: a failure, and nothing in the ledger changes, so the next pass decides
-            // again from fresh reads.
+            // ADR-003: the grant does not confer access (a row lapsed between this read and the core's). This call sends
+            // no date then (a date is sent only when nothing conferred), so since task 113 the core refused before
+            // writing: nothing changed. Never reported as Granted: a failure, and nothing in the ledger changes, so the
+            // next pass decides again from fresh reads (and, seeing nothing conferring, sends a date).
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was written but confers no access ({Warning}); " +
-                "not recorded as granted.", run.Logical, run.RootId, subject, warning);
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was not written — the existing grant has lapsed " +
+                "and confers no access ({Warning}); not recorded as granted.", run.Logical, run.RootId, subject, warning);
             run.Fail(subject, "grant-not-conferring",
-                $"Access for {subject} on this record was written but does not take effect yet. The next update will try again.");
+                $"Access for {subject} on this record was not put in place yet: their existing grant has lapsed. The next update will try again.");
             return;
         }
+
+        run.Writes++;
 
         var survivorExpiry = expiry
             ?? (active.Count > 0
@@ -1107,11 +1141,12 @@ public sealed class AssignedAccessMaterializer
 
         var restoring = live.Any(r => r.State == AssignedAccessState.Skipped && r.Reason == AssignedAccessReason.RemovedByNoAccess);
 
-        if (flags.IsSecure)
         {
             // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
             // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
-            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            // parent's No Access list too — the guard's one entry point for the record and its parents. GitHub #1410 / owner
+            // round 82: asked WHATEVER the record's flag (a not-yet-secure record filed under a walled secure parent is
+            // governed by that parent's list); the guard answers NotSecure for a record with no secure parent.
             var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                 run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
@@ -1126,15 +1161,15 @@ public sealed class AssignedAccessMaterializer
                 // Task 142 r4 (owner round 13 item 5): a fault, not a wall — nothing shared or suggested (fail closed), and
                 // the run FAILS like the deny-list fault (counted, logged, the job red). The ledger keeps what it said, so a
                 // share 143's enforcer removed is still restored once the check reads again.
-                DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault);
+                DenyListFault(run, subject, restoring || !flags.IsSecure ? "its share" : "its suggestion", detail: wall.Fault);
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccessUnverifiable, user)
                     .ConfigureAwait(false);
                 return;
             }
 
-            if (!restoring)
+            if (flags.IsSecure && !restoring)
             {
-                // Owner answer A3: suggest, do not share.
+                // Owner answer A3: suggest, do not share (secure records only).
                 await EnsureRowsAsync(run, subject, byField,
                     new AssignedAccessLedgerWrite(AssignedAccessState.PendingConfirmation, null, null, user), ct).ConfigureAwait(false);
                 run.Entry(subject, fields, user, AssignedAccessState.PendingConfirmation, null, AssignedAccessAction.Ledger);
@@ -1352,7 +1387,9 @@ public sealed class AssignedAccessMaterializer
         public static Target Skip(string reason, Guid? user = null) => new(TargetKind.Skip, reason, user);
     }
 
-    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, CancellationToken ct)
+    /// <param name="flags">The root's flags, read once per run: <see cref="InternalShareEndpoints.ClassifyEligibility"/> asks
+    /// whether the record is Restricted for a linked user flagged external (owner round 67).</param>
+    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, RootRecordFlags flags, CancellationToken ct)
     {
         if (subject.Kind == AssignedSubjectKind.Organization)
         {
@@ -1415,12 +1452,23 @@ public sealed class AssignedAccessMaterializer
         if (represented.Count > 1)
             return Target.Skip(AssignedAccessReason.LinkAmbiguous); // never pick one of two
 
+        // Owner round 67: the ONE rule /share-user applies. An enabled person is shared with, flagged external or not —
+        // except on a Restricted record, where a user flagged external (sprk_isexternal = true; blank is not external)
+        // gets nothing: no share, and no contact grant either, since a Restricted record admits no contact-based access.
+        // That is recorded as Restricted (the reason a contact gets there), so lifting Restricted gives the share back.
         var user = represented[0];
-        return InternalShareEndpoints.ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal) switch
+
+        // Verifier V4: the ONE "barred on Restricted" predicate is asked FIRST — a DISABLED or non-person user flagged external
+        // on a Restricted record is Restricted (the remover's known cause), never Ineligible (which would turn the remover's
+        // removal into a sticky Declined and keep the share away after Restricted is lifted and the user re-enabled).
+        if (InternalShareEndpoints.IsBarredOnRestricted(user.IsExternal, flags.IsRestricted))
+            return Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId);
+
+        return InternalShareEndpoints.ClassifyEligibility(
+                user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
         {
             InternalShareEndpoints.ShareEligibility.Eligible => new Target(TargetKind.Share, null, user.SystemUserId),
-            // Refused ONLY because sprk_isexternal is not "internal": an external person gets a grant row (criterion 3).
-            InternalShareEndpoints.ShareEligibility.NotInternal => new Target(TargetKind.ContactGrant),
+            InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
             _ => Target.Skip(AssignedAccessReason.Ineligible, user.SystemUserId),
         };
     }

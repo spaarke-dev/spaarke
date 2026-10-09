@@ -11,14 +11,13 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// registration.</b>
 ///
 /// <para>
-/// <b>Severity</b>: HIGH. Under MI-as-FIC (FR-39), Model 1's shared BFF UAMI can
-/// mint an assertion for ANY app registration that trusts it — the isolation
-/// boundary that was resource-level (BFF reads customer X's secret from customer
-/// X's Key Vault) becomes <b>code-level</b>: nothing but correct tenant routing
-/// stops the process authenticating as the wrong customer's app-reg (§4D I6
-/// rationale). Not CATASTROPHIC only because Model 1's app-reg is a single
-/// shared object today, limiting blast radius relative to I2/I4/I5 — still
-/// load-bearing and enforced with the same discipline.
+/// <b>Severity</b>: HIGH. Under MI-as-FIC (FR-39) a BFF UAMI can mint an assertion
+/// for ANY app registration that trusts it, so nothing but correct derivation stops
+/// the process authenticating as the wrong app-reg (§4D I6 rationale). Written when
+/// Model 1 had a shared BFF UAMI serving many customers; since D-12/D-13 (2026-09-28)
+/// every stamp has its own UAMI and its own app registration, which shrinks the blast
+/// radius but keeps the rule load-bearing: a default or fallback app-reg is still a
+/// wrong-identity path. Enforced with the same discipline as I2/I4/I5.
 /// </para>
 ///
 /// <para>
@@ -194,7 +193,7 @@ public class I6_ObAppRegDerivationTests
             offenders.Count == 0,
             "§4D I6 violation: BFF OBO code path(s) bind a default or fallback app registration " +
             "instead of deriving it from per-tenant request context / required configuration. Under " +
-            "MI-as-FIC (FR-39) the shared BFF UAMI can mint an assertion for ANY app-reg that trusts " +
+            "MI-as-FIC (FR-39) a BFF UAMI can mint an assertion for ANY app-reg that trusts " +
             "it — a hardcoded or fallback app-reg selection authenticates the process AS the wrong " +
             "customer (severity HIGH). Fix each site to resolve the app-reg from required config, " +
             "options, or per-request context; or (with reviewer sign-off) suppress a single line " +

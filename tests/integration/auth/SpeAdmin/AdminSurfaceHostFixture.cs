@@ -21,6 +21,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.RecordMatching;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.Contract.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -150,7 +151,7 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
             services.AddSingleton<ILoggerProvider>(Logs);
 
             // Batch-4 integration (master bb8ba7251 x task 165): SPE Admin runs as the BFF's OWN app-only Graph client
-            // (IGraphClientFactory.ForApp) for every config, so this host points that one client at the fake Graph. The
+            // (through SpeContainerOwnershipGuard since T227d) for every config, so this host points that one client at the fake Graph. The
             // tenant guard compares a config's environment tenant with the BFF's, so the BFF tenant here is the one the
             // tests seed on their environments (SeededTenant).
             services.RemoveAll<SpeAdminGraphService>();
@@ -161,7 +162,10 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
                     .AddInMemoryCollection(new Dictionary<string, string?> { ["TENANT_ID"] = SeededTenant })
                     .Build(),
                 sp.GetRequiredService<ILogger<SpeAdminGraphService>>(),
-                new FakeGraphClientFactory(Graph)));
+                new FakeGraphClientFactory(Graph),
+                // T227d: every container-scoped call asks the ownership guard; these tests are about business-unit scope,
+                // so the guard admits every container (tests/integration/tenant covers the refusals).
+                TestSpeOwnership.AllowAll(new FakeGraphClientFactory(Graph))));
         });
     }
 

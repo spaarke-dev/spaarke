@@ -76,6 +76,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         // inert double keeps the seam's assertions about standing-grant union/revocation, not denial.
         var sut = new AccessibleRecordSetService(
             membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();
@@ -151,6 +153,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         var participations = new FakeParticipationService(new[] { GrantedProject });
         var sut = new AccessibleRecordSetService(
             membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();

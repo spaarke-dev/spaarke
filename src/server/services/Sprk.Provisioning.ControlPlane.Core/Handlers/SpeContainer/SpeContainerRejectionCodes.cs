@@ -77,6 +77,59 @@ public static class SpeContainerRejectionCodes
     /// </summary>
     public const string ProvisioningFailed = "spe-provisioning-failed";
 
+    /// <summary>
+    /// Task 227b: <c>InterStepState.BffAppRegId</c> (H3) or <c>InterStepState.MiClientId</c> (H2a) is empty, so H8
+    /// cannot grant the customer's BFF identities on the container type. Resumable — nothing was written.
+    /// </summary>
+    public const string GrantIdentityMissing = "spe-grant-identity-missing";
+
+    /// <summary>
+    /// Task 227b: Graph refused to read or write a grant on the container-type registration (the diagnostic names
+    /// the app id). Resumable — no container was created; a grant already written is kept and re-checked on resume.
+    /// </summary>
+    public const string ContainerTypeGrantFailed = "spe-container-type-grant-failed";
+
+    /// <summary>Task 227b: infrastructure fault (token exchange, transport, timeout) while ensuring the grants — Resumable.</summary>
+    public const string ContainerTypeGrantInfraFault = "spe-container-type-grant-infra-fault";
+
+    /// <summary>
+    /// Task 227e: the customer's recorded container (environment variable <c>sprk_SharePointEmbeddedContainerId</c>, which
+    /// H7 writes on the first run) could not be read, or carries more than one value. H8 creates a container only when it
+    /// can tell the customer has none — nothing was created. Resumable.
+    /// </summary>
+    public const string RecordedContainerUnreadable = "spe-recorded-container-unreadable";
+
+    /// <summary>
+    /// Task 227e: the container the environment records (or this run adopted) does not exist for the container type's
+    /// owning app — deleted, or of another type or tenant. Not the replication wait: it is not a new container. Nothing
+    /// was created or written — Resumable once the record names the customer's container.
+    /// </summary>
+    public const string RecordedContainerNotFound = "spe-recorded-container-not-found";
+
+    /// <summary>
+    /// Task 227e: the container H8 would reuse is not the customer's — another container type, another customer's
+    /// <c>spaarkeCustomerId</c>, or another business unit's stamp. H8 wrote nothing to it (no stamp, no marker) and created
+    /// nothing — Resumable once the record names the customer's container.
+    /// </summary>
+    public const string RecordedContainerNotTheCustomers = "spe-recorded-container-not-the-customers";
+
+    /// <summary>
+    /// Task 227e: two containers are the customer's — the environment's recorded one and this run's own record name
+    /// different containers. H8 never picks one: the diagnostic names both and the operator decides which holds the
+    /// customer's data before resuming. Nothing more was created — Resumable.
+    /// </summary>
+    public const string DuplicateCustomerContainers = "spe-duplicate-customer-containers";
+
+    /// <summary>
+    /// Task 227e: the customer's container is bound, but its <c>spaarkeCustomerId</c> marker could not be confirmed or
+    /// written (Graph refused, or the container is marked for another customer / unreadably — then it is left untouched).
+    /// The container stays on the run's record, so a resume marks it — Resumable.
+    /// </summary>
+    public const string ContainerMarkerFailed = "spe-container-marker-failed";
+
+    /// <summary>Task 227e: infrastructure fault while confirming / writing the marker — Resumable (the container stays on record).</summary>
+    public const string ContainerMarkerInfraFault = "spe-container-marker-infra-fault";
+
     /// <summary>Provisioner infrastructure fault (transport, timeout, unexpected exception) — Resumable, no external side effect confirmed.</summary>
     public const string ProvisioningInfraFault = "spe-provisioning-infra-fault";
 

@@ -38,7 +38,7 @@ import {
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveMessageTarget, type IResolvedMessageTarget } from './hostContext';
-import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types, whose FC return
 // type is incompatible with React 16's JSX element type. Cast at the boundary (same pattern as
@@ -160,7 +160,7 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
           }
           return;
         }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
         if (cancelled) return;
         setBffBaseUrl(baseUrl);
         setAuthReady(true);

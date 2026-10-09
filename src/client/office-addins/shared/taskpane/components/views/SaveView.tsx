@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Spinner,
+  Text,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+} from '@fluentui/react-components';
 import { SaveFlow, type SavedDocumentPaneState } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
@@ -10,7 +18,14 @@ import {
   type ResolvedRelatedRecord,
 } from '../../services/documentIdentityService';
 import { subscribeToDocumentChanges } from '../../services/documentChangeDetectionService';
+import { canOpenSpaarkeRecords } from '../../services/openRecordLauncher';
 import type { ContactOption } from './CreateTodoView';
+import { EmailContentCaptureContext, type CaptureEmailContent } from '../../hooks/emailContentCaptureContext';
+import {
+  captureEmailContent as captureEmailContentFromReader,
+  hostAdapterEmailReader,
+  type SkippedAttachment,
+} from '../../services/emailContentCapture';
 
 const useStyles = makeStyles({
   container: {
@@ -99,12 +114,13 @@ export interface SaveViewProps {
  *
  * This view component:
  * - Initializes the host adapter and retrieves item metadata (subject, sender, recipients, attachments list)
- * - Fetches attachment metadata for Outlook emails (content retrieved server-side via Graph API)
+ * - Provides the live email reader the save uses (task 116a) and shows the attachments a save left out
  * - Renders the SaveFlow component with proper context
  * - Handles loading and error states
  *
- * Note: Email body and attachment content are retrieved server-side via Microsoft Graph API
- * using OBO authentication. This provides more reliable retrieval than Office.js client-side APIs.
+ * Task 116a: an email's body and its attachments are read here, through Office.js, when a save submits —
+ * not fetched by the server from the mailbox through Graph, which cannot reach a B2B guest's home-tenant mailbox.
+ * See `services/emailContentCapture.ts`.
  *
  * @example
  * ```tsx
@@ -149,7 +165,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
   >([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
-  // Note: emailBody removed - now retrieved server-side via Graph API
+  // Task 116a: the attachments the LAST email save left out (too large for one save, a cloud link, unreadable), each
+  // with its reason. Replaced on every save attempt; shown above the form so a left-out file is never silent.
+  const [skippedAttachments, setSkippedAttachments] = useState<SkippedAttachment[]>([]);
   // Task 045: document BYTES are deliberately NOT captured into state here. The old mount-time
   // capture (`getDocumentContent` called once in this effect, cached in a `documentContentBase64`
   // state variable) was the defect: every save after the first — an edit made after the tab
@@ -169,6 +187,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
       try {
         setIsLoading(true);
         setError(null);
+        setSkippedAttachments([]);
 
         // Get host type
         const type = hostAdapter.getHostType();
@@ -226,8 +245,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
             setSentDate(date);
           }
 
-          // Note: Email body and attachment content are now retrieved server-side via Graph API
-          // Client only sends internetMessageId and metadata for reliable, consistent retrieval
+          // Task 116a: the body and attachment CONTENT are not read here — `captureEmailContent` below reads them
+          // when a save submits (every attachment; the ones ticked by then become documents).
         } else if (type === 'word') {
           // Word-specific context
           // Document URL is typically the current file path
@@ -285,6 +304,25 @@ export const SaveView: React.FC<SaveViewProps> = ({
     }
   }, [hostAdapter]);
 
+  // Task 116a: reads the open email's body and its attachments for one save attempt, live — `useSaveFlow`
+  // calls it at submit through `EmailContentCaptureContext` (SaveFlow sits between this view and the hook). Gated on
+  // the adapter's capability, never a hostType check (NFR-10): `canGetAttachments` is Outlook read mode with Mailbox
+  // 1.8 (`getAttachmentContentAsync`). Without it nothing is provided and the save falls back to the server's Graph
+  // fetch, unchanged — sending a body there would switch that fetch off and lose the attachments.
+  const canCaptureEmailContent = hostAdapter?.getCapabilities().canGetAttachments ?? false;
+  const captureEmailContent = useCallback<CaptureEmailContent>(
+    async (atts, selectedIds) => {
+      if (!hostAdapter) {
+        throw new Error("Couldn't read this email, so nothing was saved. Try again.");
+      }
+      setSkippedAttachments([]);
+      const captured = await captureEmailContentFromReader(hostAdapterEmailReader(hostAdapter), atts, selectedIds);
+      setSkippedAttachments(captured.skipped);
+      return captured;
+    },
+    [hostAdapter]
+  );
+
   // Task 089 (UAT-9): after EVERY successful pane save — create or version, first save or a later save — mark
   // the open document with the id it was saved as, so its next save (pane or ribbon, now or after reopening the
   // file) resolves it instead of colliding with its own record. The server stamps only the stored copy (task 014).
@@ -339,7 +377,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
   // task 027 / FR-10 (NFR-10): decided from the live adapter's capabilities, never a `hostType`
   // check — `false` (including while `hostAdapter` is absent/loading) renders SaveFlow's
   // related-record card and Document-record affordance without their open action.
-  const canOpenRecord = hostAdapter?.getCapabilities().canOpenBrowserWindow ?? false;
+  // Task 120: the pane's one open gate (`canOpenSpaarkeRecords`) — ORG_URL plus `openBrowserWindow` OR `window.open`,
+  // so View Document / Open Document / the "Filed to" card also open on Office on the web.
+  const canOpenRecord = hostAdapter ? canOpenSpaarkeRecords(hostAdapter.getCapabilities()) : false;
 
   // task 040 / FR-19 (NFR-10): same pattern as canOpenRecord above — decided from the live
   // adapter's capabilities, never a `hostType` check. `false` (including while `hostAdapter` is
@@ -367,40 +407,61 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const canOpenDesktopWord = hostAdapter?.getCapabilities().canOpenDesktopWord ?? false;
 
   // Render SaveFlow with context
+  const saveFlow = (
+    <SaveFlow
+      hostType={hostType}
+      attachments={attachments}
+      getAccessToken={getAccessToken || defaultGetAccessToken}
+      showDocumentInfo
+      canOpenRecord={canOpenRecord}
+      canSuggestRelatedRecords={canSuggestRelatedRecords}
+      canProvideDocumentName={canProvideDocumentName}
+      canDetectDocumentChanges={canDetectDocumentChanges}
+      canOpenDesktopWord={canOpenDesktopWord}
+      {...(savedState !== undefined ? { savedState } : {})}
+      {...(onSavedStateChange ? { onSavedStateChange } : {})}
+      {...(itemId !== undefined ? { itemId } : {})}
+      {...(itemName !== undefined ? { itemName } : {})}
+      {...(senderEmail !== undefined ? { senderEmail } : {})}
+      {...(senderDisplayName !== undefined ? { senderDisplayName } : {})}
+      {...(recipients !== undefined ? { recipients } : {})}
+      {...(sentDate !== undefined ? { sentDate } : {})}
+      {...(documentUrl !== undefined ? { documentUrl } : {})}
+      {...(canGetDocumentContent ? { captureDocumentContent } : {})}
+      {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
+      onComplete={handleComplete}
+      {...(onSaved ? { onSaved } : {})}
+      {...(onQuickCreate ? { onQuickCreate } : {})}
+      {...(onNavigate ? { onNavigate } : {})}
+      {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
+      {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
+      {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+      {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
+      {...(onDocumentFiled ? { onDocumentFiled } : {})}
+      {...(onSearchContacts ? { onSearchContacts } : {})}
+    />
+  );
+
   return (
     <div className={styles.container}>
-      <SaveFlow
-        hostType={hostType}
-        attachments={attachments}
-        getAccessToken={getAccessToken || defaultGetAccessToken}
-        showDocumentInfo
-        canOpenRecord={canOpenRecord}
-        canSuggestRelatedRecords={canSuggestRelatedRecords}
-        canProvideDocumentName={canProvideDocumentName}
-        canDetectDocumentChanges={canDetectDocumentChanges}
-        canOpenDesktopWord={canOpenDesktopWord}
-        {...(savedState !== undefined ? { savedState } : {})}
-        {...(onSavedStateChange ? { onSavedStateChange } : {})}
-        {...(itemId !== undefined ? { itemId } : {})}
-        {...(itemName !== undefined ? { itemName } : {})}
-        {...(senderEmail !== undefined ? { senderEmail } : {})}
-        {...(senderDisplayName !== undefined ? { senderDisplayName } : {})}
-        {...(recipients !== undefined ? { recipients } : {})}
-        {...(sentDate !== undefined ? { sentDate } : {})}
-        {...(documentUrl !== undefined ? { documentUrl } : {})}
-        {...(canGetDocumentContent ? { captureDocumentContent } : {})}
-        {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
-        onComplete={handleComplete}
-        {...(onSaved ? { onSaved } : {})}
-        {...(onQuickCreate ? { onQuickCreate } : {})}
-        {...(onNavigate ? { onNavigate } : {})}
-        {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
-        {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
-        {...(documentIdentity !== undefined ? { documentIdentity } : {})}
-        {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
-        {...(onDocumentFiled ? { onDocumentFiled } : {})}
-        {...(onSearchContacts ? { onSearchContacts } : {})}
-      />
+      {skippedAttachments.length > 0 && (
+        <MessageBar intent="warning" layout="multiline" data-testid="save-skipped-attachments">
+          <MessageBarBody>
+            <MessageBarTitle>
+              {skippedAttachments.length === 1
+                ? 'One attachment was not saved'
+                : `${skippedAttachments.length} attachments were not saved`}
+            </MessageBarTitle>
+            {skippedAttachments.map(s => (
+              <div key={s.attachmentId}>{s.message}</div>
+            ))}
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {/* Always rendered (a stable tree — SaveFlow never remounts); `undefined` = no reader, the server path. */}
+      <EmailContentCaptureContext.Provider value={canCaptureEmailContent ? captureEmailContent : undefined}>
+        {saveFlow}
+      </EmailContentCaptureContext.Provider>
     </div>
   );
 };

@@ -137,7 +137,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.5.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.6.0'); // the real script ran
   return {
     ribbon,
     retrieveRecord,
@@ -1027,6 +1027,9 @@ describe('Make Secure — the people it was NOT shared with are named (round 33 
       'sdap.provision.principal_no_access': SKIPPED.noAccess('{name}', '{record}'),
       'sdap.provision.principal_no_access_unverifiable': SKIPPED.unverifiable('{name}', '{record}'),
       'sdap.provision.principal_share_failed': SKIPPED.shareFailed('{name}', '{record}'),
+      // Task 114 (owner round 67, owner wording, 2026-10-06): a new key; the three texts above are unchanged.
+      'sdap.provision.principal_external_on_restricted':
+        "{name} is flagged as an external user and can't be given access to a Restricted record.",
     });
     expect(ribbon.SKIPPED_PRINCIPAL_GENERIC).toBe(SKIPPED.generic('{name}', '{record}'));
   });

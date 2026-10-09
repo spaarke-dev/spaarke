@@ -41,8 +41,8 @@ namespace Sprk.Bff.Api.Infrastructure.Logging;
 /// (unified-access-control-r2 task 081). This middleware used to read <c>appid</c>/<c>azp</c>/
 /// <c>idtyp</c>/<c>scp</c>/<c>oid</c> itself, in <c>private static</c> helpers that no authorization
 /// path could reach. That logic was PROMOTED into <c>Spaarke.Core.Auth.CallerIdentity</c> so the
-/// authorization gate on <c>GET /api/diagnostics/tenant-container-resolver</c> and this logging scope
-/// share ONE classifier rather than drifting apart. Per CLAUDE.md §11 there must be exactly one place
+/// authorization gates (the first was the I4 diagnostic route, retired by customer-provisioning-orchestration-r1
+/// task 227f) and this logging scope share ONE classifier rather than drifting apart. Per CLAUDE.md §11 there must be exactly one place
 /// that decides caller kind from a <c>ClaimsPrincipal</c>; this file is a CONSUMER of it, not a second
 /// implementation.</para>
 ///

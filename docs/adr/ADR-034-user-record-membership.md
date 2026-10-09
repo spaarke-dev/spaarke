@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
-| Updated | 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
+| Updated | 2026-10-08 (correction note in §5: FetchXML list helper, ISS-018 #1452 — no rule change); 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
@@ -143,11 +143,24 @@ New playbook node executor `LookupUserMembership` (`ActionType = 52`, slots into
 }
 ```
 
-Downstream Query nodes consume via a new `joinIds` Handlebars helper (registered in `TemplateEngine.cs`) that produces a comma-separated list for FetchXML's `operator='in'`:
+Downstream Query nodes consume the ids through the `fetchInGuids` Handlebars helper (registered in `TemplateEngine.cs`), which writes one `<value>` child per distinct GUID inside a FetchXML `operator="in"` condition:
 
 ```xml
-<condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}"/>
+<condition attribute="sprk_matter" operator="in">{{fetchInGuids myMatters.ids}}</condition>
 ```
+
+> **Correction note (corrected 2026-10-08, ISS-018 #1452) — implementation detail only; membership semantics are unchanged.**
+> As originally written, this section said a new `joinIds` helper "produces a comma-separated list for FetchXML's
+> `operator='in'`", used as `operator="in" value="{{joinIds myMatters.ids}}"`. That premise was false: Dataverse
+> ignores the `value` attribute on a FetchXML list operator and reads values only from `<value>` child elements, so
+> that condition had zero values and every query failed ("The value passed for ConditionOperator.In is empty") —
+> for real id lists as well as empty ones. All seven notification playbooks failed in dev as a result. An `in` with
+> zero `<value>` children is an error, not "matches zero rows". `fetchInGuids` fails closed: an empty, null or
+> unresolved list, or any non-GUID element, writes the single impossible match
+> `<value>00000000-0000-0000-0000-000000000000</value>`, so the condition stays valid and selects nothing.
+> `joinIds` remains registered but is not for FetchXML (its comma shape suits an Azure AI Search `search.in` filter);
+> `FetchXmlShapeValidator` rejects it in FetchXML at deploy lint, in the `QueryDataverse` executor and in the repo
+> regression test.
 
 ### 6. Phase 2 — Junction table + event-driven sync (firm in-scope per owner 2026-06-20)
 
@@ -191,7 +204,7 @@ Materialized junction `sprk_userentityassociation` (7 columns + composite altern
 - **Auto-discovery prevents drift**: when a new sprk_assigned* field is added to sprk_matter, the resolver finds it automatically — no per-consumer config update needed.
 - **Identity-type path independence** handles real-world identity edge cases (user without contact, contact without systemuser, multi-team users) without failing the whole resolution.
 - **Strangler-fig Phase 1A → Phase 2** means consumers can start using Phase 1A today and get Phase 2 performance + freshness for free.
-- **`LookupUserMembership` playbook node + `joinIds` helper** make this pattern usable from JPS playbooks without writing custom node executors.
+- **`LookupUserMembership` playbook node + `fetchInGuids` helper** (originally `joinIds`; corrected 2026-10-08, ISS-018 #1452) make this pattern usable from JPS playbooks without writing custom node executors.
 - **Defense-in-depth Phase 2 sync** (event-driven + nightly recon) survives transient Service Bus failures, BFF-bypassing mutations (maker portal), and event publish failures (Q2 fire-and-forget mode).
 
 ### Negative
@@ -219,7 +232,7 @@ See spec.md AC-1A.1 through AC-1.Docs + AC-1B.* + AC-1C.* + AC-1D.* + AC-1P2.*. 
 - ⏳ AC-1A.5: p95 ≤300ms (deferred to P4 UAT — measured via App Insights server-side request telemetry per NFR-04).
 - ⏳ AC-1A.7: metadata cache invalidates on `POST /refresh-metadata` (covered at unit level; full E2E in P4 UAT).
 - ✅ AC-1B.1: `LookupUserMembership` node executor handles ActionType=52 (ships in R3 task 041).
-- ✅ AC-1B.2: `joinIds` Handlebars helper produces correct comma-separated lists (task 002).
+- ✅ AC-1B.2: `joinIds` Handlebars helper produces correct comma-separated lists (task 002). *(Corrected 2026-10-08, ISS-018 #1452: a comma list is not a valid FetchXML `in` list, so this criterion did not make the playbooks work; FetchXML now uses `fetchInGuids` — see §5's correction note.)*
 - ✅ AC-1C.1: `notification-new-documents.json` migrated to use `LookupUserMembership` node (ships in R3 task 050).
 - ✅ AC-1.ADR: this document.
 - ⏳ AC-1.Docs: architecture page `docs/architecture/membership-resolution-pattern.md` (task 104).

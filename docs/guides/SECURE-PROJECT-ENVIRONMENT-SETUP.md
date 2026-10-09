@@ -596,8 +596,7 @@ proven) and the creator beside them, so the same command finishes a Make Secure 
 **A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
 `65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
 `sprk_containerid` is classified: a business unit's shared container, or one this BFF is configured to use for many
-records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`,
-`SharePointEmbedded:StagingContainerId`), is **replaced** by the record's own — its owner keeps pointing at it; one that
+records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`), is **replaced** by the record's own — its owner keeps pointing at it; one that
 another project, matter or work assignment also records is **refused**; anything else is the record's **own** and is
 **kept** — no container is created and the value is not rewritten.
 
@@ -970,11 +969,20 @@ Users secure and unsecure an existing project, matter or work assignment from th
 - Both read `sprk_issecure` — with `sprk_containerid` and `_owninguser_value`, in ONE `Xrm.WebApi.retrieveRecord` —
   (every user's reader-profile Read, step 3); a failed or masked read hides BOTH. Only a flagged, team-owned record
   with a container adds the server's owner answer (above).
+- **The platform's own Share command is hidden on a Restricted record** (unified-access-control-r2 task 114, owner
+  round 67 amendment 4(a); `access_ribbon.js` 1.6.0 `isShareAllowed`). A Restricted record (`sprk_accesspermission` =
+  Restricted) is for internal use only, so sharing goes through Manage Access "+ User", which refuses a user flagged
+  `sprk_isexternal = true` there. `Set-AccessRibbon.ps1 -Apply` copies the platform's form Share command from the live
+  ribbon and appends `sprk.Access.<entity>.ShareAllowed.EnableRule` (its README). Backups, both server-side: the
+  record's save and the 5-minute Assigned-To job remove an external-flagged user's share on a Restricted record
+  (`RestrictedExternalShareRemover`), and Manage Access labels such a share "External user — no access" until then.
+  The grid and subgrid Share on SELECTED rows is hidden when ANY selected row is Restricted (`isShareAllowedForSelection`,
+  the same import).
 
 Order (release order: round 60 item 2): the BFF (tasks 148 + 150) → the **default-team part** of task 144's migration
 (`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` dry run, then `-Apply`, §4.3 — a live gate before the ribbon ships,
 round 53 item 2; complete when the dry run's plan has **no MIGRATE rows** and the retired default team **no longer holds
-the Secure Record Owner role**) → web resources (`access_ribbon.js` 1.5.0, `assignedaccess_postsave.js`, `bff_auth.js`)
+the Secure Record Owner role**) → web resources (`access_ribbon.js` 1.6.0, `assignedaccess_postsave.js` 1.1.0, `bff_auth.js`)
 → `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150 POML ui-tests on
 the three forms → the migration's **full `-Verify` exit 0**, once Make Secure's "finish" has settled the **NOT-ISOLATED**
 rows (user-owned legacy records, records owned by a team outside the Secure Record business unit, flagged records left

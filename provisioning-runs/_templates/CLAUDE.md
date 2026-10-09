@@ -27,7 +27,7 @@ Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISION
 - **I1** — `customerId`, `tenantId`, and `runId` are IMMUTABLE for this folder's lifetime. No handler reassigns them.
 - **I2** — All AI Search queries for this run MUST include unconditional `tenantId eq '{tenantId}'` filter (FR-29).
 - **I3** — All Cosmos reads/writes for this run MUST include partition-key `/customerId` predicate (FR-30).
-- **I4** — All SPE container IDs derived from this run's tenant context via `ITenantContainerResolver` (FR-31).
+- **I4** — SPE container IDs come from the record being served or the stamp's own settings, and every app-only SPE call passes `SpeContainerOwnershipGuard` — the one definition of the stamp's containers (FR-31; T227d/T227f).
 - **I5** — All Graph token acquisitions for this run use tenant `{tenantId}` (FR-32).
 - **BINDING** — Before creating, seeding, deleting or purging any Key Vault secret for this run, read and apply the current text of [`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md) "KV credential lifecycle" (time-boxed and environment-specific; root CLAUDE.md §9).
 

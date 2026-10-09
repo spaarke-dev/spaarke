@@ -80,7 +80,7 @@ public class PlaybookQueryTextEscapingTests
         const string config =
             "{\"fetchXml\":\"<fetch><entity name='sprk_event'><filter><condition attribute='modifiedon' operator='last-x-hours' " +
             "value='{{timeWindowHours}}'/><condition attribute='sprk_duedate' operator='lt' value='{{todayUtc}}'/>" +
-            "<condition attribute='sprk_regardingmatter' operator='in' value='{{joinIds myMatters.ids}}'/></filter></entity></fetch>\"}";
+            "<condition attribute='sprk_regardingmatter' operator='in'>{{fetchInGuids myMatters.ids}}</condition></filter></entity></fetch>\"}";
 
         var escaped = Render(config, context, ExecutorType.QueryDataverse);
         var unescaped = Render(config, context, executorType: null);
@@ -176,7 +176,7 @@ public class PlaybookQueryTextEscapingTests
         var copy = (Dictionary<string, object?>)escaped["myMatters"]!;
         copy["output"].Should().BeSameAs(copy, "the copy keeps the self-reference instead of recursing without end");
         copy["label"].Should().Be("a&amp;b");
-        Render("{\"fetchXml\":\"value='{{joinIds myMatters.output.ids}}'\"}", context, ExecutorType.QueryDataverse)
+        Render("{\"fetchXml\":\"<condition attribute='x' operator='in'>{{fetchInGuids myMatters.output.ids}}</condition>\"}", context, ExecutorType.QueryDataverse)
             .Should().Contain(((List<object?>)membership["ids"]!)[0]!.ToString());
     }
 

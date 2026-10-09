@@ -97,18 +97,31 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
+    /// <summary>
+    /// The event logged (at Error) when a notification playbook failed for every user (ISS-018, D-78). The App Insights
+    /// alert rule (<c>infrastructure/bicep/notification-playbook-alerts.bicep</c>) matches its message text; keep the
+    /// phrase "failed for every user" stable or update the rule with it.
+    /// </summary>
+    internal static readonly EventId TotalFailureEventId = new(46101, "NotificationPlaybookTotalFailure");
+
+    /// <summary>True when every one of at least one targeted user's runs failed (ISS-018, D-78).</summary>
+    internal static bool IsTotalFailure(int userCount, int failureCount) => userCount > 0 && failureCount >= userCount;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<PlaybookSchedulerJob> _logger;
+    private readonly TimeProvider _clock;
 
     public PlaybookSchedulerJob(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        ILogger<PlaybookSchedulerJob> logger)
+        ILogger<PlaybookSchedulerJob> logger,
+        TimeProvider? clock = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions need not supply one
     }
 
     /// <inheritdoc />
@@ -219,6 +232,34 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                         childCorrelationId,
                         cancellationToken).ConfigureAwait(false);
 
+                    // ISS-018 (#1452, owner decision D-78): a playbook that failed for EVERY user is a failed run, not
+                    // a "PartialFailure" with Success=true. All 7 notification playbooks failed for every user for
+                    // 89+ days in dev while this job reported success and advanced sprk_lastrundate, so nothing ever
+                    // retried and nobody was told. Now: an Error trace (the App Insights alert rule in
+                    // infrastructure/bicep/notification-playbook-alerts.bicep fires on it), Status=Failed, the job run
+                    // fails, and sprk_lastrundate is NOT advanced, so the next hourly tick runs it again.
+                    // A partial failure (some users) keeps its per-user Warning traces and does not hold back the
+                    // others: the run advances like a success.
+                    if (IsTotalFailure(userCount, failureCount))
+                    {
+                        _logger.LogError(
+                            TotalFailureEventId,
+                            "Notification playbook {PlaybookId} ({Name}) failed for every user — {FailureCount}/{UserCount} user runs failed; " +
+                            "run marked Failed, sprk_lastrundate not advanced, retrying next tick (childCorrelationId={ChildCorrelationId})",
+                            playbookId, playbookName, failureCount, userCount, childCorrelationId);
+
+                        children.Add(new ChildPlaybookRun(
+                            PlaybookId: playbookId,
+                            PlaybookName: playbookName,
+                            CorrelationId: childCorrelationId,
+                            Status: "Failed",
+                            UserCount: userCount,
+                            SuccessCount: successCount,
+                            FailureCount: failureCount,
+                            ErrorMessage: $"All {userCount} user run(s) failed; see the per-user traces (childCorrelationId={childCorrelationId})."));
+                        continue;
+                    }
+
                     // Persist sprk_lastrundate AFTER successful fan-out (matches legacy
                     // PlaybookSchedulerService.PersistLastRunTimestampAsync). Failure here is
                     // non-fatal — the next tick re-reads the (still-stale) value and will
@@ -280,12 +321,18 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                 children.Count(c => c.Status == "Skipped"),
                 (long)sw.Elapsed.TotalMilliseconds);
 
-            // Success is true even if individual playbooks failed — per-playbook errors are
-            // reported in children[].errorMessage. Only an unhandled exception ABOVE the per-
-            // playbook try/catch turns the run into a failure (see outer catch).
+            // ISS-018 (D-78): the job run fails when any playbook FAILED (every user failed, or its fan-out
+            // threw) — the run record no longer reads "succeeded" over a playbook that produced nothing. A
+            // PartialFailure (some users) does not fail the run; its per-user traces carry the detail. Failing
+            // here never retries the tick in-process (ScheduledJobHost retries only on an exception); the retry is
+            // the next tick, because a failed playbook's sprk_lastrundate was not advanced.
+            var failedPlaybooks = children.Where(c => c.Status == "Failed").ToList();
             return new JobRunResult(
-                Success: true,
-                ErrorMessage: null,
+                Success: failedPlaybooks.Count == 0,
+                ErrorMessage: failedPlaybooks.Count == 0
+                    ? null
+                    : $"{failedPlaybooks.Count} notification playbook(s) failed: "
+                      + string.Join("; ", failedPlaybooks.Select(c => $"{c.PlaybookName} ({c.PlaybookId}): {c.ErrorMessage}")),
                 ProcessedItems: children.Count,
                 Duration: sw.Elapsed,
                 ResultJson: SerializeChildren(children));
@@ -434,11 +481,25 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                     // make the notification playbooks runnable with no per-tenant or per-user
                     // configuration; per-user preference overrides can be layered later.
                     //
-                    // Format: dates as FetchXML-compatible UTC strings ("yyyy-MM-ddTHH:mm:ssZ").
-                    // Integer windows: hour/day windows as plain integer strings.
-                    var nowUtc = DateTimeOffset.UtcNow;
-                    var todayUtcStr = nowUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
-                    var dueSoonWindowUtcStr = nowUtc.AddDays(3).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    // Format: dates as "yyyy-MM-dd" calendar dates (task 098, below) — before task 098 they were UTC
+                    // instants ("yyyy-MM-ddTHH:mm:ssZ"). Integer windows: hour/day windows as plain integer strings.
+                    //
+                    // Task 098: {{todayUtc}} / {{dueSoonWindowUtc}} are compared with Date Only columns
+                    // (sprk_event.sprk_duedate / sprk_finalduedate — the "Query Overdue Tasks" node filters
+                    // `lt {{todayUtc}}`). The run is FOR this user (the notification recipient), so "today" is
+                    // THIS USER's local calendar date (Dataverse time zone), "yyyy-MM-dd"; the UTC day called a task
+                    // due today overdue from 20:00 Eastern. The parameter names are kept because live playbook node
+                    // configs reference them. UTC date fallback, with a warning, when the zone cannot be read.
+                    var (userToday, todayFallback) = await Spaarke.Dataverse.DataverseUserTimeZone
+                        .TodayForUserAsync(entityService, userId, _clock.GetUtcNow(), userCt).ConfigureAwait(false);
+                    if (todayFallback is not null)
+                    {
+                        _logger.LogWarning(
+                            "Playbook {PlaybookId} user {UserId}: time zone unreadable; \"today\" is the UTC date ({Reason})",
+                            playbookId, userId, todayFallback);
+                    }
+                    var todayUtcStr = Spaarke.Dataverse.DataverseDateOnly.Format(userToday);
+                    var dueSoonWindowUtcStr = Spaarke.Dataverse.DataverseDateOnly.Format(userToday.AddDays(3));
 
                     var request = new PlaybookRunRequest
                     {
@@ -641,9 +702,9 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
     /// <param name="PlaybookName">Playbook display name (<c>sprk_name</c>), or <c>"(unnamed)"</c> on null.</param>
     /// <param name="CorrelationId">Fresh per-child correlationId (Q1; <see cref="Guid.NewGuid"/> N-format).</param>
     /// <param name="Status">
-    /// One of: <c>"Succeeded"</c> (all users OK), <c>"PartialFailure"</c> (some users failed),
-    /// <c>"Failed"</c> (fan-out aborted), <c>"Skipped"</c> (not due per schedule), <c>"Cancelled"</c>
-    /// (host shutdown).
+    /// One of: <c>"Succeeded"</c> (all users OK), <c>"PartialFailure"</c> (some, not all, users failed),
+    /// <c>"Failed"</c> (every user failed — ISS-018 / D-78 — or the fan-out aborted; <c>sprk_lastrundate</c> is not
+    /// advanced), <c>"Skipped"</c> (not due per schedule), <c>"Cancelled"</c> (host shutdown).
     /// </param>
     /// <param name="UserCount">Total active users targeted for this playbook.</param>
     /// <param name="SuccessCount">Users where orchestration completed without a RunFailed event.</param>

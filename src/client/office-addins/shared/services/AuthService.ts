@@ -50,6 +50,17 @@ export interface IAuthService {
    * its own retry.
    */
   clearCache(): void;
+  /**
+   * Task 113 (dev-only Diagnostics view): how this pane signed in — the MSAL authority and whether the Office
+   * broker (NAA) or the popup fallback is in use. Optional so test doubles need not implement it.
+   */
+  getSignInDiagnostics?(): SignInDiagnostics;
+}
+
+/** Task 113: see {@link IAuthService.getSignInDiagnostics}. */
+export interface SignInDiagnostics {
+  authority: string | null;
+  naaActive: boolean;
 }
 
 export interface AuthConfig {
@@ -63,6 +74,7 @@ export interface AuthConfig {
 class AuthService implements IAuthService {
   private provider: SpaarkeAuthProvider | null = null;
   private strategy: OfficeNaaStrategy | null = null;
+  private authority: string | null = null;
 
   async initialize(config: AuthConfig): Promise<void> {
     const bffApiClientId = config.bffApiClientId || '1e40baad-e065-4aea-a8d4-4b7ab273458c';
@@ -75,6 +87,7 @@ class AuthService implements IAuthService {
       ...(config.redirectUri ? { redirectUri: config.redirectUri } : {}),
     });
 
+    this.authority = resolved.authority;
     this.strategy = new OfficeNaaStrategy(resolved, {
       fallbackRedirectUri: config.fallbackRedirectUri || `${window.location.origin}/auth-callback.html`,
     });
@@ -112,6 +125,10 @@ class AuthService implements IAuthService {
       return;
     }
     await this.provider.logout();
+  }
+
+  getSignInDiagnostics(): SignInDiagnostics {
+    return { authority: this.authority, naaActive: this.strategy?.isNaaActive() ?? false };
   }
 
   getAccount(): AccountInfo | null {

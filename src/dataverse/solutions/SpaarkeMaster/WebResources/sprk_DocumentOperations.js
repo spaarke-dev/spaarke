@@ -1,0 +1,2284 @@
+/**
+ * Spaarke Document Operations
+ * Version: 1.28.0
+ * Description: Document checkout/checkin operations via BFF API with MSAL authentication
+ *
+ * ADR-006 Exception: Approved for ribbon button invocation
+ *
+ * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.28.0:
+ * - FR-18 (spaarke-modal-system): Removed showChoiceDialog's hand-rolled
+ *   window.top.document DOM overlay (createElement/position:fixed). Reworked
+ *   showDocumentLockedDialog() to chain two Xrm.Navigation.openConfirmDialog
+ *   calls (View Only / Download Copy / Cancel) instead — a SUPPORTED client
+ *   API. Same 'view'|'download'|null return contract; openInWeb/openInDesktop
+ *   callers unchanged. Mailto contact link degrades to plain text (no HTML in
+ *   openConfirmDialog).
+ *
+ * Changes in 1.27.0:
+ * - Replaced hardcoded BFF app ID, MSAL client ID, tenant ID, redirect URI,
+ *   and BFF API URL with Dataverse Environment Variable queries
+ * - Added _resolveEnvironmentConfig() for async env var resolution with caching
+ * - BFF URL no longer uses org-to-URL mapping; reads sprk_BffApiBaseUrl env var
+ *
+ * Changes in 1.26.1:
+ * - FIX: showChoiceDialog now uses window.top.document to escape iframe context
+ *   (Dataverse runs web resources in iframes; dialog was appearing in wrong frame)
+ *
+ * Changes in 1.26.0:
+ * - Added 10-record limit for manual Send to Index (front-end only)
+ * - Added showReindexNotification() for user feedback on indexing operations
+ * - Check-in now notifies user that re-indexing will occur (future: trigger re-index)
+ *
+ * Changes in 1.25.1:
+ * - Fixed syntax error: replaced optional chaining (?.) with traditional syntax
+ *   for Dataverse web resource compatibility (script failed to parse in 1.25.0)
+ *
+ * Changes in 1.25.0:
+ * - Fixed SendToIndex to use Azure AD tenantId (from MSAL) instead of Dataverse organizationId
+ *   This aligns with PCF controls for consistent tenantId in AI Search index
+ *
+ * Copyright (c) 2025-2026 Spaarke
+ */
+
+"use strict";
+
+// Namespace declaration
+if (typeof window !== 'undefined') {
+    window.Spaarke = window.Spaarke || {};
+    window.Spaarke.Document = window.Spaarke.Document || {};
+}
+
+var Spaarke = window.Spaarke;
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+Spaarke.Document.Config = {
+    // BFF API URL - resolved from Dataverse Environment Variable (sprk_BffApiBaseUrl)
+    bffApiUrl: null,
+
+    // MSAL Configuration - resolved from Dataverse Environment Variables at init time
+    msal: {
+        // Client Application ID - resolved from sprk_MsalClientId env var
+        clientId: null,
+        // BFF Application ID - resolved from sprk_BffApiAppId env var
+        bffAppId: null,
+        // Azure AD Tenant ID - resolved from sprk_TenantId env var
+        tenantId: null,
+        // Authority URL
+        get authority() {
+            return "https://login.microsoftonline.com/" + this.tenantId;
+        },
+        // BFF API scope - CRITICAL: Use named scope, NOT .default
+        get scope() {
+            return "api://" + this.bffAppId + "/user_impersonation";
+        },
+        // Redirect URI - resolved from Dataverse org URL at init time
+        redirectUri: null
+    },
+
+    // Version
+    version: "1.28.0",
+
+    // Document Status Codes (statuscode field values)
+    statusCode: {
+        DRAFT: 1,
+        CHECKED_IN: 421500002,
+        CHECKED_OUT: 421500001,
+        LOCKED: 2
+    },
+
+    // Manual indexing limits (front-end only - backend has no limits for admin operations)
+    maxManualIndexRecords: 10
+};
+
+// =============================================================================
+// ENVIRONMENT VARIABLE RESOLUTION
+// =============================================================================
+
+/**
+ * Cached environment variable values (module-level cache)
+ * @private
+ */
+Spaarke.Document._envVarCache = {};
+Spaarke.Document._envVarLoading = false;
+Spaarke.Document._envVarResolved = false;
+
+/**
+ * Query a single Dataverse Environment Variable by schema name.
+ * Returns a Promise that resolves to the variable's value, or null if not found.
+ * @param {string} schemaName - The environment variable schema name (e.g., "sprk_BffApiAppId")
+ * @returns {Promise<string|null>}
+ * @private
+ */
+Spaarke.Document._getEnvironmentVariable = function(schemaName) {
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'" +
+        "&$select=environmentvariabledefinitionid,defaultvalue" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+    ).then(function(result) {
+        if (result.entities && result.entities.length > 0) {
+            var definition = result.entities[0];
+            // Override value (if set) takes precedence over defaultvalue. Match the
+            // resolution pattern used by @spaarke/auth's resolveRuntimeConfig.ts and
+            // by sprk_emailactions.js — falling back to defaultvalue is REQUIRED
+            // because in dev/demo envs, sprk_TenantId only has a defaultvalue set.
+            var values = definition.environmentvariabledefinition_environmentvariablevalue;
+            if (values && values.length > 0 && values[0].value) {
+                return values[0].value;
+            }
+            if (definition.defaultvalue) {
+                return definition.defaultvalue;
+            }
+        }
+        return null;
+    });
+};
+
+/**
+ * Resolve all environment configuration from Dataverse Environment Variables.
+ * Queries sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId.
+ * Results are cached in Spaarke.Document._envVarCache and applied to Config.
+ *
+ * @returns {Promise<void>}
+ * @private
+ */
+Spaarke.Document._resolveEnvironmentConfig = function() {
+    if (Spaarke.Document._envVarResolved || Spaarke.Document._envVarLoading) {
+        return Promise.resolve();
+    }
+    Spaarke.Document._envVarLoading = true;
+
+    var envVars = [
+        { schema: "sprk_BffApiBaseUrl", key: "bffApiBaseUrl" },
+        { schema: "sprk_BffApiAppId", key: "bffApiAppId" },
+        { schema: "sprk_MsalClientId", key: "msalClientId" },
+        { schema: "sprk_TenantId", key: "tenantId" }
+    ];
+
+    var promises = envVars.map(function(ev) {
+        return Spaarke.Document._getEnvironmentVariable(ev.schema).then(function(value) {
+            if (value) {
+                Spaarke.Document._envVarCache[ev.key] = value;
+            }
+            return { key: ev.key, schema: ev.schema, value: value };
+        });
+    });
+
+    return Promise.all(promises).then(function(results) {
+        // Apply resolved values to Config
+        var cache = Spaarke.Document._envVarCache;
+
+        if (cache.bffApiBaseUrl) {
+            // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+            // All fetch URLs must add /api/ themselves (buildBffApiUrl pattern).
+            // This prevents the recurring /api/api/ double-prefix bug.
+            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
+            console.log("[Spaarke.Document] BFF URL from env var (normalized):", Spaarke.Document.Config.bffApiUrl);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_BffApiBaseUrl environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.bffApiAppId) {
+            Spaarke.Document.Config.msal.bffAppId = cache.bffApiAppId;
+            console.log("[Spaarke.Document] BFF App ID from env var:", cache.bffApiAppId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_BffApiAppId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.msalClientId) {
+            Spaarke.Document.Config.msal.clientId = cache.msalClientId;
+            console.log("[Spaarke.Document] MSAL Client ID from env var:", cache.msalClientId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_MsalClientId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.tenantId) {
+            Spaarke.Document.Config.msal.tenantId = cache.tenantId;
+            console.log("[Spaarke.Document] Tenant ID from env var:", cache.tenantId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_TenantId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        // Log missing variables summary
+        var missing = results.filter(function(r) { return !r.value; });
+        if (missing.length > 0) {
+            console.error("[Spaarke.Document] Missing environment variables: " +
+                missing.map(function(m) { return m.schema; }).join(", "));
+        }
+
+        Spaarke.Document._envVarResolved = true;
+        Spaarke.Document._envVarLoading = false;
+    }).catch(function(error) {
+        console.error("[Spaarke.Document] Environment variable resolution failed:", error);
+        Spaarke.Document._envVarLoading = false;
+    });
+};
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
+/**
+ * Initialize the module
+ * Resolves configuration from Dataverse Environment Variables
+ * @returns {Promise<boolean>} True if initialization succeeded
+ */
+Spaarke.Document.init = function() {
+    try {
+        // Set redirect URI from Dataverse org URL (available without env var query)
+        var globalContext = Xrm.Utility.getGlobalContext();
+        var clientUrl = globalContext.getClientUrl();
+        // Remove trailing slash and use as redirect URI
+        Spaarke.Document.Config.msal.redirectUri = clientUrl.replace(/\/+$/, "");
+
+        console.log("[Spaarke.Document] Initializing v" + Spaarke.Document.Config.version);
+
+        // Resolve all config from Dataverse Environment Variables (async)
+        return Spaarke.Document._resolveEnvironmentConfig().then(function() {
+            console.log("[Spaarke.Document] Initialized v" + Spaarke.Document.Config.version);
+            console.log("[Spaarke.Document] BFF API URL:", Spaarke.Document.Config.bffApiUrl);
+            return true;
+        }).catch(function(error) {
+            console.error("[Spaarke.Document] Init failed during env var resolution:", error);
+            return false;
+        });
+    } catch (error) {
+        console.error("[Spaarke.Document] Init failed:", error);
+        return Promise.resolve(false);
+    }
+};
+
+/**
+ * Cached init promise to avoid duplicate initialization
+ * @private
+ */
+Spaarke.Document._initPromise = null;
+
+/**
+ * Ensure the module is initialized (resolves config from env vars).
+ * Safe to call multiple times - subsequent calls return the cached promise.
+ * @returns {Promise<void>}
+ */
+Spaarke.Document.ensureInitialized = function() {
+    if (Spaarke.Document._envVarResolved) {
+        return Promise.resolve();
+    }
+    if (!Spaarke.Document._initPromise) {
+        Spaarke.Document._initPromise = Spaarke.Document.init();
+    }
+    return Spaarke.Document._initPromise;
+};
+
+// =============================================================================
+// MSAL AUTHENTICATION
+// =============================================================================
+
+/**
+ * MSAL instance (lazy initialized)
+ */
+Spaarke.Document._msalInstance = null;
+Spaarke.Document._msalInitPromise = null;
+
+/**
+ * Load MSAL library from CDN if not already loaded
+ * @returns {Promise<void>}
+ */
+Spaarke.Document._loadMsalLibrary = function() {
+    return new Promise(function(resolve, reject) {
+        // Check if already loaded
+        if (window.msal && window.msal.PublicClientApplication) {
+            resolve();
+            return;
+        }
+
+        // Load from CDN
+        var script = document.createElement('script');
+        script.src = 'https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js';
+        script.onload = function() {
+            console.log("[Spaarke.Document] MSAL library loaded");
+            resolve();
+        };
+        script.onerror = function() {
+            reject(new Error("Failed to load MSAL library"));
+        };
+        document.head.appendChild(script);
+    });
+};
+
+/**
+ * Initialize MSAL instance
+ * CRITICAL: Must call initialize() before using MSAL in v3+
+ * @returns {Promise<msal.PublicClientApplication>}
+ */
+Spaarke.Document._initMsal = function() {
+    if (Spaarke.Document._msalInitPromise) {
+        return Spaarke.Document._msalInitPromise;
+    }
+
+    Spaarke.Document._msalInitPromise = Spaarke.Document._loadMsalLibrary()
+        .then(function() {
+            var tenantId = Spaarke.Document.Config.msal.tenantId;
+
+            // Pre-build authority metadata to skip endpoint discovery
+            // This avoids the openid-configuration fetch that fails in Dataverse iframe context
+            var authorityMetadataJson = JSON.stringify({
+                "authorization_endpoint": "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/authorize",
+                "token_endpoint": "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/token",
+                "issuer": "https://login.microsoftonline.com/" + tenantId + "/v2.0",
+                "jwks_uri": "https://login.microsoftonline.com/" + tenantId + "/discovery/v2.0/keys",
+                "end_session_endpoint": "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/logout"
+            });
+
+            var config = {
+                auth: {
+                    clientId: Spaarke.Document.Config.msal.clientId,
+                    authority: Spaarke.Document.Config.msal.authority,
+                    // CRITICAL: Static redirect URI matching Azure AD app registration
+                    redirectUri: Spaarke.Document.Config.msal.redirectUri,
+                    navigateToLoginRequestUrl: false,
+                    // Provide known authorities to avoid endpoint discovery issues
+                    knownAuthorities: ["login.microsoftonline.com"],
+                    // CRITICAL: Provide metadata directly to skip discovery fetch
+                    authorityMetadata: authorityMetadataJson
+                },
+                cache: {
+                    cacheLocation: "sessionStorage",
+                    storeAuthStateInCookie: false
+                },
+                system: {
+                    loggerOptions: {
+                        loggerCallback: function(level, message, containsPii) {
+                            if (containsPii) return;
+                            console.log("[MSAL] " + message);
+                        },
+                        logLevel: 3 // Warning level
+                    }
+                }
+            };
+
+            Spaarke.Document._msalInstance = new msal.PublicClientApplication(config);
+            console.log("[Spaarke.Document] MSAL PublicClientApplication created");
+
+            // CRITICAL: Must call initialize() in MSAL v3+
+            // Note: MSAL 2.x from CDN may not have this, so check if method exists
+            if (typeof Spaarke.Document._msalInstance.initialize === 'function') {
+                return Spaarke.Document._msalInstance.initialize().then(function() {
+                    console.log("[Spaarke.Document] MSAL initialized");
+                    return Spaarke.Document._msalInstance.handleRedirectPromise();
+                });
+            } else {
+                // MSAL 2.x doesn't require initialize()
+                return Spaarke.Document._msalInstance.handleRedirectPromise();
+            }
+        })
+        .then(function(redirectResponse) {
+            if (redirectResponse) {
+                console.log("[Spaarke.Document] Redirect response processed");
+                Spaarke.Document._currentAccount = redirectResponse.account;
+            } else {
+                // Check for existing accounts
+                var accounts = Spaarke.Document._msalInstance.getAllAccounts();
+                if (accounts.length > 0) {
+                    Spaarke.Document._currentAccount = accounts[0];
+                    console.log("[Spaarke.Document] Existing account found: " + accounts[0].username);
+                }
+            }
+            return Spaarke.Document._msalInstance;
+        });
+
+    return Spaarke.Document._msalInitPromise;
+};
+
+/**
+ * Current account cache
+ */
+Spaarke.Document._currentAccount = null;
+
+/**
+ * Get access token for BFF API
+ * Uses SSO silent flow with popup fallback
+ * Flow:
+ * 1. Try acquireTokenSilent with cached account (fastest)
+ * 2. Try ssoSilent (discover account from browser session)
+ * 3. Fall back to popup (for consent/MFA)
+ * @returns {Promise<string>} Access token
+ */
+Spaarke.Document.getAccessToken = async function() {
+    var msalInstance = await Spaarke.Document._initMsal();
+    var scope = Spaarke.Document.Config.msal.scope;
+
+    try {
+        // Step 1: Try acquireTokenSilent with cached account (fastest path)
+        if (Spaarke.Document._currentAccount) {
+            console.log("[Spaarke.Document] Attempting acquireTokenSilent with cached account...");
+            try {
+                var silentRequest = {
+                    scopes: [scope],
+                    account: Spaarke.Document._currentAccount
+                };
+                var silentResponse = await msalInstance.acquireTokenSilent(silentRequest);
+                console.log("[Spaarke.Document] acquireTokenSilent succeeded");
+                return silentResponse.accessToken;
+            } catch (silentError) {
+                console.log("[Spaarke.Document] acquireTokenSilent failed, trying ssoSilent...");
+                // Fall through to ssoSilent
+            }
+        }
+
+        // Step 2: Try ssoSilent (discover account from browser session)
+        console.log("[Spaarke.Document] Attempting ssoSilent authentication...");
+        try {
+            var ssoRequest = {
+                scopes: [scope]
+            };
+            var ssoResponse = await msalInstance.ssoSilent(ssoRequest);
+            console.log("[Spaarke.Document] ssoSilent succeeded");
+            // Update cached account
+            if (ssoResponse.account) {
+                Spaarke.Document._currentAccount = ssoResponse.account;
+            }
+            return ssoResponse.accessToken;
+        } catch (ssoError) {
+            console.log("[Spaarke.Document] ssoSilent failed:", ssoError.message);
+            // Fall through to popup
+        }
+
+        // Step 3: Fall back to popup (requires user interaction)
+        console.log("[Spaarke.Document] Falling back to popup authentication...");
+        var popupRequest = {
+            scopes: [scope],
+            loginHint: Spaarke.Document._currentAccount ? Spaarke.Document._currentAccount.username : undefined
+        };
+        var popupResponse = await msalInstance.acquireTokenPopup(popupRequest);
+        console.log("[Spaarke.Document] Popup authentication succeeded");
+        // Update cached account
+        if (popupResponse.account) {
+            Spaarke.Document._currentAccount = popupResponse.account;
+        }
+        return popupResponse.accessToken;
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Token acquisition failed:", error);
+
+        // Handle specific popup errors
+        if (error.message && error.message.includes('popup_window_error')) {
+            throw new Error("Popup blocked. Please allow popups for this site and try again.");
+        }
+        if (error.message && error.message.includes('user_cancelled')) {
+            throw new Error("Authentication cancelled by user");
+        }
+
+        throw new Error("Authentication failed: " + (error.message || "Unknown error"));
+    }
+};
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+Spaarke.Document.Utils = {
+    /**
+     * Generate a new GUID
+     * @returns {string} GUID
+     */
+    newGuid: function() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    },
+
+    /**
+     * Get document info from form context
+     * @param {object} formContext - Form context
+     * @returns {object} Document info
+     */
+    getDocumentInfo: function(formContext) {
+        var documentId = formContext.data.entity.getId().replace(/[{}]/g, "");
+        var nameAttr = formContext.getAttribute("sprk_documentname") || formContext.getAttribute("sprk_name");
+        var documentName = nameAttr ? nameAttr.getValue() : "this document";
+
+        return {
+            id: documentId,
+            name: documentName
+        };
+    },
+
+    /**
+     * Update document status code in Dataverse
+     * @param {string} documentId - Document ID (GUID)
+     * @param {number} statusCode - Status code value from Spaarke.Document.Config.statusCode
+     * @returns {Promise<boolean>} Success
+     */
+    updateDocumentStatus: async function(documentId, statusCode) {
+        try {
+            console.log("[Spaarke.Document] Updating document status:", documentId, "to", statusCode);
+
+            var result = await Xrm.WebApi.updateRecord("sprk_document", documentId, {
+                "statuscode": statusCode
+            });
+
+            console.log("[Spaarke.Document] Document status updated successfully");
+            return true;
+        } catch (error) {
+            console.error("[Spaarke.Document] Failed to update document status:", error);
+            // Don't throw - status update failure shouldn't block the operation
+            return false;
+        }
+    }
+};
+
+// =============================================================================
+// DOCUMENT LOCKED DIALOG (ADR-023 UX via supported Xrm.Navigation — FR-18)
+// =============================================================================
+
+/**
+ * Show document locked dialog with two choices: View Only or Download Copy
+ * (plus implicit Cancel). Reproduces the ADR-023 choice-dialog UX (view /
+ * download / cancel) using two chained Xrm.Navigation.openConfirmDialog calls
+ * — a SUPPORTED client API — instead of the prior hand-rolled
+ * window.top.document DOM overlay (removed 2026-08, spaarke-modal-system
+ * FR-18; ADR-006 web-resource exception stays JS-on-supported-API, not PCF).
+ *
+ * Sequence: "View Only?" (confirm -> 'view', decline -> ask next) then, only
+ * if declined, "Download Copy instead?" (confirm -> 'download', decline ->
+ * null). This preserves the exact three outcomes openInWeb/openInDesktop
+ * branch on. The old overlay's one-click mailto contact link cannot be
+ * reproduced here — openConfirmDialog's text is plain text, not HTML — so the
+ * contact email (when known) is surfaced as a plain-text line instead.
+ *
+ * @param {object} checkoutInfo - Info about who has the document checked out
+ * @param {string} checkoutInfo.name - Name of person who checked out
+ * @param {string} [checkoutInfo.email] - Email of person who checked out
+ * @param {string} documentName - Name of the document
+ * @returns {Promise<string|null>} 'view' | 'download' | null if cancelled
+ */
+Spaarke.Document.showDocumentLockedDialog = async function(checkoutInfo, documentName) {
+    var contactLine = checkoutInfo.email
+        ? ("\n\nContact " + checkoutInfo.name + " at " + checkoutInfo.email + " to request access.")
+        : "";
+
+    var viewResult = await Xrm.Navigation.openConfirmDialog({
+        title: "Document Locked",
+        text: "\"" + documentName + "\" is currently checked out by " + checkoutInfo.name + "." + contactLine +
+              "\n\nOpen it for viewing only? Any changes you make will not be saved.",
+        confirmButtonLabel: "View Only",
+        cancelButtonLabel: "More Options"
+    });
+
+    if (viewResult.confirmed) {
+        return 'view';
+    }
+
+    var downloadResult = await Xrm.Navigation.openConfirmDialog({
+        title: "Document Locked",
+        text: "Download a local copy of \"" + documentName + "\" to edit offline instead?\n\n" +
+              "Changes won't sync back automatically.",
+        confirmButtonLabel: "Download Copy",
+        cancelButtonLabel: "Cancel"
+    });
+
+    return downloadResult.confirmed ? 'download' : null;
+};
+
+// =============================================================================
+// CHECKOUT STATUS CACHE
+// =============================================================================
+
+/**
+ * Cached checkout status for enable rule evaluation
+ * Key: documentId, Value: { isCheckedOut, isCheckedOutByMe, checkedOutBy, timestamp }
+ */
+Spaarke.Document._checkoutStatusCache = {};
+
+/**
+ * Get checkout status (cached for 30 seconds)
+ * @param {string} documentId - Document ID
+ * @param {string} [prefetchedToken] - Optional pre-fetched access token (to avoid MSAL popup issues)
+ * @returns {Promise<object>} Checkout status
+ */
+Spaarke.Document.getCheckoutStatus = async function(documentId, prefetchedToken) {
+    var cached = Spaarke.Document._checkoutStatusCache[documentId];
+    var now = Date.now();
+
+    // Return cached if less than 30 seconds old
+    if (cached && (now - cached.timestamp) < 30000) {
+        return cached;
+    }
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        // Use prefetched token if provided, otherwise get a new one
+        var token = prefetchedToken || await Spaarke.Document.getAccessToken();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + documentId + "/checkout-status",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        if (response.ok) {
+            var data = await response.json();
+            var status = {
+                isCheckedOut: data.isCheckedOut || false,
+                isCheckedOutByMe: data.isCheckedOutByCurrentUser || false,
+                checkedOutBy: data.checkedOutBy || null,
+                timestamp: now
+            };
+            Spaarke.Document._checkoutStatusCache[documentId] = status;
+            return status;
+        }
+    } catch (error) {
+        console.error("[Spaarke.Document] Failed to get checkout status:", error);
+    }
+
+    // Default to not checked out if we can't determine
+    return { isCheckedOut: false, isCheckedOutByMe: false, checkedOutBy: null, timestamp: now };
+};
+
+/**
+ * Clear checkout status cache for a document
+ * @param {string} documentId - Document ID
+ */
+Spaarke.Document.clearCheckoutStatusCache = function(documentId) {
+    delete Spaarke.Document._checkoutStatusCache[documentId];
+};
+
+/**
+ * Pending refresh info - stored at window level for persistence across async contexts
+ */
+Spaarke.Document._pendingRefresh = null;
+
+/**
+ * Refresh form data and ribbon after an operation
+ * Uses formContext.data.refresh with fallback to page navigation
+ * @param {object} formContext - Form context
+ * @param {string} documentId - Document ID for navigation fallback
+ */
+Spaarke.Document.refreshForm = function(formContext, documentId) {
+    console.log("[Spaarke.Document] >>> refreshForm ENTERED for document:", documentId);
+    console.log("[Spaarke.Document] formContext valid:", !!formContext);
+    console.log("[Spaarke.Document] formContext.data valid:", !!(formContext && formContext.data));
+
+    try {
+        if (!formContext || !formContext.data) {
+            console.error("[Spaarke.Document] formContext is invalid!");
+            // Try navigating directly as fallback
+            console.log("[Spaarke.Document] Using navigation fallback...");
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: documentId
+            });
+            return;
+        }
+
+        // Try standard refresh first (synchronous call, returns Promise)
+        console.log("[Spaarke.Document] Calling formContext.data.refresh(true)...");
+        formContext.data.refresh(true).then(function() {
+            console.log("[Spaarke.Document] formContext.data.refresh() SUCCEEDED");
+            // Refresh ribbon
+            console.log("[Spaarke.Document] Calling formContext.ui.refreshRibbon()...");
+            formContext.ui.refreshRibbon();
+            console.log("[Spaarke.Document] Ribbon refresh completed!");
+        }).catch(function(refreshError) {
+            console.warn("[Spaarke.Document] formContext.data.refresh() FAILED:", refreshError);
+            console.log("[Spaarke.Document] Falling back to page navigation...");
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: documentId
+            });
+        });
+
+    } catch (syncError) {
+        console.error("[Spaarke.Document] refreshForm threw synchronously:", syncError);
+        // Last resort fallback
+        try {
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: documentId
+            });
+        } catch (navError) {
+            console.error("[Spaarke.Document] Navigation also failed:", navError);
+        }
+    }
+};
+
+// =============================================================================
+// CHECKOUT DOCUMENT
+// =============================================================================
+
+/**
+ * Check out document - called from ribbon button
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.checkoutDocument = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Checkout requested for:", docInfo.id, docInfo.name);
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Checking out document...");
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to checkout
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/checkout",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            console.log("[Spaarke.Document] Document checked out successfully");
+
+            // Update document status to "Checked Out" in Dataverse
+            await Spaarke.Document.Utils.updateDocumentStatus(
+                docInfo.id,
+                Spaarke.Document.Config.statusCode.CHECKED_OUT
+            );
+
+            // Clear cache
+            Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
+
+            // v1.19.0: Show dialog, then navigate to refresh page
+            var capturedDocId = docInfo.id;
+            console.log("[Spaarke.Document] Showing success dialog...");
+
+            await Xrm.Navigation.openAlertDialog({
+                text: "Document checked out successfully. You can now edit the document.",
+                confirmButtonLabel: "OK"
+            });
+
+            console.log("[Spaarke.Document] Dialog closed, navigating to refresh page...");
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: capturedDocId
+            });
+
+        } else {
+            var errorData;
+            var responseText = "";
+            try {
+                responseText = await response.text();
+                console.error("[Spaarke.Document] Checkout failed with status:", response.status);
+                console.error("[Spaarke.Document] Response body:", responseText);
+                errorData = JSON.parse(responseText);
+            } catch (e) {
+                console.error("[Spaarke.Document] Failed to parse error response:", e);
+                errorData = { detail: responseText || "Unknown error occurred" };
+            }
+
+            if (response.status === 409) {
+                // Already checked out
+                var lockedMessage = "This document is already checked out";
+                if (errorData.checkedOutBy) {
+                    lockedMessage += " by " + errorData.checkedOutBy.name;
+                }
+                lockedMessage += ".";
+
+                await Xrm.Navigation.openErrorDialog({
+                    message: lockedMessage
+                });
+            } else {
+                var errorMessage = errorData.detail || errorData.title || "Failed to check out document";
+                await Xrm.Navigation.openErrorDialog({
+                    message: errorMessage
+                });
+            }
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Checkout error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to check out document: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// CHECKIN DOCUMENT
+// =============================================================================
+
+/**
+ * Check in document - called from ribbon button
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.checkinDocument = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Checkin requested for:", docInfo.id, docInfo.name);
+
+        // Prompt for comment (optional)
+        var commentResult = await Xrm.Navigation.openDialog("sprk_CheckinCommentDialog", {
+            height: 250,
+            width: 450,
+            position: 1
+        }, {}).catch(function() {
+            // Dialog cancelled or not found - use simple prompt
+            return null;
+        });
+
+        var comment = "";
+        if (commentResult && commentResult.parameters && commentResult.parameters.comment) {
+            comment = commentResult.parameters.comment;
+        } else {
+            // Fallback: Use confirm dialog with implied empty comment
+            var confirmResult = await Xrm.Navigation.openConfirmDialog({
+                title: "Check In Document",
+                text: "Check in \"" + docInfo.name + "\"?\n\nThis will save your changes and make the document available for others to edit.",
+                confirmButtonLabel: "Check In",
+                cancelButtonLabel: "Cancel"
+            });
+
+            if (!confirmResult.confirmed) {
+                console.log("[Spaarke.Document] Checkin cancelled by user");
+                return;
+            }
+        }
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Checking in document...");
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to checkin
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/checkin",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    comment: comment
+                })
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            console.log("[Spaarke.Document] Document checked in successfully");
+
+            // Update document status to "Checked In" in Dataverse
+            await Spaarke.Document.Utils.updateDocumentStatus(
+                docInfo.id,
+                Spaarke.Document.Config.statusCode.CHECKED_IN
+            );
+
+            // Clear cache
+            Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
+
+            // v1.26.0: Show success dialog with re-indexing notification
+            var capturedDocId = docInfo.id;
+            console.log("[Spaarke.Document] Showing success dialog with re-index notification...");
+
+            await Xrm.Navigation.openAlertDialog({
+                title: "Document Checked In",
+                text: "Document checked in successfully.\n\n" +
+                      "The document will be re-indexed to update semantic search relationships. " +
+                      "This process runs in the background.",
+                confirmButtonLabel: "OK"
+            });
+
+            console.log("[Spaarke.Document] Dialog closed, navigating to refresh page...");
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: capturedDocId
+            });
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to check in document";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Checkin error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to check in document: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// DISCARD CHECKOUT
+// =============================================================================
+
+/**
+ * Discard checkout - called from ribbon button
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.discardCheckout = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Discard requested for:", docInfo.id, docInfo.name);
+
+        // Confirm discard
+        var confirmResult = await Xrm.Navigation.openConfirmDialog({
+            title: "Discard Checkout?",
+            text: "Discard checkout for \"" + docInfo.name + "\"?\n\nAny unsaved changes will be lost.",
+            confirmButtonLabel: "Discard",
+            cancelButtonLabel: "Cancel"
+        });
+
+        if (!confirmResult.confirmed) {
+            console.log("[Spaarke.Document] Discard cancelled by user");
+            return;
+        }
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Discarding checkout...");
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to discard
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/discard",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            console.log("[Spaarke.Document] Checkout discarded successfully");
+
+            // Update document status to "Checked In" in Dataverse (back to previous state)
+            await Spaarke.Document.Utils.updateDocumentStatus(
+                docInfo.id,
+                Spaarke.Document.Config.statusCode.CHECKED_IN
+            );
+
+            // Clear cache
+            Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
+
+            // v1.19.0: Show dialog, then navigate to refresh page
+            var capturedDocId = docInfo.id;
+            console.log("[Spaarke.Document] Showing success dialog...");
+
+            await Xrm.Navigation.openAlertDialog({
+                text: "Checkout discarded. The document has been restored to its previous state.",
+                confirmButtonLabel: "OK"
+            });
+
+            console.log("[Spaarke.Document] Dialog closed, navigating to refresh page...");
+            Xrm.Navigation.navigateTo({
+                pageType: "entityrecord",
+                entityName: "sprk_document",
+                entityId: capturedDocId
+            });
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to discard checkout";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Discard error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to discard checkout: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// DELETE DOCUMENT
+// =============================================================================
+
+/**
+ * Delete document - called from ribbon button
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.deleteDocument = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Delete requested for:", docInfo.id, docInfo.name);
+
+        // Show confirmation dialog
+        var confirmResult = await Xrm.Navigation.openConfirmDialog({
+            title: "Delete Document?",
+            text: "This will permanently delete \"" + docInfo.name + "\" and its file from storage.\n\nThis action cannot be undone.",
+            confirmButtonLabel: "Delete",
+            cancelButtonLabel: "Cancel"
+        });
+
+        if (!confirmResult.confirmed) {
+            console.log("[Spaarke.Document] Delete cancelled by user");
+            return;
+        }
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Deleting document...");
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to delete
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id,
+            {
+                method: "DELETE",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        // Handle response
+        if (response.ok) {
+            // Success - navigate to document grid
+            Xrm.Utility.closeProgressIndicator();
+
+            console.log("[Spaarke.Document] Document deleted successfully");
+
+            // Show brief success message then navigate
+            await Xrm.Navigation.openAlertDialog({
+                text: "Document deleted successfully.",
+                confirmButtonLabel: "OK"
+            });
+
+            // Navigate to document list
+            Xrm.Navigation.navigateTo({
+                pageType: "entitylist",
+                entityName: "sprk_document"
+            });
+
+        } else {
+            // Handle error response
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            Xrm.Utility.closeProgressIndicator();
+
+            // Check for specific error types
+            if (response.status === 409) {
+                // Document is locked (checked out)
+                var lockedMessage = "This document is currently checked out and cannot be deleted.\n\n";
+                if (errorData.checkedOutBy) {
+                    lockedMessage += "Checked out by: " + errorData.checkedOutBy.name;
+                } else {
+                    lockedMessage += "Please wait for it to be checked in.";
+                }
+
+                await Xrm.Navigation.openErrorDialog({
+                    message: lockedMessage
+                });
+
+            } else if (response.status === 404) {
+                // Document not found
+                await Xrm.Navigation.openErrorDialog({
+                    message: "Document not found. It may have already been deleted."
+                });
+
+                // Still navigate away since document doesn't exist
+                Xrm.Navigation.navigateTo({
+                    pageType: "entitylist",
+                    entityName: "sprk_document"
+                });
+
+            } else {
+                // Other error
+                var errorMessage = errorData.detail || errorData.title || "Failed to delete document";
+                await Xrm.Navigation.openErrorDialog({
+                    message: errorMessage
+                });
+            }
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Delete error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to delete document: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// CHECKOUT HELPER (for Open in Web/Desktop)
+// =============================================================================
+
+/**
+ * Perform checkout without showing success dialog
+ * Used by openInWeb/openInDesktop when user chooses to check out first
+ * @param {string} documentId - Document ID
+ * @param {string} documentName - Document name for error messages
+ * @returns {Promise<boolean>} Success
+ */
+Spaarke.Document._performCheckout = async function(documentId, documentName) {
+    console.log("[Spaarke.Document] Performing checkout for:", documentId, documentName);
+
+    try {
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to checkout
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + documentId + "/checkout",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log("[Spaarke.Document] Checkout successful");
+
+            // Update document status to "Checked Out" in Dataverse
+            await Spaarke.Document.Utils.updateDocumentStatus(
+                documentId,
+                Spaarke.Document.Config.statusCode.CHECKED_OUT
+            );
+
+            // Clear cache
+            Spaarke.Document.clearCheckoutStatusCache(documentId);
+
+            return true;
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            if (response.status === 409) {
+                // Already checked out
+                var lockedMessage = "This document is already checked out";
+                if (errorData.checkedOutBy) {
+                    lockedMessage += " by " + errorData.checkedOutBy.name;
+                }
+                lockedMessage += ".";
+                throw new Error(lockedMessage);
+            } else {
+                throw new Error(errorData.detail || errorData.title || "Failed to check out document");
+            }
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Checkout failed:", error);
+        throw error;
+    }
+};
+
+/**
+ * Check if document is currently checked out (synchronous check from form attribute)
+ * @param {object} formContext - Form context
+ * @returns {object} { isCheckedOut: boolean, isCheckedOutByMe: boolean }
+ */
+Spaarke.Document._getCheckoutState = function(formContext) {
+    try {
+        var checkedOutByAttr = formContext.getAttribute("sprk_checkedoutby");
+        if (checkedOutByAttr) {
+            var checkedOutBy = checkedOutByAttr.getValue();
+            if (checkedOutBy && checkedOutBy.length > 0 && checkedOutBy[0]) {
+                // Document is checked out
+                var currentUserId = Xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "").toLowerCase();
+                var checkedOutUserId = checkedOutBy[0].id.replace(/[{}]/g, "").toLowerCase();
+                var isCurrentUser = currentUserId === checkedOutUserId;
+                return {
+                    isCheckedOut: true,
+                    isCheckedOutByMe: isCurrentUser,
+                    checkedOutByName: checkedOutBy[0].name
+                };
+            }
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] _getCheckoutState error:", e);
+    }
+    return { isCheckedOut: false, isCheckedOutByMe: false, checkedOutByName: null };
+};
+
+// =============================================================================
+// OPEN IN WEB (Office Online)
+// =============================================================================
+
+/**
+ * Office file extensions that support Office Online viewing
+ * (matches SpeDocumentViewer's comprehensive list)
+ */
+Spaarke.Document.OFFICE_EXTENSIONS = [
+    // Word
+    '.docx', '.doc', '.docm', '.dot', '.dotx', '.dotm',
+    // Excel
+    '.xlsx', '.xls', '.xlsm', '.xlsb', '.xlt', '.xltx', '.xltm',
+    // PowerPoint
+    '.pptx', '.ppt', '.pptm', '.pot', '.potx', '.potm', '.pps', '.ppsx', '.ppsm'
+];
+
+/**
+ * Open document in Office Online (new browser tab)
+ * Called from ribbon button
+ * Shows checkout prompt if document is not already checked out
+ * If locked by another user, shows ADR-023 choice dialog with View/Download/Cancel options
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.openInWeb = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Open in Web requested for:", docInfo.id, docInfo.name);
+
+        // CRITICAL: Pre-fetch token immediately while in user click context
+        // This ensures MSAL can open popup if needed (before any async dialogs)
+        console.log("[Spaarke.Document] Pre-fetching token in user click context...");
+        var prefetchedToken = await Spaarke.Document.getAccessToken();
+        console.log("[Spaarke.Document] Token pre-fetched successfully");
+
+        // Check current checkout state
+        var checkoutState = Spaarke.Document._getCheckoutState(formContext);
+        console.log("[Spaarke.Document] Checkout state:", checkoutState);
+
+        // Track if we need to proceed with opening
+        var shouldOpen = true;
+        var didCheckout = false;
+
+        // If document is not checked out, ask user if they want to check it out first
+        if (!checkoutState.isCheckedOut) {
+            var confirmResult = await Xrm.Navigation.openConfirmDialog({
+                title: "Check Out Document?",
+                text: "Do you want to check out \"" + docInfo.name + "\" before opening?\n\n" +
+                      "Checking out will prevent others from editing while you have it open.",
+                confirmButtonLabel: "Check Out & Open",
+                cancelButtonLabel: "Open Without Checkout"
+            });
+
+            if (confirmResult.confirmed) {
+                // User wants to check out first
+                Xrm.Utility.showProgressIndicator("Checking out document...");
+
+                try {
+                    await Spaarke.Document._performCheckout(docInfo.id, docInfo.name);
+                    console.log("[Spaarke.Document] Document checked out before opening");
+                    didCheckout = true;
+                    Xrm.Utility.closeProgressIndicator();
+                } catch (checkoutError) {
+                    Xrm.Utility.closeProgressIndicator();
+                    await Xrm.Navigation.openErrorDialog({
+                        message: checkoutError.message
+                    });
+                    return;
+                }
+            }
+        } else if (!checkoutState.isCheckedOutByMe) {
+            // Document is checked out by someone else - show ADR-023 choice dialog
+            console.log("[Spaarke.Document] Document locked, fetching checkout details...");
+
+            // Get full checkout info including email from BFF API (using prefetched token)
+            var checkoutInfo = { name: checkoutState.checkedOutByName, email: null };
+            try {
+                var apiStatus = await Spaarke.Document.getCheckoutStatus(docInfo.id, prefetchedToken);
+                if (apiStatus.checkedOutBy && apiStatus.checkedOutBy.email) {
+                    checkoutInfo.email = apiStatus.checkedOutBy.email;
+                }
+            } catch (e) {
+                console.log("[Spaarke.Document] Could not fetch checkout email:", e);
+            }
+
+            // Show ADR-023 styled choice dialog
+            var choice = await Spaarke.Document.showDocumentLockedDialog(checkoutInfo, docInfo.name);
+            console.log("[Spaarke.Document] User choice:", choice);
+
+            if (choice === 'download') {
+                // User chose to download instead
+                await Spaarke.Document.downloadDocument(primaryControl);
+                return;
+            } else if (choice !== 'view') {
+                // User cancelled
+                return;
+            }
+            // choice === 'view' - continue to open
+        }
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Getting document link...");
+
+        // Use the prefetched token for API call
+        var token = prefetchedToken;
+
+        // Call BFF API to get open links
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/open-links",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            var data = await response.json();
+
+            if (data.webUrl) {
+                console.log("[Spaarke.Document] Opening in Office Online:", data.webUrl);
+                // Open in new tab with security attributes
+                window.open(data.webUrl, '_blank', 'noopener,noreferrer');
+
+                // If we checked out, refresh the form to show updated status
+                if (didCheckout) {
+                    Spaarke.Document.refreshForm(formContext, docInfo.id);
+                }
+            } else {
+                console.warn("[Spaarke.Document] No web URL available for document");
+                await Xrm.Navigation.openErrorDialog({
+                    message: "This document cannot be opened in Office Online."
+                });
+            }
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to get document link";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Open in Web error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to open document: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// OPEN IN DESKTOP (Native App)
+// =============================================================================
+
+/**
+ * Open document in desktop application (Word, Excel, PowerPoint)
+ * Called from ribbon button
+ * Shows checkout prompt if document is not already checked out
+ * If locked by another user, shows ADR-023 choice dialog with View/Download/Cancel options
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.openInDesktop = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Open in Desktop requested for:", docInfo.id, docInfo.name);
+
+        // CRITICAL: Pre-fetch token immediately while in user click context
+        // This ensures MSAL can open popup if needed (before any async dialogs)
+        console.log("[Spaarke.Document] Pre-fetching token in user click context...");
+        var prefetchedToken = await Spaarke.Document.getAccessToken();
+        console.log("[Spaarke.Document] Token pre-fetched successfully");
+
+        // Check current checkout state
+        var checkoutState = Spaarke.Document._getCheckoutState(formContext);
+        console.log("[Spaarke.Document] Checkout state:", checkoutState);
+
+        // Track if we checked out
+        var didCheckout = false;
+
+        // If document is not checked out, ask user if they want to check it out first
+        if (!checkoutState.isCheckedOut) {
+            var confirmResult = await Xrm.Navigation.openConfirmDialog({
+                title: "Check Out Document?",
+                text: "Do you want to check out \"" + docInfo.name + "\" before opening?\n\n" +
+                      "Checking out will prevent others from editing while you have it open.",
+                confirmButtonLabel: "Check Out & Open",
+                cancelButtonLabel: "Open Without Checkout"
+            });
+
+            if (confirmResult.confirmed) {
+                // User wants to check out first
+                Xrm.Utility.showProgressIndicator("Checking out document...");
+
+                try {
+                    await Spaarke.Document._performCheckout(docInfo.id, docInfo.name);
+                    console.log("[Spaarke.Document] Document checked out before opening");
+                    didCheckout = true;
+                    Xrm.Utility.closeProgressIndicator();
+                } catch (checkoutError) {
+                    Xrm.Utility.closeProgressIndicator();
+                    await Xrm.Navigation.openErrorDialog({
+                        message: checkoutError.message
+                    });
+                    return;
+                }
+            }
+        } else if (!checkoutState.isCheckedOutByMe) {
+            // Document is checked out by someone else - show ADR-023 choice dialog
+            console.log("[Spaarke.Document] Document locked, fetching checkout details...");
+
+            // Get full checkout info including email from BFF API (using prefetched token)
+            var checkoutInfo = { name: checkoutState.checkedOutByName, email: null };
+            try {
+                var apiStatus = await Spaarke.Document.getCheckoutStatus(docInfo.id, prefetchedToken);
+                if (apiStatus.checkedOutBy && apiStatus.checkedOutBy.email) {
+                    checkoutInfo.email = apiStatus.checkedOutBy.email;
+                }
+            } catch (e) {
+                console.log("[Spaarke.Document] Could not fetch checkout email:", e);
+            }
+
+            // Show ADR-023 styled choice dialog
+            var choice = await Spaarke.Document.showDocumentLockedDialog(checkoutInfo, docInfo.name);
+            console.log("[Spaarke.Document] User choice:", choice);
+
+            if (choice === 'download') {
+                // User chose to download instead
+                await Spaarke.Document.downloadDocument(primaryControl);
+                return;
+            } else if (choice !== 'view') {
+                // User cancelled
+                return;
+            }
+            // choice === 'view' - continue to open
+        }
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Getting document link...");
+
+        // Use the prefetched token for API call
+        var token = prefetchedToken;
+
+        // Call BFF API to get open links
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/open-links",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            var data = await response.json();
+
+            if (data.desktopUrl) {
+                console.log("[Spaarke.Document] Opening in desktop app:", data.desktopUrl);
+                // Use location.href to trigger protocol handler (ms-word:, ms-excel:, etc.)
+                window.location.href = data.desktopUrl;
+
+                // If we checked out, refresh the form to show updated status
+                if (didCheckout) {
+                    // Small delay to allow the protocol handler to start
+                    setTimeout(function() {
+                        Spaarke.Document.refreshForm(formContext, docInfo.id);
+                    }, 500);
+                }
+            } else {
+                console.warn("[Spaarke.Document] No desktop URL available for document");
+                await Xrm.Navigation.openErrorDialog({
+                    message: "This document cannot be opened in a desktop application."
+                });
+            }
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to get document link";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Open in Desktop error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to open document: " + error.message
+        });
+    }
+};
+
+// =============================================================================
+// DOWNLOAD DOCUMENT
+// =============================================================================
+
+/**
+ * Download document - called from ribbon button
+ * Uses BFF API to download document file
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.downloadDocument = async function(primaryControl) {
+    var formContext = primaryControl;
+
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Download requested for:", docInfo.id, docInfo.name);
+
+        // Show progress
+        Xrm.Utility.showProgressIndicator("Downloading document...");
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to get download blob
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/documents/" + docInfo.id + "/download",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId
+                }
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            // Get filename from Content-Disposition header or use document name
+            var filename = docInfo.name || "document";
+            var contentDisposition = response.headers.get("Content-Disposition");
+            if (contentDisposition) {
+                var match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (match && match[1]) {
+                    filename = match[1].replace(/['"]/g, '');
+                }
+            }
+
+            // Create blob and trigger download
+            var blob = await response.blob();
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            console.log("[Spaarke.Document] Document downloaded:", filename);
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to download document";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Download error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to download document: " + error.message
+        });
+    }
+};
+
+/**
+ * Enable/Display rule for Download button
+ * Always returns true (download is available for all document types)
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canDownload = function(primaryControl) {
+    // Download is always available for any document type
+    return true;
+};
+
+// =============================================================================
+// REFRESH FORM
+// =============================================================================
+
+/**
+ * Refresh form and ribbon - called from ribbon button
+ * Simple wrapper for form refresh with ribbon update
+ * @param {object} primaryControl - Form context
+ */
+Spaarke.Document.refreshDocument = function(primaryControl) {
+    var formContext = primaryControl;
+
+    try {
+        var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
+        console.log("[Spaarke.Document] Refresh requested for:", docInfo.id, docInfo.name);
+
+        // Clear checkout status cache to get fresh data
+        Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
+
+        // Refresh form data and ribbon
+        Spaarke.Document.refreshForm(formContext, docInfo.id);
+
+    } catch (error) {
+        console.error("[Spaarke.Document] Refresh error:", error);
+    }
+};
+
+// =============================================================================
+// ENABLE RULES (for ribbon button visibility)
+// =============================================================================
+
+/**
+ * Enable/Display rule for Checkout button
+ * Returns true if document is NOT checked out
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ *       Falls back to Xrm.Page for backward compatibility.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canCheckout = function(primaryControl) {
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
+
+    // For synchronous enable rules, check form attribute
+    try {
+        // Use provided context or fall back to Xrm.Page (deprecated but needed for ribbon rules)
+        var formContext = primaryControl;
+        if (!formContext || !formContext.getAttribute) {
+            // Fallback for ribbon DisplayRules that don't pass context
+            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.getAttribute) {
+                formContext = Xrm.Page;
+            }
+        }
+
+        if (formContext && formContext.getAttribute) {
+            // Check sprk_checkedoutby lookup - if it has a value, document is checked out
+            var checkedOutByAttr = formContext.getAttribute("sprk_checkedoutby");
+            if (checkedOutByAttr) {
+                var checkedOutBy = checkedOutByAttr.getValue();
+                var isCheckedOut = checkedOutBy && checkedOutBy.length > 0;
+                console.log("[Spaarke.Document] canCheckout - sprk_checkedoutby has value:", isCheckedOut);
+                // Can checkout only if NOT currently checked out
+                return !isCheckedOut;
+            } else {
+                console.log("[Spaarke.Document] canCheckout - sprk_checkedoutby attribute not found on form");
+            }
+        } else {
+            console.log("[Spaarke.Document] canCheckout - No form context available");
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] canCheckout error:", e);
+    }
+
+    // Default to enabled (show Check Out button)
+    return true;
+};
+
+/**
+ * Enable/Display rule for Checkin button
+ * Returns true if document is checked out BY CURRENT USER
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ *       Falls back to Xrm.Page for backward compatibility.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canCheckin = function(primaryControl) {
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
+
+    try {
+        // Use provided context or fall back to Xrm.Page (deprecated but needed for ribbon rules)
+        var formContext = primaryControl;
+        if (!formContext || !formContext.getAttribute) {
+            // Fallback for ribbon DisplayRules that don't pass context
+            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.getAttribute) {
+                formContext = Xrm.Page;
+            }
+        }
+
+        if (formContext && formContext.getAttribute) {
+            // Check sprk_checkedoutby lookup - if it has a value, document is checked out
+            var checkedOutByAttr = formContext.getAttribute("sprk_checkedoutby");
+            if (checkedOutByAttr) {
+                var checkedOutBy = checkedOutByAttr.getValue();
+                if (checkedOutBy && checkedOutBy.length > 0 && checkedOutBy[0]) {
+                    // Document is checked out - check if by current user
+                    var currentUserId = Xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "").toLowerCase();
+                    var checkedOutUserId = checkedOutBy[0].id.replace(/[{}]/g, "").toLowerCase();
+                    var isCurrentUser = currentUserId === checkedOutUserId;
+                    console.log("[Spaarke.Document] canCheckin - checkedOutBy:", checkedOutBy[0].name, "isCurrentUser:", isCurrentUser);
+                    return isCurrentUser;
+                } else {
+                    console.log("[Spaarke.Document] canCheckin - document not checked out (sprk_checkedoutby is empty)");
+                }
+            } else {
+                console.log("[Spaarke.Document] canCheckin - sprk_checkedoutby attribute not found on form");
+            }
+        } else {
+            console.log("[Spaarke.Document] canCheckin - No form context available");
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] canCheckin error:", e);
+    }
+
+    // Default to hidden (don't show Check In button)
+    return false;
+};
+
+/**
+ * Enable/Display rule for Discard button
+ * Returns true if document is checked out BY CURRENT USER
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canDiscard = function(primaryControl) {
+    // Same logic as canCheckin
+    console.log("[Spaarke.Document] canDiscard - delegating to canCheckin");
+    return Spaarke.Document.canCheckin(primaryControl);
+};
+
+/**
+ * Enable/Display rule for Delete button
+ * Returns true if document is NOT checked out
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canDelete = function(primaryControl) {
+    // Same logic as canCheckout (can delete if not checked out)
+    console.log("[Spaarke.Document] canDelete - delegating to canCheckout");
+    return Spaarke.Document.canCheckout(primaryControl);
+};
+
+/**
+ * Enable/Display rule for Open in Web button
+ * Returns true only for Office file types that have Office Online viewers
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canOpenInWeb = function(primaryControl) {
+    try {
+        // Use provided context or fall back to Xrm.Page
+        var formContext = primaryControl;
+        if (!formContext || !formContext.getAttribute) {
+            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.getAttribute) {
+                formContext = Xrm.Page;
+            }
+        }
+
+        if (formContext && formContext.getAttribute) {
+            // Check file extension from document name or file extension field
+            var fileExtension = null;
+
+            // Try sprk_fileextension field first (if it exists)
+            var extAttr = formContext.getAttribute("sprk_fileextension");
+            if (extAttr) {
+                fileExtension = extAttr.getValue();
+            }
+
+            // Fall back to extracting from document name
+            if (!fileExtension) {
+                var nameAttr = formContext.getAttribute("sprk_documentname") || formContext.getAttribute("sprk_name");
+                if (nameAttr) {
+                    var name = nameAttr.getValue();
+                    if (name) {
+                        var lastDot = name.lastIndexOf('.');
+                        if (lastDot > 0) {
+                            fileExtension = name.substring(lastDot).toLowerCase();
+                        }
+                    }
+                }
+            }
+
+            if (fileExtension) {
+                fileExtension = fileExtension.toLowerCase();
+                // Ensure it starts with a dot
+                if (!fileExtension.startsWith('.')) {
+                    fileExtension = '.' + fileExtension;
+                }
+
+                var isOfficeFile = Spaarke.Document.OFFICE_EXTENSIONS.indexOf(fileExtension) !== -1;
+                console.log("[Spaarke.Document] canOpenInWeb - extension:", fileExtension, "isOffice:", isOfficeFile);
+                return isOfficeFile;
+            }
+
+            console.log("[Spaarke.Document] canOpenInWeb - no file extension found");
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] canOpenInWeb error:", e);
+    }
+
+    // Default to hidden (hide Open in Web button for unknown file types)
+    return false;
+};
+
+/**
+ * Enable/Display rule for Open in Desktop button
+ * Returns true for Office file types (Word, Excel, PowerPoint)
+ * Note: For ribbon DisplayRules/EnableRules, primaryControl may not be provided.
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canOpenInDesktop = function(primaryControl) {
+    // Same logic as canOpenInWeb - both require Office file types
+    console.log("[Spaarke.Document] canOpenInDesktop - delegating to canOpenInWeb");
+    return Spaarke.Document.canOpenInWeb(primaryControl);
+};
+
+/**
+ * Enable/Display rule for Refresh button
+ * Always returns true (refresh is always available)
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Document.canRefresh = function(primaryControl) {
+    // Refresh is always available
+    return true;
+};
+
+// =============================================================================
+// RE-INDEX NOTIFICATIONS
+// =============================================================================
+
+/**
+ * Shows re-indexing notification dialog to user
+ * Called when user action triggers re-indexing (check-in, manual send-to-index)
+ *
+ * @param {string} trigger - Trigger type: "checkin" | "manual" | "auto"
+ * @param {number} [count=1] - Number of documents being re-indexed
+ * @returns {Promise<void>}
+ */
+Spaarke.Document.showReindexNotification = async function(trigger, count) {
+    count = count || 1;
+
+    var messages = {
+        checkin: "Your document is being re-indexed to update semantic search relationships.\n\n" +
+                 "This process runs in the background and may take a few moments to complete.",
+        manual: count === 1
+            ? "Document is being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete."
+            : count + " documents are being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete.",
+        auto: "Document metadata has changed. Re-indexing to update search results.\n\n" +
+              "This process runs in the background."
+    };
+
+    var titles = {
+        checkin: "Re-Indexing Document",
+        manual: "Indexing in Progress",
+        auto: "Automatic Re-Index"
+    };
+
+    await Xrm.Navigation.openAlertDialog({
+        title: titles[trigger] || "Indexing",
+        text: messages[trigger] || "Document indexing in progress.",
+        confirmButtonLabel: "OK"
+    });
+};
+
+// =============================================================================
+// SEND TO INDEX (Semantic Search)
+// =============================================================================
+
+/**
+ * Send document(s) to semantic search index
+ * Called from ribbon button on form, grid, and subgrid
+ *
+ * @param {object} primaryControl - Form context (for form) or SelectedControl (for grid/subgrid)
+ * @param {string[]} [selectedItemIds] - Selected record IDs (for grid/subgrid)
+ */
+Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
+
+    try {
+        var documentIds = [];
+        var isGridContext = false;
+
+        // Determine context: form or grid/subgrid
+        // Normalize every GUID to lowercase + strip braces. Xrm APIs return GUIDs in
+        // {UPPERCASE} form; Azure AI Search Edm.String filters are case-sensitive, and
+        // lookups elsewhere (Find Similar, related-doc joins) use lowercase. Normalizing
+        // here gives one consistent shape for the BFF and the index. BFF also normalizes
+        // defensively, but cleaner contract to do it at the source.
+        if (selectedItemIds && selectedItemIds.length > 0) {
+            // Grid or subgrid context
+            documentIds = selectedItemIds.map(function(id) {
+                return id.replace(/[{}]/g, "").toLowerCase();
+            });
+            isGridContext = true;
+            console.log("[Spaarke.Document] SendToIndex - grid context with", documentIds.length, "documents");
+        } else if (primaryControl && primaryControl.data && primaryControl.data.entity) {
+            // Form context
+            var docInfo = Spaarke.Document.Utils.getDocumentInfo(primaryControl);
+            documentIds = [(docInfo.id || "").replace(/[{}]/g, "").toLowerCase()];
+            console.log("[Spaarke.Document] SendToIndex - form context for document:", documentIds[0]);
+        } else if (primaryControl && primaryControl.getGrid) {
+            // SelectedControl from grid/subgrid
+            var selectedRows = primaryControl.getGrid().getSelectedRows();
+            if (selectedRows && selectedRows.getLength() > 0) {
+                selectedRows.forEach(function(row) {
+                    var rowData = row.getData();
+                    if (rowData && rowData.entity) {
+                        var id = rowData.entity.getId().replace(/[{}]/g, "").toLowerCase();
+                        documentIds.push(id);
+                    }
+                });
+            }
+            isGridContext = true;
+            console.log("[Spaarke.Document] SendToIndex - SelectedControl context with", documentIds.length, "documents");
+        }
+
+        if (documentIds.length === 0) {
+            await Xrm.Navigation.openAlertDialog({
+                text: "Please select at least one document to send to the search index.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        // Check 10-record limit for manual indexing (front-end only)
+        // Backend has no hard limits to support admin bulk operations
+        var maxRecords = Spaarke.Document.Config.maxManualIndexRecords;
+        if (documentIds.length > maxRecords) {
+            console.log("[Spaarke.Document] SendToIndex - Selection exceeds limit:", documentIds.length, ">", maxRecords);
+            await Xrm.Navigation.openAlertDialog({
+                title: "Selection Limit Exceeded",
+                text: "The manual Send to Index is limited to " + maxRecords + " records at a time.\n\n" +
+                      "You selected " + documentIds.length + " records.\n\n" +
+                      "Contact your administrator for large volume bulk indexing projects.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        // Get tenant ID from MSAL account (Azure AD tenant ID)
+        // This must match the tenantId used by PCF controls for indexing and visualization
+        // Previously used Dataverse organizationId which caused tenantId mismatch
+        // NOTE: Using traditional syntax (not ?.) for Dataverse web resource compatibility
+        var tenantId = (Spaarke.Document._currentAccount && Spaarke.Document._currentAccount.tenantId) ||
+            Spaarke.Document.Config.msal.tenantId;
+
+        if (!tenantId) {
+            console.error("[Spaarke.Document] SendToIndex - No tenantId available from MSAL account");
+            await Xrm.Navigation.openAlertDialog({
+                text: "Unable to determine tenant ID. Please try the operation again.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        console.log("[Spaarke.Document] SendToIndex - Using Azure AD tenantId:", tenantId);
+
+        // Show progress
+        var progressMsg = documentIds.length === 1
+            ? "Sending document to search index..."
+            : "Sending " + documentIds.length + " documents to search index...";
+        Xrm.Utility.showProgressIndicator(progressMsg);
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to send to index
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/ai/rag/send-to-index",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    documentIds: documentIds,
+                    tenantId: tenantId
+                })
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            var data = await response.json();
+            console.log("[Spaarke.Document] SendToIndex response:", data);
+
+            // Build result message
+            var resultMsg;
+            if (data.successCount === data.totalRequested) {
+                resultMsg = data.totalRequested === 1
+                    ? "Document successfully sent to search index."
+                    : data.totalRequested + " documents successfully sent to search index.";
+            } else if (data.successCount === 0) {
+                resultMsg = "Failed to index documents. Please try again.";
+                // Response field is `errorMessage` (per RagEndpoints.cs SendToIndexDocumentResult),
+                // not `error`. The old `data.results[0].error` was always undefined so the user
+                // never saw the actual cause. Fixed 2026-05-19.
+                if (data.results && data.results.length > 0 && data.results[0].errorMessage) {
+                    resultMsg += "\n\nError: " + data.results[0].errorMessage;
+                }
+            } else {
+                resultMsg = data.successCount + " of " + data.totalRequested + " documents indexed successfully.";
+                if (data.failedCount > 0) {
+                    resultMsg += "\n" + data.failedCount + " document(s) failed.";
+                    if (data.results) {
+                        for (var i = 0; i < data.results.length; i++) {
+                            if (!data.results[i].success && data.results[i].errorMessage) {
+                                resultMsg += "\n  - " + data.results[i].errorMessage;
+                            }
+                        }
+                    }
+                }
+            }
+
+            await Xrm.Navigation.openAlertDialog({
+                text: resultMsg,
+                confirmButtonLabel: "OK"
+            });
+
+            // Refresh form if in form context
+            if (!isGridContext && primaryControl && primaryControl.data) {
+                var docId = documentIds[0];
+                Spaarke.Document.refreshForm(primaryControl, docId);
+            } else if (isGridContext && primaryControl && primaryControl.refresh) {
+                // Refresh grid
+                primaryControl.refresh();
+            }
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to send document(s) to index";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] SendToIndex error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to send to index: " + error.message
+        });
+    }
+};
+
+/**
+ * Enable rule for Send to Index button
+ * Always enabled (can index any document with a file)
+ * @param {object} [primaryControl] - Form or SelectedControl context
+ * @returns {boolean}
+ */
+Spaarke.Document.canSendToIndex = function(primaryControl) {
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
+
+    try {
+        // For form context, check if document has a file
+        if (primaryControl && primaryControl.getAttribute) {
+            var hasFileAttr = primaryControl.getAttribute("sprk_hasfile");
+            if (hasFileAttr) {
+                var hasFile = hasFileAttr.getValue();
+                console.log("[Spaarke.Document] canSendToIndex - hasFile:", hasFile);
+                return hasFile === true;
+            }
+            // Fallback - check if there's a filename
+            var fileNameAttr = primaryControl.getAttribute("sprk_filename");
+            if (fileNameAttr) {
+                var fileName = fileNameAttr.getValue();
+                console.log("[Spaarke.Document] canSendToIndex - fileName:", fileName);
+                return !!fileName;
+            }
+        }
+
+        // For grid context, enable if any selection (we'll validate on click)
+        if (primaryControl && primaryControl.getGrid) {
+            var selectedRows = primaryControl.getGrid().getSelectedRows();
+            return selectedRows && selectedRows.getLength() > 0;
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] canSendToIndex error:", e);
+    }
+
+    // Default to enabled (for grids/subgrids where we can't easily check)
+    return true;
+};
+
+/**
+ * Selection count rule for Send to Index button on grid/subgrid
+ * Enables when 1 or more records are selected
+ * @param {object} selectedControl - SelectedControl (grid context)
+ * @returns {boolean}
+ */
+Spaarke.Document.hasSelection = function(selectedControl) {
+    try {
+        if (selectedControl && selectedControl.getGrid) {
+            var selectedRows = selectedControl.getGrid().getSelectedRows();
+            var hasSelection = selectedRows && selectedRows.getLength() > 0;
+            console.log("[Spaarke.Document] hasSelection:", hasSelection);
+            return hasSelection;
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] hasSelection error:", e);
+    }
+    return false;
+};
+
+// =============================================================================
+// MODULE EXPORTS
+// =============================================================================
+
+console.log("[Spaarke.Document] Operations module loaded v" + Spaarke.Document.Config.version);
+
+// v1.26.0 Changes:
+// - Added 10-record limit for manual Send to Index (front-end limit only)
+// - Added showReindexNotification() helper for user feedback on indexing operations
+// - Updated check-in success message to inform user about re-indexing
+// - Added Config.maxManualIndexRecords constant (backend has no limits for admin operations)
+
+// v1.23.0 Changes:
+// - CRITICAL FIX: Pre-fetch MSAL token at start of openInWeb/openInDesktop
+// - This ensures token acquisition happens in user click context (before async dialogs)
+// - Fixes MSAL timeout when document is locked by another user (popup blocked issue)
+// - getCheckoutStatus now accepts optional prefetchedToken parameter
+
+// v1.22.0 Changes:
+// - ADR-023: Enhanced document locked dialog with View Only / Download / Cancel options
+// - Added showChoiceDialog() - reusable ADR-023 compliant choice dialog (removed in 1.28.0, see above)
+// - Added showDocumentLockedDialog() - specialized dialog for locked documents
+// - Added email contact link when document is locked by another user
+// - Fetches checkout user email from BFF API for contact link
+
+// v1.21.0 Changes:
+// - Added status code updates on checkout/checkin/discard (statuscode field)
+// - Added checkout prompt dialog when opening documents in Web or Desktop
+// - Added _performCheckout and _getCheckoutState helper functions
+

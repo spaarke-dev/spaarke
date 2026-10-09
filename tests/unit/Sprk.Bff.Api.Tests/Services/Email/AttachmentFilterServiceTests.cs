@@ -15,6 +15,14 @@ namespace Sprk.Bff.Api.Tests.Services.Email;
 /// </summary>
 public class AttachmentFilterServiceTests
 {
+    /// <summary>
+    /// Per-pattern regex budget for THESE tests (production default: 1 s). A full BFF run executes many xunit collections
+    /// in parallel, and thread-scheduling delay there — not regex work, which takes well under a millisecond — once
+    /// pushed <see cref="Filter_LogoImage_Excluded"/> past 1 s, so the logo pattern "timed out", failed open and the
+    /// test failed (2026-10-07). Same remedy as EmailAttachmentProcessorTests (spaarke-ontology-platform-r1 task 095).
+    /// </summary>
+    private static readonly TimeSpan GenerousTestTimeout = TimeSpan.FromSeconds(5);
+
     private readonly Mock<ILogger<AttachmentFilterService>> _loggerMock;
     private readonly EmailProcessingOptions _defaultOptions;
 
@@ -23,6 +31,7 @@ public class AttachmentFilterServiceTests
         _loggerMock = new Mock<ILogger<AttachmentFilterService>>();
         _defaultOptions = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             MaxAttachmentSizeMB = 25,
             BlockedAttachmentExtensions = [".exe", ".dll", ".bat", ".ps1", ".vbs", ".js", ".cmd"],
             SignatureImagePatterns =
@@ -153,6 +162,7 @@ public class AttachmentFilterServiceTests
         // Arrange
         var options = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             MaxAttachmentSizeMB = 1 // 1MB limit
         };
         var service = CreateService(options);
@@ -280,6 +290,27 @@ public class AttachmentFilterServiceTests
         // Assert
         shouldFilter.Should().BeTrue();
         reason.Should().Contain("signature");
+    }
+
+    [Fact]
+    public void Filter_SignaturePatternTimesOut_FailsOpenAndKeepsTheAttachment()
+    {
+        // Arrange - a near-zero budget stands in for a scheduling-induced overrun, deterministically.
+        var service = CreateService(new EmailProcessingOptions
+        {
+            SignatureImagePatterns = [@"^logo.*\.(png|gif|jpg|jpeg)$"],
+            MinImageSizeKB = 5,
+            SignatureImageRegexTimeout = TimeSpan.FromTicks(1),
+        });
+        var attachment = CreateAttachment("logo.png", "image/png", 10000);
+
+        // Act
+        var act = () => service.ShouldFilterAttachment(attachment);
+
+        // Assert - never throws; a timed-out pattern is a non-match, and 10 KB is above the small-image threshold,
+        // so the attachment is kept (the documented degradation), not lost.
+        var (shouldFilter, _) = act.Should().NotThrow().Subject;
+        shouldFilter.Should().BeFalse();
     }
 
     [Theory]
@@ -414,6 +445,7 @@ public class AttachmentFilterServiceTests
         // Arrange
         var options = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             FilterCalendarFiles = true,
             CalendarFileExtensions = [".ics", ".vcs"]
         };
@@ -434,6 +466,7 @@ public class AttachmentFilterServiceTests
         // Arrange
         var options = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             FilterCalendarFiles = false,
             CalendarFileExtensions = [".ics", ".vcs"]
         };
@@ -457,6 +490,7 @@ public class AttachmentFilterServiceTests
         // Arrange
         var options = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             FilterInlineAttachments = true
         };
         var service = CreateService(options);
@@ -476,6 +510,7 @@ public class AttachmentFilterServiceTests
         // Arrange
         var options = new EmailProcessingOptions
         {
+            SignatureImageRegexTimeout = GenerousTestTimeout,
             FilterInlineAttachments = false,
             MinImageSizeKB = 1 // Set low to not trigger size filter
         };

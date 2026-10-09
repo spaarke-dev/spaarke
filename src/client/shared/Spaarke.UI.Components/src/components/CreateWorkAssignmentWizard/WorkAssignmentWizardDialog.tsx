@@ -90,6 +90,11 @@ export interface IWorkAssignmentWizardDialogProps {
    */
   embedded?: boolean;
   /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 112 (InAppWizardHost).
+   */
+  uiScale?: number;
+  /**
    * Resolves the SPE container ID for file uploads.
    * Called once during the finish handler. If not provided and containerId is
    * not set, file uploads will be skipped.
@@ -123,6 +128,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   containerId,
   navigationService,
   embedded,
+  uiScale,
   resolveSpeContainerId,
   tenantId,
   initialFileRefs,
@@ -643,6 +649,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       finishingLabel={finishingLabel}
       embedded={embedded}
       hideTitle={embedded}
+      {...(uiScale !== undefined ? { uiScale } : {})}
     />
   );
 };

@@ -46,16 +46,7 @@ name_templates:
   l2WorkerAppServiceName: spaarke-provisioning-controlplane-worker-{env}
 
   # Platform resource group (per-env). LIVE-verified 2026-08-28 dev: rg-spaarke-platform-dev ✅
-  # (Note: BFF App Service lives in a DIFFERENT rg — rg-spaarke-{env} — see bffAppServiceRg below.)
   platformResourceGroup: rg-spaarke-platform-{env}
-
-  # BFF App Service RG (per-env) — added 2026-08-28 SESSION 20 task 212 Gap C.
-  # LIVE-verified 2026-08-28 dev: rg-spaarke-dev (NOT rg-spaarke-platform-dev — different RG from L2).
-  bffAppServiceRg: rg-spaarke-{env}
-
-  # BFF App Service name (per-env) — added 2026-08-28 SESSION 20 task 212 Gap C.
-  # LIVE-verified 2026-08-28 dev: spaarke-bff-dev ✅ (in rg-spaarke-dev)
-  bffAppServiceName: spaarke-bff-{env}
 
   # Service Bus namespace (per-env). NOT VERIFIED 2026-08-28 in dev — no sb namespace
   # visible in either rg-spaarke-platform-dev or rg-spaarke-dev at time of audit.
@@ -88,59 +79,21 @@ name_templates:
     demo: https://spaarke-demo.crm.dynamics.com # placeholder; not yet provisioned
     prod: https://spaarke-registry-prod.crm.dynamics.com # placeholder; not yet provisioned
 
-# --- Per-topology / per-env values (populated by task 213 after SPE topology setup) ---
-# 2026-08-30 SESSION 20 task 212 reconciliation against SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md:
-#
-# CONTAINER-TYPES are PER-MODEL, not per-customer (topology doc §3 + §R1+R2 25-cap).
-# The intent for `containerTypeId` in this file has SHIFTED: it now holds ONE GUID per
-# (env × model), NOT one per customer. E.g., dev's `containerTypeId` value depends on
-# WHICH model tier is dispatching (trial / Model 1 / Model 2). Since the current dispatch
-# target is TRIAL (customerId=trial1), `containerTypeId` for `dev` here means "the
-# Spaarke Trial 1 container-type GUID" — shared across ALL trial prospects.
-#
-# BFF APP-REG is ALSO shared per-model per-env (topology doc §3A rows 4-6):
-#   - `Spaarke BFF — Trial 1`  (row 4, cardinality 1) — used by ALL trial prospects
-#   - `Spaarke BFF — Model 1` (row 5, cardinality 1) — used by ALL Model 1 customers
-#   - `Spaarke BFF — {Customer}` (row 6, cardinality 1 per Model 2 customer)
-#
-# BOTH the container-type and its OWNING app-reg are CREATED OUT-OF-BAND ONCE (per
-# topology doc §R5 delegated-only + §7 defect note — H8 as originally written cannot
-# work with app-only). Population of the values below awaits that one-time setup, which
-# is task 213's scope. HARD STOP behavior of Step 0.5b is preserved — attempting a fresh
-# dispatch before values are populated fails fast with an actionable error.
+# --- Per-env values ---
+# containerTypeId: the "Spaarke Model 1" container type (standard billing, registered in Spaarke's tenant),
+# one per env — every customer stamp gets its own container inside it (H8). Created ONCE out of band via a
+# delegated flow (topology doc §R5; runbook). There is no shared BFF app registration or BFF URL here
+# (T227a, D-12/D-13): H3 creates each customer's BFF app registration and H8 grants it container-type access.
 per_env_constants:
   dev:
-    # Per-model container-type GUID. For trial1 dispatch: the `Spaarke Trial 1` container-type
-    # (owned by `Spaarke SPE Trial 1 Owner` app-reg). ONCE-PER-TOPOLOGY (all trial prospects
-    # share this container-type; each gets their own container inside it). Created via
-    # delegated flow — SPE Admin app / VS Code extension / SharePoint admin center — NOT via
-    # r1 H8 as-currently-written. Populated by task 213 after one-time topology setup.
-    # See SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3 + §4 + §R5.
     # 2026-10-03 (task 248): `Spaarke Model 1` (standard billing, registered in Spaarke's tenant), owned by
     # `Spaarke SPE Model 1 Owner` (bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e). The dev L2 Worker carries the matching
     # SpeContainerOptions owner entry (parameters/platform-controlplane-dev.bicepparam speContainerTypeOwners)
-    # and signs in as the owning app via its UAMI's federated credential — no certificate. The trial-era wording
-    # above is stale (shared trial tier retired, D-12); restructuring this file per model is T227 (G2).
+    # and signs in as the owning app via its UAMI's federated credential — no certificate.
     containerTypeId: fb3817a8-5a55-42ba-8cc9-12cf055168b8
-
-    # Shared BFF API app-reg for this env × model. Single-tenant `AzureADMyOrg`
-    # (BFFs are always single-tenant per topology doc §3A rows 4-6; Entra-multitenancy
-    # applies ONLY to `Spaarke SPE Model 2 Owner` container-type OWNING app per row 3).
-    # For trial1 dispatch: `Spaarke BFF — Trial 1` app-reg (NEW per owner directive 2026-08-30;
-    # do NOT reuse existing `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`). Populated
-    # by task 213 after Register-EntraAppRegistrations.ps1 extension lands.
-    bffApiAppId: null # PENDING task 213 topology setup + population; RENAMED from `bffMultiTenantAppId` (Entra-strict-wrong name — see ADR-028 line 239 RESOLVED note)
-
-    # Base URL of the deployed BFF for this env × model. For trial1: `spaarke-bff-trial1`
-    # (or agreed alternative — task 213 decides). Used for admin-consent redirect_uri (Model 2 only).
-    bffProdBase: https://spaarke-bff-dev.azurewebsites.net # placeholder — task 213 replaces per env × model routing
 
   demo:
     containerTypeId: null # PENDING topology setup — demo tier not yet in scope
-    bffApiAppId: null # PENDING topology setup — demo tier not yet in scope
-    bffProdBase: https://spaarke-bff-demo.azurewebsites.net
 
   prod:
     containerTypeId: null # PENDING topology setup — prod tier not yet in scope
-    bffApiAppId: null # PENDING topology setup — prod tier not yet in scope
-    bffProdBase: https://spaarke-bff-prod.azurewebsites.net

@@ -69,10 +69,10 @@ public static class HandlerIds
     /// </summary>
     public const string H4b = "H4b";
 
-    /// <summary>H5 -- Dataverse environment creation.</summary>
+    /// <summary>H5 -- adopt the customer's Dataverse environment (the operator creates it; T228).</summary>
     public const string H5 = "H5";
 
-    /// <summary>H6 -- Dataverse solution import (9 solutions, dependency-ordered).</summary>
+    /// <summary>H6 -- Dataverse package import (one solution, SpaarkeMaster; managed by default — T218b).</summary>
     public const string H6 = "H6";
 
     /// <summary>H7 -- Dataverse environment-variable values.</summary>
@@ -106,7 +106,8 @@ public static class HandlerIds
     public const string H14 = "H14";
 
     /// <summary>
-    /// H14a -- Exchange ApplicationAccessPolicy sub-step. In-process only
+    /// H14a -- Exchange RBAC for Applications sub-step (group-scoped "Application Mail.*" role
+    /// assignments for the stamp's managed identity; replaced ApplicationAccessPolicy, owner D26). In-process only
     /// (see class remarks) -- NOT in <see cref="Dispatchable"/>.
     /// </summary>
     public const string H14a = "H14a";

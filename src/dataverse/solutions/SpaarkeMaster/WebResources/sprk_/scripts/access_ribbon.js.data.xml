@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{e74f3275-48c1-f111-a05c-3833c5e9614d}</WebResourceId>
+  <Name>sprk_/scripts/access_ribbon.js</Name>
+  <DisplayName>sprk_/scripts/access_ribbon.js</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_scriptsaccess_ribbonjsE74F3275-48C1-F111-A05C-3833C5E9614D</FileName>
+</WebResource>

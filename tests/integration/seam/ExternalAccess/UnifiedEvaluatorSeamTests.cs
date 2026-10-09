@@ -213,6 +213,89 @@ public sealed class UnifiedEvaluatorSeamTests
             AccessibleRecordSetService.MembershipTermRights, "an unrestricted record is untouched");
     }
 
+    // Task 114 verifier K1 (owner round 67): on the SPA/Teams plane a systemuser FLAGGED EXTERNAL keeps no membership
+    // access to a Restricted record — the Restricted veto applies to them as it does to a contact. An internal (or blank-
+    // flag) systemuser's membership still survives. Dataverse's own business-unit read of a non-secure Restricted record
+    // is out of scope here (accepted known limit, owner round 77).
+
+    private static Mock<IMembershipResolverService> MembershipOf(params Guid[] ids)
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, ids));
+        return membership;
+    }
+
+    [Fact]
+    public async Task K1_ASystemUserFlaggedExternal_GetsNoRestrictedRecordThroughMembership_ButKeepsAnUnrestrictedOne()
+    {
+        var restricted = Guid.Parse("10000000-0000-0000-0000-000000114a01");
+        var open = Guid.Parse("10000000-0000-0000-0000-000000114a02");
+        var participations = new ParticipationWorld();
+        participations.Flags[restricted] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var sut = BuildSut(BuildDataverse(contactHeld: false), MembershipOf(restricted, open).Object, participations,
+            systemUsers: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(SystemUserId));
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(restricted, "a Restricted record admits no user flagged external, membership included");
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights, "an unrestricted record is untouched");
+    }
+
+    /// <summary>The positive twin: the same composition for an INTERNAL systemuser keeps the Restricted record.</summary>
+    [Fact]
+    public async Task K1_AnInternalSystemUser_KeepsTheRestrictedRecordThroughMembership()
+    {
+        var restricted = Guid.Parse("10000000-0000-0000-0000-000000114a03");
+        var participations = new ParticipationWorld();
+        participations.Flags[restricted] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var sut = BuildSut(BuildDataverse(contactHeld: false), MembershipOf(restricted).Object, participations);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(restricted).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+    }
+
+    /// <summary>
+    /// Fail closed (ADR-003): when whether the systemuser is flagged external cannot be read, the Restricted record's
+    /// membership term does not survive; an unrestricted record is unaffected, and nothing is read when no candidate is
+    /// Restricted.
+    /// </summary>
+    [Fact]
+    public async Task K1_WhenTheExternalFlagCannotBeRead_TheRestrictedRecordIsRemoved_FailClosed()
+    {
+        var restricted = Guid.Parse("10000000-0000-0000-0000-000000114a04");
+        var open = Guid.Parse("10000000-0000-0000-0000-000000114a05");
+        var participations = new ParticipationWorld();
+        participations.Flags[restricted] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var faulting = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict);
+        faulting.Setup(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Simulated systemuser read failure."));
+
+        var sut = BuildSut(BuildDataverse(contactHeld: false), MembershipOf(restricted, open).Object, participations,
+            systemUsers: faulting.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(restricted);
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+    }
+
+    /// <summary>NFR-02: with no Restricted candidate the flag is never read (a strict resolver with no setup would throw).</summary>
+    [Fact]
+    public async Task K1_WithNoRestrictedCandidate_TheExternalFlagIsNotRead()
+    {
+        var open = Guid.Parse("10000000-0000-0000-0000-000000114a06");
+        var neverCalled = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict);
+
+        var sut = BuildSut(BuildDataverse(contactHeld: false), MembershipOf(open).Object, new ParticipationWorld(),
+            systemUsers: neverCalled.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        neverCalled.VerifyNoOtherCalls();
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // Criterion 4 — FR-22: secure record — standing-derived and org-derived contributions absent for
     // ContactOnly AND SystemUser principals; direct personal grant survives; suppressed-Collaborate-
@@ -1509,6 +1592,8 @@ public sealed class UnifiedEvaluatorSeamTests
             // Merge of 137-b2 with 143-r2 (task 142 base): 143 r1 added the identity store to the evaluator; the inert
             // unlinked default every other construction site uses.
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
@@ -1641,7 +1726,8 @@ public sealed class UnifiedEvaluatorSeamTests
         IMembershipResolverService membership,
         ParticipationWorld participations,
         NoAccessListReader? denyReader = null,
-        IContactIdentityStore? identityStore = null)
+        IContactIdentityStore? identityStore = null,
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? systemUsers = null)
     {
         var standing = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
         return new AccessibleRecordSetService(
@@ -1650,6 +1736,8 @@ public sealed class UnifiedEvaluatorSeamTests
             standing,
             denyReader ?? new SeamNoAccessListReader(),
             identityStore ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            systemUsers ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 

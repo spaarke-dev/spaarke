@@ -868,8 +868,10 @@ public class ExternalParticipationService
     /// </summary>
     /// <remarks>
     /// These are the ROOT tables' values, read from root metadata — not from any communication option set.
-    /// <c>sprk_communication.sprk_accesspermission</c> is retired (task 138, owner Q6): a communication
-    /// inherits its parent's permission, and nothing reads its own copy.
+    /// The same option set backs <c>sprk_accesspermission</c> on To Do, Event, Communication and Document, where it is
+    /// a DISPLAY copy of the parent's value (task 173, owner round 81; the communication column was to be retired by
+    /// task 138, round 81 keeps it). A child's access comes from its parent root (owner Q6): no access decision reads
+    /// a child table's own copy.
     /// </remarks>
     internal const int AccessPermissionRestricted = 100000002;
 

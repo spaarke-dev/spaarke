@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// </list>
 ///
 /// <para>
-/// Full pipeline coverage (text extraction, SpeFileStore staging, playbook event consumption)
+/// Full pipeline coverage (text extraction, playbook event consumption)
 /// is intentionally OUT OF SCOPE — <see cref="Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore"/>
 /// is a concrete non-virtual facade that cannot be cleanly mocked without a wider refactor,
 /// and the NFR-07-binding pre-fill flow is exercised end-to-end by existing integration tests.
@@ -69,6 +69,20 @@ public class ProjectPreFillServiceTests
         var parameters = ctor.GetParameters();
         parameters.Should().Contain(p => p.ParameterType == typeof(IPlaybookLookupService),
             "Pattern A — IPlaybookLookupService MUST remain a constructor dependency");
+    }
+
+    [Fact]
+    public void ProjectPreFillService_Constructor_TakesNoStorageDependency_UploadsAreNeverStored()
+    {
+        // Task 227f: pre-fill extracts text in memory and stores nothing — the optional SPE staging container (configured
+        // by no environment) was retired. A storage dependency coming back would mean uploads persisted somewhere again.
+        var ctor = typeof(ProjectPreFillService)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Single();
+
+        ctor.GetParameters().Should().NotContain(
+            p => p.ParameterType.Name == "SpeFileStore" || p.ParameterType.Name.EndsWith("SharePointEmbeddedOptions", StringComparison.Ordinal),
+            "pre-fill uploads are never stored (task 227f)");
     }
 
     [Fact]

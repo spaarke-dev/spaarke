@@ -476,7 +476,7 @@ public sealed partial class RecordContainerResolver
     /// <see cref="BffApplicationIdKeys"/>. Owner round 37 item 3: such an item is one the BFF placed — a relocation copy —
     /// and the interim rule serves it when the strict derived-container test passes.
     /// </summary>
-    private bool IsUploadedByTheBffIdentity(SpeItemCreator item)
+    internal bool IsUploadedByTheBffIdentity(SpeItemCreator item)
         => (!Guid.TryParse(item.UserObjectId, out var user) || user == Guid.Empty)
            && Guid.TryParse(item.ApplicationId, out var application)
            && _bffApplicationIds.Contains(application);

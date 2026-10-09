@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{0069254c-fb0c-f111-8342-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_SpaarkeBlackFullLogoSVG</Name>
+  <DisplayName>SPRK full logo all black SVG</DisplayName>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_SpaarkeBlackFullLogoSVG0069254C-FB0C-F111-8342-7CED8D1DC988</FileName>
+</WebResource>

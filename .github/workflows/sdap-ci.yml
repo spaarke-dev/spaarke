@@ -552,20 +552,9 @@ jobs:
           path: ./TestResults/adr-results.trx
           if-no-files-found: warn
 
-      # -----------------------------------------------------------------------
-      # customer-provisioning-orchestration-r1 task 088 (r3 task 063 gate wiring)
-      # — Naming-conformance gate (FR-35 + NFR-08). Static regex scan for KV-
-      # secret / Azure-resource naming drift. Read-only. ~1 s runtime.
-      #
-      # Advisory (continue-on-error: true) during r1's Phase G/H remediation
-      # window — flip to blocking once r1 wires the follow-on flip signal
-      # (see projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md §1.4).
-      # -----------------------------------------------------------------------
-      - name: Naming-conformance gate (FR-35, advisory until r1 remediation lands)
-        id: naming-conformance
-        continue-on-error: true
-        shell: pwsh
-        run: ./scripts/naming-conformance-check.ps1
+      # Naming-conformance gate (FR-35): moved 2026-10-06 (customer-provisioning-orchestration-r1 T230a)
+      # to the merge-blocking `naming-conformance` job in ci-tier1-blocking.yml (the Router's required
+      # check). This workflow is not required and this job is continue-on-error, so it could never block.
 
       - name: Plugin size validation
         shell: pwsh

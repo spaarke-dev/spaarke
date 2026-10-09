@@ -2,7 +2,7 @@
  * WizardStepper.tsx
  * Vertical sidebar step indicator for multi-step wizard dialogs.
  * Renders an ordered list of steps with status-driven visual states
- * (pending / active / completed). Supports dynamic steps added at runtime.
+ * (pending / active / completed / skipped). Supports dynamic steps added at runtime.
  */
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
@@ -141,6 +141,21 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     color: tokens.colorBrandForeground1,
   },
+  // Skipped (ontology task 056): an empty dashed ring — deliberately NO tick, so a skipped step never
+  // reads as done. Token strokes only.
+  indicatorSkipped: {
+    width: '22px',
+    height: '22px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusCircular,
+    border: `${tokens.strokeWidthThick} dashed ${tokens.colorNeutralStroke1}`,
+    backgroundColor: 'transparent',
+    flexShrink: 0,
+  },
+  labelSkipped: {
+    color: tokens.colorNeutralForeground3,
+    lineHeight: '1.3',
+  },
   // Step label text
   labelPending: {
     color: tokens.colorNeutralForeground3,
@@ -191,6 +206,10 @@ const StepIndicator: React.FC<IStepIndicatorProps> = ({ status }) => {
     );
   }
 
+  if (status === 'skipped') {
+    return <span className={styles.indicatorSkipped} aria-hidden="true" />;
+  }
+
   // pending
   return <span className={styles.indicatorPending} aria-hidden="true" />;
 };
@@ -211,7 +230,9 @@ const StepRow: React.FC<IStepRowProps> = ({ step, isLast }) => {
       ? styles.labelActive
       : step.status === 'completed'
         ? styles.labelCompleted
-        : styles.labelPending;
+        : step.status === 'skipped'
+          ? styles.labelSkipped
+          : styles.labelPending;
 
   return (
     <li className={styles.stepItem} role="listitem" aria-current={step.status === 'active' ? 'step' : undefined}>

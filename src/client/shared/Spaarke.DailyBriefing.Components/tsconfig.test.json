@@ -21,6 +21,9 @@
       // at the real compiled declaration rather than adding a broad wildcard
       // that could silently stop routing other subpaths through their mocks.
       "@spaarke/ui-components/types/LookupTypes": ["../Spaarke.UI.Components/dist/types/LookupTypes.d.ts"],
+      // task 098: the dependency-free `dateLocal` module, imported by deep path so tests run the REAL date parsing
+      // (narrow subpath, same rule as above — no wildcard).
+      "@spaarke/ui-components/utils/dateLocal": ["../Spaarke.UI.Components/src/utils/dateLocal.ts"],
       "@spaarke/compose-components": ["./test/__mocks__/spaarke-compose-components.tsx"],
       "@spaarke/ai-widgets": ["./test/__mocks__/spaarke-ai-widgets.tsx"],
       // Task 081 round 6 (R5-3): the Daily Briefing Code Page's handler

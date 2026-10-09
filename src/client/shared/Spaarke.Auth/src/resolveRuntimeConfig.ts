@@ -23,6 +23,8 @@
  * @module resolveRuntimeConfig
  */
 
+import { isDataverseOrigin, normalizeTenant } from './tenant';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -42,7 +44,11 @@ export interface IRuntimeConfig {
   bffOAuthScope: string;
   /** Azure AD client ID for MSAL authentication. */
   msalClientId: string;
-  /** Azure AD tenant ID (from Xrm organizationSettings). Empty string if not available. */
+  /**
+   * Azure AD tenant ID — `sprk_TenantId` env var, else Xrm organizationSettings,
+   * else the BFF's `/api/config/client`; always a validated single-tenant value.
+   * Empty string if not available.
+   */
   tenantId: string;
 }
 
@@ -64,6 +70,11 @@ const CACHE_DURATION_MS = 5 * 60 * 1000;
 let cachedConfig: IRuntimeConfig | null = null;
 let cacheTimestamp = 0;
 
+/** Tenant found by discoverTenantId() on this page; '' until found. */
+let discoveredTenant = '';
+/** When discoverTenantId's sprk_TenantId lookup last failed or found nothing (0 = never). */
+let envTenantMissAt = 0;
+
 function isCacheValid(): boolean {
   return cachedConfig !== null && Date.now() - cacheTimestamp < CACHE_DURATION_MS;
 }
@@ -72,6 +83,9 @@ function isCacheValid(): boolean {
 export function clearRuntimeConfigCache(): void {
   cachedConfig = null;
   cacheTimestamp = 0;
+  discoveredTenant = '';
+  envTenantMissAt = 0;
+  bffTenantRequests.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,11 +120,127 @@ function loadFromLocalStorage(): IRuntimeConfig | null {
       bffBaseUrl: entry.bffBaseUrl,
       bffOAuthScope: entry.bffOAuthScope,
       msalClientId: entry.msalClientId,
-      tenantId: entry.tenantId ?? '',
+      tenantId: normalizeTenant(entry.tenantId) ?? '',
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * The tenant from the persisted runtime config (`__spaarke_rtc__`), validated.
+ * Read synchronously by `resolveConfig()` (#1453) so a page opened outside the
+ * Xrm frame (full-screen / new window) still signs in against the tenant.
+ */
+export function readCachedRuntimeTenant(): string | undefined {
+  return normalizeTenant(loadFromLocalStorage()?.tenantId);
+}
+
+// ---------------------------------------------------------------------------
+// BFF /api/config/client tenant fallback (cached)
+// ---------------------------------------------------------------------------
+
+/**
+ * `/api/config/client` is anonymous and rate-limited to 10 requests per minute
+ * per IP (RateLimitingModule, "anonymous" policy). Staff behind one NAT share
+ * that budget, so a successful answer is persisted per BFF host (the BFF's
+ * tenant does not change) and concurrent or repeated callers on a page share
+ * one request. A failure is remembered briefly so retries cannot hammer it.
+ */
+const BFF_TENANT_LS_KEY = '__spaarke_bff_tenant__';
+const BFF_TENANT_TTL_MS = 24 * 60 * 60 * 1000;
+/** How long a failed tenant lookup (BFF or env var) is remembered before it is retried. */
+const TENANT_LOOKUP_FAILURE_BACKOFF_MS = 60 * 1000;
+/**
+ * Upper bound for each tenant-discovery request. initAuth() serializes provider
+ * selection, so an unreachable BFF or Dataverse endpoint must not stall every
+ * later init on the page.
+ */
+const TENANT_LOOKUP_TIMEOUT_MS = 8 * 1000;
+
+/** An AbortSignal that fires after `ms`, or undefined where the host has no AbortSignal support. */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    if (typeof AbortController !== 'undefined') {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    }
+  } catch {
+    /* fall through — no timeout available */
+  }
+  return undefined;
+}
+
+const bffTenantRequests = new Map<string, { promise: Promise<string>; at: number; ok: boolean }>();
+
+function readPersistedBffTenant(bffBaseUrl: string): string | undefined {
+  try {
+    const raw = localStorage.getItem(BFF_TENANT_LS_KEY);
+    if (!raw) return undefined;
+    const entry = JSON.parse(raw) as { bffBaseUrl?: string; tenantId?: string; _ts?: number };
+    if (entry.bffBaseUrl !== bffBaseUrl || !entry._ts || Date.now() - entry._ts > BFF_TENANT_TTL_MS) return undefined;
+    return normalizeTenant(entry.tenantId);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistBffTenant(bffBaseUrl: string, tenantId: string): void {
+  try {
+    localStorage.setItem(BFF_TENANT_LS_KEY, JSON.stringify({ bffBaseUrl, tenantId, _ts: Date.now() }));
+  } catch {
+    /* localStorage may not be available */
+  }
+}
+
+/**
+ * The tenant the BFF is configured for (`AzureAd:TenantId`, via the anonymous
+ * `/api/config/client`), validated; `''` when unavailable. Never throws.
+ */
+export function fetchBffClientTenant(bffBaseUrl: string | undefined): Promise<string> {
+  const base = typeof bffBaseUrl === 'string' ? normalizeUrl(bffBaseUrl) : '';
+  if (!/^https?:\/\//i.test(base)) return Promise.resolve('');
+
+  const persisted = readPersistedBffTenant(base);
+  if (persisted) return Promise.resolve(persisted);
+
+  const existing = bffTenantRequests.get(base);
+  if (existing && (existing.ok || Date.now() - existing.at < TENANT_LOOKUP_FAILURE_BACKOFF_MS)) {
+    return existing.promise;
+  }
+
+  const entry = { promise: Promise.resolve(''), at: Date.now(), ok: false };
+  entry.promise = (async () => {
+    try {
+      const resp = await fetch(`${base}/api/config/client`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: timeoutSignal(TENANT_LOOKUP_TIMEOUT_MS),
+      });
+      if (!resp.ok) {
+        console.warn(`[Spaarke.RuntimeConfig] /api/config/client returned ${resp.status} (non-fatal)`);
+        return '';
+      }
+      const cfg = (await resp.json()) as { tenantId?: string };
+      const tenant = normalizeTenant(cfg.tenantId);
+      if (!tenant) {
+        console.warn('[Spaarke.RuntimeConfig] /api/config/client returned no usable tenantId (non-fatal)');
+        return '';
+      }
+      entry.ok = true;
+      persistBffTenant(base, tenant);
+      return tenant;
+    } catch (err) {
+      console.warn('[Spaarke.RuntimeConfig] /api/config/client tenant fallback failed (non-fatal):', err);
+      return '';
+    }
+  })();
+  bffTenantRequests.set(base, entry);
+  return entry.promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +299,13 @@ function resolveXrmContext(): XrmGlobalContext | null {
 /**
  * Query Dataverse environment variables using the session cookie (no bearer token).
  * This works in Dataverse web resources where the browser is already authenticated.
+ * `signal` (optional) aborts both requests — tenant discovery passes a timeout.
  */
-async function queryEnvironmentVariables(clientUrl: string, schemaNames: string[]): Promise<Map<string, string>> {
+async function queryEnvironmentVariables(
+  clientUrl: string,
+  schemaNames: string[],
+  signal?: AbortSignal
+): Promise<Map<string, string>> {
   const results = new Map<string, string>();
   const apiBase = `${clientUrl}/api/data/v9.2`;
 
@@ -188,6 +323,7 @@ async function queryEnvironmentVariables(clientUrl: string, schemaNames: string[
         'OData-Version': '4.0',
       },
       credentials: 'include', // Use session cookie
+      signal,
     }
   );
 
@@ -226,6 +362,7 @@ async function queryEnvironmentVariables(clientUrl: string, schemaNames: string[
         'OData-Version': '4.0',
       },
       credentials: 'include',
+      signal,
     }
   );
 
@@ -311,8 +448,9 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   }
 
   // Capture Xrm tenantId as a fallback (in Code Page contexts this is frequently
-  // undefined — the env var below is the primary source).
-  const xrmTenantId = xrmContext.organizationSettings?.tenantId ?? '';
+  // undefined — the env var below is the primary source). Validated: a garbage
+  // value ('undefined', 'organizations', …) must not reach an authority (#1453).
+  const xrmTenantId = normalizeTenant(xrmContext.organizationSettings?.tenantId) ?? '';
 
   // 2. Query all four environment variables in a single batch
   const envVars = await queryEnvironmentVariables(clientUrl, [
@@ -356,10 +494,15 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   // is only used if the env var isn't set or returns empty. This is the
   // canonical fix for the long-running "auth doesn't pick up tenant ID" issue:
   // Xrm.organizationSettings.tenantId is unreliable in Code Page contexts;
-  // the customer-set env var is the source of truth.
-  const envTenantId = envVars.get(ENV_VAR_NAMES.TENANT_ID);
-  let resolvedTenantId = envTenantId && envTenantId.trim() ? envTenantId.trim() : xrmTenantId;
-  let tenantSource = envTenantId && envTenantId.trim() ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
+  // the customer-set env var is the source of truth. (Same order as everywhere
+  // else in the library — see "TENANT PRECEDENCE" in tenant.ts.)
+  const rawEnvTenantId = envVars.get(ENV_VAR_NAMES.TENANT_ID);
+  const envTenantId = normalizeTenant(rawEnvTenantId);
+  if (!envTenantId && rawEnvTenantId && rawEnvTenantId.trim()) {
+    console.warn(`[Spaarke.RuntimeConfig] '${ENV_VAR_NAMES.TENANT_ID}' is not a valid tenant; ignoring it.`);
+  }
+  let resolvedTenantId = envTenantId ?? xrmTenantId;
+  let tenantSource = envTenantId ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
 
   const normalizedBffUrl = normalizeUrl(bffBaseUrl);
 
@@ -369,23 +512,13 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   // empty there, and if sprk_TenantId also has no value record the tenant is empty). An empty tenant makes the
   // MSAL authority fall back to /organizations, which breaks ssoSilent in an iframe and forces an interactive
   // popup loop (messaging-r3 2026-07-22). The BFF host is already known, so this needs no extra config and no
-  // token (the endpoint is anonymous). Non-fatal: a failure just leaves the tenant empty as before.
+  // token (the endpoint is anonymous). Non-fatal: a failure just leaves the tenant empty as before. The fetch
+  // is shared and cached (fetchBffClientTenant) because the endpoint is rate-limited per IP.
   if (!resolvedTenantId) {
-    try {
-      const cfgResp = await fetch(`${normalizedBffUrl}/api/config/client`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (cfgResp.ok) {
-        const cfg = (await cfgResp.json()) as { tenantId?: string };
-        const bffTenant = cfg.tenantId?.trim();
-        if (bffTenant && bffTenant !== 'common' && bffTenant !== 'organizations') {
-          resolvedTenantId = bffTenant;
-          tenantSource = 'bff-config';
-        }
-      }
-    } catch (err) {
-      console.warn('[Spaarke.RuntimeConfig] /api/config/client tenant fallback failed (non-fatal):', err);
+    const bffTenant = await fetchBffClientTenant(normalizedBffUrl);
+    if (bffTenant) {
+      resolvedTenantId = bffTenant;
+      tenantSource = 'bff-config';
     }
   }
 
@@ -408,6 +541,65 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   );
 
   return config;
+}
+
+/**
+ * Asynchronously discover the environment's tenant when the synchronous chain
+ * in `resolveConfig()` found none (#1453). Used by `initAuth()` (and therefore
+ * `createCodePageAuthInitializer`) before building the MSAL authority.
+ *
+ * Order: this module's cached runtime config → the Dataverse environment
+ * variable `sprk_TenantId` (same session-cookie query as resolveRuntimeConfig;
+ * needs Xrm or a page on the Dataverse domain) → the BFF's `/api/config/client`
+ * (cached; see fetchBffClientTenant) — the order under "TENANT PRECEDENCE" in
+ * tenant.ts. Each request is capped at 8 s, and a failed or empty env-var lookup
+ * is not repeated for 60 s, so discovery cannot stall initAuth() indefinitely.
+ * Returns `''` when nothing yields a valid tenant. Never throws.
+ */
+export async function discoverTenantId(bffBaseUrl?: string): Promise<string> {
+  if (discoveredTenant) return discoveredTenant;
+
+  if (isCacheValid()) {
+    const cached = normalizeTenant(cachedConfig?.tenantId);
+    if (cached) return (discoveredTenant = cached);
+  }
+
+  let clientUrl = '';
+  try {
+    clientUrl = resolveXrmContext()?.getClientUrl() ?? '';
+  } catch {
+    /* fall through */
+  }
+  if (!clientUrl && isDataverseOrigin()) clientUrl = window.location.origin;
+
+  if (clientUrl && Date.now() - envTenantMissAt >= TENANT_LOOKUP_FAILURE_BACKOFF_MS) {
+    try {
+      const envVars = await queryEnvironmentVariables(
+        clientUrl,
+        [ENV_VAR_NAMES.TENANT_ID],
+        timeoutSignal(TENANT_LOOKUP_TIMEOUT_MS)
+      );
+      const raw = envVars.get(ENV_VAR_NAMES.TENANT_ID);
+      const tenant = normalizeTenant(raw);
+      if (tenant) {
+        console.info(`[Spaarke.RuntimeConfig] tenant resolved from ${ENV_VAR_NAMES.TENANT_ID}`);
+        return (discoveredTenant = tenant);
+      }
+      if (raw && raw.trim()) {
+        console.warn(`[Spaarke.RuntimeConfig] '${ENV_VAR_NAMES.TENANT_ID}' is not a valid tenant; ignoring it.`);
+      }
+    } catch (err) {
+      console.warn(`[Spaarke.RuntimeConfig] ${ENV_VAR_NAMES.TENANT_ID} lookup failed (non-fatal):`, err);
+    }
+    envTenantMissAt = Date.now();
+  }
+
+  const bffTenant = await fetchBffClientTenant(bffBaseUrl);
+  if (bffTenant) {
+    console.info('[Spaarke.RuntimeConfig] tenant resolved from /api/config/client');
+    return (discoveredTenant = bffTenant);
+  }
+  return '';
 }
 
 /**

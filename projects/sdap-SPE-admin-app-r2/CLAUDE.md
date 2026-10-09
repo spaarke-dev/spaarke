@@ -157,6 +157,39 @@ Realistic concurrency is 2–3 agents, not 6. See [`plan.md`](plan.md) §3.
 
 ---
 
+## Standing directives & gotchas
+
+Owner directives:
+- **090 wrap-up is HELD until UAT passes** — do not run it early (operator, 2026-10-03).
+- **CI must NOT gate on `SpeAdminGraphService.cs`** — no LOC gate, no `GodClassGuardTests`, no wiring
+  `report-large-server-files.ps1` into CI (operator, 2026-08-31).
+- **r2 does not take the god-file refactor** — it lives in `sdap-SPE-admin-app-r3` Phase 1a/1b/2
+  (r3 `design.md` §0, decided 2026-10-07).
+- Deploys: the operator decides BFF deploys; the SPE Admin page may be deployed by Claude (2026-10-05).
+
+Identity (since 2026-10-04, PR #1291):
+- SPE Admin container work runs as the **BFF managed identity** `mi-bff-api-dev` (appId `5967251e-171c-46fe-a6c2-ef843c90309d`,
+  SP object `9fd47efb-7962-492b-ac44-e5ccd0268ebb`) via `IGraphClientFactory.ForApp()`; grants + container types
+  run **delegated**. No owning-app secrets anywhere. Access = `applicationPermissionGrant` on the registration.
+- **Graph app roles for a managed identity cannot be set in the portal** — only via
+  `POST /servicePrincipals/{mi}/appRoleAssignments` (Graph SP `ba630d35-…`).
+- Fail-closed **tenant guard**: a config whose environment tenant is blank or ≠ `TENANT_ID` is refused.
+- Security **Alerts** "Account is not provisioned" = tenant **licensing**, not a permission (unchanged across identities).
+
+Environment gotchas:
+- Never bare `git stash` / `git stash pop` (shared stack) — a prior session popped another project's stash.
+- Pre-commit hook needs **root** `node_modules` (prettier). `npm install` at root regenerates tracked
+  `.husky/_/*` — restore with `git checkout -- .husky/_` before committing.
+- SpeAdminApp: `vite build` does **not** type-check; `npx tsc --noEmit` shows ~123 **pre-existing** errors.
+- Live probes authenticate app-only as the dev owning app `170c98e1…` (KV `sprk-prod-kv` /
+  `spe-owning-app-secret`) — TEST-only identity; destructive probes use throwaway containers (NFR-07).
+- `/test-diet` must be scoped against **master**, not `{start}..HEAD` (branch merged master many times).
+- `tests/unit/…/SpeAdmin/SearchItemsTests.cs` is actively maintained by **uac-r2** — don't move it.
+- Publish-size: measure master vs branch from fresh short-path worktrees (`C:\code_files\w1m` / `w1b`),
+  Compress-Archive Optimal; last: 45.66 vs 45.65 MB (2026-10-04).
+
+---
+
 ## Files
 
 | File | Purpose |

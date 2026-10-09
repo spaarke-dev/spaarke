@@ -7,6 +7,76 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
+
+`customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
+
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: Amendment **A6** — customer stamps disable key/local auth on
+  every data-plane resource and reach them as the stamp UAMI; a stamp vault holds no credential with a managed-identity
+  alternative; dev/demo keep "key if configured" until the D13 follow-on (named case: the dev Document Intelligence key).
+  The A4 pattern note no longer points at the closed E-3. `INDEX.md` row updated.
+- **`.claude/constraints/provisioning.md`**: the keyless section cites A6.
+- **`.claude/skills/provision-environment/SKILL.md`**: the tenant-id line no longer calls Spaarke's tenant "shared".
+- **`.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`**: Decision 3 (shared-BFF Dataverse routing) marked
+  superseded by D-12.
+- **`.claude/constraints/provisioning.md`** (T218e, earlier the same day — recorded here): the package rule takes
+  roles from the ROOT business unit only; "Secure Record Owner" stays contained in the Secure Record unit and is
+  created per environment by H7b (T256), not packaged.
+- Root `CLAUDE.md` unchanged (its provisioning and auth pointer rows were already correct).
+
+---
+###### 2026-10-07 — Stamp BFF clients: CORS + H3 client access (T240a)
+
+`customer-provisioning-orchestration-r1` T240a (owner 2026-10-07: `addins.spaarke.com`, `external.spaarke.com`).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp BFF clients — CORS + app-registration client
+  access": the manifest's literal CORS origins are the two shared client sites; H3 sets exactly the SPA redirect and the
+  pre-authorized clients on the customer's own registration; `EntraAppRegOptions__SpaarkeTenantId` is required.
+- **`.claude/skills/provision-environment/SKILL.md`**: the handler list's H3 line said "KV secret bootstrap"; it is the
+  per-customer BFF app registration (now with client access). H4b notes the CORS origins.
+
+---
+###### 2026-10-07 — Tenancy wording follows D-12 everywhere (T233)
+
+`customer-provisioning-orchestration-r1` T233 (plan G8).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: the opening line no longer offers a "Model 1 shared trial/SMB" stamp; both models are dedicated stamps.
+- **`.claude/skills/azure-deploy/SKILL.md`**: the retired Model 1 stack row no longer says H2a refuses Model 1 runs (it deploys them with `customer.bicep` since task 228).
+- **`.claude/patterns/provisioning/operator-rbac-bootstrap.md`**: the multiple-vault anti-pattern no longer cites the retired shared tier.
+
+---
+###### 2026-10-07 — Model 1 guests: environment security group + pay-as-you-go (T232)
+
+`customer-provisioning-orchestration-r1` T232 (owner D2; owner 2026-10-07: Spaarke pays guest access pay-as-you-go).
+
+- **`.claude/skills/provision-environment/SKILL.md`** Step 1e-bis: a Model1 run's preset is fixed to `B2BGuest`; new
+  intake `environmentSecurityGroupId` (GUID of `sprk-{customerId}-users`); the step checks PRQ-C-10 (group) and
+  PRQ-C-12 (guest access) as the operator — hard stop — and shows PRQ-C-11 (`pac licensing
+  get-environment-billing-policy`) for confirmation; Step 4.0 sends the group id.
+- **`.claude/constraints/provisioning.md`**: new binding section "Model 1 users — B2B guests, environment security group,
+  pay-as-you-go".
+
+---
+###### 2026-10-07 — ADR-050 amended: `WizardShell` is the wizard preset, `WizardModal` retired, in-app launch rule (spaarke-ontology-platform-r1 task 110, D-26)
+
+`.claude/adr/ADR-050-canonical-modal-shell.md` (concise; **no full ADR-050 exists under `docs/adr/`**, checked
+2026-10-07): the preset list is now `ConfirmModal`, `ChoiceModal`, `FormModal`, `PreviewModal`, `BrowseModal`,
+**`WizardShell`** — the engine-bearing wizard preset that renders inside `SprkModal`, with an `embedded` mode for tabs,
+full pages and pages under platform chrome. **`WizardModal` is retired** (zero consumers). New MUSTs: every multi-step
+flow uses `WizardShell` (no second wizard engine); **launch in-app** from Spaarke React surfaces and keep
+`navigateTo(target 2)` for hostless ribbon scripts, because its title bar is light-only platform chrome that cannot be
+themed; `WizardShell` embedded `hideTitle` under platform chrome; wizards default to `dismiss="explicit"` + `uiScale`.
+New MUST NOT: inject CSS or DOM into platform dialog chrome. Unchanged: Layout 1 (85% × 85%), the `fullCover`
+escalation, the per-entity-size MUST NOT. `RecordNavigationModalShell` is recorded as the dirty-check protocol behind
+`BrowseModal.onBeforeNavigate` (zero envelope consumers). Companion fixes: `.claude/patterns/ui/record-modal-selection.md`
+and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationModalShell`"),
+`.claude/adr/ADR-026-full-page-custom-page-standard.md` (Wizard/dialog row cross-reference), plus
+`docs/standards/MODAL-DECISION-CRITERIA.md`, `docs/standards/MODAL-DESIGN-SYSTEM.md` §7 and
+`docs/architecture/ui-dialog-shell-architecture.md`. Path **B** per root `CLAUDE.md` §6.5 (owner decision **D-26**,
+2026-10-07); alternatives A (project exception) and C (build on `WizardModal`, a second engine) rejected. Record:
+`projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
+
+---
 ###### 2026-10-07 — Module CLAUDE.md files corrected against the code: 89,166 → 45,733 bytes (−43,433) across 8 files (module-claude-md-cleanup-r1)
 
 A module `CLAUDE.md` loads whenever an agent reads a file in its folder, and agents treat it as ground truth. Checked line by line against the code, the older files were giving wrong instructions, not just long ones. Originals are archived verbatim at `.claude/archive/2026-10-07/modules/`. Each file now carries maintainer notes in a stripped HTML comment, with a **size target, not a cap**.
@@ -76,7 +146,170 @@ Three docs had anchor links to the old §6.5 / §10 headings and were repointed.
 Three files change: `.claude/patterns/auth/spe-writer-identity-matching.md` (marked SUPERSEDED, decision-matrix row marked historical), `.claude/constraints/auth.md` (the SPE File Access section is rewritten: app-only behind a Dataverse decision plus the pointer check; no new `*AsUserAsync` callers; container roles only through `GrantMarkedWriterAsync`) and `.claude/constraints/bff-extensions.md` §D (background SPE reads are app-only after the pointer check). This follows owner rounds 69/70.
 
 ---
+###### 2026-10-06 — Optional per-customer OpenAI spend limit at intake (T254)
 
+`customer-provisioning-orchestration-r1` T254 (owner G37: no cap by default, a per-customer limit if desired).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-quater — OPTIONAL `openAiMonthlyLimitUsd` (empty = no
+  limit; plain number in (0, 1,000,000]); Step 4.0 sends it only when set; on an upgrade run leave it out or send the
+  current value (a re-run re-applies it). Later changes: `scripts/Set-AiSpendLimit.ps1` (guide §3.2b).
+
+---
+###### 2026-10-06 — Keyless proof: H13 proves every stamp service with the BFF's managed identity (T230b)
+
+`customer-provisioning-orchestration-r1` T230b (owner D13).
+
+- **`.claude/constraints/provisioning.md`** ("Stamp resources are keyless"): the per-run proof — H13 calls the stamp BFF's
+  `POST /api/platform/keyless-proof` as the L2 Worker identity (app role `Provisioning.KeylessProof`, assigned by H3); an
+  auth failure is never a skip; ARM keyless check (`ArmStampKeylessVerifier`); new MUST NOT: a key credential in server
+  code needs its `KeyCredentialCensusTests` entry and, for a stamp resource, its `StampKeySettingCatalog` + probe entries.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** E-2: informational note — the stamp measurement mechanism exists;
+  the measurement is pending T186.
+- **`.claude/skills/provision-environment/SKILL.md`**: H13 line names the keyless gate.
+- H13's four user-workflow "sample" checks (agent message, search count, layouts, field mappings) are removed: an app-only
+  token could never pass them and their auth failures were skipped, so they never ran.
+
+---
+###### 2026-10-06 — H13 checks the deployed stamp; naming conformance + I1 are build gates (T230a)
+
+`customer-provisioning-orchestration-r1` T230a (G5).
+
+- **`.claude/constraints/provisioning.md`**: I3 text corrected to spec FR-30 (`/tenantId` on the stamp's containers or the
+  key `cosmos-db.bicep` declares; `/customerId` only on L2's ProvisioningRun); H13 samples I2–I5 on the stamp, I1 is
+  enforced by its ArchTest only (the L2 Worker ships and runs no script — T253).
+- **`.claude/skills/provision-environment/SKILL.md`**: invariants row — I2–I5 at H13, I1 a build gate.
+- Naming conformance (`scripts/naming-conformance-check.ps1`, vault rule now also `sprk-{customerId}-{env}-kv`) runs as a
+  merge-blocking job in `ci-tier1-blocking.yml`; H13's per-run copy (which linted repository files absent from the
+  Worker host) is removed.
+
+###### 2026-10-06 — Cost model for dedicated stamps: one rule set, every model, no waiver (T229)
+
+`customer-provisioning-orchestration-r1` T229 (G4, G13; D-12 — every customer gets a dedicated stamp).
+
+- **`.claude/constraints/provisioning.md`**: new binding section "Cost model — one dedicated stamp per run, both models":
+  no `shared-trial` tier / marginal / shared-floor envelope; `tier` + `estimatedMonthlyUsd` required for every model and
+  validated by `CostEnvelopeIntake` at POST /api/runs and in H0; no `costEnvelopePolicy` / `warnAndProceed`; H13 has one
+  `DedicatedStampEnvelopeUsd` ($400; $337.04 fixed at 2026-10-06 list prices), re-derived when `customer.bicep` SKUs change.
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-ter (tier + estimate, with the empty-stamp floor as
+  guidance); batch loader drops `costEnvelopePolicy` and its Model 2 check; Step 2 BAT-10 overrun is a hard stop in both
+  modes (no interactive "Proceed anyway?"); Step 4.0 requires and sends both values, no `costEnvelopePolicy`.
+
+###### 2026-10-06 — The customer's subscription and Dataverse environment are operator prerequisites (T228)
+
+`customer-provisioning-orchestration-r1` T228 (owner D4 / Q1; L2 identity = Owner per customer subscription, owner
+decision 2026-10-06).
+
+- **`.claude/constraints/provisioning.md`**: new binding section — the operator creates the customer's subscription and
+  Dataverse environment; intake requires `subscriptionId`, `containerTypeId` and `dataverseEnvUrl` for every model (no
+  shared or default subscription); the environment's domain must be `spaarke-{customerId}[-{environmentName}]`
+  (`DataverseEnvironmentUrlRule`); H1 refuses a subscription holding another customer's stamp; H5 adopts and never
+  creates; H10 runs before H6; Owner granted per customer subscription by the operator (PRQ-S-04).
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 1b-bis (subscriptionId + dataverseEnvUrl), the Step 1e
+  Model 1 hard stop removed, Step 1f records the real environment URL, Step 4.0 sends `dataverseEnvUrl` and never falls
+  back to `az account show`.
+
+###### 2026-10-06 — One ROOT container per customer; H7 links the root business unit; secure-record setup is a runbook phase (T227g)
+
+`customer-provisioning-orchestration-r1` T227g (owner question: how do the Secure Record containers fit?).
+
+- **`.claude/constraints/provisioning.md`** (SPE section): "one container per customer" corrected to one ROOT container —
+  secure-record containers (one per secure project / matter / work assignment) and further business-unit containers are
+  the BFF's, at runtime, bound and marked. New binding bullet: H7 sets the root business unit's `sprk_containerid` to H8's
+  container (unified-access-control-r2 task 076's non-secure default), never overwriting another container (Resumable
+  `root-business-unit-container-conflict`); every script-created container carries the `spaarkeCustomerId` marker.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 6d — the secure-record environment setup
+  (`SECURE-PROJECT-ENVIRONMENT-SETUP.md`, gated by its §7 checklist) before the customer is told the environment is ready.
+
+###### 2026-10-06 — One definition of the stamp's containers; the I4 resolver diagnostic retired (T227f)
+
+`customer-provisioning-orchestration-r1` T227f.
+
+- **`.claude/constraints/provisioning.md`** I4: container ids come from the record or the stamp's settings and every
+  app-only SPE call passes `SpeContainerOwnershipGuard`; the unused `ITenantContainerResolver` (and its diagnostic route)
+  and `SharePointEmbedded:StagingContainerId` were removed.
+- **`.claude/skills/provision-environment/SKILL.md`**: the I4 checklist line names what H13 actually checks.
+
+###### 2026-10-06 — H8 reuses the customer's container; unread SPE-ContainerTypeId retired (T227e)
+
+`customer-provisioning-orchestration-r1` T227e.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): one container per customer, ever — on top of
+  unified-access-control-r2 task 165's per-run creation record, a LATER run reuses the container the environment records
+  (`sprk_SharePointEmbeddedContainerId`, written by H7); the record and the environment disagreeing stops the run naming
+  both; a reused container is never removed by a failed bind; H8 writes the `spaarkeCustomerId` marker after the bind.
+  The marker name is one source-linked constant (`src/server/shared/Contracts/SpeContainerCustomerMarker.cs`).
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-topology-constants` retired with its only
+  entry (`SPE-ContainerTypeId`, unread); the reader now refuses it.
+- **`.claude/skills/provision-environment/SKILL.md`**: the `containerTypeId` comment names its real readers (H4b setting, H8).
+
+###### 2026-10-06 — App-only SPE calls go through the ownership guard (T227d, owner D28/D29)
+
+`customer-provisioning-orchestration-r1` T227d.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): app-only SPE Graph clients come only from
+  `SpeContainerOwnershipGuard`; "own" = a configured stamp container or the `spaarkeCustomerId` marker; SPE Admin on a
+  stamp is confined to own containers (owner D29); enforced by ArchTest `SpeAppOnlyContainerGuardTests`.
+
+###### 2026-10-06 — Non-secret values from later handlers are settings, not vault secrets (T227c, plan G18)
+
+`customer-provisioning-orchestration-r1` T227c.
+
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`** rule 4: a non-secret value a later handler
+  produces goes in `per_env_settings` with a `from-{handler}-output` source and an H4b ← handler DAG edge (the SPE
+  container id moved there), not in the vault.
+
+###### 2026-10-06 — SPE app-only isolation is in code (T227b, owner D28)
+
+`customer-provisioning-orchestration-r1` T227b.
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section — one container type per model, one container per
+  customer; an app-only grant reaches every container of the type, so app-only SPE calls must target only the stamp's
+  own container(s), enforced in code (T227d). A container type per customer was rejected by the owner.
+
+###### 2026-10-06 — No shared BFF app registration in the provisioning skill (T227a, plan G2)
+
+`customer-provisioning-orchestration-r1` T227a.
+
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 0.5b no longer derives `{bffAppServiceId}` / `{bffAppId}`;
+  Step 0.5c no longer hard-stops on a null `bffApiAppId` or checks a shared BFF app and its grant (each customer's
+  BFF app is created by H3; H8 grants it — T227b); Step 5a (Model 2) no longer reads removed constants.
+
+###### 2026-10-06 — One OpenAI deployment set for stamps; no recompose (T247, plan G27)
+
+`customer-provisioning-orchestration-r1` T247.
+
+- **`.claude/patterns/provisioning/openai-quota-region-composition.md`**: rewritten. The stamp set is fixed (the BFF calls
+  deployments by name), mirrored by `PinnedModelCatalog.cs` and pinned by a forcing test; DataZoneStandard; OpenAI in
+  `openAiLocation`; no support case. The old gpt-5 tiers, support-ticket quota bumps and "MVP fallback" are gone.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 2.5 F5 no longer auto-recomposes the deployment set (a
+  shortfall HALTs at H0); F8/F9 support-ticket steps marked not used; `sharedOpenAiLocation` → `openAiLocation`.
+
+###### 2026-10-06 — Customer stamps get their own keyless Content Safety (T246, plan G26)
+
+`customer-provisioning-orchestration-r1` T246.
+
+- **`.claude/constraints/provisioning.md`**: the keyless-stamp rule now lists Content Safety, and states that its
+  endpoint is a plain app setting the BFF requires outside Development/Testing — never a fallback to a shared or dev
+  account (the BFF used to default to a non-existent dev endpoint and fail open).
+
+###### 2026-10-06 — Customer stamps are keyless (T244, owner D13)
+
+`customer-provisioning-orchestration-r1` T244 (plan G16).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp resources are keyless" — local auth disabled on
+  AI Search (no `authOptions`), OpenAI, Document Intelligence and Service Bus; Storage shared key off; no key-listing
+  call, SAS rule or key/connection-string output in any stamp module; callers get roles (L2 now holds Search Service
+  Contributor for H2b + Search Index Data Reader for the H13 probe); Event Grid dead-letters with the system topic's identity.
+  Forcing function: `tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs` over the compiled `customer.json`.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: informational note under E-2 (no rule change) — E-2 covers the
+  shared dev `AIServices` account only; stamps are `kind: OpenAI` with local auth disabled, so the key fallback cannot
+  apply there; a 401 at T230 would be an E-2 scope extension needing an owner decision. Cosmos DB and SignalR are in
+  the keyless rule too (owner added Cosmos 2026-10-06).
+- **`.claude/constraints/azure-deployment.md`**: the Service Bus row listed a Key Vault-referenced
+  `ConnectionStrings__ServiceBus`; the supported path is `ServiceBus__FullyQualifiedNamespace` + managed identity
+  (`ServiceBusClientFactory`), and the startup-failure line now says so.
+
+---
 ###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
 
 `.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.
@@ -127,6 +360,7 @@ skipped all of Tier 1 including the Xrm capability guard.
 
 `.claude/FAILURE-MODES.md` G-13: a lookup in a `$filter` must be `_<name>_value`. The section now records the No Access reader defect (every deny-list read was a 400 on dev and failed closed, which blocked secure provisioning) and the provisioning seeder case (#1318). It also records the lesson: a test double that matches on query text can't catch a wrong query, because it copies the same mistake.
 
+---
 ###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
 
 `.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to
@@ -1575,7 +1809,7 @@ Trigger: `spaarkeai-compose-r3` project-pipeline run hit a stale POML template. 
 - **Deferred (separate evaluation, NOT implemented)**: settings-level Stop/PreToolUse hooks, `/loop`, `/batch`, scheduling, plan-mode mandates, and the proposal's calibration-pass (1.10). Per user direction 2026-07-08.
 
 ### Fixed (2026-07-08 — permission prompts)
-- Added `"PowerShell(*)"` to user-level [`~/.claude/settings.json`](file) allow list (alongside the existing `"Bash(*)"`) to stop recurring PowerShell approval prompts across all worktrees. (User-scoped file; not in-repo.)
+- Added `"PowerShell(*)"` to user-level `~/.claude/settings.json` allow list (alongside the existing `"Bash(*)"`) to stop recurring PowerShell approval prompts across all worktrees. (User-scoped file; not in-repo.)
 
 ### Added (2026-07-08 visual-host-create-button-r1 — Sonnet-5 execution model tiering)
 - **Model-tier strategy across the task pipeline.** Planning phases (design-to-spec, project-pipeline Steps 0–3) run on Opus 4.8 / Fable 5; task **execution defaults to Sonnet 5 @ effort `xhigh`**, with per-task escalation to Opus/Fable for the minority of high-power tasks. Mechanism is additive (absent tier ⇒ current behavior):

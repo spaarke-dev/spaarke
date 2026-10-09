@@ -8,6 +8,7 @@ import * as React from "react";
 import { Input, makeStyles, shorthands } from "@fluentui/react-components";
 import { DatePicker } from "@fluentui/react-datepicker-compat";
 import type { IFieldConfig, FieldChangeCallback } from "../../../types/FormConfig";
+import { parseDueDate } from "@spaarke/ui-components";
 
 const useStyles = makeStyles({
   row: {
@@ -35,13 +36,9 @@ export interface DateTimeFieldRendererProps {
 }
 
 function parseISODate(isoString: string | null | undefined): Date | null {
-  if (!isoString) return null;
-  try {
-    const date = new Date(isoString);
-    return isNaN(date.getTime()) ? null : date;
-  } catch {
-    return null;
-  }
+  // Task 098: a bare "YYYY-MM-DD" (the six sprk_event date columns are Date Only) is that LOCAL calendar day;
+  // new Date("YYYY-MM-DD") is UTC midnight — a bare date showed the previous day west of UTC.
+  return parseDueDate(isoString);
 }
 
 function formatDateForDisplay(date?: Date): string {
