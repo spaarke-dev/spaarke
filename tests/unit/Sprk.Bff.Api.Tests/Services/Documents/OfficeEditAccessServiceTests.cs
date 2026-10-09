@@ -49,6 +49,11 @@ public class OfficeEditAccessServiceTests
             });
         _membership.Setup(m => m.ReadAccessAsync(SecureDrive, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Membership.ContainerAccess([], RolesComplete: true, new Dictionary<string, string>()));
+
+        // Task 175 (#1478): a work assignment's or project's Restricted state also comes from what it is filed under. These
+        // records are filed under nothing (the filing read returns no row); an unanswered read would fail closed.
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
     }
 
     private Sut Build(OwningSecureRecord? secureOwner, AccessRights rights)

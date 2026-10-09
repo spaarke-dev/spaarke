@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -372,8 +373,14 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         // FR-D1 / FR-06: tag the resolved regarding as the RAG grounding key on the outbound half too,
         // so a matter-scoped query returns sent correspondence (was null). Best-effort/non-fatal (NFR-04).
-        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
-            _genericEntityService, communicationId, _logger, ct);
+        // Task 177: the shared index-parent rule (the record that governs the communication) is Scoped.
+        ParentEntityContext? parentEntity;
+        using (var parentScope = _scopeFactory.CreateScope())
+        {
+            parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                _genericEntityService, parentScope.ServiceProvider.GetService<DocumentIndexParentResolver>(),
+                communicationId, _logger, ct);
+        }
 
         var request = new PostUploadIndexingRequest(
             TenantId: tenantId,

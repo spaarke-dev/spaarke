@@ -142,10 +142,10 @@ Write-Host ""
 # Report import command (works whether or not pac is present)
 if (Get-Command pac -ErrorAction SilentlyContinue) {
     Write-Host "To import, run:" -ForegroundColor Cyan
-    Write-Host "  pac solution import --path `"$((Resolve-Path $zipPath).Path)`" --publish-changes"
+    Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath `"$((Resolve-Path $zipPath).Path)`" -SolutionUniqueName <name>"
 } else {
     Write-Host "pac CLI not found on PATH. Install Power Platform CLI to import:" -ForegroundColor Yellow
     Write-Host "  https://learn.microsoft.com/power-platform/developer/cli/introduction"
     Write-Host "Then run:"
-    Write-Host "  pac solution import --path `"$((Resolve-Path $zipPath).Path)`" --publish-changes"
+    Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath `"$((Resolve-Path $zipPath).Path)`" -SolutionUniqueName <name>"
 }

@@ -1,0 +1,5 @@
+# Paths the tenant-wide-publish lint skips. One per line: path<TAB>reason. Keep this list as short as possible.
+.claude/skills/dataverse-deploy/SKILL.md	Task 130 (D-83): the main session applies projects/spaarke-ontology-platform-r1/notes/task-130-skill-amendments.md (sub-agents cannot write .claude). Delete this line when applied.
+.claude/skills/pcf-deploy/SKILL.md	Task 130 (D-83): the main session applies projects/spaarke-ontology-platform-r1/notes/task-130-skill-amendments.md (sub-agents cannot write .claude). Delete this line when applied.
+.claude/skills/ribbon-edit/SKILL.md	Task 130 (D-83): the main session applies projects/spaarke-ontology-platform-r1/notes/task-130-skill-amendments.md (sub-agents cannot write .claude). Delete this line when applied.
+.claude/archive/2026-10-07/modules/pcf.CLAUDE.md	Archived copy of the pre-condensation src/client/pcf/CLAUDE.md (master, 2026-10-07): history, not live guidance; sub-agents cannot edit .claude/. Delete this line if the archive is removed.

@@ -67,7 +67,7 @@ Deploy these web resources to Dataverse **BEFORE** importing the ribbon:
 5. **Re-package and import**:
    ```powershell
    Compress-Archive -Path "EventRibbons_extracted/*" -DestinationPath "EventRibbons_modified.zip"
-   pac solution import --path "EventRibbons_modified.zip" --publish-changes
+   pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "EventRibbons_modified.zip" -SolutionUniqueName <name>
    ```
 
 ## Button Locations

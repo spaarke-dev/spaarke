@@ -114,6 +114,7 @@ public class PredictMatterCostPlaybookTests
         _ingestDocumentSourceMock.Object,
         _consumerRoutingMock.Object,
         _ragServiceMock.Object,
+        PermitAllRetrievalAccessTrim.Instance,
         BuildAssistantHandler(),
         _nodeServiceMock.Object,
         NullLogger<InsightsOrchestrator>.Instance);

@@ -33,5 +33,18 @@ export type {
   // Task 067: the No Access List entry (064's contract) and the host's organization-membership answer.
   IRecordNoAccessEntry,
   IContactOrganizationMembership,
+  // Task 175 (owner round 87): a record's direct filing parents and the floor they set.
+  IFollowsParent,
+  IAccessFloor,
 } from './types';
+// Task 175: the host's parsers for `can-manage-access` and the Access Permission pill's floor rules.
+export {
+  parseFollowsParents,
+  parseAccessFloor,
+  resolveAccessPermissionPill,
+  isLooserThanFloor,
+  accessPermissionStateOf,
+  describeEffectiveAccess,
+} from './followsParent';
+export type { AccessValueOrigin } from './followsParent';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';

@@ -34,6 +34,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
   `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
 
+###### 2026-10-09 — Agent cost controls: Sonnet sub-agents, concurrency caps, earlier compaction (agent-cost-controls-r1)
+
+Owner direction 2026-10-09 after estimated spend rose to $1–2.5k a day. The number of calls had grown about 20×, 65–92% of them from sub-agents (mostly Opus, inherited from `"model": "opus"`). Windows ran out of memory from the parallelism.
+
+- **`.claude/settings.json`:**
+  - `env` gains `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4` and `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`.
+  - New top-level `workflowSizeGuideline: "small"` and `autoCompactWindow: 400000`.
+  - The main-session `model` is unchanged. A per-call `model` still overrides the sub-agent default, for planning and reviews.
+- **`.claude/constraints/agent-cost.md`** (new, binding), with the evidence table and the settings reference (docs confirmed 2026-10-09). Seven rules:
+  1. sub-agents default to Sonnet;
+  2. one top-tier review per change set;
+  3. small, scoped agents;
+  4. don't resume an idle agent;
+  5. concurrency, including one or two heavy projects per machine;
+  6. earlier compaction;
+  7. research fans out once.
+  Indexed in `.claude/constraints/INDEX.md`.
+- **Root `CLAUDE.md`:**
+  - §8.5 gains an "Agent cost" bullet.
+  - §16 names the new settings.
+- **`.claude/FAILURE-MODES.md`:** G-19.
+
+---
 ###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
 
 `customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
@@ -102,6 +125,18 @@ and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationMo
 `docs/architecture/ui-dialog-shell-architecture.md`. Path **B** per root `CLAUDE.md` §6.5 (owner decision **D-26**,
 2026-10-07); alternatives A (project exception) and C (build on `WizardModal`, a second engine) rejected. Record:
 `projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
+
+---
+###### 2026-10-08 — Enforcement ladder: rules enforced by the build, not prose (enforcement-ladder-r1); root CLAUDE.md about +1.1 KB vs this branch's base (about 17.8 KB injected, under 190 lines)
+
+The common root cause behind the 2026-10 findings (dead `res.ok` branches after `authenticatedFetch`, detached tests, #975's 3-of-47 fix, module CLAUDE.md drift, the shared-stash incident): a rule in prose drifts and competes for attention, while a rule the build enforces reaches the agent at the line it just wrote. This makes that the default.
+
+- **Root §16 "Enforcement ladder"**: for any new rule, use the strongest mechanism that works — type → lint rule (`post-edit-lint.sh` now returns findings to the agent as `additionalContext` after each Edit/Write; before this its stdout reached only the debug log) → ArchTest/guard (`Stop` hook, CI) → hook/permission → prose with a reason. Record "Enforced by: …". New guards carry must-fire/must-not-fire controls and a ratchet baseline. Full checklist: `ai-procedure-maintenance` **Checklist G**; Checklist A (new ADR) gains item 12, Checklist F runs the path check.
+- **`task-execute` Step 9.5 rule 6 "Fix the class, not the instance"**: a pattern defect is searched repo-wide and fixed, guarded or listed.
+- **`code-review` Step 6.55 "Enforcement check"**: flags a new rule with no mechanism, a guard with no must-fire control, and a pattern fix with no class search.
+- **New check `scripts/quality/Test-InstructionPaths.ps1`** (CI Tier 2, advisory; also in `doc-drift-audit`): every backticked path under src/, tests/, docs/, scripts/, .claude/, .github/, infrastructure/ or config/ in every instruction file (and FAILURE-MODES) must be tracked by git — case-sensitive, so it answers the same on Windows and Linux CI. Ratcheted — `scripts/quality/instruction-paths.baseline.txt` records the 39 dead paths found today (deleted PCFs, moved files); a new one fails. Gitignored build output, placeholders and package-relative `src/…` are skipped. Its own must-fire test caught a bug in it (every `src/` path was being skipped).
+- **`post-edit-lint.sh` delivers its findings**: a `PostToolUse` hook's plain stdout goes only to the debug log, so the lint hook never reached the agent. It now emits `hookSpecificOutput.additionalContext` with only real findings (filtered per tool, capped at 3,000 characters), stays silent on a clean file, and its matcher covers `Edit|Write`.
+- **`permissions.ask` on `git stash pop/apply/drop/clear`** (Bash + PowerShell, including `git -C <path> stash …`): the stash stack is shared by every worktree; a pop applied another session's stash on 2026-10-08. New **FAILURE-MODES G-18**.
 
 ---
 ###### 2026-10-07 — Procedure calibration: guardrails, not caps (procedure-calibration-r1)

@@ -65,7 +65,7 @@ if ($LASTEXITCODE -ne 0) { throw "Pack failed" }
 
 # 3. Import
 Write-Host "`n-- Importing solution --"
-pac solution import --path $zipPath --publish-changes --async
-if ($LASTEXITCODE -ne 0) { throw "Import failed" }
+$repoRoot = Resolve-Path (Join-Path $here ".." ".." ".." "..")
+& (Join-Path $repoRoot "scripts" "Import-SolutionScoped.ps1") -EnvironmentUrl $Environment -ZipPath $zipPath -SolutionUniqueName "FieldMappingAdminSolution" -ImportArgs @("--async")
 
 Write-Host "`nDeploy complete: $zipPath" -ForegroundColor Green
