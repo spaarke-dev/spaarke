@@ -14,6 +14,21 @@
           <columns>
             <column width="66%">
               <sections>
+                <section name="sprk_access_permission" id="18e8e37e-b2ca-24b8-d8c0-08113dd9bf3b" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="ACCESS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{3f8de6ca-c82b-6046-47c1-d8b520b2a62f}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Access Permission" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_accesspermission" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_accesspermission" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
                 <section name="sprk_filing_picker" id="39b0b3ea-2bdf-202b-9e54-8707d15d7543" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
                   <labels>
                     <label description="RELATED RECORD" languagecode="1033" />
@@ -547,11 +562,13 @@
         <event name="onload" application="false" active="false">
           <Handlers>
             <Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{688da323-f388-4166-883a-a1f3199f2b81}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.AccessPermissionInherited.onLoad" libraryName="sprk_accesspermission_inherited" handlerUniqueId="{81386d8f-95b2-f1b2-b893-2a8d972a5188}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>
       <formLibraries>
         <Library name="sprk_todo_regarding_presave" libraryUniqueId="{11942c50-2399-1ff8-d30f-b2bcf5c7e537}" />
+        <Library name="sprk_accesspermission_inherited" libraryUniqueId="{219ac684-96e1-d98a-a957-d3453836778a}" />
       </formLibraries>
     </form>
     <IsCustomizable>1</IsCustomizable>

@@ -15,11 +15,8 @@
 // global choices, systemuser.sprk_primarycontact (field-secured), both identity-link field-security profiles with
 // their permissions, the collisions view — and the alternate key on the mirror, which the BFF creates contacts by.
 //
-// KNOWN GAP (pinned, T255): the export has no alternate key on contact. The package rule covered OOB-table columns
-// but not OOB-table keys; T255 extends the rule (SpaarkePackageScope.psm1, EntityKey on OOB tables). The key exists in
-// spaarkedev1 (UAC-r2 task 141 live gate G-1, 2026-10-02), so the next Assemble → Export (an owner-approved live step,
-// docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md) brings it into git. Until then KeyAwaitingExport is true; when
-// the key arrives this test fails until the pin is removed — the gap cannot be closed silently or forgotten.
+// T255 closed the known gap 2026-10-09: the package rule includes OOB-table keys (SpaarkePackageScope.psm1) and
+// SpaarkeMaster 1.2.1.0 carries the contact key, so a missing key now fails this test.
 //
 // Controls (tests/CLAUDE.md): the attribute / key / profile scans are run against seeded XML with and without the
 // thing they look for.
@@ -48,9 +45,6 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
         "sprk_identityplane", "sprk_identitycollisionon", "sprk_identitycollisionoid",
         "sprk_identitycollisionplane", "sprk_identitycollisionreason", "sprk_identitycollisionparties",
     ];
-
-    /// <summary>T255 pin — true while the committed export lacks the contact alternate key (see file header).</summary>
-    private static readonly bool KeyAwaitingExport = true;
 
     [Fact]
     public void ThePackageCarriesTheBindingColumns_FieldSecuredWhereTheBffRequiresIt()
@@ -112,24 +106,15 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
     }
 
     [Fact]
-    public void TheContactAlternateKeyOnTheMirror_IsPackaged_OrPinnedAsAwaitingExport()
+    public void TheContactAlternateKeyOnTheMirror_IsPackaged()
     {
         var contact = XDocument.Load(PackagePath("Entities", "Contact", "Entity.xml"));
         var keyed = KeyAttributes(contact, KeyLogicalName);
 
-        if (keyed is null)
-        {
-            KeyAwaitingExport.Should().BeTrue(
-                "the contact alternate key is missing from the committed SpaarkeMaster export: every BFF contact create " +
-                "(by contacts(sprk_externalobjectidkey='…')) fails on a stamp without it. Run the release process " +
-                "(Assemble → Export) so the package carries it — the package rule includes OOB-table keys since T255");
-        }
-        else
-        {
-            keyed.Should().Equal([MirrorColumn], "the BFF creates by the mirror; a key on the secured binding is impossible");
-            KeyAwaitingExport.Should().BeFalse(
-                "the export now carries the key — remove the T255 KeyAwaitingExport pin in this test");
-        }
+        keyed.Should().NotBeNull(
+            "every BFF contact create (by contacts(sprk_externalobjectidkey='…')) fails on a stamp without the contact " +
+            "alternate key. Run the release process (Assemble → Export) so the package carries it");
+        keyed.Should().Equal([MirrorColumn], "the BFF creates by the mirror; a key on the secured binding is impossible");
     }
 
     // ---------- controls: the scans on seeded XML ----------
