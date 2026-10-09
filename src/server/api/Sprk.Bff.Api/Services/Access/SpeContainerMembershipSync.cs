@@ -434,13 +434,21 @@ public class SpeContainerMembershipSync
         }
     }
 
-    /// <summary>Is the record Restricted? <see langword="null"/> when it could not be read (the Restricted rule then does not fire).</summary>
+    /// <summary>
+    /// Is the record Restricted — its own value, or (#1478, task 175) through what it is filed under (task 174's effective
+    /// rule)? <see langword="null"/> when it could not be read (the Restricted rule then does not fire, as before).
+    /// </summary>
     private async Task<bool?> IsRestrictedAsync(string entity, Guid recordId, CancellationToken ct)
     {
         try
         {
             var row = await _dataverse.RetrieveAsync(entity, recordId, ["sprk_accesspermission"], ct).ConfigureAwait(false);
-            return row?.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value == ExternalParticipationService.AccessPermissionRestricted;
+            if (row?.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value == ExternalParticipationService.AccessPermissionRestricted)
+                return true;
+            return row is null
+                ? false
+                : await Sprk.Bff.Api.Infrastructure.ExternalAccess.EffectiveRootFlags
+                    .RestrictedThroughFilingAsync(_dataverse, _logger, entity, recordId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

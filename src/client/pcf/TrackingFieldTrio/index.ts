@@ -123,6 +123,21 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.45 (task 175, unified-access-control-r2 — owner round 87, refining round 84: the parent sets a FLOOR; a filed
+ *   work assignment or project may be made stricter by hand, never looser, and its grants and shares are unaffected):
+ *   `evaluateGrantGate` keeps `followsParents` and the floor (`floorSecure`, `floorAccessPermission`,
+ *   `parentUnverifiable`) from the same `can-manage-access` answer, only from an answer naming THIS record, reset when the
+ *   form rebinds. With a floor the Access Permission pill stays editable but offers only the options at or above it, and
+ *   a looser pick through the pill is ignored (a value arriving through `updateView` is never written back: the form
+ *   library and the server put back a value below the floor); `parentUnverifiable` makes
+ *   the pill read-only (fail closed). The pill's tooltip and the bundled `AccessGrantModal`'s parent bar say whether the
+ *   value is inherited (from which parent) or set on this record; the modal names the parent (`onOpenParent`,
+ *   `context.navigation.openForm` on `sprk_matter` / `sprk_project`) and keeps every grant affordance. Parentless, or
+ *   an older BFF without these fields: unchanged.
+ *
+ * v1.0.44 (task 175, owner round 84 — superseded by v1.0.45): locked a child record's Manage Access and pill while it
+ *   had a parent.
+ *
  * v1.0.43 (task 174, unified-access-control-r2 — owner round 84; task 067's amendment): no change in this file's logic;
  *   the bundled `AccessGrantModal` gates its options, explains its banner ("It follows the {matter|project} it is filed
  *   under: {name}.") and marks "No effect" from the record's EFFECTIVE access that task 064's read now reports — the
@@ -230,7 +245,15 @@ import {
   type IContactOrganizationMembership,
   type ExternalGrantRootType,
   type AccessPermissionState,
+  type IFollowsParent,
+  type IAccessFloor,
   resolveAccessPermissionState,
+  parseFollowsParents,
+  parseAccessFloor,
+  resolveAccessPermissionPill,
+  isLooserThanFloor,
+  accessPermissionStateOf,
+  describeEffectiveAccess,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Spaarke theme resolution (ADR-021 dark mode): the user's Spaarke theme choice, then the MDA's own theme — the same
 // helpers the Communication PCFs use.
@@ -275,6 +298,8 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environme
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
+/** The host's raw Limited / Restricted values, for the shared state and floor rules (Standard is anything else). */
+const ACCESS_PERMISSION_VALUES = { limited: ACCESS_PERMISSION_LIMITED, restricted: ACCESS_PERMISSION_RESTRICTED };
 
 // Owner O1 FINAL (2026-10-01): on a SECURE record the closed pill reads "Secure"
 // (red) for both secure and secure + Restricted. That is a closed-LABEL change
@@ -410,6 +435,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * refresh while an answer is already in flight. */
   private grantGateRequestedFor: string | null | undefined = undefined;
 
+  /** Task 175 (owner round 87): the bound record's DIRECT filing parents, from the same `can-manage-access` answer as
+   * {@link canGrantAccessValue} (`followsParents`). Display only: named by Manage Access and the pill's note. `[]` until
+   * a 200 naming THIS record says otherwise, and on every failure. */
+  private followsParentsValue: IFollowsParent[] = [];
+
+  /** Task 175 (owner round 87): the floor the parents set (`floorSecure`, `floorAccessPermission`,
+   * `parentUnverifiable`), from the same answer. `null` until a 200 naming THIS record arrives, and on every failure —
+   * the pill is then unchanged and the server still refuses a value looser than the floor. */
+  private accessFloorValue: IAccessFloor | null = null;
+
   /** The bound record's `sprk_issecure`, read for GATING (task 138): `true` / `false` from a successful
    * read, `null` while unread or when the read fails or the value is hidden (field-level security). The
    * modal state treats `null` as Limited — an unknown Secure flag must never widen what the dialog offers. */
@@ -505,6 +540,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // the field). Sync local state to the framework's raw values.
     this.monitorValue = context.parameters.monitor?.raw ?? false;
     this.highPriorityValue = context.parameters.highPriority?.raw ?? false;
+    // Task 175 (owner round 87): never written back from here, whatever the value. The server keeps a stored value
+    // above the last floor as the record's OWN, so a put-back would turn an inherited value into a permanent own one;
+    // the form library and the server already put back a value below the real floor.
     this.accessPermissionValue = context.parameters.accessPermission?.raw ?? null;
 
     // Re-ask the server if — and only if — this control is now bound to a different record (task 118).
@@ -645,6 +683,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
     this.grantGateRequestedFor = recordId;
     this.canGrantAccessValue = false;
+    // Task 175: nor the previous record's parents and floor.
+    this.followsParentsValue = [];
+    this.accessFloorValue = null;
     void this.evaluateGrantGate(recordId);
   }
 
@@ -760,6 +801,35 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }
   };
 
+  /** Task 175 (owner round 87): the pill's note — e.g. "Access Permission: Restricted (inherited from Matter X)" — or
+   * `undefined` when there is no parent or no floor to compare with. */
+  private describeAccessPermissionNote(): string | undefined {
+    const floor = this.accessFloorValue;
+    if (!floor || this.followsParentsValue.length === 0 || floor.floorAccessPermission === null) return undefined;
+    return describeEffectiveAccess({
+      accessPermission: accessPermissionStateOf(this.accessPermissionValue, ACCESS_PERMISSION_VALUES),
+      isSecure: this.isSecureValue === true,
+      floor,
+      parents: this.followsParentsValue,
+    }).join('. ');
+  }
+
+  /** Opens a parent of the record (task 175) on its own form. Manage Access closes first: the form
+   * navigates away from this record. The BFF names the parent `'matter'` or `'project'`; this host maps it to its table. */
+  private openParentRecord = (parent: IFollowsParent): void => {
+    const entityName = parent.recordType === 'matter' ? 'sprk_matter' : 'sprk_project';
+    this.isGrantModalOpen = false;
+    this.grantModalSection = undefined;
+    this.renderControl();
+    try {
+      void Promise.resolve(this.context.navigation.openForm({ entityName, entityId: parent.recordId })).catch(err =>
+        console.warn('[TrackingFieldTrio] open parent record failed.', err)
+      );
+    } catch (err) {
+      console.warn('[TrackingFieldTrio] open parent record failed.', err);
+    }
+  };
+
   /** The bound record's primary-name value (e.g. the matter number) for the email
    * "Related to" chip (task 073 UAT v1.0.24 #9). Read from the form entity's
    * primary attribute — entity-agnostic, no metadata call. Undefined outside an
@@ -857,7 +927,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         return;
       }
 
-      const body = (await res.json()) as { recordId?: string; canManageAccess?: boolean } | null;
+      const body = (await res.json()) as {
+        recordId?: string;
+        canManageAccess?: boolean;
+        // Task 175: additive; absent from an older BFF (then: not locked).
+        followsParents?: unknown;
+        parentUnverifiable?: unknown;
+        floorSecure?: unknown;
+        floorAccessPermission?: unknown;
+      } | null;
 
       // `canManageAccess === true` exactly — not truthy. A body that omits the field, or carries a
       // truthy-but-wrong value, is an answer this client does not understand, and an answer it does not
@@ -884,7 +962,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         );
       }
 
-      this.setGrantGate(recordId, answeredYes && answersThisRecord);
+      // Task 175: the parents and the floor are kept only from an answer about THIS record.
+      const followsParents = answersThisRecord ? parseFollowsParents(body?.followsParents) : [];
+      const accessFloor = answersThisRecord ? parseAccessFloor(body) : null;
+      if (accessFloor?.parentUnverifiable) {
+        console.info(
+          `[TrackingFieldTrio] What ${recordType} ${recordId} is filed under could not be read; the Access Permission is read-only.`
+        );
+      }
+
+      this.setGrantGate(recordId, answeredYes && answersThisRecord, followsParents, accessFloor);
     } catch (err) {
       console.warn(
         `[TrackingFieldTrio] Could not establish whether you may manage access on ${recordType} ${recordId}; ` +
@@ -905,12 +992,19 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * staleness check belongs in ONE place: a slow answer for a record the form has since left must be
    * dropped, and dropping it in four separate places is three chances to forget.
    */
-  private setGrantGate(answeredFor: string | null, canGrant: boolean): void {
+  private setGrantGate(
+    answeredFor: string | null,
+    canGrant: boolean,
+    followsParents: IFollowsParent[] = [],
+    accessFloor: IAccessFloor | null = null
+  ): void {
     if (this.grantGateRequestedFor !== answeredFor) {
       return;
     }
 
     this.canGrantAccessValue = canGrant;
+    this.followsParentsValue = followsParents;
+    this.accessFloorValue = accessFloor;
     this.renderControl();
   }
 
@@ -1372,6 +1466,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // that becomes read-only — or a column that becomes non-editable — takes effect immediately.
     const controlDisabled = this.context.mode?.isControlDisabled === true;
     const accessPermissionBound = this.isAccessPermissionBound();
+    const accessPermissionPill = resolveAccessPermissionPill(
+      this.getAccessPermissionOptions(),
+      this.accessFloorValue,
+      ACCESS_PERMISSION_VALUES
+    );
 
     const props: ITrackingFieldTrioProps = {
       monitor: this.monitorValue,
@@ -1382,8 +1481,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.43 • Built 2026-10-08',
-      accessPermissionOptions: this.getAccessPermissionOptions(),
+      versionText: 'v1.0.45 • Built 2026-10-09',
+      // Task 175 (owner round 87): only the options at or above the parent's floor.
+      accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
       // sync if the field is renamed).
@@ -1399,6 +1499,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         this.notifyOutputChanged();
       },
       onAccessPermissionChange: v => {
+        // Task 175 (owner round 87): never looser than the parent's floor (the menu does not offer it; this is the
+        // backstop). The field keeps its previous value.
+        if (isLooserThanFloor(v, this.accessFloorValue?.floorAccessPermission, ACCESS_PERMISSION_VALUES)) {
+          this.renderControl();
+          return;
+        }
         this.accessPermissionValue = v;
         this.notifyOutputChanged();
       },
@@ -1434,7 +1540,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       canGrantAccess: this.canGrantAccessValue,
       // Task 138 — read-only form / non-editable column / unbound column / secure display (O1 FINAL).
       disabled: controlDisabled,
-      accessPermissionDisabled: !this.isAccessPermissionEditable(),
+      // Task 175 (owner round 87): also read-only when what the record is filed under could not be read (fail closed).
+      accessPermissionDisabled: !this.isAccessPermissionEditable() || accessPermissionPill.readOnly,
+      // Task 175: whether the value is inherited from a parent or set on this record (no note without a floor).
+      accessPermissionNote: this.describeAccessPermissionNote(),
       showAccessPermission: accessPermissionBound,
       secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
       // Task 153: the access-status indicator (undefined while unasked or in flight → nothing drawn).
@@ -1527,6 +1636,14 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
                     // Task 067: contacts in a walled organization are marked walled off in Current Access.
                     fetchContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
+                    // Task 175 (owner round 87): the parents' floor, shown in a bar naming the parent; grants unaffected.
+                    followsParents: this.followsParentsValue,
+                    onOpenParent: this.openParentRecord,
+                    accessFloor: this.accessFloorValue ?? undefined,
+                    recordAccessPermission: accessPermissionStateOf(
+                      this.accessPermissionValue,
+                      ACCESS_PERMISSION_VALUES
+                    ),
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the

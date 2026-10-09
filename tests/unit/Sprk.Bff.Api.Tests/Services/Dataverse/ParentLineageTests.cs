@@ -78,6 +78,40 @@ public class ParentLineageTests
         }
     }
 
+    /// <summary>
+    /// Task 175 (owner round 84): the form library locks a work assignment's and a project's Access Permission (and Secure)
+    /// while it has a parent, deciding "has a parent" from the SAME filing the server walks: the typed regarding lookups
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.TypedFilingColumns"/>) and the polymorphic pair naming a
+    /// matter or project (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent"/>). The two blocks are
+    /// carried literally; this fails the build if they drift.
+    /// </summary>
+    [Fact]
+    public void FormLibraryRootParentLookups_MatchTheServerFiling()
+    {
+        var path = FindRepoFile("src/client/webresources/js/sprk_accesspermission_inherited.js");
+        path.Should().NotBeNull("the form library is checked in");
+        var source = File.ReadAllText(path!);
+
+        var roots = Regex.Match(source, @"ROOT_PARENT_LOOKUPS:BEGIN[^\n]*\n\s*ns\.ROOT_PARENT_LOOKUPS\s*=\s*(?<json>\{.*?\});\s*/\*\s*ROOT_PARENT_LOOKUPS:END",
+            RegexOptions.Singleline);
+        roots.Success.Should().BeTrue("the roots' map sits between the ROOT_PARENT_LOOKUPS markers");
+        var form = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(roots.Groups["json"].Value)!;
+        var server = Sprk.Bff.Api.Services.Access.SecureRootInheritance.TypedFilingColumns;
+        form.Keys.Should().BeEquivalentTo(server.Keys);
+        foreach (var table in server.Keys)
+        {
+            form[table].Should().BeEquivalentTo(server[table].ToDictionary(c => c.Column, c => c.ParentTable),
+                $"{table}: the form and the server must agree on what files it under a parent");
+        }
+
+        var pair = Regex.Match(source, @"PAIR_PARENT_TABLES:BEGIN[^\n]*\n\s*ns\.PAIR_PARENT_TABLES\s*=\s*(?<json>\[.*?\]);\s*/\*\s*PAIR_PARENT_TABLES:END",
+            RegexOptions.Singleline);
+        pair.Success.Should().BeTrue("the pair's parent tables sit between the PAIR_PARENT_TABLES markers");
+        var pairTables = JsonSerializer.Deserialize<List<string>>(pair.Groups["json"].Value)!;
+        pairTables.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project" });
+        pairTables.Should().OnlyContain(t => Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(t));
+    }
+
     private static string? FindRepoFile(string relativePath)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
