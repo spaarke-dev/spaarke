@@ -670,8 +670,15 @@ public class DailyBriefingCollector : ICodedWorkflow
         if (day.FallbackReason is not null)
         {
             _logger.LogWarning(
-                "DailyBriefingCollector: the caller's time zone could not be read; \"today\" is the UTC date ({Reason}).",
-                day.FallbackReason);
+                "DailyBriefingCollector: the caller's time zone could not be read; \"today\" is the UTC date ({Reason}, {ErrorKind}).",
+                day.FallbackReason,
+                // Identifier-only: the exception type (and HTTP status when it has one), so a missing privilege (403) is
+                // visible. Never the message.
+                day.Error is null
+                    ? "none"
+                    : day.Error is HttpRequestException { StatusCode: { } status }
+                        ? $"{nameof(HttpRequestException)} status={(int)status}"
+                        : day.Error.GetType().Name);
         }
 
         return day;
