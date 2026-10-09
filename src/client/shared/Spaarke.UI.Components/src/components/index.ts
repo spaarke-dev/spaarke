@@ -317,3 +317,8 @@ export * from './StatusBadge';
 // EvidenceLine, StatusBar, RecordRow, AggregateCard + the console-state to
 // StatusBadge-tone table (spaarke-ontology-platform-r1 task 057, FR-28/D-24).
 export * from './ConsoleKit';
+
+// Worklist - MatterCard, the ONE worklist row component (one card per core record,
+// one IssueLine per Work Item; data-driven variants). spaarke-ontology-platform-r1
+// task 051 (FR-25/FR-28, D-24).
+export * from './Worklist';
