@@ -4,7 +4,7 @@
     <title>Per-node create/update/delete endpoints can still change or delete nodes of a system playbook (#1498): apply the task 133 guard without breaking the deploy tooling</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>after #1497 (task 133) review</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF endpoints; protects live system playbooks; may touch the deploy path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -39,6 +39,8 @@ Also in scope (review K3): CreateNodeAsync / UpdateNodeAsync write request.Confi
   </acceptance-criteria>
 
   <notes>Created 2026-10-09 by the main session from #1498 (task 133 finding; no-parking rule).</notes>
+
+  <completion>CANCELLED 2026-10-09 by owner decision D-105: Designer/node-endpoint protection is outside the ontology scope. #1498 stays open on GitHub for the owning area; not this project's work.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -4,7 +4,7 @@
     <title>Retire the legacy canvas Playbook Designer: demo still runs the 2026-05-19 PlaybookBuilder bundle that saves canvas JSON and deletes nodes straight from the browser (bypasses the task 133 guard); the unused PlaybookBuilderHost PCF remains in dev</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>owner approval for the demo deploy</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deploy to a non-dev environment; protects live system playbooks; removes a web resource.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -40,6 +40,8 @@ Check every other environment the repo deploys to (the environment list in the d
   </acceptance-criteria>
 
   <notes>Created 2026-10-09 by the main session from the #1497 review (F2; no-parking rule).</notes>
+
+  <completion>CANCELLED 2026-10-09 by owner decision D-105: demo is not this project's environment and Designer protection is outside the ontology scope. Finding (demo runs the 2026-05-19 canvas PlaybookBuilder) recorded in PR #1497's body.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
