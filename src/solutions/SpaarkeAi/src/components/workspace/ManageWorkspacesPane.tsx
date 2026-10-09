@@ -454,7 +454,9 @@ async function launchEditWizard(
     data,
     title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
   });
-  if (!outcome.launched) {
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
     );
@@ -517,7 +519,9 @@ async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
     data,
     title: "Create New Workspace",
   });
-  if (!outcome.launched) {
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
     );

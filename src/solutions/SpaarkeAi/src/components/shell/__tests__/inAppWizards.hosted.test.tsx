@@ -100,6 +100,25 @@ describe("FindSimilarApp — in-app (SprkModal)", () => {
     }
   });
 
+  it("a failed name read keeps the placeholder label and logs nothing sensitive", async () => {
+    const spies = (["error", "warn", "log", "info"] as const).map(m => jest.spyOn(console, m).mockImplementation(() => undefined));
+    const retrieveRecord = jest.fn().mockRejectedValue(new Error("403 secret-token-abc for record abc-123"));
+    (window as unknown as { Xrm?: unknown }).Xrm = { WebApi: { retrieveRecord }, Navigation: {} };
+    try {
+      inHost(<FindSimilarApp {...baseProps} initialDocument={{ documentId: "abc-123" }} inApp={{ onClose: jest.fn() }} />);
+      await waitFor(() => expect(retrieveRecord).toHaveBeenCalledTimes(1));
+      await Promise.resolve();
+
+      expect(screen.getByText("Selected document")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Find Similar/ })).toBeEnabled();
+      const logged = spies.flatMap(s => s.mock.calls.map(c => c.map(String).join(" "))).join("\n");
+      expect(logged).not.toMatch(/secret-token|403/);
+    } finally {
+      spies.forEach(s => s.mockRestore());
+      delete (window as unknown as { Xrm?: unknown }).Xrm;
+    }
+  });
+
   it("an empty documentId preselects nothing", () => {
     inHost(<FindSimilarApp {...baseProps} initialDocument={{ documentId: "" }} inApp={{ onClose: jest.fn() }} />);
     expect(screen.queryByText("Selected document")).toBeNull();

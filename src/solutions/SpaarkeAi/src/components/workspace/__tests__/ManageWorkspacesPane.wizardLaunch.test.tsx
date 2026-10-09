@@ -123,6 +123,21 @@ describe("ManageWorkspacesPane — Workspace layout wizard launch", () => {
     await waitFor(() => expect(mockRefetch).toHaveBeenCalled());
   });
 
+  it("New while another in-app wizard is open warns 'already open', not 'Xrm.Navigation not available'", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const opener = jest.fn().mockResolvedValue({ busy: true });
+    unregister = registerInAppWizardHost(opener, ["sprk_workspacelayoutwizard"]);
+    mountPane();
+
+    fireEvent.click(await screen.findByTestId("manage-workspaces-new"));
+
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    const text = warn.mock.calls.map(c => String(c[0])).join("\n");
+    expect(text).toMatch(/already open/);
+    expect(text).not.toMatch(/not available/);
+    warn.mockRestore();
+  });
+
   it("with no host mounted, New keeps the navigateTo dialog and its title", async () => {
     mountPane();
 

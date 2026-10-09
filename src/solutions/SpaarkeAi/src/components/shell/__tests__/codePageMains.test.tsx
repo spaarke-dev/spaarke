@@ -16,7 +16,7 @@ import "@testing-library/jest-dom";
 import { waitFor } from "@testing-library/react";
 import { readHandoffResult } from "@spaarke/ui-components/services/surfaceHandoff/handoffStorage";
 
-jest.setTimeout(60000); // cold module graph of the code-page entry points
+jest.setTimeout(240000); // cold module graph of the code-page entry points
 
 const mockWaProps: { current: any } = { current: null };
 const mockFindSimilarProps: { current: any } = { current: null };

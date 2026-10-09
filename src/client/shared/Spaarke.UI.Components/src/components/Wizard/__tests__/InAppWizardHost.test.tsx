@@ -464,6 +464,34 @@ describe('InAppWizardHost — code-page wizards open through supplied renderers 
 // #1420: Create Work Assignment reaches launchSurface as committed
 // ---------------------------------------------------------------------------
 
+describe('InAppWizardHost — launchSurface while another wizard is open', () => {
+  it('reports launched:false with busy:true (distinguishable from "no host"), clears its envelope, opens nothing new', async () => {
+    mountHost();
+    act(() => launchCreateMatterWizard({ bffBaseUrl: BFF }));
+    await screen.findByTestId('wizard-matter');
+
+    let outcome!: Awaited<ReturnType<typeof launchSurface>>;
+    await act(async () => {
+      outcome = await launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl: BFF });
+    });
+
+    expect(outcome.launched).toBe(false);
+    expect(outcome.busy).toBe(true);
+    expect(screen.queryByTestId('wizard-workassignment')).toBeNull();
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('with no host at all, launchSurface is launched:false WITHOUT busy', async () => {
+    const outcome = await launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl: BFF });
+    // No host: falls back to navigateTo (stubbed present), so it launches; remove Xrm for the no-host case.
+    expect(outcome.busy).toBeUndefined();
+    delete (window as unknown as { Xrm?: unknown }).Xrm;
+    const noXrm = await launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl: BFF });
+    expect(noXrm.launched).toBe(false);
+    expect(noXrm.busy).toBeUndefined();
+  });
+});
+
 describe('InAppWizardHost — Create Work Assignment completion (#1420)', () => {
   it('passes onComplete to the wizard and a finished create reads back committed with the record id', async () => {
     mountHost();

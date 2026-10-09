@@ -241,6 +241,21 @@ describe("WorkspaceGrid launch sites — Upload Documents", () => {
     expect(navigateTo).not.toHaveBeenCalled();
   });
 
+  it("warns 'already open' (not 'Xrm not available') when another in-app wizard is open", async () => {
+    const opener = jest.fn().mockResolvedValue({ busy: true });
+    unregister = registerInAppWizardHost(opener, ["sprk_documentuploadwizard"]);
+    mountGrid();
+    const warn = console.warn as unknown as jest.Mock;
+
+    await act(async () => {
+      await mockBuildConfigArgs.current.onAddDocument();
+    });
+
+    const text = warn.mock.calls.map(c => String(c[0])).join("\n");
+    expect(text).toMatch(/already open/);
+    expect(text).not.toMatch(/Xrm.Navigation not available/);
+  });
+
   it("keeps the navigateTo shape (no title, wizard size) when no host is mounted", async () => {
     mountGrid();
 

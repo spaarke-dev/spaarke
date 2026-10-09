@@ -502,7 +502,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // the in-app renderer reads it with the same `resolveUploadLaunchParams`.
       data: encodeURIComponent(dataString),
     });
-    if (!outcome.launched) {
+    if (outcome.busy) {
+      console.warn("[WorkspaceGrid] A wizard is already open; the upload wizard was not opened.");
+    } else if (!outcome.launched) {
       console.warn("[WorkspaceGrid] Xrm.Navigation not available");
     }
   }, []);
