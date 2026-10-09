@@ -26,8 +26,10 @@ namespace Sprk.Bff.Api.Services.Access;
 /// the flag cleared last), and one whose Access Permission differs from its parents' is written (one column). Only what
 /// differs is written; a project changed here sends what is filed under it round again in the same run; un-secures are
 /// bounded (<see cref="MaxUnsecuresPerRun"/>, a cursor like the provisionings') and so are the Access Permission writes
-/// (<see cref="MaxPermissionWritesPerRun"/>). A record that cannot be decided, or whose step did not complete, stays at the
-/// more restrictive state and fails the run, named; the next run completes it.</para>
+/// (<see cref="MaxPermissionWritesPerRun"/>). A record whose step did not complete stays at the more restrictive state and
+/// fails the run, named; the next run completes it. A record whose filing cannot be decided is left as it is and reported in
+/// <c>followParents.undetermined</c> / <c>problems</c> without failing the run (task 173's precedent: one bad row must not
+/// fail every run; enforcement already treats it as secure and Restricted).</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: each record's step is idempotent and read back (an isolated record is only given a
 /// missing sharee), so no claim marker. Rule 4: a run that could not LIST the parents or the filed records throws — a
 /// failed scan is a failed run, nothing decided; a run in which some record could not be secured, or some record was
@@ -210,10 +212,10 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
             traceId, unsecureAfter, MaxUnsecuresPerRun, MaxPermissionWritesPerRun, cancellationToken).ConfigureAwait(false);
         lock (_cursorGate)
             _unsecureCursor = follow.UnsecureResumeAfter;
-        if (follow.Undetermined + follow.NotCompleted > 0)
+        if (follow.NotCompleted > 0)
         {
-            incomplete.Add($"{follow.Undetermined + follow.NotCompleted} filed record(s) not brought into step with their parents " +
-                           $"(left at the more restrictive state): {string.Join("; ", follow.Problems.Take(20))}");
+            incomplete.Add($"{follow.NotCompleted} filed record(s) not brought into step with their parents (left at the more " +
+                           $"restrictive state; the next run retries): {string.Join("; ", follow.Problems.Take(20))}");
         }
 
         _logger.Log(

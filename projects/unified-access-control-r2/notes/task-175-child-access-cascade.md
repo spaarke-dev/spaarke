@@ -126,6 +126,9 @@ in-process job (ADR-036/052). BFF identity, the same invariant owner for L1 and 
   sets the parents' value within 5 minutes and enforcement already follows the parent.
 - **`alsoUnsecure`** is still accepted and validated but asks for nothing more; every filed record follows. `relatedSecureRecords`
   now lists what is STILL secure after the cascade (another secure parent, a step not completed, beyond the inline bound).
+- **An undecidable record does not fail the job run** (task 173's precedent): it is left as it is, counted in
+  `followParents.undetermined` and named in `problems`; enforcement already treats it as secure and Restricted (task 174).
+  A step that did not complete (`notCompleted`) or a deferral does fail the run.
 - **No F3 per related record** (round 84: F3 applies only to parentless records). A consequence to note: filing a secure
   parentless work assignment under an ordinary matter (by anyone with Write on it) un-secures it at the next run — the rule as
   the owner stated it.
@@ -146,7 +149,7 @@ in-process job (ADR-036/052). BFF identity, the same invariant owner for L1 and 
   gate refusing while filed (AC 3/4); Make Secure refused on a child, allowed on a parentless record (AC 4); fault mid-cascade
   (owner PATCH not applied) leaves it flagged secure, Secure-team-owned, shares intact AND Restricted, run fails naming it, next
   run completes (AC 6); a parent still owned by the Secure team never hands the child to it; an unreadable parent loosens
-  nothing; #1478 helper + the synchronizer's barred set (one test; the other three readers call the same helper).
+  nothing and is reported without failing the run; #1478 helper + the synchronizer's barred set (one test; the other three readers call the same helper).
 - `SecureRootInheritanceTests` "the way back" rewritten to round 84 (4 tests): the matter's unsecure un-secures the work
   assignment (owned by the BU team, shares revoked; decoys untouched); `alsoUnsecure` subsumed (no F3; unrelated reported);
   unsecure of a filed record 409 `access_follows_parent` before and after the parent's unsecure; unreadable parent 500.
@@ -166,7 +169,27 @@ Standard while still secure); restored, green. Run 2026-10-09.
 
 ### Suite results
 
-See the PR description (filled after the full runs).
+Branch rebased on `origin/master` `e78c47149` (2026-10-09):
+
+- `tests/unit/Sprk.Bff.Api.Tests` (includes `tests/integration/{auth,contract,regression,seam,data-mutation}`): 19,085 passed,
+  0 failed, 54 skipped (30 min). After the last change (undecidable rows do not fail the run): the affected classes
+  (SecureRootInheritance*, ChildAccessCascade, AssignedAccessReconciliationJob) 226 passed.
+- `tests/Spaarke.ArchTests`: 841 passed. `tests/integration/Sprk.Bff.Api.IntegrationTests`: 87 passed, 5 skipped.
+  `Spe.Integration.Tests`: 350 passed, 25 skipped.
+- Jest (`Spaarke.UI.Components`: AccessGrantModal, TrackingFieldTrio, accessRibbon*, accessPermissionInherited*): 18 suites,
+  439 passed. PCF TrackingFieldTrio `build:prod` 1.0.44: succeeded.
+- Updated to round 84 (the old rule asserted "never auto-unsecure"): `SecureRootInheritanceTests` way-back (4),
+  `SecureRootInheritanceRound31Tests` (2), `SecureRootInheritanceRound39Tests` (4 unsecure cases now also assert the follow;
+  the five route provisioning cases on a filed record are replaced by the 409 lock test and an unreadable-filing theory —
+  their inherited-path walls stay pinned by Round31/Writer tests). Harness-only: `OfficeEditAccessServiceTests` and
+  `AssignedAccessReconciliationJobTests` answer the filing read (a parentless record), plus one sweep test for #1478.
+
+### Publish size, CVEs (CLAUDE.md §10, NFR-06)
+
+Fresh master `e78c47149` (`C:\wt175m`): 38,110,531 B, 192 files. Branch: 38,137,809 B, 192 files. **Delta +27,278 B
+(+0.03 MB).** Convention: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`,
+`Compress-Archive -CompressionLevel Optimal`, PDBs included. `dotnet list package --vulnerable --include-transitive`: none (no
+package added).
 
 ## Known limits
 

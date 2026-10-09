@@ -141,7 +141,13 @@ public sealed record FollowParentsPass
     /// <summary>Up to 200 changes: table, id, what changed.</summary>
     public IReadOnlyList<object> Changes { get; init; } = Array.Empty<object>();
 
-    public bool IsComplete => Undetermined == 0 && NotCompleted == 0 && Deferred == 0;
+    /// <summary>
+    /// Nothing is left that a run can do. Undetermined records are reported, not counted here (task 173's precedent): a record
+    /// whose filing cannot be decided — a transient fault, or bad data such as a pair id that is not a GUID — is left at its
+    /// current state, which enforcement already treats as secure and Restricted (task 174, fail closed); counting it would keep
+    /// the job failed on every run for one bad row.
+    /// </summary>
+    public bool IsComplete => NotCompleted == 0 && Deferred == 0;
 }
 
 /// <summary>
@@ -538,7 +544,7 @@ public sealed partial class SecureRootInheritance
             changedParents = new List<(string Table, Guid Id)>();
             foreach (var root in below.Where(r => r.Confirmed))
             {
-                if (unsecuresTried >= maxUnsecures && permissions >= maxPermissionWrites)
+                if (unsecured >= maxUnsecures || permissions >= maxPermissionWrites)
                 {
                     deferred++;
                     continue;

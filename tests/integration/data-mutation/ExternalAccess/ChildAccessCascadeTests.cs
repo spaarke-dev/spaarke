@@ -312,9 +312,12 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
     }
 
-    /// <summary>ADR-003: an ancestry that cannot be read loosens nothing (and the run reports it).</summary>
+    /// <summary>
+    /// ADR-003: an ancestry that cannot be read loosens nothing, and the run reports it (<c>undetermined</c>, named in
+    /// <c>problems</c>) without failing — task 173's precedent: one undecidable row must not fail every run.
+    /// </summary>
     [Fact]
-    public async Task AnUnreadableParent_LoosensNothing_AndFailsTheRun()
+    public async Task AnUnreadableParent_LoosensNothing_AndIsReported()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         OrdinaryMatter(matter, Standard);
@@ -324,7 +327,14 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
 
         var run = await _job.RunAsync();
 
-        run.Success.Should().BeFalse();
+        using (var doc = JsonDocument.Parse(run.ResultJson!))
+        {
+            var follow = doc.RootElement.GetProperty("followParents");
+            follow.GetProperty("undetermined").GetInt32().Should().Be(1);
+            follow.GetProperty("problems").EnumerateArray().Select(p => p.GetString()).Should()
+                .Contain(p => p!.Contains(workAssignment.ToString("D")));
+        }
+
         _fixture.IsSecureOf(workAssignment).Should().BeTrue();
         PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted);
         _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
