@@ -19,9 +19,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// because search authorizes a row by its parent, the parent IS an access decision: it must be the record that governs the
 /// document, the same one <c>RecordContainerResolver</c> stores it under.</para>
 /// <para><b>Candidates.</b> The records the document names, most specific first: its work assignment, project, matter,
-/// invoice. Only when it names none of them: the core stamps of the event it is related to (work assignment, project,
-/// matter — read through <see cref="CoreAncestorResolver"/>, one hop); search cannot authorize an <c>event</c> parent, and the
-/// event inherits its access from those records. A communication's candidates are its <c>sprk_regarding{core}</c> lookups.</para>
+/// invoice — each through its typed lookup and its <c>sprk_related*</c> twin (a document filed only through a twin is still
+/// filed there; "a related matter is still a matter"). Only when it names none of them: the core stamps of the event and of
+/// the communication it is related to (work assignment, project, matter — read through <see cref="CoreAncestorResolver"/>, one
+/// hop each); search cannot authorize an <c>event</c> or <c>communication</c> parent, and each inherits its access from those
+/// records. A communication's own candidates are its <c>sprk_regarding{core}</c> lookups.</para>
 /// <para><b>The rule</b> (main-session decision 2026-10-09, task 177 verifier round; matches the storage decision):
 /// (1) if exactly ONE candidate is secure (EFFECTIVE: its own flag or a secure record it is filed under, task 174 / round
 /// 87), it is the parent — or, when several secure candidates are one secure family, the most specific of them;
@@ -50,15 +52,56 @@ public sealed class DocumentIndexParentResolver
     private const string ProjectColumn = "sprk_project";
     private const string InvoiceColumn = "sprk_invoice";
     private const string WorkAssignmentColumn = "sprk_workassignment";
-    private const string RelatedEventColumn = "sprk_relatedevent";
+
+    /// <summary>The parent types a document's DIRECT links can name, most specific first, with their search name and the
+    /// name used when the row gives none.</summary>
+    private static readonly (string Table, string SearchType, string UnknownName)[] ParentTypes =
+    [
+        ("sprk_workassignment", "workassignment", "Unknown Work Assignment"),
+        ("sprk_project", "project", "Unknown Project"),
+        ("sprk_matter", "matter", "Unknown Matter"),
+        ("sprk_invoice", "invoice", "Unknown Invoice"),
+    ];
+
+    /// <summary>The intermediates whose core stamps name the parent when the document names no record directly.</summary>
+    private static readonly (string Table, string NamedType, string UnknownName)[] IntermediateTypes =
+    [
+        ("sprk_event", "event", "Unknown Event"),
+        ("sprk_communication", "communication", "Unknown Communication"),
+    ];
+
+    /// <summary>
+    /// A named projection of the ONE document link vocabulary (<see cref="DocumentLinkFields.All"/>): every link to a
+    /// <see cref="ParentTypes"/> table, most specific type first, the typed lookup before its <c>sprk_related*</c> twin (both
+    /// target the same table — "a related matter is still a matter"). EXCLUDED, by name: the agreement, to-do and service
+    /// request links (not records search authorizes a parent by, and not roots), the PARTY links (contact, organization,
+    /// vendor organization — referenced, never an owner of content) and the source email (an activity).
+    /// </summary>
+    private static readonly (string Column, string Table, string SearchType, string UnknownName)[] DirectLinks =
+        DocumentLinkFields.All
+            .Select(f => (Field: f, Rank: Array.FindIndex(ParentTypes, t => t.Table == f.TargetEntityLogicalName)))
+            .Where(x => x.Rank >= 0)
+            .OrderBy(x => x.Rank)
+            .ThenBy(x => x.Field.LogicalName.StartsWith("sprk_related", StringComparison.Ordinal) ? 1 : 0)
+            .Select(x => (x.Field.LogicalName, ParentTypes[x.Rank].Table, ParentTypes[x.Rank].SearchType, ParentTypes[x.Rank].UnknownName))
+            .ToArray();
+
+    /// <summary>The projection's links to an <see cref="IntermediateTypes"/> table (the related event and communication).</summary>
+    private static readonly (string Column, string Table, string NamedType, string UnknownName)[] IntermediateLinks =
+        DocumentLinkFields.All
+            .Select(f => (Field: f, Rank: Array.FindIndex(IntermediateTypes, t => t.Table == f.TargetEntityLogicalName)))
+            .Where(x => x.Rank >= 0)
+            .Select(x => (x.Field.LogicalName, IntermediateTypes[x.Rank].Table, IntermediateTypes[x.Rank].NamedType, IntermediateTypes[x.Rank].UnknownName))
+            .ToArray();
 
     /// <summary>The columns the derivation reads when it has only the document id (one read).</summary>
     internal static readonly string[] RowColumns =
-        [MatterColumn, ProjectColumn, InvoiceColumn, WorkAssignmentColumn, RelatedEventColumn];
+        [.. DirectLinks.Select(l => l.Column), .. IntermediateLinks.Select(l => l.Column)];
 
-    /// <summary>The links <see cref="Spaarke.Dataverse.DocumentEntity"/> does not carry: read for every Send-to-Index /
-    /// index-file document.</summary>
-    private static readonly string[] BeyondEntityColumns = [WorkAssignmentColumn, RelatedEventColumn];
+    /// <summary>The links <see cref="Spaarke.Dataverse.DocumentEntity"/> does not carry (it has only the typed matter /
+    /// project / invoice): read for every Send-to-Index / index-file document.</summary>
+    private static readonly string[] BeyondEntityColumns =
+        [.. RowColumns.Where(c => c is not (MatterColumn or ProjectColumn or InvoiceColumn))];
 
     /// <summary>Core tables, most specific first, with their search name and the name used when the row gives none.</summary>
     private static readonly (string Table, string SearchType, string UnknownName)[] CoreOrder =
@@ -113,11 +156,26 @@ public sealed class DocumentIndexParentResolver
             return IndexParentDecision.Undecided;
         }
 
-        var candidates = new List<IndexParentCandidate>(4);
-        AddCandidate(candidates, row, WorkAssignmentColumn, "sprk_workassignment", "workassignment", "Unknown Work Assignment");
-        AddCandidate(candidates, "sprk_project", "project", document.ProjectId, document.ProjectName ?? "Unknown Project");
-        AddCandidate(candidates, "sprk_matter", "matter", document.MatterId, document.MatterName ?? "Unknown Matter");
-        AddCandidate(candidates, "sprk_invoice", "invoice", document.InvoiceId, document.InvoiceName ?? "Unknown Invoice");
+        // The typed matter / project / invoice come from the entity (with its names), the rest from the row just read.
+        var candidates = new List<IndexParentCandidate>(8);
+        foreach (var (column, table, searchType, unknownName) in DirectLinks)
+        {
+            switch (column)
+            {
+                case ProjectColumn:
+                    AddCandidate(candidates, table, searchType, document.ProjectId, document.ProjectName ?? unknownName);
+                    break;
+                case MatterColumn:
+                    AddCandidate(candidates, table, searchType, document.MatterId, document.MatterName ?? unknownName);
+                    break;
+                case InvoiceColumn:
+                    AddCandidate(candidates, table, searchType, document.InvoiceId, document.InvoiceName ?? unknownName);
+                    break;
+                default:
+                    AddCandidate(candidates, row, column, table, searchType, unknownName);
+                    break;
+            }
+        }
 
         return await DecideForRowAsync(documentId, row, candidates, ct).ConfigureAwait(false);
     }
@@ -140,11 +198,11 @@ public sealed class DocumentIndexParentResolver
             return null;
         }
 
-        var candidates = new List<IndexParentCandidate>(4);
-        AddCandidate(candidates, row, WorkAssignmentColumn, "sprk_workassignment", "workassignment", "Unknown Work Assignment");
-        AddCandidate(candidates, row, ProjectColumn, "sprk_project", "project", "Unknown Project");
-        AddCandidate(candidates, row, MatterColumn, "sprk_matter", "matter", "Unknown Matter");
-        AddCandidate(candidates, row, InvoiceColumn, "sprk_invoice", "invoice", "Unknown Invoice");
+        var candidates = new List<IndexParentCandidate>(8);
+        foreach (var (column, table, searchType, unknownName) in DirectLinks)
+        {
+            AddCandidate(candidates, row, column, table, searchType, unknownName);
+        }
 
         return (await DecideForRowAsync(id, row, candidates, ct).ConfigureAwait(false)).Parent;
     }
@@ -263,43 +321,57 @@ public sealed class DocumentIndexParentResolver
             return new IndexParentDecision(parent, candidates.Select(c => c.Parent).ToList(), Decided: parent is not null);
         }
 
-        var relatedEvent = row.GetAttributeValue<EntityReference>(RelatedEventColumn);
-        if (relatedEvent is null || relatedEvent.Id == Guid.Empty)
+        // No record named directly: the core stamps of the intermediates the document is related to (event, communication),
+        // one hop each, decided by the same rule.
+        var named = new List<ParentEntityContext>(IntermediateLinks.Length);
+        var stamps = new List<IndexParentCandidate>(3);
+        foreach (var (column, table, namedType, unknownName) in IntermediateLinks)
+        {
+            var link = row.GetAttributeValue<EntityReference>(column);
+            if (link is null || link.Id == Guid.Empty)
+            {
+                continue;
+            }
+
+            named.Add(new ParentEntityContext(namedType, link.Id.ToString(), link.Name ?? unknownName));
+            var ancestors = await _coreAncestors.ResolveStampsAsync(table, link.Id, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!ancestors.Succeeded)
+            {
+                _logger.LogWarning(
+                    "Index parent: document {DocumentId}'s {Table} {Id} has no readable core ancestor ({Error}); indexing without a parent.",
+                    documentId, table, link.Id, ancestors.Error);
+                return new IndexParentDecision(null, named, Decided: false);
+            }
+
+            foreach (var (coreTable, searchType, coreUnknownName) in CoreOrder)
+            {
+                foreach (var stamp in ancestors.Stamps.Where(s => string.Equals(s.EntityType, coreTable, StringComparison.OrdinalIgnoreCase)))
+                {
+                    AddCandidate(stamps, coreTable, searchType, stamp.RecordId.ToString(), coreUnknownName);
+                }
+            }
+        }
+
+        if (named.Count == 0)
         {
             return IndexParentDecision.NothingNamed;
-        }
-
-        var named = new List<ParentEntityContext> { new("event", relatedEvent.Id.ToString(), relatedEvent.Name ?? "Unknown Event") };
-        var ancestors = await _coreAncestors.ResolveStampsAsync("sprk_event", relatedEvent.Id, ct).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-        if (!ancestors.Succeeded)
-        {
-            _logger.LogWarning(
-                "Index parent: document {DocumentId}'s event {EventId} has no readable core ancestor ({Error}); indexing without a parent.",
-                documentId, relatedEvent.Id, ancestors.Error);
-            return new IndexParentDecision(null, named, Decided: false);
-        }
-
-        var stamps = new List<IndexParentCandidate>(3);
-        foreach (var (table, searchType, unknownName) in CoreOrder)
-        {
-            var stamp = ancestors.Stamps.FirstOrDefault(s => string.Equals(s.EntityType, table, StringComparison.OrdinalIgnoreCase));
-            if (stamp is not null)
-            {
-                stamps.Add(new IndexParentCandidate(table, stamp.RecordId, new ParentEntityContext(searchType, stamp.RecordId.ToString(), unknownName)));
-            }
         }
 
         if (stamps.Count == 0)
         {
             // No ancestor, or only one search cannot name (a service request).
             _logger.LogInformation(
-                "Index parent: document {DocumentId}'s event {EventId} is under no matter, project or work assignment; indexing without a parent.",
-                documentId, relatedEvent.Id);
+                "Index parent: document {DocumentId}'s related records are under no matter, project or work assignment; indexing without a parent.",
+                documentId);
             return new IndexParentDecision(null, named, Decided: true);
         }
 
-        var governing = await ChooseGoverningAsync(stamps, ct).ConfigureAwait(false);
+        // Most specific first across both intermediates.
+        var ordered = stamps
+            .OrderBy(c => Array.FindIndex(CoreOrder, o => string.Equals(o.Table, c.Table, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var governing = await ChooseGoverningAsync(ordered, ct).ConfigureAwait(false);
         return new IndexParentDecision(governing, named, Decided: governing is not null);
     }
 
@@ -327,7 +399,7 @@ public sealed class DocumentIndexParentResolver
         List<IndexParentCandidate> candidates, Entity row, string column, string table, string searchType, string unknownName)
     {
         var reference = row.GetAttributeValue<EntityReference>(column);
-        if (reference is not null && reference.Id != Guid.Empty)
+        if (reference is not null && reference.Id != Guid.Empty && !Names(candidates, table, reference.Id))
         {
             var name = string.IsNullOrWhiteSpace(reference.Name) ? unknownName : reference.Name;
             candidates.Add(new IndexParentCandidate(table, reference.Id, new ParentEntityContext(searchType, reference.Id.ToString(), name)));
@@ -336,11 +408,15 @@ public sealed class DocumentIndexParentResolver
 
     private static void AddCandidate(List<IndexParentCandidate> candidates, string table, string searchType, string? id, string name)
     {
-        if (Guid.TryParse(id, out var recordId) && recordId != Guid.Empty)
+        if (Guid.TryParse(id, out var recordId) && recordId != Guid.Empty && !Names(candidates, table, recordId))
         {
             candidates.Add(new IndexParentCandidate(table, recordId, new ParentEntityContext(searchType, id!, name)));
         }
     }
+
+    /// <summary>The same record through a typed lookup and its twin (or two intermediates) is one candidate.</summary>
+    private static bool Names(List<IndexParentCandidate> candidates, string table, Guid id) =>
+        candidates.Any(c => c.Id == id && string.Equals(c.Table, table, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>One record a document (or communication) names, and the parent it would be indexed under.</summary>

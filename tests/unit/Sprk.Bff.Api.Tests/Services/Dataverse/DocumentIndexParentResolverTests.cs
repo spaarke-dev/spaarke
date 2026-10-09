@@ -28,11 +28,40 @@ public class DocumentIndexParentResolverTests
     private readonly Mock<IGenericEntityService> _dataverse = new(MockBehavior.Strict);
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _flags = new(NotSecure);
 
+    /// <summary>The filing world the REAL task-174 walk reads: (table, id) → row. Empty = nothing is filed under anything.</summary>
+    private readonly Dictionary<(string Table, Guid Id), Entity> _filing = new();
+
     public DocumentIndexParentResolverTests()
     {
-        // The filing walk: nothing is filed under anything.
+        // The filing walk's queries, answered from _filing by the id condition each one carries (Equal or In).
         _dataverse.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+            {
+                var ids = query.Criteria.Conditions
+                    .Where(c => string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(c => c.Values.Select(v => (Guid)v))
+                    .ToHashSet();
+                return new EntityCollection(_filing
+                    .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
+                    .Select(kv => kv.Value)
+                    .ToList());
+            });
+    }
+
+    /// <summary>A work assignment filed under <paramref name="matter"/> (its typed <c>sprk_regardingmatter</c>), and that
+    /// matter's own row (secure), as the walk reads them.</summary>
+    private void WorkAssignmentFiledUnderSecureMatter(Guid workAssignment, Guid matter)
+    {
+        _filing[("sprk_workassignment", workAssignment)] = new Entity("sprk_workassignment", workAssignment)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter),
+            ["sprk_issecure"] = false,
+        };
+        _filing[("sprk_matter", matter)] = new Entity("sprk_matter", matter)
+        {
+            ["sprk_issecure"] = true,
+            ["sprk_mattername"] = "Secure Matter",
+        };
     }
 
     private Sprk.Bff.Api.Services.Dataverse.DocumentIndexParentResolver Resolver()
@@ -202,5 +231,73 @@ public class DocumentIndexParentResolverTests
 
         decision.Parent.Should().Be(new ParentEntityContext("workassignment", Linked.ToString(), "Diligence"));
         decision.Named.Should().HaveCount(3);
+    }
+
+    /// <summary>
+    /// Rule (1) through the REAL filing walk: a work assignment filed under secure matter M, the document naming both. Both
+    /// are secure (the work assignment through M) and of one family, so the more specific — the work assignment — wins.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentUnderTheSecureMatterTheDocumentAlsoNames_IsOneFamily_TheWorkAssignmentWins()
+    {
+        WorkAssignmentFiledUnderSecureMatter(Linked, Other);
+        _flags.Flags[Other] = Secure;
+        DocumentRow(("sprk_matter", "sprk_matter", Other, "Secure Matter"), ("sprk_workassignment", "sprk_workassignment", Linked, "Diligence"));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext("workassignment", Linked.ToString(), "Diligence"));
+    }
+
+    /// <summary>
+    /// Rule (3) through the REAL filing walk: a work assignment under secure matter M1, and an unrelated secure matter M2
+    /// the document also names — two different secure roots, so no parent.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentUnderOneSecureMatter_AndAnUnrelatedSecureMatter_GiveNoParent()
+    {
+        var unrelated = Guid.Parse("4d000000-0000-4000-8000-0000000017c5");
+        WorkAssignmentFiledUnderSecureMatter(Linked, Other);
+        _flags.Flags[Other] = Secure;
+        DocumentRow(("sprk_matter", "sprk_matter", unrelated, "Other Matter"), ("sprk_workassignment", "sprk_workassignment", Linked, "Diligence"));
+
+        // Control: with M2 NOT secure the walk is read and the work assignment (secure through M1) wins — so the null
+        // below is the two-roots rule, not an unreadable walk.
+        (await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None))
+            .Should().Be(new ParentEntityContext("workassignment", Linked.ToString(), "Diligence"));
+
+        _flags.Flags[unrelated] = Secure;
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().BeNull();
+    }
+
+    /// <summary>A document filed only through a <c>sprk_related*</c> twin is still filed there (verifier K6).</summary>
+    [Fact]
+    public async Task ADocumentFiledOnlyThroughARelatedTwin_IsFiledUnderThatRecord()
+    {
+        DocumentRow(("sprk_relatedmatter", "sprk_matter", Linked, "Related Matter"));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext("matter", Linked.ToString(), "Related Matter"));
+    }
+
+    /// <summary>
+    /// A document related only to a communication is filed under the communication's core record (verifier K6: the
+    /// communication's <c>sprk_regarding{core}</c>, one hop, like the event). Beyond the one K6 test: it is the second new
+    /// branch, and the only one that reads a communication.
+    /// </summary>
+    [Fact]
+    public async Task ADocumentRelatedOnlyToACommunication_IsFiledUnderTheCommunicationsCoreRecord()
+    {
+        var communication = Guid.Parse("4d000000-0000-4000-8000-0000000017c6");
+        DocumentRow(("sprk_relatedcommunication", "sprk_communication", communication, "RE: Closing"));
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", communication) { ["sprk_regardingproject"] = new EntityReference("sprk_project", Linked) });
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext("project", Linked.ToString(), "Unknown Project"));
     }
 }

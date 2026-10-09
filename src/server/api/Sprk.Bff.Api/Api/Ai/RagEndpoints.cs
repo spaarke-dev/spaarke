@@ -1241,10 +1241,12 @@ public static class RagEndpoints
                     continue;
                 }
 
-                // Step 3: the parent the chunks are filed under, from the document row — the ONE derivation
-                // (DocumentIndexParentResolver, #1510 / task 177): the most specific record the document names (work
-                // assignment, project, matter, then invoice), else a related event's core record. Unchanged from the
-                // former matter / project / invoice block for a row that names only one of those.
+                // Step 3: the parent the chunks are filed under is the record whose access GOVERNS the document — the
+                // ONE decision (DocumentIndexParentResolver, #1510 / task 177). Among the records the row names (work
+                // assignment, project, matter, invoice, typed or sprk_related*; else the core stamps of a related event
+                // or communication): the one secure record (effective), several of one secure family -> the most
+                // specific of them; none secure -> the most specific; two different secure roots or an unreadable
+                // secure state -> no parent (fail closed). A row naming one record keeps the parent it always had.
                 var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
 
                 // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE

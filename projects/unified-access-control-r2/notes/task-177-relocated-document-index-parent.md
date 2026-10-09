@@ -121,6 +121,13 @@ have added a CRUD→AI dependency (bff-extensions.md A.4).
   - a communication with a matter + a secure project gives the project
     (`RagGroundingParentEntitySeamTests.ResolveAsync_MatterAndSecureProject_GroundsUnderTheProject`).
 - Owner Q1: `ADocumentNamingTwoRecords_NeitherSecure_IsFiledUnderTheMoreSpecificOne` (three ties).
+- Pre-merge round. Both K1 tests run through a REAL filing-walk stub: the walk's queries are answered from a
+  (table, id) world.
+  - `AWorkAssignmentUnderTheSecureMatterTheDocumentAlsoNames_IsOneFamily_TheWorkAssignmentWins`.
+  - `AWorkAssignmentUnderOneSecureMatter_AndAnUnrelatedSecureMatter_GiveNoParent`. It carries a control: with M2 not
+    secure, the work assignment wins, which proves the null comes from the two-roots rule and not from an unreadable walk.
+  - K6: `ADocumentFiledOnlyThroughARelatedTwin_IsFiledUnderThatRecord`, and
+    `ADocumentRelatedOnlyToACommunication_IsFiledUnderTheCommunicationsCoreRecord` (the second new branch).
 - Extras, each justified:
   - `ADocumentUnderASecureMatterAndANonSecureWorkAssignment_IsFiledUnderTheMatter`: rule 1 beats rule 2 on the
     document's own links.
@@ -140,8 +147,11 @@ have added a CRUD→AI dependency (bff-extensions.md A.4).
 
 ## Known limits (K-class, one line each)
 
-- K2: the related twins (`sprk_relatedmatter` / `sprk_relatedproject` / `sprk_relatedworkassignment`) are not read. 0
-  live rows set them (CoreAncestorResolver note, 2026-10-02), and no BFF writer writes them.
+- Fixed in the pre-merge round (verifier K6): the `sprk_related{workassignment,project,matter,invoice}` twins are
+  candidates under the same rule, each after its typed lookup and deduplicated with it. `sprk_relatedcommunication`
+  resolves like the event, through the communication's core stamps (`CoreAncestorResolver`, one read). Both come from a
+  named projection of `DocumentLinkFields.All`, with the exclusions written down, so no second copy of the vocabulary
+  exists (`DocumentLinkVocabularyGuardTests`).
 - K2: an event whose only core ancestor is a service request gives no parent, because search cannot authorize one.
 - K2: two secure candidates of ONE family are recognised through the walk's secure parents (their secure roots
   overlap). A document that names a secure project P AND the secure matter M that P is filed under resolves to P. Two
@@ -199,3 +209,6 @@ Dataverse proxy (spaarkedev1, read-only, 2026-10-09):
 - Publish size (`dotnet publish -c Release`, fresh master `c8a87d818` against the first-round branch, same machine):
   +10,284 B uncompressed, +4,542 B zipped (37,203,854 B, about 35.48 MiB). No package reference changed.
 - Self-review (task-execute Step 9.5): no F-class finding remains. The K-class items are listed above.
+- Pre-merge round (K1 / K4 / K6): 2,171 targeted cases, 2,158 passed and 13 skipped. `Spaarke.ArchTests` 841 / 841 (the
+  document-link vocabulary guard caught a literal copy, which was replaced by a projection of `DocumentLinkFields.All`).
+  `-warnaserror` is clean.
