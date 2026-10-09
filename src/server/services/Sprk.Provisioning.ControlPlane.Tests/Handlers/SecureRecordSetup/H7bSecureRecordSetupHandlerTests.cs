@@ -186,6 +186,71 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task IdentityLinkWriterWithAForeignMember_QuarantinesTheRun_WritingNothing()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.ProfileUsers[dv.LinkWriterProfileId].Add(Guid.NewGuid());
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.GateStates.Should().ContainKey($"h7b-{SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember}");
+        repo.LastWrittenRun.CompletedPhases.Should().NotContain(p => p.Phase == "H7b");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion1_DoesNotShortCircuit_AndAddsTheIdentityLinkMemberships()
+    {
+        // An environment H7b configured before S15–S18: the run row records the phase under the v1 key.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.ProfileTeams[dv.LinkReaderProfileId].Clear();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Clear();
+        dv.Writes.Clear();
+        var v1Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=1\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v1Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v1Hash);
+        dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(dv.Teams.Where(t => t.IsDefault).Select(t => t.Id));
+        dv.Writes.Should().OnlyContain(w => w.StartsWith("AssociateProfile", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DryRun_RecordsTheIdentityLinkMembershipsInThePlan()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.Parameters.NonSecret[IntakeParameterCatalog.SecureRecordSetupDryRun] = "true";
+        var repo = new FakeRepository(run);
+
+        await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var plan = repo.LastWrittenRun!.GateStates[H7bSecureRecordSetupHandler.PlanGateId].Evidence!.Value.GetProperty("plan")
+            .EnumerateArray().Select(e => e.GetString()).ToArray();
+        plan.Should().Contain($"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}'");
+        plan.Should().Contain(a => a!.EndsWith($"to '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'", StringComparison.Ordinal));
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task NoAccessEntryMissing_FailsResumable_SoTheBffIsNeverDeployed()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);

@@ -39,6 +39,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal bool AddPrivilegesIsIgnored { get; set; }
     internal bool SetColumnFalseIsIgnored { get; set; }
 
+    /// <summary>Profiles whose user/team associations are accepted but do not stick (verify-phase tests).</summary>
+    internal HashSet<Guid> ProfileAssociationsIgnored { get; } = [];
+
     internal List<SecureSetupBusinessUnit> Units { get; } = [];
     internal Dictionary<Guid, Guid> UserUnit { get; } = [];
     internal List<SecureSetupTeam> Teams { get; } = [];
@@ -52,7 +55,13 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Dictionary<Guid, HashSet<Guid>> ProfileTeams { get; } = [];
     internal Dictionary<Guid, HashSet<Guid>> ProfileUsers { get; } = [];
     internal Dictionary<Guid, Guid?> UserApplicationId { get; } = [];
-    internal List<SecureSetupFieldPermission> FieldPermissions { get; } = [];
+    /// <summary>Field permissions per column logical name (as Dataverse filters <c>fieldpermissions</c> by attributelogicalname).</summary>
+    internal Dictionary<string, List<SecureSetupFieldPermission>> FieldPermissionsByColumn { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The <c>sprk_issecure</c> permissions (S14).</summary>
+    internal List<SecureSetupFieldPermission> FieldPermissions => ColumnPermissions(SecureRecordSetupProcedure.SecureFlagColumn);
+
+    /// <summary><c>IsSecured</c> per <c>"table.column"</c> (see <see cref="ColumnKey"/>); absent = no such column.</summary>
     internal Dictionary<string, bool?> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal Dictionary<string, HashSet<Guid>> NullFlagRows { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -67,6 +76,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid ReaderProfileId { get; private set; }
     internal Guid WriterProfileId { get; private set; }
     internal Guid SystemAdministratorProfileId { get; private set; }
+    internal Guid LinkReaderProfileId { get; private set; }
+    internal Guid LinkWriterProfileId { get; private set; }
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
@@ -74,7 +85,10 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>
     /// A freshly provisioned environment after H6: one root unit and its default team (holding no role), the package's
     /// metadata for every table of <paramref name="roleSet"/>, the two BFF-managed profiles with their sprk_issecure
-    /// permissions on four tables (secured), the platform System Administrator profile, and H10's two application users.
+    /// permissions on four tables (secured), the two identity-link profiles with their permissions on
+    /// contact.sprk_externalobjectid and systemuser.sprk_primarycontact (secured) exactly as SpaarkeMaster ships them, the
+    /// platform System Administrator profile (read/create/update on every secured column, as the platform grants it),
+    /// and H10's two application users.
     /// </summary>
     internal static FakeSecureRecordSetupDataverse NewEnvironment(SecureRecordOwnerRoleSet roleSet)
     {
@@ -96,8 +110,19 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, table, 4, 0, 0));
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, table, 4, 4, 4));
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
-            dv.SecuredColumns[table] = true;
+            dv.SecuredColumns[ColumnKey(table, SecureRecordSetupProcedure.SecureFlagColumn)] = true;
             dv.NullFlagRows[table] = [];
+        }
+
+        dv.LinkReaderProfileId = dv.AddProfile(SecureRecordSetupProcedure.IdentityLinkReaderProfileName);
+        dv.LinkWriterProfileId = dv.AddProfile(SecureRecordSetupProcedure.IdentityLinkWriterProfileName);
+        foreach (var (table, column) in SecureRecordSetupProcedure.IdentityLinkColumns)
+        {
+            var permissions = dv.ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(dv.LinkReaderProfileId, table, 4, 0, 0));
+            permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, table, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
+            dv.SecuredColumns[ColumnKey(table, column)] = true;
         }
 
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
@@ -114,6 +139,17 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         TeamMembers[id] = [];
         TeamRoles[id] = [];
         return id;
+    }
+
+    internal static string ColumnKey(string table, string column) => $"{table}.{column}";
+
+    internal List<SecureSetupFieldPermission> ColumnPermissions(string column)
+    {
+        if (!FieldPermissionsByColumn.TryGetValue(column, out var permissions))
+        {
+            FieldPermissionsByColumn[column] = permissions = [];
+        }
+        return permissions;
     }
 
     internal Guid AddProfile(string name)
@@ -288,13 +324,14 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task<IReadOnlyList<SecureSetupFieldPermission>> ListFieldPermissionsAsync(SecureRecordSetupTarget target, string attributeLogicalName, CancellationToken cancellationToken)
     {
         Read(nameof(ListFieldPermissionsAsync));
-        return Task.FromResult<IReadOnlyList<SecureSetupFieldPermission>>(FieldPermissions.ToArray());
+        return Task.FromResult<IReadOnlyList<SecureSetupFieldPermission>>(
+            FieldPermissionsByColumn.TryGetValue(attributeLogicalName, out var permissions) ? permissions.ToArray() : []);
     }
 
     public Task<bool?> IsAttributeSecuredAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
     {
         Read(nameof(IsAttributeSecuredAsync));
-        return Task.FromResult(SecuredColumns.GetValueOrDefault(tableLogicalName));
+        return Task.FromResult(SecuredColumns.GetValueOrDefault(ColumnKey(tableLogicalName, attributeLogicalName)));
     }
 
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)
@@ -382,14 +419,20 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task AssociateProfileTeamAsync(SecureRecordSetupTarget target, Guid profileId, Guid teamId, CancellationToken cancellationToken)
     {
         Write($"AssociateProfileTeam {profileId} {teamId}");
-        ProfileTeams[profileId].Add(teamId);
+        if (!ProfileAssociationsIgnored.Contains(profileId))
+        {
+            ProfileTeams[profileId].Add(teamId);
+        }
         return Task.CompletedTask;
     }
 
     public Task AssociateProfileUserAsync(SecureRecordSetupTarget target, Guid profileId, Guid userId, CancellationToken cancellationToken)
     {
         Write($"AssociateProfileUser {profileId} {userId}");
-        ProfileUsers[profileId].Add(userId);
+        if (!ProfileAssociationsIgnored.Contains(profileId))
+        {
+            ProfileUsers[profileId].Add(userId);
+        }
         return Task.CompletedTask;
     }
 

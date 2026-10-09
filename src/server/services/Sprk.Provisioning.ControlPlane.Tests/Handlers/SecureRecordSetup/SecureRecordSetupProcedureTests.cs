@@ -3,8 +3,9 @@
 //
 // T256 (H7b) — the Secure Record setup steps against an in-memory environment (FakeSecureRecordSetupDataverse).
 // INCOMING-145 §2.5: empty env → full setup; configured env → no writes; each refusal; the S6 strip removes injected
-// privileges and keeps every file entry; dry run writes nothing. Plus §6 T2/T4, S8, S10–S14 and the sprk_noaccessentry
-// prerequisite. Uses the REAL embedded codified set (26 tables), so a change to the file is exercised here too.
+// privileges and keeps every file entry; dry run writes nothing. Plus §6 T2/T4, S8, S10–S14, the sprk_noaccessentry
+// prerequisite, and S15–S18 (the contact identity-binding profiles' memberships and lock, INCOMING-141 / T255). Uses
+// the REAL embedded codified set (26 tables), so a change to the file is exercised here too.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -67,6 +68,12 @@ public sealed class SecureRecordSetupProcedureTests
         dv.TeamRoles[dv.DefaultTeamOf(unit.Id).Id].Should().BeEmpty("the new unit's default team arrived with System Administrator (§5.5)");
         dv.ProfileTeams[dv.ReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id });
         dv.ProfileUsers[dv.WriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id },
+            "S16: every default team reads the identity-binding columns");
+        dv.ProfileUsers[dv.LinkReaderProfileId].Should().BeEmpty();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser },
+            "S17: the BFF's application users, and only them, write the bindings");
+        dv.ProfileTeams[dv.LinkWriterProfileId].Should().BeEmpty();
 
         applied.State.BusinessUnitId.Should().Be(unit.Id);
         applied.State.OwnerTeamId.Should().Be(team.Id);
@@ -107,6 +114,12 @@ public sealed class SecureRecordSetupProcedureTests
         plan.Should().Contain(a => a.StartsWith("give ", StringComparison.Ordinal));
         plan.Should().Contain(a => a.Contains("default team", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith($"add BFF application user {dv.BffAppUser}", StringComparison.Ordinal));
+        plan.Should().Contain($"add BFF application user {dv.BffAppUser} to '{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}'");
+        plan.Should().Contain($"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}'");
+        plan.Should().Contain($"add default team 'spaarke-acme' ({dv.RootDefaultTeamId}) to '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'");
+        plan.Should().Contain($"add the new unit's default team to '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'");
+        dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEmpty("a dry run associates nobody");
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEmpty();
     }
 
     [Fact]
@@ -205,8 +218,121 @@ public sealed class SecureRecordSetupProcedureTests
 
         (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
 
-        dv.Writes.Should().ContainSingle().Which.Should().Contain(laterDefault.ToString());
+        dv.Writes.Should().BeEquivalentTo(
+            [$"AssociateProfileTeam {dv.ReaderProfileId} {laterDefault}", $"AssociateProfileTeam {dv.LinkReaderProfileId} {laterDefault}"],
+            "S11 and S16 each add the new default team, and nothing else is written");
         dv.ProfileTeams[dv.ReaderProfileId].Should().Contain(laterDefault);
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().Contain(laterDefault);
+    }
+
+    // ------------------------------------------------------------ S15–S18 identity-link profiles (INCOMING-141)
+
+    [Fact]
+    public async Task IdentityLinkMemberships_OnAnEnvironmentConfiguredBeforeThem_AreAddedAlone()
+    {
+        // An environment H7b set up before S15–S18 existed: everything but the identity-link memberships is in place.
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileTeams[dv.LinkReaderProfileId].Clear();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Clear();
+        var defaultTeams = dv.Teams.Where(t => t.IsDefault).Select(t => t.Id).ToArray();
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().BeEquivalentTo(
+            defaultTeams.Select(id => $"AssociateProfileTeam {dv.LinkReaderProfileId} {id}")
+                .Concat([$"AssociateProfileUser {dv.LinkWriterProfileId} {dv.BffAppUser}", $"AssociateProfileUser {dv.LinkWriterProfileId} {dv.MiAppUser}"]),
+            "only the missing identity-link memberships are written");
+
+        dv.Writes.Clear();
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Which.Actions.Should().BeEmpty();
+        dv.Writes.Should().BeEmpty("the second run writes nothing");
+    }
+
+    [Fact]
+    public async Task IdentityLinkWriter_WithOneBffUserAlready_GainsOnlyTheOther()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Remove(dv.MiAppUser);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.Writes.Should().Equal($"AssociateProfileUser {dv.LinkWriterProfileId} {dv.MiAppUser}");
+    }
+
+    [Fact]
+    public async Task DryRun_OnAnEnvironmentMissingOnlyTheIdentityLinkMemberships_PlansThem_AndWritesNothing()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileTeams[dv.LinkReaderProfileId].Clear();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Clear();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        dv.Writes.Should().BeEmpty();
+        plan.Should().OnlyContain(a => a.EndsWith($"'{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'", StringComparison.Ordinal)
+                                       || a.EndsWith($"'{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}'", StringComparison.Ordinal));
+        plan.Should().HaveCount(dv.Teams.Count(t => t.IsDefault) + 2);
+    }
+
+    [Fact]
+    public async Task IdentityLinkWriter_ForeignMember_IsRefusedEvenOnADryRun_WithoutWriting()
+    {
+        var dv = NewEnv();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Add(Guid.NewGuid());
+
+        var refused = Refused(await RunAsync(dv, dryRun: true),
+            SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().StartWith("(dry run)");
+        refused.Actions.Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IdentityLinkWriter_ForeignMember_OnAConfiguredEnvironment_IsRefused_AndNothingIsRemoved()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var foreign = Guid.NewGuid();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Add(foreign);
+
+        var refused = Refused(await RunAsync(dv),
+            SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(foreign.ToString()).And.Contain(SecureRecordSetupProcedure.IdentityLinkWriterProfileName);
+        dv.Writes.Should().BeEmpty();
+        dv.ProfileUsers[dv.LinkWriterProfileId].Should().Contain(foreign, "a member is never removed here — it is an operator decision");
+    }
+
+    [Fact]
+    public async Task IdentityLinkLock_IgnoresAnotherTableCarryingTheSameColumnName()
+    {
+        var dv = NewEnv();
+        dv.ColumnPermissions("sprk_externalobjectid")
+            .Add(new SecureSetupFieldPermission(dv.AddProfile("Portal Admins"), "sprk_externalparty", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>(
+            "the lock is contact.sprk_externalobjectid — a same-named column on another table is not part of it");
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenAnIdentityLinkMembershipDidNotStick()
+    {
+        var dv = NewEnv();
+        dv.ProfileAssociationsIgnored.Add(dv.LinkWriterProfileId);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable)
+            .Diagnostic.Should().Contain($"'{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}' members are users []");
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenAnIdentityLinkReaderMembershipDidNotStick()
+    {
+        var dv = NewEnv();
+        dv.ProfileAssociationsIgnored.Add(dv.LinkReaderProfileId);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable)
+            .Diagnostic.Should().Contain($"are not in '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'");
     }
 
     [Fact]
@@ -316,8 +442,14 @@ public sealed class SecureRecordSetupProcedureTests
                 SecureRecordSetupRejectionCodes.FieldWriterHasOtherMember, FailureClass.QuarantineRequired },
             { "a team in the writer profile", dv => dv.ProfileTeams[dv.WriterProfileId].Add(dv.RootDefaultTeamId),
                 SecureRecordSetupRejectionCodes.FieldWriterHasOtherMember, FailureClass.QuarantineRequired },
-            { "column not secured", dv => dv.SecuredColumns["sprk_matter"] = false,
+            { "column not secured", dv => dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_matter", "sprk_issecure")] = false,
                 SecureRecordSetupRejectionCodes.FieldLockIncomplete, FailureClass.Resumable },
+            { "the BFF-managed READER profile may update the flag (every default team is its member)", dv =>
+                {
+                    dv.FieldPermissions.RemoveAll(p => p.ProfileId == dv.ReaderProfileId && p.EntityName == "sprk_matter");
+                    dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, "sprk_matter", 4, 0, 4));
+                },
+                SecureRecordSetupRejectionCodes.FieldLockOtherWriter, FailureClass.QuarantineRequired },
             { "reader cannot read", dv =>
                 {
                     dv.FieldPermissions.RemoveAll(p => p.ProfileId == dv.ReaderProfileId && p.EntityName == "sprk_project");
@@ -336,6 +468,55 @@ public sealed class SecureRecordSetupProcedureTests
                     dv.TeamRoles[dv.RootDefaultTeamId].Add(basicUser);
                 },
                 SecureRecordSetupRejectionCodes.RootDefaultTeamReachesSecureUnit, FailureClass.QuarantineRequired },
+
+            // ---- S15–S18: the contact identity-binding profiles (INCOMING-141) ----
+            { "identity-link reader profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.IdentityLinkReaderProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "identity-link writer profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.IdentityLinkWriterProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "two identity-link writer profiles", dv => dv.AddProfile(SecureRecordSetupProcedure.IdentityLinkWriterProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "a human in the identity-link writer profile", dv => dv.ProfileUsers[dv.LinkWriterProfileId].Add(Guid.NewGuid()),
+                SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember, FailureClass.QuarantineRequired },
+            { "a BFF user plus a stranger in the identity-link writer profile", dv =>
+                    dv.ProfileUsers[dv.LinkWriterProfileId].UnionWith([dv.BffAppUser, Guid.NewGuid()]),
+                SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember, FailureClass.QuarantineRequired },
+            { "a team in the identity-link writer profile", dv => dv.ProfileTeams[dv.LinkWriterProfileId].Add(dv.RootDefaultTeamId),
+                SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember, FailureClass.QuarantineRequired },
+            { "contact.sprk_externalobjectid not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalobjectid")] = false,
+                SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable },
+            { "systemuser.sprk_primarycontact absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("systemuser", "sprk_primarycontact")),
+                SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable },
+            { "identity-link reader cannot read systemuser.sprk_primarycontact", dv =>
+                    dv.ColumnPermissions("sprk_primarycontact").RemoveAll(p => p.ProfileId == dv.LinkReaderProfileId),
+                SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable },
+            { "identity-link writer cannot update contact.sprk_externalobjectid", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_externalobjectid");
+                    permissions.RemoveAll(p => p.ProfileId == dv.LinkWriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, "contact", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable },
+            { "identity-link writer grants on another table only", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_externalobjectid");
+                    permissions.RemoveAll(p => p.ProfileId == dv.LinkWriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, "sprk_externalparty", 4, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable },
+            { "another profile may create contact.sprk_externalobjectid", dv =>
+                    dv.ColumnPermissions("sprk_externalobjectid")
+                        .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
+            { "the identity-link READER profile may update systemuser.sprk_primarycontact", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_primarycontact");
+                    permissions.RemoveAll(p => p.ProfileId == dv.LinkReaderProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.LinkReaderProfileId, "systemuser", 4, 0, 4));
+                },
+                SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
         };
         return data;
     }

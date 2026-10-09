@@ -96,5 +96,21 @@
       operator's `true`); operator sets it after one report-only cycle (guide §6.5.2). (7) Registry column (hand-off §4.4): not
       built — nothing reads it; the run document, both slots and T7 carry the value. (8) PRQ-C-13 added; Deploy-ControlPlane.ps1
       read-only preflight refuses a code deploy onto a stack without ReservedTenants__*.</note>
+    <note date="2026-10-09">Remaining code item DONE (worktree agent, FULL rigor; no live action): H7b maintains the identity-link
+      profile memberships. SecureRecordSetupProcedure S15–S18, copied from S10/S11/S12/S14: S15 both profiles exactly once
+      (field_profile_unresolved); S17 read half — "Spaarke Identity Link Writers" members other than H10's two BFF app users
+      (or any team) → QuarantineRequired secure_setup.identity_link_writer_has_other_member, nothing removed; S18 lock —
+      contact.sprk_externalobjectid + systemuser.sprk_primarycontact secured, reader read=4, writer 4/4/4
+      (identity_link_lock_incomplete, Resumable) and no other profile but System Administrator may create/update
+      (identity_link_lock_other_writer, QuarantineRequired — the reader profile is not exempt); all refusals before the
+      first write. Writes after S12: S16 every default team → Identity Link Readers, S17 the BFF app users → Identity Link
+      Writers; Phase-3 verify checks all four profiles' memberships; dry run plans them in gate h7b-secure-setup-plan.
+      ProcedureVersion 1→2 (a run completed under v1 re-applies). Writers identity verified: the BFF writes the binding
+      app-only with its UAMI (DataverseContactIdentityStore over the BFF TokenCredential = H10 systemUserId); the writer set
+      is H10's two app users, the same set as S12, the shipped profile description and UAC-r2's dev configuration. Defect
+      fixed in scope: S14 exempted the BFF-managed READER profile from the other-writer rule, so a reader grant of
+      create/update on sprk_issecure (= every default team) passed — it is now refused (field_lock_other_writer).
+      ContactIdentityBindingSchemaPackagedTests now takes the profile names from H7b and pins H7b's lock columns to the
+      package. Guide H7b row + §6.5.2 updated. Live verification: T186.</note>
   </notes>
 </task>
