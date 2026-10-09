@@ -59,10 +59,13 @@ const useStyles = makeStyles({
   rule: { flexShrink: 0, color: tokens.colorNeutralForeground3 },
   timing: { flexShrink: 0, color: tokens.colorNeutralForeground3 },
   chevron: { flexShrink: 0, color: tokens.colorNeutralForeground3 },
-  // Tier -> text colour, following SmartTodo's palette (red / dark orange / yellow / grey), tokens only.
-  overdue: { color: tokens.colorStatusDangerForeground1 },
+  // Tier -> text colour: SmartTodo's due palette (overdue red / 0-3d dark orange / 4-7d yellow / 8-10d grey, owner
+  // decision 2026-10-05), as the Foreground tokens of the same Red / DarkOrange / Yellow families SmartTodo's
+  // badge backgrounds use (a line has no badge, so the text takes the colour). Tokens only.
+  overdue: { color: tokens.colorPaletteRedForeground1 },
   soon3d: { color: tokens.colorPaletteDarkOrangeForeground1 },
-  soon7d: { color: tokens.colorStatusWarningForeground1 },
+  soon7d: { color: tokens.colorPaletteYellowForeground1 },
+  soon10d: { color: tokens.colorNeutralForeground2 },
 });
 
 export const IssueLine: React.FC<IssueLineProps> = ({ itemId, view, onOpen }) => {
@@ -71,6 +74,7 @@ export const IssueLine: React.FC<IssueLineProps> = ({ itemId, view, onOpen }) =>
     overdue: styles.overdue,
     '3d': styles.soon3d,
     '7d': styles.soon7d,
+    '10d': styles.soon10d,
   };
   return (
     <button

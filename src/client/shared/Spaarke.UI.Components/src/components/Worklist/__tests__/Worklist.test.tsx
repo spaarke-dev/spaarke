@@ -442,3 +442,79 @@ describe('ADR-021 and structure', () => {
     expect(Object.keys(barrel).filter(k => /^[A-Z]/.test(k))).toEqual(['MatterCard']);
   });
 });
+
+describe('due-state tone palette (SmartTodo: overdue red / 0-3d dark orange / 4-7d yellow / 8-10d grey)', () => {
+  const colorOf = (item: WorklistItem, dark = false) => {
+    const { unmount } = renderThemed(<MatterCard core={matterCore} items={[item]} today={TODAY} />, dark);
+    const el = screen.getByTestId('issue-timing');
+    const out = { tone: el.getAttribute('data-tone'), color: getComputedStyle(el).color };
+    unmount();
+    return out;
+  };
+  const doItem = (dueDate: string): WorklistItem => ({ ...overdueTaskItem, dueDate });
+
+  const EXPECTED: Array<[string, WorklistItem, string, string]> = [
+    ['overdue', doItem('2026-10-04'), 'overdue', 'var(--colorPaletteRedForeground1)'],
+    ['0-3 days', doItem('2026-10-12'), '3d', 'var(--colorPaletteDarkOrangeForeground1)'],
+    ['4-7 days', doItem('2026-10-14'), '7d', 'var(--colorPaletteYellowForeground1)'],
+    ['8-10 days', doItem('2026-10-18'), '10d', 'var(--colorNeutralForeground2)'],
+    ['11+ days', doItem('2026-12-01'), 'none', 'var(--colorNeutralForeground3)'],
+    ['Decide age', pathBItem, 'age', 'var(--colorNeutralForeground3)'],
+  ];
+
+  it.each(EXPECTED)('%s takes its tone token', (_label, item, tone, token) => {
+    expect(colorOf(item)).toEqual({ tone, color: token });
+  });
+
+  it('the four urgency tiers each have a distinct colour (no two tiers swapped or merged)', () => {
+    const colors = EXPECTED.slice(0, 4).map(([, item]) => colorOf(item).color);
+    expect(new Set(colors).size).toBe(4);
+  });
+
+  it('every tier text colour has WCAG AA contrast (4.5:1) on the card background in light and dark', () => {
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5]
+        .map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const tokensByTier = [
+      'colorPaletteRedForeground1',
+      'colorPaletteDarkOrangeForeground1',
+      'colorPaletteYellowForeground1',
+      'colorNeutralForeground2',
+      'colorNeutralForeground3',
+    ] as const;
+    for (const theme of [webLightTheme, webDarkTheme]) {
+      for (const t of tokensByTier) {
+        expect({ t, ok: ratio(theme[t], theme.colorNeutralBackground1) >= 4.5 }).toEqual({ t, ok: true });
+      }
+    }
+  });
+
+  it('the colour is a theme variable in dark mode too (the host provider supplies the dark value)', () => {
+    expect(colorOf(doItem('2026-10-04'), true).color).toBe('var(--colorPaletteRedForeground1)');
+    expect(webDarkTheme.colorPaletteRedForeground1).not.toBe(webLightTheme.colorPaletteRedForeground1);
+    expect(webDarkTheme.colorPaletteYellowForeground1).not.toBe(webLightTheme.colorPaletteYellowForeground1);
+  });
+});
+
+describe('focus ring', () => {
+  it('a focused line shows a visible ring: focus-visible outline style, width and token colour', () => {
+    renderThemed(<MatterCard core={matterCore} items={[pathBItem]} today={TODAY} />);
+    const line = screen.getByTestId('issue-line');
+    const focusCss = Array.from(document.styleSheets)
+      .flatMap(sh => Array.from((sh as CSSStyleSheet).cssRules))
+      .filter(r => (r as CSSStyleRule).selectorText?.endsWith(':focus-visible'))
+      .filter(r => Array.from(line.classList).some(c => (r as CSSStyleRule).selectorText === `.${c}:focus-visible`))
+      .map(r => r.cssText)
+      .join('\n');
+    expect(focusCss).toContain('outline-style: solid');
+    expect(focusCss).toContain('outline-width: var(--strokeWidthThick)');
+    expect(focusCss).toContain('outline-color: var(--colorStrokeFocus2)');
+  });
+});

@@ -57,3 +57,16 @@ threshold. No PCF or other bundle touched.
 Re-based per coordinator: 057 (418914d69), 012 (StatusBadge) and 007 (`007-schema-verification.md`) outputs verified present on
 origin/docs/ontology-platform-design (4a8a6ffe5); merged clean (no conflicts). Tests re-run after the merge (Worklist + ConsoleKit, 68 pass)
 and the SpaarkeAi bundle delta re-measured against that base: unchanged, +5,067 B raw.
+
+## Round 2 (#1513 review): tone palette
+Spec deviation fixed: tier text now uses the Red / DarkOrange / Yellow families SmartTodo's due badges use (KanbanCard `DUE_BADGE_STYLE`,
+Background3 tokens), as their Foreground1 variants because a line has no badge: overdue `colorPaletteRedForeground1`, 0-3d
+`colorPaletteDarkOrangeForeground1`, 4-7d `colorPaletteYellowForeground1` (was `colorStatusWarningForeground1`, nearly the same as
+dark orange), 8-10d `colorNeutralForeground2`; 11+d and Decide age stay `colorNeutralForeground3`. Contrast on the card background
+(`colorNeutralBackground1`), WCAG ratios: light red 5.85, orange 5.44, yellow 4.74, grey 10.05; dark red 5.20, orange 5.45, yellow 12.22,
+grey 10.01 - all >= 4.5 at rest and asserted in a test. Known limit (K-class): on the transient hover background three combinations fall
+to 4.19-4.40 (light yellow 4.35, dark red 4.19, dark orange 4.40); the palette is an owner decision.
+Tests: 10 added (47 Worklist, 78 with ConsoleKit): tone-to-token mapping per tier, distinct colours, contrast in both themes, dark-mode
+variable, and the focus ring (focus-visible outline style / width / token colour read from the generated stylesheet).
+Mutation proofs (each run fails, source restored): tone class removed -> 6 fail; 3d/7d tokens swapped -> 2 fail; class map swapped -> 2 fail;
+focus ring removed -> 1 fail; 7d back to StatusWarning -> 1 fail.
