@@ -107,7 +107,7 @@
     LIVE PROOF OWED (T186): the PATCH systemusers businessunitid move (H11) and the customer-unit creates (H10) have only
     HTTP-shape tests; H11's read-back fails closed if the move does not land.
 
-    VERIFICATION: ControlPlane tests 2587 passed / 1 skipped (pre-existing); Spaarke.ArchTests 889/889 (built explicitly);
+    VERIFICATION: ControlPlane tests 2598 passed / 1 skipped (pre-existing); Spaarke.ArchTests 889/889 (built explicitly);
     dotnet build Spaarke.sln 0 errors / 0 warnings.
   </notes>
 </task>

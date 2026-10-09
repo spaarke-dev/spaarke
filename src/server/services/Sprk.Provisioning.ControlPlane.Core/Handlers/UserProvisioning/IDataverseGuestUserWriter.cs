@@ -63,7 +63,8 @@ public interface IDataverseGuestUserWriter
     /// environment security group on that read (root business unit) — moves it from the ROOT unit to
     /// <see cref="DataverseGuestUserRequest.BusinessUnitId"/> (read back), and associates every role in
     /// <see cref="DataverseGuestUserRequest.RoleIds"/> it does not hold yet. A user in any other unit is not moved:
-    /// <see cref="DataverseGuestUserOutcome.InForeignBusinessUnit"/>, nothing written.
+    /// <see cref="DataverseGuestUserOutcome.InForeignBusinessUnit"/>, nothing written. A user holding a role of another unit
+    /// is <see cref="DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit"/>, nothing written or removed.
     /// </summary>
     Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken cancellationToken);
 }

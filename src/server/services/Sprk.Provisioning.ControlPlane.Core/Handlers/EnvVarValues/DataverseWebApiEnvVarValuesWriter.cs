@@ -18,9 +18,9 @@
 //   `new ClientSecretCredential(...)` construction is confined to the
 //   factory's ClientSecret (pre-migration/fallback) branch — never on the
 //   secret-free branch. NOT DefaultAzureCredential-as-the-Worker: H7
-//   authenticates AS the BFF app-reg (the MI-Dataverse App User (H10) has
-//   not yet been created at H7's point in the DAG; H10 runs AFTER H7 per
-//   design.md §4.1) — under MI-FIC the Worker's UAMI merely MINTS the
+//   authenticates AS the BFF app-reg (which H10 registered as an
+//   application user before H6 — T228 moved H10 ahead of H6/H7) — under
+//   MI-FIC the Worker's UAMI merely MINTS the
 //   federated assertion the app-reg trusts (H3-created FIC). Token audience
 //   is the env URL's origin + `/.default` — Dataverse Web API's token scope
 //   convention (parity with DataverseWebApiHealthProbe).

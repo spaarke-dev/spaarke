@@ -22,9 +22,12 @@
 //                         systemusers({id}) businessunitid@odata.bind, If-Match: * — and
 //                         read back BEFORE any role (a unit change strips roles); a user in
 //                         any other unit is InForeignBusinessUnit, nothing written (root id:
-//                         H8's IDataverseRootBusinessUnitReader, reused). Then per role id:
-//                         GET systemusers({id})/systemuserroles_association?$filter=roleid eq {r}
-//                         → POST .../systemuserroles_association/$ref only when not held.
+//                         H8's IDataverseRootBusinessUnitReader, reused). Then ONE read of
+//                         every held role with its unit — GET systemusers({id})/
+//                         systemuserroles_association?$select=roleid,_businessunitid_value —
+//                         a role of any other unit is HoldsRoleOutsideBusinessUnit (nothing
+//                         written or removed); otherwise POST .../systemuserroles_association/$ref
+//                         for each requested role not held.
 //
 // Every id read from Dataverse is canonicalized (ADR-044) before it is placed in a
 // filter or a reference URL. An HTTP timeout is a Failure, not an escaped exception.

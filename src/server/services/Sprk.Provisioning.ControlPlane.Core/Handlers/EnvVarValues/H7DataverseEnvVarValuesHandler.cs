@@ -309,7 +309,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             return await FailMissingUpstreamAsync(run, etag, "customerBusinessUnitId",
                 "InterStepState.customerBusinessUnitId (H10's customer business unit) is not a GUID. H7 links it to H8's " +
                 "container: every user owns its records there, and the BFF resolves a non-secure record's container from its " +
-                "owning unit (T259).", cancellationToken).ConfigureAwait(false);
+                "owning unit (T259). A run whose H10 completed without it (before T259) needs a new run.",
+                cancellationToken).ConfigureAwait(false);
         }
         // A44.5 (task 205i): chain-aware secret guard. The secret is REQUIRED
         // only when the FR-39 ordered credential chain's primary is
@@ -325,8 +326,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             var diagnostic =
                 "EnvVarValuesOptions:ClientSecret is not populated and the FR-39 credential chain requires it " +
                 "(primary = ClientSecret — the legacy/unconfigured default). H7 authenticates to the target Dataverse " +
-                "env via confidential-client credentials against the BFF app-reg (same pattern H6 uses) — the " +
-                "MI-Dataverse App User (H10) does not exist yet at H7's point in the DAG. Wave C5 wires this to " +
+                "env via confidential-client credentials against the BFF app-reg (same pattern H6 uses), which H10 " +
+                "registered as an application user before H6 (T228). Wave C5 wires this to " +
                 "a Key Vault reference; wave C4 requires operator to set the app-setting explicitly. " +
                 "Secret-free environments instead configure EnvVarValues:Credentials:Order:0=ManagedIdentityFederated " +
                 "(A44.5). Handler did NOT invoke the writer.";
@@ -421,8 +422,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
 
         var success = (EnvVarValuesWriteOutcome.Success)writeOutcome;
 
-        // (7) All post-conditions cleared — advance Cosmos state. Reconciler
-        // (Wave C5) fans out to H10.
+        // (7) All post-conditions cleared — advance Cosmos state. The reconciler
+        // fans out to H7's successors (H11 — DagAdvancer.HandlerDependencies).
         stopwatch.Stop();
         _logger.LogInformation(
             "H7 Dataverse env-var values succeeded: runId={RunId} customerId={CustomerId} " +
