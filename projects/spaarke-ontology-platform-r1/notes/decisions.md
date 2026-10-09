@@ -110,6 +110,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
 | D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 | D-69 | WizardShell's skipped-step marker (dashed ring) is **opt-in** per wizard; existing wizards keep the tick for a skipped step; the 058 decision wizard opts in (from the #1386 review F1) | Binding (056, 058) |
+| D-93 | Merge #1480 (task 113) when fully green after its last three small fixes; the Console then auto-deploys to dev (owner 2026-10-09) | Binding (113) |
 | D-91 | Pause in dev (set inactive) the failing notification playbooks: Tasks Overdue, Matter/Project Activity, New Documents, New Emails, New Events, until the fix is deployed; Due Soon + Work Assignments stay on (owner 2026-10-09) | Binding (120) |
 | D-92 | Before any further fix, a full top-model sweep of the playbook engine and every playbook for defects of this kind (Condition false-branch skip, invalid option values, date formatting, membership lag found in the first live run) (owner 2026-10-09) | Binding (120) |
 | D-89 | Merge #1461 when green; then in dev: deploy master BFF, turn on sprk_playbooknode auditing (D-80), sync FOUR playbooks (Overdue, Due Soon, Matter Activity, Work Assignments), deploy the failure alert bicep, prove delivery with zz-120 rows. Docs/Emails/Events wait for uac-r2 (owner 2026-10-08) | Binding (120) |
