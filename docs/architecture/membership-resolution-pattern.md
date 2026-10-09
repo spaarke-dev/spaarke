@@ -374,7 +374,7 @@ All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) 
 > `<value>00000000-0000-0000-0000-000000000000</value>` (valid, selects nothing). `FetchXmlShapeValidator` enforces the
 > shape in the `QueryDataverse` executor, deploy lint C and the repo regression test.
 
-| Playbook | File | Migration task | Verified |
+| Playbook (deleted by D-100) | File (historical path) | Migration task | Verified |
 |---|---|---|---|
 | `notification-new-documents.json` (NP-003) | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json` | Task 050 | Node `LookupUserMembership` present; resolved IDs bound to `myMatters.ids` (line 64) |
 | `notification-new-emails.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json` | Task 051 | Same pattern |
@@ -640,7 +640,7 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 |---|---|
 | **Confusing `AssociationResolver` (PCF) with Membership resolution (BFF)** | See Naming-Collision Register above. Different surfaces, different concepts, both stable. |
 | **Re-deriving membership in ad-hoc FetchXML** | This is the R2-UAT root cause (A1 / D5). Always go through `IMembershipResolverService`. (Historical: Daily Briefing's `BriefingService.GetTopPriorityMatterAsync` STUB was the last known offender; closed Wave 28 / 2026-06-22 — see Confirmed Consumers table.) |
-| **Joining through `sprk_matterteammember` or other non-existent entity** | The R2-broken `notification-new-documents.json` playbook was migrated in R3 task 050 to use `LookupUserMembership` node + a downstream FetchXML id list. Same for `notification-new-emails.json` (task 051) and `notification-new-events.json` (task 052). |
+| **Joining through `sprk_matterteammember` or other non-existent entity** | The R2-broken `notification-new-documents.json` playbook (retired and deleted, D-100) was migrated in R3 task 050 to use `LookupUserMembership` node + a downstream FetchXML id list. Same for `notification-new-emails.json` (task 051) and `notification-new-events.json` (task 052). |
 | **Writing a FetchXML id list as `operator="in" value="{{joinIds …}}"`** | Dataverse ignores `value` on a list operator; the query fails for every list (ISS-018 #1452). Use `<condition … operator="in">{{fetchInGuids path.ids}}</condition>`; an `in` with zero `<value>` children is an error, not "zero rows". (Added 2026-10-08.) |
 | **Assuming Phase 1A FetchXml scales forever** | Monitor AC-1A.5 p95. Phase 2 junction-write path + recon + invalidation already shipped in R3; the read-path swap (resolver queries junction table instead of FetchXml) is the R4 escape hatch when sustained p95 > 500ms. |
 | **Creating new `PlatformAdmin` policy** | Forbidden (Q6). Reuse existing `SystemAdmin` policy at `AuthorizationModule.cs:241`. |
