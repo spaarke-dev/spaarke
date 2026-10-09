@@ -176,7 +176,8 @@ describe('SaveFlow — Outlook suggestion cards carry filing access and never pr
         <FluentProvider theme={webLightTheme}>
           <SaveFlow
             hostType="outlook"
-            itemId="<abc@contoso.com>"
+            itemId="AAMkAGI2TG93AAA="
+            internetMessageId="<abc@contoso.com>"
             itemName="Re: Secure matter"
             canSuggestRelatedRecords
             getAccessToken={jest.fn().mockResolvedValue('token')}

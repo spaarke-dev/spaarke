@@ -138,6 +138,56 @@ public sealed class IncomingAssociationResolver
     }
 
     /// <summary>
+    /// Applies a decision evaluated EARLIER to a communication that ALREADY existed — the write <see cref="ResolveAsync"/>
+    /// makes after evaluating, without evaluating again (spaarkeai-word-add-in-r1 task 121: an Office save that reconciled
+    /// to an unfiled communication files it to the save's record, owner decision 2026-10-09). A reparent: the owner is
+    /// re-derived from the parents after the change and reassigned (<see cref="ApplyDecisionAsync"/>); a refusal throws
+    /// before anything is written.
+    /// </summary>
+    /// <remarks>Only the record <paramref name="onlyRecordId"/> is filed: the decision is narrowed to it first
+    /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing.</remarks>
+    /// <returns><c>false</c> (nothing written) when the decision does not write <paramref name="onlyRecordId"/>.</returns>
+    public async Task<bool> ApplyToExistingRecordAsync(
+        Guid communicationId, AssociationDecision decision, Guid onlyRecordId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        if (NarrowToRecord(decision, onlyRecordId) is not { } narrowed)
+            return false;
+
+        await ApplyDecisionAsync(communicationId, narrowed, ownerAlreadyResolved: false, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// <paramref name="decision"/> writing ONLY the regarding that targets <paramref name="recordId"/> (task 121), or
+    /// <see langword="null"/> when it writes none. Every other candidate it would have written is marked
+    /// <c>Written = false</c> in the provenance — the review surface reads per-candidate <c>written</c> as what the row is
+    /// filed under, so a dropped write must not still read as filed (the same rule as a withheld intermediate).
+    /// </summary>
+    internal static AssociationDecision? NarrowToRecord(AssociationDecision decision, Guid recordId)
+    {
+        var kept = decision.RegardingWrites
+            .Where(w => w.Value.Id == recordId)
+            .ToDictionary(w => w.Key, w => w.Value, StringComparer.OrdinalIgnoreCase);
+        if (kept.Count == 0)
+            return null;
+
+        bool IsKept(CandidateTrace c) =>
+            kept.ContainsKey(c.Field) && Guid.TryParse(c.TargetId, out var id) && id == recordId;
+
+        return decision with
+        {
+            RegardingWrites = kept,
+            Provenance = decision.Provenance with
+            {
+                Candidates = decision.Provenance.Candidates
+                    .Select(c => c.Written && !IsKept(c) ? c with { Written = false } : c)
+                    .ToList(),
+            },
+        };
+    }
+
+    /// <summary>
     /// The ownership question for a NEW communication that <paramref name="decision"/> will file (task 146): every
     /// lookup <see cref="ApplyToNewRecordAsync"/> will write is a parent — each regarding the decision writes AND the
     /// FR-26 core-ancestor stamps derived from them (secure-if-any: an email filed to an intermediate record — an
