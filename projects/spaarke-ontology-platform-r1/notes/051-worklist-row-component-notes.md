@@ -53,3 +53,7 @@ adr-check: ADR-021 (Fluent v9, tokens only, no literals, dark via host provider)
 index.html (single-file): 6,079,254 B -> 6,084,321 B = +5,067 B raw (+0.08%), gzip 1,690.82 kB -> 1,692.09 kB (+1.27 kB). No consumer
 imports MatterCard yet (059 will), so this is the unused-export cost of the barrel line (module-level `makeStyles`). Well under the 5 MB
 threshold. No PCF or other bundle touched.
+
+Re-based per coordinator: 057 (418914d69), 012 (StatusBadge) and 007 (`007-schema-verification.md`) outputs verified present on
+origin/docs/ontology-platform-design (4a8a6ffe5); merged clean (no conflicts). Tests re-run after the merge (Worklist + ConsoleKit, 68 pass)
+and the SpaarkeAi bundle delta re-measured against that base: unchanged, +5,067 B raw.
