@@ -395,24 +395,41 @@ export interface IAccessGrantModalProps {
    */
   initialSection?: 'noAccess';
   /**
-   * The record's DIRECT filing parents whose access it follows (unified-access-control-r2 task 175, owner round 84: "a
-   * child's access always follows its parent, both ways, and is locked while it has a parent"), as the host read them
-   * from `GET /api/v1/external-access/can-manage-access` (`followsParents`). Non-empty: the record's access is LOCKED
-   * here — every write affordance is hidden, Current Access and the No Access List stay visible read-only, and a banner
-   * names the parent to manage it on. Omitted or empty (a parentless record, a matter, or an older BFF): unchanged. The
-   * server refuses every write on such a record anyway (409 `sdap.access.access_follows_parent`), which the modal also
-   * shows as this locked state.
+   * The record's DIRECT filing parents (unified-access-control-r2 task 175; owner round 87, refining round 84), as the
+   * host read them from `GET /api/v1/external-access/can-manage-access` (`followsParents`). Non-empty: the parents set
+   * this record's MINIMUM Secure and Access Permission (the floor) — it can be made stricter, never looser. The modal
+   * then shows an info bar naming the first parent (a link with {@link onOpenParent}) next to the usual Access
+   * Permission bar. Grants and shares are unaffected: every grant affordance stays available. Omitted or empty (a
+   * parentless record, a matter, or an older BFF): no parent bar.
    */
   followsParents?: IFollowsParent[];
   /** Opens a parent record (task 175) — the host navigates to its form. Omit and the banner names the parent as text. */
   onOpenParent?: (parent: IFollowsParent) => void;
+  /** The floor the parents set (task 175, round 87; `can-manage-access`). With {@link recordAccessPermission}, the
+   * parent bar says whether each effective value is inherited or set on this record. Omit: no such annotation. */
+  accessFloor?: IAccessFloor;
+  /** The record's OWN Access Permission, not folded with Secure (unlike {@link accessPermissionState}) — the host maps
+   * its stored value. Used only for the parent bar's "Access Permission: … (inherited from …)" line. */
+  recordAccessPermission?: AccessPermissionState;
 }
 
-/** A direct filing parent a record's access follows (task 175; `followsParents` on `can-manage-access`). */
+/** A direct filing parent of a record (task 175; `followsParents` on `can-manage-access`). */
 export interface IFollowsParent {
   recordType: 'matter' | 'project';
   recordId: string;
   name: string | null;
+}
+
+/**
+ * The minimum a record's parents set (task 175, owner round 87; `can-manage-access`): the most restrictive Secure and
+ * Access Permission across its parents and their chain. Both are `null` on a parentless record, from an older BFF, and
+ * when `parentUnverifiable` (what the record is filed under could not be read; the host then makes the Access Permission
+ * pill read-only — fail closed).
+ */
+export interface IAccessFloor {
+  floorSecure: boolean | null;
+  floorAccessPermission: AccessPermissionState | null;
+  parentUnverifiable: boolean;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

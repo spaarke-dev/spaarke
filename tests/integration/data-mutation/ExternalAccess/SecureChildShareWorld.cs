@@ -193,6 +193,9 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 175: every access-record (<c>sprk_accessinheritance</c>) write, in order.</summary>
+    public List<(string Table, Guid Id, string Text)> AccessRecordWrites { get; } = new();
+
     /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
     public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
 
@@ -343,6 +346,16 @@ internal sealed class SecureChildShareWorld
             if (!_rows.TryGetValue((table, id), out var target))
                 throw new InvalidOperationException($"Test: {table} {id} does not exist.");
             target["sprk_accesspermission"] = option;
+            return;
+        }
+
+        // Task 175 (round 87): the follow writes ONE column, the access record (sprk_accessinheritance).
+        if (fields.Count == 1 && fields.TryGetValue("sprk_accessinheritance", out var marker) && marker is string text)
+        {
+            AccessRecordWrites.Add((table, id, text));
+            if (!_rows.TryGetValue((table, id), out var row))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            row["sprk_accessinheritance"] = text;
             return;
         }
 

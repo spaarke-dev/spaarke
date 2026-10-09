@@ -1,13 +1,14 @@
 /**
- * AccessGrantModal — a child record whose access follows its parent (unified-access-control-r2 task 175, owner round
- * 84: "a child's access always follows its parent, both ways, and is locked while it has a parent").
+ * AccessGrantModal and the Access Permission pill on a record filed under a matter or project (unified-access-control-r2
+ * task 175; owner round 87, refining round 84): the parent sets a FLOOR. The child may be made stricter, never looser;
+ * its grants and shares are unaffected.
  *
- * Covers: with `followsParents` the modal hides every write affordance (+ Contact / + Organization / + User, the
- * candidates and their level dropdowns, Add, Suggested Access Grant/Dismiss, Revoke), keeps Current Access and the No
- * Access List read-only, and names the parent in an info bar with a working link; a parentless record is unchanged;
- * the no-permission state stays distinct; the server's 409 `sdap.access.access_follows_parent` on a write is the same
- * locked state, not a raw error; an inherited user share (`inheritedFrom` on `/user-shares`) is a read-only row that
- * still carries the No Access marker; the No Access List names a direct parent only.
+ * Covers: a child keeps every grant affordance; the parent bar ("Minimum access comes from the parent …") shows WITH the
+ * Access Permission bar (coordinator O-4) and says whether each effective value is inherited or set on this record; a
+ * parentless record shows no parent bar; the server's 409 `sdap.access.access_follows_parent` is an inline refusal of
+ * that action, never a modal-wide state; an inherited user share is a read-only row that still carries the No Access
+ * marker; the No Access List names a direct parent only; the pure floor rules — the pill's option filter,
+ * `parentUnverifiable` making the pill read-only, the inherited / set-on-this-record display.
  */
 
 import * as React from 'react';
@@ -15,6 +16,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import type {
+  IAccessFloor,
   IAccessGrantModalProps,
   IAccessGrantRecord,
   IFollowsParent,
@@ -32,9 +34,17 @@ import {
 } from '../noAccess';
 import {
   parseFollowsParents,
+  parseAccessFloor,
   followsParentFallbackMessage,
   otherParentsSuffix,
   describeInheritedShare,
+  resolveAccessPermissionPill,
+  isLooserThanFloor,
+  accessPermissionStateOf,
+  accessPermissionOrigin,
+  secureOrigin,
+  describeOrigin,
+  describeEffectiveAccess,
 } from '../followsParent';
 
 const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
@@ -45,6 +55,19 @@ const USER_ID = 'cccccccc-0000-0000-0000-000000000001';
 const INHERITED_USER_ID = 'cccccccc-0000-0000-0000-000000000002';
 
 const PARENT_MATTER: IFollowsParent = { recordType: 'matter', recordId: PARENT_MATTER_ID, name: 'Acme v. Beta' };
+const RESTRICTED_FLOOR: IAccessFloor = {
+  floorSecure: true,
+  floorAccessPermission: 'restricted',
+  parentUnverifiable: false,
+};
+
+/** The host's raw option values (the PCF's `sprk_accesspermission`): Standard / Limited / Restricted. */
+const VALUES = { limited: 100000001, restricted: 100000002 };
+const OPTIONS = [
+  { value: 100000000, label: 'Standard' },
+  { value: 100000001, label: 'Limited' },
+  { value: 100000002, label: 'Restricted' },
+];
 
 const CONTACT_GRANT: IAccessGrantRecord = {
   accessRecordId: 'grant-contact-1',
@@ -120,7 +143,7 @@ interface ISetup {
   shares?: IShareFixture[];
   suggestions?: IAssignedAccessEntry[];
   noAccessEntries?: IRecordNoAccessEntry[];
-  /** Answers a POST write (revoke / share-user / grant); default 200 `{}`. */
+  /** Answers a POST write (revoke / share-user / grant / dismiss); default 200 `{ deactivatedCount: 1 }`. */
   write?: (url: string) => Response;
   overrides?: Partial<IAccessGrantModalProps>;
 }
@@ -166,12 +189,6 @@ async function loaded(): Promise<void> {
   await waitFor(() => expect(screen.queryByText('Loading access data…')).not.toBeInTheDocument());
 }
 
-function posts(props: IAccessGrantModalProps): string[] {
-  return (props.authenticatedFetch as unknown as jest.Mock).mock.calls
-    .filter(([, init]: [string, RequestInit | undefined]) => init?.method === 'POST')
-    .map(([url]: [string]) => url);
-}
-
 function currentAccessRow(name: string): HTMLElement {
   const rows = screen
     .getAllByText(name, { exact: false })
@@ -181,53 +198,86 @@ function currentAccessRow(name: string): HTMLElement {
   return rows[0];
 }
 
-/** Every write affordance the lock removes. */
-function expectNoWriteAffordances(): void {
-  expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Add organization' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Add user' })).not.toBeInTheDocument();
-  expect(screen.queryByText('Add Access Permissions')).not.toBeInTheDocument();
-  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Add \(/ })).not.toBeInTheDocument();
-  expect(screen.queryByText('Suggested Access')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Grant / })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Dismiss / })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
+/** The info bar naming the parent, or `null`. */
+function parentBar(): HTMLElement | null {
+  const title = screen.queryByText('Minimum access from the parent', { selector: '.fui-MessageBarTitle' });
+  return title ? (title.closest('.fui-MessageBar') as HTMLElement) : null;
 }
 
-describe('AccessGrantModal — locked: access follows the parent (task 175)', () => {
-  it('hides every write affordance and keeps Current Access and the No Access List read-only', async () => {
-    const props = makeProps({
-      overrides: { followsParents: [PARENT_MATTER], onOpenParent: jest.fn() },
-      shares: [{ systemUserId: USER_ID, fullName: 'Uma User', accessLevel: 100000000 }],
-      suggestions: [PENDING_SUGGESTION],
-    });
-    renderModal(props);
+/** Every grant affordance (owner round 87: all stay available on a child). */
+function expectEveryGrantAffordance(): void {
+  expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Add organization' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Add user' })).toBeEnabled();
+  expect(screen.getByRole('checkbox', { name: 'Select Cody Candidate' })).toBeEnabled();
+  expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: /^Add \(/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Grant Pat Paralegal' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' })).toBeEnabled();
+  // The contact grant and the direct user share are both revocable.
+  for (const revoke of screen.getAllByRole('button', { name: 'Revoke' })) expect(revoke).toBeEnabled();
+  expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(2);
+}
+
+const DIRECT_SHARE: IShareFixture = { systemUserId: USER_ID, fullName: 'Uma User', accessLevel: 100000000 };
+
+describe('AccessGrantModal — a record with a parent (task 175, owner round 87)', () => {
+  it('keeps every grant affordance', async () => {
+    renderModal(
+      makeProps({
+        overrides: { followsParents: [PARENT_MATTER], onOpenParent: jest.fn(), accessFloor: RESTRICTED_FLOOR },
+        shares: [DIRECT_SHARE],
+        suggestions: [PENDING_SUGGESTION],
+      })
+    );
     await loaded();
 
-    expectNoWriteAffordances();
-    // Read-only content stays.
-    expect(screen.getByText('Current Access')).toBeInTheDocument();
-    expect(screen.getByText('Carla Contact')).toBeInTheDocument();
-    expect(screen.getByText(/Uma User/)).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'No Access List' })).toBeInTheDocument();
-    // The lock is not the no-permission state, nor the Write-required deny.
-    expect(screen.queryByText(/You do not have permission/)).not.toBeInTheDocument();
+    expectEveryGrantAffordance();
     expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
   });
 
-  it('names the parent in an info bar whose link opens it', async () => {
+  it('names the parent in an info bar whose link opens it, WITH the Access Permission bar', async () => {
     const onOpenParent = jest.fn();
-    renderModal(makeProps({ overrides: { followsParents: [PARENT_MATTER], onOpenParent } }));
+    renderModal(
+      makeProps({
+        overrides: {
+          followsParents: [PARENT_MATTER],
+          onOpenParent,
+          accessPermissionState: 'restricted',
+          isSecureRecord: true,
+        },
+      })
+    );
     await loaded();
 
-    expect(screen.getByText('Access follows the parent', { selector: '.fui-MessageBarTitle' })).toBeInTheDocument();
-    const link = screen.getByRole('button', { name: 'Acme v. Beta' });
-    const bar = link.closest('.fui-MessageBar') as HTMLElement;
-    expect(bar).toHaveTextContent('Access follows the parent matter Acme v. Beta; manage it there.');
-    fireEvent.click(link);
+    const bar = parentBar();
+    expect(bar).toHaveTextContent(
+      'Minimum access comes from the parent matter Acme v. Beta: this record can be made stricter but not looser.'
+    );
+    // Coordinator O-4: the Access Permission bar stays.
+    expect(screen.getByText('Secure – Restricted', { selector: '.fui-MessageBarTitle' })).toBeInTheDocument();
+    fireEvent.click(within(bar!).getByRole('button', { name: 'Acme v. Beta' }));
     expect(onOpenParent).toHaveBeenCalledWith(PARENT_MATTER);
+  });
+
+  it('says whether each effective value is inherited or set on this record', async () => {
+    renderModal(
+      makeProps({
+        overrides: {
+          followsParents: [PARENT_MATTER],
+          accessFloor: { floorSecure: false, floorAccessPermission: 'limited', parentUnverifiable: false },
+          recordAccessPermission: 'limited',
+          isSecureRecord: true,
+        },
+      })
+    );
+    await loaded();
+
+    const bar = parentBar()!;
+    expect(
+      within(bar).getByText('Access Permission: Limited (inherited from Matter Acme v. Beta)')
+    ).toBeInTheDocument();
+    expect(within(bar).getByText('Secure (set on this record)')).toBeInTheDocument();
   });
 
   it('names the first of several parents and counts the others; an unnamed parent links by its type', async () => {
@@ -236,11 +286,11 @@ describe('AccessGrantModal — locked: access follows the parent (task 175)', ()
     renderModal(makeProps({ overrides: { followsParents: [unnamed, PARENT_MATTER, PARENT_MATTER], onOpenParent } }));
     await loaded();
 
-    const link = screen.getByRole('button', { name: 'project' });
-    expect(link.closest('.fui-MessageBar')).toHaveTextContent(
-      'Access follows the parent project and 2 others; manage it there.'
+    const bar = parentBar()!;
+    expect(bar).toHaveTextContent(
+      'Minimum access comes from the parent project and 2 others: this record can be made stricter but not looser.'
     );
-    fireEvent.click(link);
+    fireEvent.click(within(bar).getByRole('button', { name: 'project' }));
     expect(onOpenParent).toHaveBeenCalledWith(unnamed);
   });
 
@@ -248,137 +298,80 @@ describe('AccessGrantModal — locked: access follows the parent (task 175)', ()
     renderModal(makeProps({ overrides: { followsParents: [PARENT_MATTER] } }));
     await loaded();
 
-    expect(screen.queryByRole('button', { name: 'Acme v. Beta' })).not.toBeInTheDocument();
-    expect(screen.getByText('Acme v. Beta').tagName).toBe('STRONG');
+    const bar = parentBar()!;
+    expect(within(bar).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(bar).getByText('Acme v. Beta').tagName).toBe('STRONG');
   });
 
-  it('replaces the Access Permission bar (its "+ User" advice does not apply on a locked record)', async () => {
-    renderModal(makeProps({ overrides: { followsParents: [PARENT_MATTER], accessPermissionState: 'restricted' } }));
-    await loaded();
-
-    expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
-    expect(screen.getByText('Access follows the parent', { selector: '.fui-MessageBarTitle' })).toBeInTheDocument();
-  });
-
-  it('Save closes without writing anything', async () => {
-    const props = makeProps({ overrides: { followsParents: [PARENT_MATTER] } });
-    renderModal(props);
-    await loaded();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(props.onClose).toHaveBeenCalled());
-    expect(posts(props)).toEqual([]);
-  });
-
-  it('the no-permission state stays distinct from the lock', async () => {
+  it('the no-permission state is unchanged on a child', async () => {
     renderModal(makeProps({ overrides: { followsParents: [PARENT_MATTER], canGrantAccess: false } }));
 
     expect(
       await screen.findByText('You do not have permission to grant or revoke access for this record.')
     ).toBeInTheDocument();
-    expect(screen.queryByText('Access follows the parent')).not.toBeInTheDocument();
+    expect(parentBar()).toBeNull();
   });
 });
 
-describe('AccessGrantModal — a parentless record is unchanged (task 175)', () => {
+describe('AccessGrantModal — a parentless record (task 175)', () => {
   it.each([
     ['followsParents omitted', undefined],
     ['followsParents empty', [] as IFollowsParent[]],
-  ])('%s: every write affordance is offered and no parent bar is shown', async (_label, followsParents) => {
+  ])('%s: every grant affordance and no parent bar', async (_label, followsParents) => {
+    renderModal(
+      makeProps({ overrides: { followsParents }, shares: [DIRECT_SHARE], suggestions: [PENDING_SUGGESTION] })
+    );
+    await loaded();
+
+    expect(parentBar()).toBeNull();
+    expectEveryGrantAffordance();
+  });
+});
+
+describe('AccessGrantModal — the 409 access_follows_parent is an inline refusal (task 175)', () => {
+  const refusal = (body: Record<string, unknown>) => (): Response =>
+    json({ status: 409, reasonCode: 'sdap.access.access_follows_parent', ...body }, 409);
+  const SERVER_SENTENCE = 'This would make the work assignment less restricted than the matter Acme v. Beta.';
+
+  async function revokeCarla(): Promise<void> {
+    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+  }
+
+  it('a refused Revoke shows the server sentence for that action and nothing else changes', async () => {
     renderModal(
       makeProps({
-        overrides: { followsParents },
-        shares: [{ systemUserId: USER_ID, fullName: 'Uma User', accessLevel: 100000000 }],
+        shares: [DIRECT_SHARE],
         suggestions: [PENDING_SUGGESTION],
+        write: refusal({ detail: SERVER_SENTENCE }),
       })
     );
     await loaded();
 
-    expect(screen.queryByText('Access follows the parent')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add contact' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add organization' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add user' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Select Cody Candidate' })).toBeInTheDocument();
-    expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Grant Pat Paralegal' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' })).toBeInTheDocument();
-    // The contact grant and the direct user share are both revocable.
-    expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(2);
-  });
-});
+    await revokeCarla();
 
-describe('AccessGrantModal — the 409 access_follows_parent refusal (task 175)', () => {
-  const refusal = (body: Record<string, unknown>) => () =>
-    json({ status: 409, reasonCode: 'sdap.access.access_follows_parent', ...body }, 409);
-
-  it('a refused Revoke becomes the locked state naming the parent, not an error', async () => {
-    const onOpenParent = jest.fn();
-    const props = makeProps({
-      overrides: { onOpenParent },
-      write: refusal({
-        detail: 'Access to this work assignment follows the matter Acme v. Beta. Change it there.',
-        parentRecordType: 'matter',
-        parentRecordId: PARENT_MATTER_ID,
-        parentName: 'Acme v. Beta',
-      }),
-    });
-    renderModal(props);
-    await loaded();
-
-    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    const dialog = await screen.findByRole('alertdialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Revoke' }));
-
-    const link = await screen.findByRole('button', { name: 'Acme v. Beta' });
-    expect(link.closest('.fui-MessageBar')).toHaveTextContent(
-      'Access follows the parent matter Acme v. Beta; manage it there.'
-    );
-    fireEvent.click(link);
-    expect(onOpenParent).toHaveBeenCalledWith(PARENT_MATTER);
-    expectNoWriteAffordances();
-    expect(screen.queryByText(/Failed to revoke/)).not.toBeInTheDocument();
+    expect(await screen.findByText(SERVER_SENTENCE)).toBeInTheDocument();
     expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
-  });
-
-  it('without a parent in the body it shows the server sentence', async () => {
-    const props = makeProps({
-      write: refusal({ detail: 'Access to this project follows the matter it is filed under. Change it there.' }),
-    });
-    renderModal(props);
-    await loaded();
-
-    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
-
-    expect(
-      await screen.findByText('Access to this project follows the matter it is filed under. Change it there.')
-    ).toBeInTheDocument();
-    expectNoWriteAffordances();
+    expect(parentBar()).toBeNull();
+    // Not a modal-wide state: every affordance stays, enabled.
+    expectEveryGrantAffordance();
   });
 
   it('without a detail it shows the designed sentence for the parent type', async () => {
-    const props = makeProps({ write: refusal({ parentRecordType: 'project' }) });
-    renderModal(props);
+    renderModal(makeProps({ write: refusal({ parentRecordType: 'project' }) }));
     await loaded();
 
-    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+    await revokeCarla();
 
     expect(await screen.findByText(followsParentFallbackMessage('project'))).toBeInTheDocument();
     expect(followsParentFallbackMessage('project')).toBe(
-      'Access to this record follows the project it is filed under. Change it there.'
+      "This change would make this record's access looser than the project it is filed under. A record can be made " +
+        'stricter than its parent, but not looser.'
     );
   });
 
-  it('a refused Add stops the batch and shows the lock with no error notice', async () => {
-    const props = makeProps({
-      write: refusal({
-        detail: 'Access follows the parent.',
-        parentRecordType: 'matter',
-        parentRecordId: PARENT_MATTER_ID,
-        parentName: 'Acme v. Beta',
-      }),
-    });
+  it('a refused Add item is reported by name and the rest of the batch is not stopped', async () => {
+    const props = makeProps({ write: refusal({ detail: SERVER_SENTENCE }) });
     renderModal(props);
     await loaded();
 
@@ -387,22 +380,30 @@ describe('AccessGrantModal — the 409 access_follows_parent refusal (task 175)'
     fireEvent.click(await screen.findByRole('option', { name: 'View Only' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add (1)' }));
 
-    expect(await screen.findByText('Acme v. Beta')).toBeInTheDocument();
-    expectNoWriteAffordances();
-    expect(screen.queryByText('Error')).not.toBeInTheDocument();
-    expect(posts(props)).toHaveLength(1);
+    expect(await screen.findByText(`Granted access to 0 of 1. Cody Candidate: ${SERVER_SENTENCE}`)).toBeInTheDocument();
+    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
   });
 
-  it('a 409 with another reason code is not the lock', async () => {
-    const props = makeProps({ write: () => json({ reasonCode: 'sdap.access.grant.would_lower_existing' }, 409) });
-    renderModal(props);
+  it('a refused suggestion Grant or Dismiss shows the sentence inline', async () => {
+    renderModal(makeProps({ suggestions: [PENDING_SUGGESTION], write: refusal({ detail: SERVER_SENTENCE }) }));
     await loaded();
 
-    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Grant Pat Paralegal' }));
+    expect(await screen.findByText(SERVER_SENTENCE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' })).toBeEnabled());
+    expect(screen.getByText(SERVER_SENTENCE)).toBeInTheDocument();
+    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+  });
+
+  it('a 409 with another reason code is an ordinary failure', async () => {
+    renderModal(makeProps({ write: () => json({ reasonCode: 'sdap.access.grant.would_lower_existing' }, 409) }));
+    await loaded();
+
+    await revokeCarla();
 
     expect(await screen.findByText(/Failed to revoke access for Carla Contact/)).toBeInTheDocument();
-    expect(screen.queryByText('Access follows the parent')).not.toBeInTheDocument();
   });
 });
 
@@ -414,10 +415,9 @@ describe('AccessGrantModal — inherited user shares (task 175)', () => {
     modifiedOn: '2026-10-01T00:00:00Z',
     inheritedFrom: { recordType: 'matter', recordId: PARENT_MATTER_ID },
   };
-  const DIRECT: IShareFixture = { systemUserId: USER_ID, fullName: 'Uma User', accessLevel: 100000000 };
 
-  it('is a read-only row, labelled with its parent, even on a parentless record', async () => {
-    renderModal(makeProps({ shares: [INHERITED, DIRECT] }));
+  it('is a read-only row, labelled with its parent', async () => {
+    renderModal(makeProps({ shares: [INHERITED, DIRECT_SHARE], overrides: { followsParents: [PARENT_MATTER] } }));
     await loaded();
 
     const row = currentAccessRow('Ingrid Inherited');
@@ -432,11 +432,7 @@ describe('AccessGrantModal — inherited user shares (task 175)', () => {
 
   it('still carries the No Access marker of a user wall in force, naming the direct parent it reaches through', async () => {
     renderModal(
-      makeProps({
-        shares: [INHERITED],
-        noAccessEntries: [entry({})],
-        overrides: { followsParents: [PARENT_MATTER] },
-      })
+      makeProps({ shares: [INHERITED], noAccessEntries: [entry({})], overrides: { followsParents: [PARENT_MATTER] } })
     );
     await loaded();
 
@@ -450,7 +446,7 @@ describe('AccessGrantModal — inherited user shares (task 175)', () => {
   });
 
   it('a share with inheritedFrom null is a direct, revocable share', async () => {
-    renderModal(makeProps({ shares: [{ ...DIRECT, inheritedFrom: null }] }));
+    renderModal(makeProps({ shares: [{ ...DIRECT_SHARE, inheritedFrom: null }] }));
     await loaded();
 
     const row = currentAccessRow('Uma User');
@@ -486,7 +482,6 @@ describe('task 175 rules (pure)', () => {
     expect(describeCoverage(viaParent, [{ recordId: PARENT_MATTER_ID, name: 'Acme v. Beta' }])).toBe(
       'Through the secure matter this record is filed under: Acme v. Beta'
     );
-    // A record further up (not a direct parent) is labelled by its type alone; so is an unnamed direct parent.
     const viaGrandparent = entry({ coveredRecordId: GRANDPARENT_ID });
     expect(describeCoverage(viaGrandparent, [{ recordId: PARENT_MATTER_ID, name: 'Acme v. Beta' }])).toBe(
       'Through the secure matter this record is filed under'
@@ -506,7 +501,6 @@ describe('task 175 rules (pure)', () => {
     ).toBe(
       'Every record referencing Acme LLP, reaching this one through the secure matter it is filed under: Acme v. Beta'
     );
-    // This record itself is never given a parent's name.
     expect(
       describeCoverage(entry({ viaSecureParent: false, coveredRecordId: PARENT_MATTER_ID }), [PARENT_MATTER])
     ).toBe('This record');
@@ -529,9 +523,138 @@ describe('task 175 rules (pure)', () => {
     expect(parseFollowsParents({})).toEqual([]);
   });
 
+  it('parses the floor; absent or off-contract fields are no floor', () => {
+    expect(
+      parseAccessFloor({ floorSecure: true, floorAccessPermission: 'restricted', parentUnverifiable: false })
+    ).toEqual(RESTRICTED_FLOOR);
+    expect(parseAccessFloor({})).toEqual({ floorSecure: null, floorAccessPermission: null, parentUnverifiable: false });
+    expect(
+      parseAccessFloor({ floorSecure: 'yes', floorAccessPermission: 'unknown', parentUnverifiable: 'true' })
+    ).toEqual({ floorSecure: null, floorAccessPermission: null, parentUnverifiable: false });
+    expect(parseAccessFloor(null).parentUnverifiable).toBe(false);
+    expect(parseAccessFloor({ parentUnverifiable: true, floorSecure: null, floorAccessPermission: null })).toEqual({
+      floorSecure: null,
+      floorAccessPermission: null,
+      parentUnverifiable: true,
+    });
+  });
+
   it('counts the other parents', () => {
     expect(otherParentsSuffix(1)).toBe('');
     expect(otherParentsSuffix(2)).toBe(' and 1 other');
     expect(otherParentsSuffix(4)).toBe(' and 3 others');
+  });
+});
+
+describe('the Access Permission pill under a floor (pure, task 175 round 87)', () => {
+  const floor = (floorAccessPermission: IAccessFloor['floorAccessPermission']): IAccessFloor => ({
+    floorSecure: null,
+    floorAccessPermission,
+    parentUnverifiable: false,
+  });
+  const labels = (r: { options: Array<{ label: string }> }) => r.options.map(o => o.label);
+
+  it('offers only the options at or above the floor, and stays editable', () => {
+    expect(resolveAccessPermissionPill(OPTIONS, floor('restricted'), VALUES)).toEqual({
+      options: [OPTIONS[2]],
+      readOnly: false,
+    });
+    expect(labels(resolveAccessPermissionPill(OPTIONS, floor('limited'), VALUES))).toEqual(['Limited', 'Restricted']);
+    expect(labels(resolveAccessPermissionPill(OPTIONS, floor('standard'), VALUES))).toEqual([
+      'Standard',
+      'Limited',
+      'Restricted',
+    ]);
+  });
+
+  it('is unchanged without a floor (parentless, or an older BFF)', () => {
+    expect(resolveAccessPermissionPill(OPTIONS, null, VALUES)).toEqual({ options: OPTIONS, readOnly: false });
+    expect(resolveAccessPermissionPill(OPTIONS, undefined, VALUES)).toEqual({ options: OPTIONS, readOnly: false });
+    expect(resolveAccessPermissionPill(OPTIONS, floor(null), VALUES)).toEqual({ options: OPTIONS, readOnly: false });
+  });
+
+  it('is read-only when what the record is filed under could not be read (fail closed)', () => {
+    expect(
+      resolveAccessPermissionPill(
+        OPTIONS,
+        { floorSecure: null, floorAccessPermission: null, parentUnverifiable: true },
+        VALUES
+      )
+    ).toEqual({ options: OPTIONS, readOnly: true });
+  });
+
+  it('is read-only rather than offering a looser value when no option meets the floor', () => {
+    expect(resolveAccessPermissionPill(OPTIONS.slice(0, 2), floor('restricted'), VALUES)).toEqual({
+      options: OPTIONS.slice(0, 2),
+      readOnly: true,
+    });
+  });
+
+  it('detects a value looser than the floor (the host ignores such a pick)', () => {
+    expect(isLooserThanFloor(100000000, 'limited', VALUES)).toBe(true);
+    expect(isLooserThanFloor(null, 'limited', VALUES)).toBe(true);
+    expect(isLooserThanFloor(100000001, 'limited', VALUES)).toBe(false);
+    expect(isLooserThanFloor(100000002, 'limited', VALUES)).toBe(false);
+    expect(isLooserThanFloor(100000000, null, VALUES)).toBe(false);
+    expect(accessPermissionStateOf(100000002, VALUES)).toBe('restricted');
+    expect(accessPermissionStateOf(null, VALUES)).toBe('standard');
+  });
+});
+
+describe('inherited or set on this record (pure, task 175 round 87)', () => {
+  it('Access Permission: above the floor is set here; at a non-Standard floor is inherited; Standard/Standard says nothing', () => {
+    expect(accessPermissionOrigin('restricted', 'limited', [PARENT_MATTER])).toEqual({ kind: 'setOnRecord' });
+    expect(accessPermissionOrigin('restricted', 'restricted', [PARENT_MATTER])).toEqual({
+      kind: 'inherited',
+      parent: PARENT_MATTER,
+    });
+    expect(accessPermissionOrigin('limited', 'limited', [])).toEqual({ kind: 'inherited', parent: null });
+    expect(accessPermissionOrigin('standard', 'standard', [PARENT_MATTER])).toBeNull();
+    expect(accessPermissionOrigin('limited', 'standard', [PARENT_MATTER])).toEqual({ kind: 'setOnRecord' });
+    expect(accessPermissionOrigin('restricted', null, [PARENT_MATTER])).toBeNull();
+  });
+
+  it('Secure: with a secure floor inherited, without one set on this record, unknown floor says nothing', () => {
+    expect(secureOrigin(true, true, [PARENT_MATTER])).toEqual({ kind: 'inherited', parent: PARENT_MATTER });
+    expect(secureOrigin(true, false, [PARENT_MATTER])).toEqual({ kind: 'setOnRecord' });
+    expect(secureOrigin(true, null, [PARENT_MATTER])).toBeNull();
+    expect(secureOrigin(false, true, [PARENT_MATTER])).toBeNull();
+  });
+
+  it('reads as a person reads it', () => {
+    expect(describeOrigin({ kind: 'inherited', parent: PARENT_MATTER })).toBe('inherited from Matter Acme v. Beta');
+    expect(describeOrigin({ kind: 'inherited', parent: { ...PARENT_MATTER, recordType: 'project', name: null } })).toBe(
+      'inherited from the parent project'
+    );
+    expect(describeOrigin({ kind: 'setOnRecord' })).toBe('set on this record');
+    expect(describeOrigin(null)).toBe('');
+    expect(
+      describeEffectiveAccess({
+        accessPermission: 'restricted',
+        isSecure: true,
+        floor: RESTRICTED_FLOOR,
+        parents: [PARENT_MATTER],
+      })
+    ).toEqual([
+      'Access Permission: Restricted (inherited from Matter Acme v. Beta)',
+      'Secure (inherited from Matter Acme v. Beta)',
+    ]);
+    // A stored value below the floor is enforced as the floor.
+    expect(
+      describeEffectiveAccess({
+        accessPermission: 'standard',
+        isSecure: false,
+        floor: { floorSecure: false, floorAccessPermission: 'limited', parentUnverifiable: false },
+        parents: [PARENT_MATTER],
+      })
+    ).toEqual(['Access Permission: Limited (inherited from Matter Acme v. Beta)']);
+    expect(
+      describeEffectiveAccess({
+        accessPermission: 'standard',
+        isSecure: false,
+        floor: { floorSecure: false, floorAccessPermission: 'standard', parentUnverifiable: false },
+        parents: [PARENT_MATTER],
+      })
+    ).toEqual(['Access Permission: Standard']);
   });
 });

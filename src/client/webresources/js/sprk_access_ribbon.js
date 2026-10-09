@@ -45,13 +45,15 @@
  * team in ANOTHER business unit - a secure record reassigned outside Spaarke - unfinished, Make Secure offered. An
  * answer that cannot be had keeps Make Secure hidden on that record (Remove Secure still follows the flag).
  *
- * A record that follows a parent (task 175, owner round 84: "a child's access always follows its parent, both ways, and
- * is locked while it has a parent"): a work assignment or project filed under a matter or project takes its Secure
- * designation from that parent, so Make Secure and Remove Secure are HIDDEN on it. The same can-manage-access answer that
- * gives the Write verdict names the record's direct filing parents (`followsParents`) and whether they could be read
- * (`parentUnverifiable`); a non-empty list, or parentUnverifiable === true, hides both commands (fail closed). An answer
- * without those fields (an older BFF) is "no parent". The server refuses both calls on such a record anyway (409
- * sdap.access.access_follows_parent). A matter never has a parent. Update Access is unaffected.
+ * A record filed under a parent (task 175, owner round 87: "the parent sets a FLOOR"): a work assignment or project filed
+ * under a matter or project inherits Secure from it and may never be looser, but may be made stricter by hand. The same
+ * can-manage-access answer that gives the Write verdict says whether the record's floor is secure (`floorSecure`) and
+ * whether what it is filed under could be read (`parentUnverifiable`). Make Secure follows its normal rules on such a
+ * record (making a child stricter is allowed); Remove Secure is HIDDEN when floorSecure === true (the record's Secure
+ * comes from the parent; removing it would breach the floor - the server refuses it 409
+ * sdap.access.access_follows_parent); parentUnverifiable === true hides both (fail closed). Otherwise Remove Secure
+ * follows its normal rules (secure + Write; the server enforces F3). An answer without these fields (an older BFF) is "no
+ * floor". A matter never has a parent. Update Access is unaffected.
  *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
@@ -87,15 +89,17 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // Restricted record (any selected Restricted row, on a grid); the principal_external_on_restricted warning and the
     // server's no-internal-reader sentence after Make Secure. 1.7.0 - task 175 (owner round 84): Make Secure / Remove
     // Secure hidden on a record that follows a parent (can-manage-access followsParents / parentUnverifiable, from the
-    // same cached answer); the access_follows_parent refusal.
-    ns.VERSION = "1.7.0";
+    // same cached answer); the access_follows_parent refusal. 1.8.0 - task 175 (owner round 87, the parent sets a floor):
+    // Make Secure follows its normal rules on a filed record; Remove Secure hidden when floorSecure is true; both hidden
+    // when parentUnverifiable is true.
+    ns.VERSION = "1.8.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
     var CACHE_KEY_PREFIX = "sprk_access_canmanage_";
 
     /**
-     * How long the secure-command rules trust a cached gate answer's parent facts (task 175): a record filed or un-filed
+     * How long the secure-command rules trust a cached gate answer's floor facts (task 175): a record filed or un-filed
      * since is seen within this time. Update Access keeps the cached Write verdict for the session, as before.
      */
     var GATE_FRESH_MS = 30000;
@@ -128,30 +132,28 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         return !!body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
     }
 
-    /** "No" for the caller: no Write verdict (the parent facts are moot then). */
-    var NO_VERDICT = Object.freeze({ can: false, followsParent: true });
+    /** "No" for the caller: no Write verdict (the floor facts are moot then; fail closed). */
+    var NO_VERDICT = Object.freeze({ can: false, unverifiable: true, floorSecure: true });
 
     /**
-     * Task 175: whether a gate answer says the record follows a parent - a non-empty `followsParents` (its direct filing
-     * parents), or `parentUnverifiable === true` (what it is filed under could not be read: fail closed). An answer without
-     * either field (an older BFF) is "no parent".
+     * Task 175 (owner round 87): the floor facts of one "yes" answer - `unverifiable` when parentUnverifiable === true
+     * (what the record is filed under could not be read: fail closed), `floorSecure` when floorSecure === true (its Secure
+     * is inherited). A missing or null field (an older BFF, a parentless record) is false: no floor.
      */
-    function followsParentOf(body) {
-        if (body.parentUnverifiable === true) {
-            return true;
-        }
-
-        return Array.isArray(body.followsParents) && body.followsParents.length > 0;
+    function verdictOf(body) {
+        return { can: true, unverifiable: body.parentUnverifiable === true, floorSecure: body.floorSecure === true };
     }
 
-    /** Caches one verdict for the record: { can, followsParent, at } as JSON. */
+    /** Caches one verdict for the record: { can, unverifiable, floorSecure, at } as JSON. */
     function cacheVerdict(cacheKey, verdict) {
-        safeSessionSet(cacheKey, JSON.stringify({ can: verdict.can, followsParent: verdict.followsParent, at: Date.now() }));
+        safeSessionSet(cacheKey, JSON.stringify({
+            can: verdict.can, unverifiable: verdict.unverifiable, floorSecure: verdict.floorSecure, at: Date.now()
+        }));
     }
 
     /**
      * The cached verdict for the record, or null when there is none - or only a value an older version of this script
-     * cached ("true"/"false" carries no parent facts, so it is asked again).
+     * cached ("true"/"false", or 1.7.0's { can, followsParent }: no floor facts, so it is asked again).
      */
     function cachedVerdict(cacheKey) {
         var raw = safeSessionGet(cacheKey);
@@ -161,8 +163,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
         try {
             var v = JSON.parse(raw);
-            return v && typeof v === "object" && typeof v.can === "boolean" && typeof v.followsParent === "boolean" &&
-                typeof v.at === "number" ? v : null;
+            return v && typeof v === "object" && typeof v.can === "boolean" && typeof v.unverifiable === "boolean" &&
+                typeof v.floorSecure === "boolean" && typeof v.at === "number" ? v : null;
         } catch (e) {
             return null;
         }
@@ -172,8 +174,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     var pendingGate = {};
 
     /**
-     * Asks the server whether the caller may manage access on the record and (task 175) whether the record follows a
-     * parent - ONE call. Resolves { can, followsParent } and caches it; never rejects (a failure is NO_VERDICT, not cached -
+     * Asks the server whether the caller may manage access on the record and (task 175) its floor facts - ONE call.
+     * Resolves { can, unverifiable, floorSecure } and caches it; never rejects (a failure is NO_VERDICT, not cached -
      * retried on the next evaluation).
      */
     function queryCanManage(record, cacheKey) {
@@ -198,7 +200,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                         return response.json().then(function (body) {
                             // The answer must be about THIS record (the gate echoes the id it answered about).
                             var can = answersFor(body, record) && body.canManageAccess === true;
-                            var verdict = can ? { can: true, followsParent: followsParentOf(body) } : NO_VERDICT;
+                            var verdict = can ? verdictOf(body) : NO_VERDICT;
                             cacheVerdict(cacheKey, verdict);
                             return verdict;
                         });
@@ -222,7 +224,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     /**
      * The gate verdict for the record: the cached one when there is one (with `fresh`, only when younger than
      * GATE_FRESH_MS), otherwise the question to the server. A cache HIT answers synchronously.
-     * @returns {{can: boolean, followsParent: boolean}|Promise<{can: boolean, followsParent: boolean}>}
+     * @returns {{can: boolean, unverifiable: boolean, floorSecure: boolean}|Promise<object>}
      */
     function gateVerdict(record, fresh) {
         var cacheKey = gateCacheKey(record);
@@ -633,11 +635,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
-     * the record, the same rule as Update Access) AND the record does not follow a parent (task 175: the same answer's
-     * followsParents / parentUnverifiable, at most GATE_FRESH_MS old) AND `wanted(state)` holds for the record's secure
-     * state. An unknown flag satisfies neither rule, so a failed or masked read hides both commands.
+     * the record, the same rule as Update Access) AND what the record is filed under could be read (task 175:
+     * parentUnverifiable is not true - fail closed) AND `floorAllows(verdict)` holds (the same answer, at most
+     * GATE_FRESH_MS old) AND `wanted(state)` holds for the record's secure state. An unknown flag satisfies neither rule,
+     * so a failed or masked read hides both commands.
      */
-    function secureCommandEnabled(primaryControl, wanted) {
+    function secureCommandEnabled(primaryControl, wanted, floorAllows) {
         try {
             if (!helpersLoaded()) {
                 return false;
@@ -656,9 +659,13 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                         return false;
                     }
 
-                    if (verdict.followsParent !== false) {
-                        console.info(LOG, "This record follows a parent (or what it is filed under could not be read): " +
-                            "its Secure designation is set there, so Make Secure and Remove Secure stay hidden.");
+                    if (verdict.unverifiable !== false) {
+                        console.info(LOG, "What this record is filed under could not be read, so Make Secure and Remove " +
+                            "Secure stay hidden.");
+                        return false;
+                    }
+
+                    if (floorAllows && floorAllows(verdict) !== true) {
                         return false;
                     }
 
@@ -677,7 +684,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     /**
      * EnableRule for "Make Secure": the caller has Write, and the record is NOT secure - or it is flagged secure but its
      * transition did not finish (round 40 item 1; acceptance (e) amended: hidden on a PROVISIONED secure record). Calling
-     * it again then finishes the transition: the server resumes or re-runs it.
+     * it again then finishes the transition: the server resumes or re-runs it. On a record filed under a parent the same
+     * rules hold (task 175, owner round 87: making a child stricter is allowed).
      */
     ns.canMakeSecure = function (primaryControl) {
         return secureCommandEnabled(primaryControl, function (state) {
@@ -685,10 +693,21 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         });
     };
 
-    /** EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3). */
+    /**
+     * EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3) - and (task
+     * 175, owner round 87) its floor is not secure: a record whose Secure is inherited from what it is filed under cannot
+     * go below that floor, so the command is hidden there.
+     */
     ns.canRemoveSecure = function (primaryControl) {
         return secureCommandEnabled(primaryControl, function (state) {
             return state.secure === true;
+        }, function (verdict) {
+            if (verdict.floorSecure !== false) {
+                console.info(LOG, "This record's Secure designation is inherited from what it is filed under, so Remove " +
+                    "Secure stays hidden (remove it there, or file the record elsewhere).");
+                return false;
+            }
+            return true;
         });
     };
 
@@ -747,13 +766,15 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     });
 
     /**
-     * Task 175 (owner round 84): the server's 409 refusal of Make Secure and Remove Secure on a work assignment or project
-     * filed under a parent (extensions parentRecordType, parentRecordId, parentName). Its `detail` is shown as sent.
+     * Task 175 (owner round 87): the server's 409 refusal of Remove Secure on a work assignment or project whose floor is
+     * secure - filed under a secure parent (extensions parentRecordType, parentRecordId, parentName). Its `detail` is shown
+     * as sent.
      */
     ns.ACCESS_FOLLOWS_PARENT = "sdap.access.access_follows_parent";
 
     /** That refusal's text when the server sent no `detail`: {record} per table, {parent} its parentName or "its parent". */
-    ns.ACCESS_FOLLOWS_PARENT_FALLBACK = "This {record} is filed under {parent}, and its access follows it. Change it there.";
+    ns.ACCESS_FOLLOWS_PARENT_FALLBACK = "This {record} is filed under {parent}, which is secure; its secure designation " +
+        "comes from there. Remove it there, or file it elsewhere.";
 
     /**
      * A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled); for access_follows_parent
@@ -931,8 +952,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return result;
             }
 
-            // Task 175: refused because the record follows a parent the cached gate answer did not know of - forget that
-            // answer, so the refreshed ribbon asks again and hides the command.
+            // Task 175: refused because the record's floor is secure and the cached gate answer did not know it - forget
+            // that answer, so the refreshed ribbon asks again and hides Remove Secure.
             if (reasonCodeOf(result) === ns.ACCESS_FOLLOWS_PARENT) {
                 safeSessionRemove(gateCacheKey(record));
             }

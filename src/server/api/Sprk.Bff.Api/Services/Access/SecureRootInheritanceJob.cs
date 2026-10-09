@@ -19,15 +19,16 @@ namespace Sprk.Bff.Api.Services.Access;
 /// where a parent's later share change (a model-driven-app Share, a <c>/share-user</c>) reaches its filed records.</para>
 /// <para><b>Writes ON, enabled</b> (owner R3/R4: minutes, never hourly; round 6: such a record IS secure). Every write is
 /// provisioning's own (the record's creator shared first, read back, compensated) or the synchronizer's add-only mirror.</para>
-/// <para><b>Both ways (task 175, owner round 84; replaces round 6 item 4's "never auto-unsecure").</b> After the securing
-/// loop, every work assignment and project filed under SOMETHING is decided over the one batched walk
-/// (<see cref="SecureRootInheritance.FollowParentsPassAsync"/>): one whose secure parents are all no longer secure follows
-/// them out of isolation through the unsecure endpoint's own steps (ownership to the parents' business unit's team first,
-/// the flag cleared last), and one whose Access Permission differs from its parents' is written (one column). Only what
+/// <para><b>Both ways, with a floor (task 175: owner round 84, refined by round 87).</b> After the securing loop, every work
+/// assignment and project is decided over the one batched walk (<see cref="SecureRootInheritance.FollowParentsPassAsync"/>):
+/// its stored values become max(own, floor) — the floor its parents set, and what was set on it by hand (its access record,
+/// <c>sprk_accessinheritance</c>). An inherited Secure whose parents are no longer secure follows them out of isolation
+/// through the unsecure endpoint's own steps (ownership to the parents' business unit's team first, the flag cleared last);
+/// an inherited Access Permission follows its parents both ways; an own value stays; a re-file never loosens. Only what
 /// differs is written; a project changed here sends what is filed under it round again in the same run; un-secures are
-/// bounded (<see cref="MaxUnsecuresPerRun"/>, a cursor like the provisionings') and so are the Access Permission writes
-/// (<see cref="MaxPermissionWritesPerRun"/>). A record whose step did not complete stays at the more restrictive state and
-/// fails the run, named; the next run completes it. A record whose filing cannot be decided is left as it is and reported in
+/// bounded (<see cref="MaxUnsecuresPerRun"/>, a cursor like the provisionings') and so are the other writes
+/// (<see cref="MaxRecordWritesPerRun"/>). A record whose step did not complete stays at the more restrictive state and
+/// fails the run, named; the next run completes it. A record that cannot be decided is left as it is and reported in
 /// <c>followParents.undetermined</c> / <c>problems</c> without failing the run (task 173's precedent: one bad row must not
 /// fail every run; enforcement already treats it as secure and Restricted).</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: each record's step is idempotent and read back (an isolated record is only given a
@@ -69,8 +70,8 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
     /// <summary>Task 175: un-secures per run (each moves ownership and revokes shares); the rest wait for the next run.</summary>
     internal const int MaxUnsecuresPerRun = 25;
 
-    /// <summary>Task 175: Access Permission writes per run (one column each); the rest wait for the next run.</summary>
-    internal const int MaxPermissionWritesPerRun = 500;
+    /// <summary>Task 175: other followed records per run (an Access Permission or an access record, one column each).</summary>
+    internal const int MaxRecordWritesPerRun = 500;
 
     /// <summary>Records listed in <c>ResultJson</c> (the per-record log lines are complete).</summary>
     internal const int MaxSampledRecords = 200;
@@ -209,7 +210,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
         lock (_cursorGate)
             unsecureAfter = _unsecureCursor;
         var follow = await inheritance.FollowParentsPassAsync(
-            traceId, unsecureAfter, MaxUnsecuresPerRun, MaxPermissionWritesPerRun, cancellationToken).ConfigureAwait(false);
+            traceId, unsecureAfter, MaxUnsecuresPerRun, MaxRecordWritesPerRun, cancellationToken).ConfigureAwait(false);
         lock (_cursorGate)
             _unsecureCursor = follow.UnsecureResumeAfter;
         if (follow.NotCompleted > 0)
@@ -256,7 +257,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                           "provisionings; the next run continues from where this one stopped.",
                     follow.Deferred == 0 ? null
                         : $"{follow.Deferred} filed record(s) were not brought into step with their parents past this run's bounds " +
-                          $"({MaxUnsecuresPerRun} un-secures, {MaxPermissionWritesPerRun} Access Permission writes); the next run continues.",
+                          $"({MaxUnsecuresPerRun} un-secures, {MaxRecordWritesPerRun} other records); the next run continues.",
                 }.Where(m => m is not null)),
             ProcessedItems: filed.Count - deferred,
             Duration: duration,
@@ -285,6 +286,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     inStep = follow.InStep,
                     unsecured = follow.Unsecured,
                     permissionsChanged = follow.PermissionsChanged,
+                    accessRecordsWritten = follow.MarkersWritten,
                     undetermined = follow.Undetermined,
                     notCompleted = follow.NotCompleted,
                     deferred = follow.Deferred,

@@ -642,16 +642,11 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
-    /// Task 175 (owner round 84) supersedes this block's five <c>/provision-project</c> cases on a work assignment filed under a
-    /// secure matter (a named colleague or the caller on the matter's list, the matter unreadable before or during the
-    /// colleagues): a caller can no longer provision a record WITH a parent at all — it is refused 409
-    /// <c>access_follows_parent</c> before anything is read or written, so no colleague is shared and no list is consulted.
-    /// The walls a filed record's INHERITED provisioning honours (its recorded creator against the record's and every secure
-    /// parent's list, fresh and resumed) stay pinned by <see cref="SecureRootInheritanceRound31Tests"/> and
-    /// <see cref="SecureRootInheritanceWriterTests"/>.
+    /// <c>/provision-project</c> on a work assignment filed under a secure matter: a colleague on the MATTER's No Access list
+    /// is skipped with the existing per-person code and a message naming the matter's list; the other colleague is shared.
     /// </summary>
     [Fact]
-    public async Task ProvisioningAFiledRecord_WithNamedColleagues_IsRefusedAsFollowingItsParent_AndSharesNobody()
+    public async Task ProvisioningAFiledRecord_SkipsANamedColleagueOnTheSecureMattersNoAccessList()
     {
         var (matter, workAssignment, other) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
@@ -662,28 +657,48 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
             new { recordType = "workassignment", recordId = workAssignment, sharePrincipalIds = new[] { Colleague, other } });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
-        var problem = await JsonOf(response);
-        problem.GetProperty("reasonCode").GetString().Should().Be(AccessFollowsParent.ReasonCode);
-        problem.GetProperty("parentRecordId").GetGuid().Should().Be(matter);
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
-        _fixture.ShareMaskOf(workAssignment, other).Should().Be(0, "refused before anything is written");
-        _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "walled off the matter it is filed under");
+        _fixture.ShareMaskOf(workAssignment, other).Should().NotBe(0);
+        var skipped = (await JsonOf(response)).GetProperty("skippedPrincipals").EnumerateArray().Single();
+        skipped.GetProperty("systemUserId").GetGuid().Should().Be(Colleague);
+        skipped.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalNoAccess);
+        skipped.GetProperty("message").GetString().Should().Contain("secure matter this record is filed under");
     }
 
     /// <summary>
-    /// What a work assignment is filed under cannot be read when a caller provisions it — fresh, or resumed (already
-    /// team-owned, its container missing): refused 500 <c>parent_unverifiable</c> before any write — never "parentless" on a
-    /// guess (task 175), so its lock cannot be skipped by an unreadable matter.
+    /// Round 31 item 1 through the same entry point: the caller provisioning a work assignment filed under a secure matter is
+    /// on the MATTER's list — refused before any write, the message naming the matter's list (never an entry).
     /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ProvisioningAFiledRecord_WhenTheMatterItIsFiledUnderCannotBeRead_IsRefused(bool resume)
+    [Fact]
+    public async Task ProvisioningAFiledRecord_WhenTheCallerIsOnTheSecureMattersNoAccessList_IsRefusedNamingThatList()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
-        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: resume ? SecureTeam : null, isSecure: true);
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: true);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, matter);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId = workAssignment });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        problem.GetProperty("detail").GetString().Should().Contain("the No Access list of the secure matter it is filed under");
+        _fixture.OwningTeamOf(workAssignment).Should().BeNull("nothing was changed");
+    }
+
+    /// <summary>
+    /// The matter a work assignment is filed under cannot be read when its creator provisions it: refused before any write
+    /// (unverifiable), the message saying it is a secure record it is filed under whose list could not be checked.
+    /// </summary>
+    [Fact]
+    public async Task ProvisioningAFiledRecord_WhenTheMatterItIsFiledUnderCannotBeRead_IsRefusedNamingThatList()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: true);
         World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
         World.FailingRowReadsOf("sprk_matter", matter);
 
@@ -691,8 +706,57 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
             new { recordType = "workassignment", recordId = workAssignment });
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-        (await JsonOf(response)).GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonParentUnverifiable);
-        _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable);
+        problem.GetProperty("detail").GetString().Should().Contain("the No Access list of a secure record it is filed under");
+    }
+
+    /// <summary>The same on the RESUME path (the work assignment already team-owned, its container missing): refused, naming that list.</summary>
+    [Fact]
+    public async Task ResumingAFiledRecord_WhenTheMatterItIsFiledUnderCannotBeRead_IsRefusedNamingThatList()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: SecureTeam, isSecure: true);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        World.FailingRowReadsOf("sprk_matter", matter);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId = workAssignment });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorNoAccess);
+        problem.GetProperty("detail").GetString().Should().Contain("the No Access list of a secure record it is filed under");
+    }
+
+    /// <summary>
+    /// The matter becomes unreadable after the creator's check (between the creator's share and the colleagues'): the named
+    /// colleague is skipped as unverifiable, the warning saying it is a secure record it is filed under whose list could not
+    /// be checked.
+    /// </summary>
+    [Fact]
+    public async Task ProvisioningAFiledRecord_WhenTheMatterBecomesUnreadableBeforeTheColleagues_SkipsThemNamingThatList()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: true);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        _fixture.OnGranted = (record, principal) =>
+        {
+            if (record == workAssignment && principal == DataversePrincipalRef.User(Creator))
+                World.FailingRowReadsOf("sprk_matter", matter);
+        };
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId = workAssignment, sharePrincipalIds = new[] { Colleague } });
+
+        var body = await JsonOf(response);
+        var skipped = body.GetProperty("skippedPrincipals").EnumerateArray().Single();
+        skipped.GetProperty("systemUserId").GetGuid().Should().Be(Colleague);
+        skipped.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalNoAccessUnverifiable);
+        skipped.GetProperty("message").GetString().Should().Contain("the No Access list of a secure record this record is filed under");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
     }
 
     /// <summary>

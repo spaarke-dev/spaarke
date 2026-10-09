@@ -17,9 +17,9 @@ using static Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureRootInheritanc
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
 /// <summary>
-/// unified-access-control-r2 task 175 (owner round 84: "Child access should always follow parent; if parent changes, then
-/// child changes. ... if a child has a parent then the access cannot be changed manually") — the STORED Secure flag and Access
-/// Permission of a filed work assignment or project follow its parents both ways, and are locked while it has a parent. Driven
+/// unified-access-control-r2 task 175 (owner round 84, refined by round 87: "the parent sets a FLOOR; a child may be
+/// stricter") — the STORED Secure flag and Access Permission of a filed work assignment or project are never looser than its
+/// parents'; an inherited value follows them both ways, a value set on the child stays, and a re-file never loosens. Driven
 /// through the REAL routes (<c>/unsecure-project</c>, <c>/provision-project</c>), the REAL <see cref="SecureRootInheritance"/>
 /// and the REAL <see cref="SecureRootInheritanceJob"/> over the provisioning fixture's Dataverse and its
 /// <see cref="SecureChildShareWorld"/>.
@@ -120,6 +120,7 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         }
     }
 
+
     // ── AC 2: the Access Permission follows the parent, both ways; correct rows are not written ──────────────────────────
 
     /// <summary>
@@ -156,111 +157,201 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         _fixture.IsSecureOf(child).Should().BeFalse("nothing about its Secure flag changed");
     }
 
-    // ── AC 3: re-file — away from a secure parent it follows the new one; no parent keeps its values, editable ──────────
+
+    // ── Round 87: own vs inherited; a re-file never loosens; the floor lock ────────────────────────────────────────────
+
+    /// <summary>The access record (sprk_accessinheritance) as a test seeds it: what the record's values were derived from.</summary>
+    private void SeedRecord(string table, Guid id, bool floorSecure, int floorPermission, bool ownSecure, int? ownPermission,
+        params (string Table, Guid Id)[] parents) =>
+        World.Set(table, id, AccessInheritance.Column, new AccessInheritance(
+            parents.Select(p => $"{p.Table}:{p.Id:D}").ToList(), floorSecure, floorPermission, ownSecure, ownPermission).Serialize());
+
+    private AccessInheritance? RecordOf(string table, Guid id) =>
+        AccessInheritance.Parse(World.ValueOf<string>(table, id, AccessInheritance.Column)).Value;
 
     /// <summary>
-    /// AC 3: a secure work assignment re-filed (a form edit) from secure matter M to ordinary matter N is no longer secure
-    /// after one job run (the cascade's path: owned by N's business unit team), and takes N's Access Permission.
+    /// Round 87 item 2 (the owner's example): a work assignment made secure BY HAND under an ordinary matter keeps it when the
+    /// matter is later secured and then un-secured — Make Secure on a child is allowed (it only makes it stricter) and records
+    /// the designation as the record's own; only an inherited Secure follows a parent down.
     /// </summary>
     [Fact]
-    public async Task ReFilingAChildFromASecureMatterToAnOrdinaryOne_MakesItNotSecure_InOneRun()
+    public async Task AChildMadeSecureByHand_StaysSecure_WhenItsParentIsSecuredAndThenUnsecured()
     {
-        var (secureMatter, ordinaryMatter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, name: "Harbour");
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+
+        var madeSecure = await PostAsync(ProvisionRoute, new { recordType = "workassignment", recordId = workAssignment, transition = "make-secure" });
+        madeSecure.StatusCode.Should().Be(HttpStatusCode.OK, await madeSecure.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("tightening a child is never refused");
+        RecordOf("sprk_workassignment", workAssignment)!.OwnSecure.Should().BeTrue("Make Secure records it as set on the record");
+
+        (await PostAsync(ProvisionRoute, new { recordType = "matter", recordId = matter })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        (await PostAsync(UnsecureRoute, new { recordType = "matter", recordId = matter })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        _fixture.IsSecureOf(matter).Should().BeFalse();
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("its own secure designation stays when the parent loosens");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureTeam);
+    }
+
+    /// <summary>
+    /// Round 87 item 3: an Access Permission set on the child (Limited, chosen on the form above a Standard floor) is its own.
+    /// The matter turning Restricted raises the child to Restricted (the floor); the matter going back to Standard brings it
+    /// back to its own Limited — not to Standard.
+    /// </summary>
+    [Fact]
+    public async Task AnAccessPermissionSetOnTheChild_IsKeptUnderTheFloor_AndComesBackWhenTheParentLoosens()
+    {
+        var (matter, child) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Standard);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue(); // the record: inherited Standard
+
+        SetPermission("sprk_workassignment", child, InheritedAccessPermission.Limited); // a user, on the form
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited, "a stricter choice is allowed");
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().Be(InheritedAccessPermission.Limited);
+
+        SetPermission("sprk_matter", matter, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted, "never looser than the floor");
+
+        SetPermission("sprk_matter", matter, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited,
+            "only the inherited part follows the parent down; the value set on the child stays");
+    }
+
+    /// <summary>Round 87: a child's Access Permission set LOWER than the floor (a grid edit past the form lock) is put back.</summary>
+    [Fact]
+    public async Task AnAccessPermissionBelowTheFloor_IsPutBack()
+    {
+        var (matter, child) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Restricted);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        SetPermission("sprk_workassignment", child, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted);
+    }
+
+    /// <summary>
+    /// Round 87 item 5 (verifier F1): a re-file NEVER loosens a child. A work assignment secure and Restricted through secure
+    /// matter M, re-filed (a form edit) to ordinary Standard matter N, stays secure and Restricted; both become its own, so a
+    /// later loosening of N does not take them either. And a secure parentless work assignment filed under an ordinary matter
+    /// stays secure (the owner's example; the backfill rule for a record with no access record yet).
+    /// </summary>
+    [Fact]
+    public async Task ReFiling_NeverLoosensAChild()
+    {
+        var (secureMatter, ordinaryMatter, workAssignment, parentless) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, secureMatter);
         SetPermission("sprk_matter", secureMatter, Restricted);
         OrdinaryMatter(ordinaryMatter, Standard);
         SecureFiledWorkAssignment(_fixture, workAssignment, secureMatter);
         SetPermission("sprk_workassignment", workAssignment, Restricted);
+        _fixture.SeedWorkAssignment(parentless, owningTeamId: SecureTeam, containerId: $"b!wa-{parentless:N}", isSecure: true);
+        (await _job.RunAsync()).Success.Should().BeTrue(); // records: the filed one inherited, the parentless one its own
+        RecordOf("sprk_workassignment", workAssignment)!.OwnSecure.Should().BeFalse("secure through the matter");
 
         World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", ordinaryMatter));
+        World.Set("sprk_workassignment", parentless, "sprk_regardingmatter", new EntityReference("sprk_matter", ordinaryMatter));
         var run = await _job.RunAsync();
 
         run.Success.Should().BeTrue(run.ErrorMessage);
-        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
-        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureChildShareWorld.GeneralTeam);
-        PermissionOf("sprk_workassignment", workAssignment).Should().Be(Standard, "it follows its new matter");
-        using var doc = JsonDocument.Parse(run.ResultJson!);
-        doc.RootElement.GetProperty("followParents").GetProperty("unsecured").GetInt32().Should().Be(1);
+        foreach (var id in new[] { workAssignment, parentless })
+        {
+            _fixture.IsSecureOf(id).Should().BeTrue("a re-file never un-secures");
+            _fixture.OwningTeamOf(id).Should().Be(SecureTeam);
+            RecordOf("sprk_workassignment", id)!.OwnSecure.Should().BeTrue("what it held beyond the new floor is its own now");
+        }
+
+        PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted, "a re-file never loosens the Access Permission");
+        _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment || u.RecordId == parentless, "no un-secure step ran");
     }
 
     /// <summary>
-    /// AC 3 (second half) + AC 4: a work assignment whose parent is REMOVED keeps its values (the job writes nothing to it)
-    /// and becomes editable — a BFF write of its Access Permission passes the gate; while it had a parent the same write was
-    /// refused <c>access_follows_parent</c>, naming the matter.
+    /// Round 87 floor lock on a BFF write: an Access Permission LOWER than the parents' is refused (<c>access_follows_parent</c>,
+    /// naming the matter); an equal or stricter one passes; once the parent is removed any value passes.
     /// </summary>
     [Fact]
-    public async Task RemovingTheParent_KeepsTheValues_AndMakesThemEditable()
+    public async Task ABffWrite_BelowTheFloorIsRefused_AtOrAboveItPasses_AndWithoutAParentAnythingPasses()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
-        SecureMatter(_fixture, matter, name: "Falcon");
-        SetPermission("sprk_matter", matter, Restricted);
-        SecureFiledWorkAssignment(_fixture, workAssignment, matter);
-        SetPermission("sprk_workassignment", workAssignment, Restricted);
-        var write = new[] { new KeyValuePair<string, object?>("sprk_accesspermission", new OptionSetValue(Standard)) };
+        OrdinaryMatter(matter, InheritedAccessPermission.Limited, name: "Falcon");
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+        static KeyValuePair<string, object?>[] Write(int value) =>
+            new[] { new KeyValuePair<string, object?>("sprk_accesspermission", new OptionSetValue(value)) };
 
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            var refused = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
-                .CheckRefileAsync("sprk_workassignment", workAssignment, write, CancellationToken.None);
-            refused!.RefusalCode.Should().Be(AccessFollowsParent.ReasonCode);
-            refused.Reason.Should().Contain("Falcon");
-        }
+        using var scope = _fixture.Services.CreateScope();
+        var inheritance = scope.ServiceProvider.GetRequiredService<SecureRootInheritance>();
+
+        var refused = await inheritance.CheckRefileAsync("sprk_workassignment", workAssignment, Write(Standard), CancellationToken.None);
+        refused!.RefusalCode.Should().Be(AccessFollowsParent.ReasonCode);
+        refused.Reason.Should().Contain("Falcon");
+        (await inheritance.CheckRefileAsync("sprk_workassignment", workAssignment, Write(InheritedAccessPermission.Limited), CancellationToken.None))
+            .Should().BeNull("equal to the floor");
+        (await inheritance.CheckRefileAsync("sprk_workassignment", workAssignment, Write(Restricted), CancellationToken.None))
+            .Should().BeNull("stricter than the floor: a child may be stricter");
 
         World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
-        var run = await _job.RunAsync();
-
-        run.Success.Should().BeTrue(run.ErrorMessage);
-        _fixture.IsSecureOf(workAssignment).Should().BeTrue("a record left with no parent keeps its last values");
-        PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted);
-        World.AccessPermissionWrites.Should().NotContain(w => w.Id == workAssignment);
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            (await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
-                .CheckRefileAsync("sprk_workassignment", workAssignment, write, CancellationToken.None))
-                .Should().BeNull("a parentless record's values are its own (F3 still applies to its Secure flag)");
-        }
+        (await inheritance.CheckRefileAsync("sprk_workassignment", workAssignment, Write(Standard), CancellationToken.None))
+            .Should().BeNull("a parentless record's values are its own");
     }
 
-    // ── AC 4: the routes refuse a child with a parent; a parentless record behaves as before ──────────────────────────────
-
     /// <summary>
-    /// AC 4: Make Secure (<c>/provision-project</c>) on a work assignment filed under an ORDINARY matter is refused 409
-    /// <c>access_follows_parent</c> naming the matter, nothing written; on a parentless work assignment it secures it as
-    /// before.
+    /// Verifier K1: the floor lock's own fail-closed branch — a BFF write of the Access Permission on a work assignment whose
+    /// matter cannot be read is refused (<c>parent_undetermined</c>), never let through as "no floor".
     /// </summary>
     [Fact]
-    public async Task MakeSecure_OnAChildWithAParent_IsRefusedNamingIt_AndOnAParentlessRecordSecuresAsBefore()
+    public async Task ABffWrite_WhenWhatTheRecordIsFiledUnderCannotBeRead_IsRefused()
     {
-        var (matter, child, parentless) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        OrdinaryMatter(matter, name: "Harbour");
-        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
-        _fixture.SeedWorkAssignment(parentless, isSecure: false);
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Restricted);
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+        World.FailingRowReadsOf("sprk_matter", matter);
 
-        var refused = await PostAsync(ProvisionRoute, new { recordType = "workassignment", recordId = child, transition = "make-secure" });
+        using var scope = _fixture.Services.CreateScope();
+        var refused = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>().CheckRefileAsync(
+            "sprk_workassignment", workAssignment,
+            new[] { new KeyValuePair<string, object?>("sprk_accesspermission", new OptionSetValue(Standard)) }, CancellationToken.None);
 
-        refused.StatusCode.Should().Be(HttpStatusCode.Conflict, await refused.Content.ReadAsStringAsync());
-        var problem = await JsonOf(refused);
-        problem.GetProperty("reasonCode").GetString().Should().Be(AccessFollowsParent.ReasonCode);
-        problem.GetProperty("parentRecordType").GetString().Should().Be("matter");
-        problem.GetProperty("parentRecordId").GetGuid().Should().Be(matter);
-        problem.GetProperty("parentName").GetString().Should().Be("Harbour");
-        _fixture.Updates.Should().NotContain(u => u.RecordId == child);
-        _fixture.IsSecureOf(child).Should().BeFalse();
+        refused.Should().NotBeNull();
+        refused!.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+    }
 
-        var allowed = await PostAsync(ProvisionRoute, new { recordType = "workassignment", recordId = parentless, transition = "make-secure" });
+    /// <summary>
+    /// Round 87: removing a Secure designation set on the child by hand (its parent is NOT secure) is allowed to its F3
+    /// holder (here its creator), as on a parentless record; removing one that comes from a secure parent is refused 409
+    /// (covered by <see cref="SecureRootInheritanceTests"/>).
+    /// </summary>
+    [Fact]
+    public async Task RemoveSecure_OnAChildWhoseSecureIsItsOwn_IsAllowedLikeAParentlessRecord()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter);
+        SecureFiledWorkAssignment(_fixture, workAssignment, matter);
 
-        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
-        _fixture.IsSecureOf(parentless).Should().BeTrue("F3/Make Secure unchanged for a parentless record");
+        var response = await PostAsync(UnsecureRoute, new { recordType = "workassignment", recordId = workAssignment });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
     }
 
     // ── AC 6: a fault mid-cascade leaves the child at the more restrictive state; the next run completes it ─────────────
 
     /// <summary>
-    /// AC 6 + the seeding proof of the fail-closed ORDER: the matter is no longer secure and Standard, but the work
-    /// assignment's ownership move does not take effect (Dataverse accepts the owner PATCH and ignores it). The un-secure
-    /// stops at the read-back: the work assignment is still flagged secure, still owned by the Secure team, keeps its shares
-    /// AND keeps Restricted (the looser Access Permission is written only after the un-secure completes); the run fails
-    /// naming it. Once the fault clears, the next run completes it.
+    /// AC 6 + the seeding proof of the fail-closed ORDER: the work assignment's Secure and Restricted are INHERITED (its
+    /// record says so) from a matter that is now ordinary and Standard, but its ownership move does not take effect
+    /// (Dataverse accepts the owner PATCH and ignores it). The un-secure stops at the read-back: still flagged secure, still
+    /// owned by the Secure team, its shares kept AND still Restricted (the looser Access Permission is written only after the
+    /// un-secure completes); the run fails naming it. Once the fault clears, the next run completes it.
     /// </summary>
     [Fact]
     public async Task AFaultMidCascade_LeavesTheChildSecureAndRestricted_Reports_AndTheNextRunCompletes()
@@ -269,6 +360,8 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         OrdinaryMatter(matter, Standard); // un-secured already (its own unsecure is not under test here)
         SecureFiledWorkAssignment(_fixture, workAssignment, matter);
         SetPermission("sprk_workassignment", workAssignment, Restricted);
+        SeedRecord("sprk_workassignment", workAssignment, floorSecure: true, Restricted, ownSecure: false, ownPermission: null,
+            ("sprk_matter", matter));
         var sharesBefore = _fixture.SharesOn(workAssignment);
 
         _fixture.OwnershipPatchIsApplied = false;
@@ -281,6 +374,7 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         _fixture.SharesOn(workAssignment).Should().BeEquivalentTo(sharesBefore, "no share is revoked before the owner move holds");
         PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted,
             "the looser Access Permission waits for the un-secure (fail closed: the more restrictive state)");
+        RecordOf("sprk_workassignment", workAssignment)!.OwnSecure.Should().BeFalse("a failed un-secure never turns into 'its own'");
 
         _fixture.OwnershipPatchIsApplied = true;
         var completed = await _job.RunAsync();
@@ -293,8 +387,8 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
 
     /// <summary>
     /// Fail closed on the owner: a parent whose flag was cleared OUTSIDE the BFF but which is still owned by the Secure Record
-    /// Owners team would hand the child to that memberless team — reachable by nobody once its shares go. The child is
-    /// left secure, untouched, and reported.
+    /// Owners team would hand an inherited-secure child to that memberless team — reachable by nobody once its shares go. The
+    /// child is left secure, untouched, and reported.
     /// </summary>
     [Fact]
     public async Task AParentStillOwnedByTheSecureTeam_NeverHandsTheChildToIt_TheChildStaysSecure()
@@ -302,6 +396,8 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         _fixture.SeedMatter(matter, owningTeamId: SecureTeam, containerId: $"b!matter-{matter:N}", isSecure: false);
         SecureFiledWorkAssignment(_fixture, workAssignment, matter);
+        SeedRecord("sprk_workassignment", workAssignment, floorSecure: true, Standard, ownSecure: false, ownPermission: null,
+            ("sprk_matter", matter));
 
         var run = await _job.RunAsync();
 
@@ -339,6 +435,7 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         PermissionOf("sprk_workassignment", workAssignment).Should().Be(Restricted);
         _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
     }
+
 
     // ── #1478: the readers that decide Restricted from the stored column see Restricted through a parent ──────────────────
 

@@ -1,6 +1,6 @@
 /**
- * `sprk_access_ribbon.js` 1.7.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group (task 175's
- * "record follows a parent" rule: accessRibbon.followsParent.test.ts).
+ * `sprk_access_ribbon.js` 1.8.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group (task 175's
+ * floor rule: accessRibbon.followsParent.test.ts).
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -138,7 +138,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.7.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.8.0'); // the real script ran
   return {
     ribbon,
     retrieveRecord,
@@ -167,13 +167,13 @@ const RECORD_TYPES: Record<string, string> = {
 };
 
 /**
- * 142's cached can-manage-access verdict for this record (Write on it, the server's own answer) — since 1.7.0 (task 175)
- * cached with the record's parent facts: here a record with no parent, cached just now.
+ * 142's cached can-manage-access verdict for this record (Write on it, the server's own answer) — since 1.8.0 (task 175)
+ * cached with the record's floor facts: here a record with no floor, cached just now.
  */
 function canManage(entityName: string, can: boolean): void {
   window.sessionStorage.setItem(
     `sprk_access_canmanage_${RECORD_TYPES[entityName]}_${RECORD_ID}`,
-    JSON.stringify({ can, followsParent: !can, at: Date.now() })
+    JSON.stringify({ can, unverifiable: !can, floorSecure: !can, at: Date.now() })
   );
 }
 

@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
     Locks sprk_accesspermission on the To Do, Event, Communication and Document forms while the record has a parent, with
-    an "Access permission is inherited from ..." notification (owner rounds 81 and 84) - and, task 175, sprk_accesspermission
-    and sprk_issecure on the Work Assignment and Project main forms while the record is filed under a matter or project.
+    an "Access permission is inherited from ..." notification (owner rounds 81 and 84) - and, task 175 (owner round 87), a
+    FLOOR lock on the Work Assignment and Project main forms while the record is filed under a matter or project.
     DRY RUN by default; -Verify checks the result at any time.
 
 .DESCRIPTION
@@ -14,10 +14,12 @@
     (src/client/webresources/js/sprk_accesspermission_inherited.js), which decides "has a parent" from the server's own
     filing lookups (pinned by ParentLineageTests.FormLibraryParentLookups_MatchTheServerMap).
 
-    Task 175 (owner round 84: "a child's access always follows its parent, both ways, and is locked while it has a
-    parent"): a work assignment or project filed under a matter or project (its typed regarding lookups or the
-    polymorphic regarding pair - the server's SecureRootInheritance filing, pinned in the library's ROOT_PARENT_LOOKUPS /
-    PAIR_PARENT_TABLES) takes the parent's sprk_issecure and sprk_accesspermission; the same library locks both there.
+    Task 175 (owner round 87: "the parent sets a FLOOR"): a work assignment or project filed under a matter or project
+    (its typed regarding lookups or the polymorphic regarding pair - the server's SecureRootInheritance filing, pinned in
+    the library's ROOT_PARENT_LOOKUPS / PAIR_PARENT_TABLES) inherits Secure and Access Permission and may never be looser,
+    but may be made stricter. There the same library (1.2.0) keeps sprk_accesspermission editable, puts back a value looser
+    than the parents' floor, disables sprk_issecure while the record is filed, and says whether the value is inherited or
+    set on the record; an unreadable parent locks both (fail safe).
 
     The lock is applied at run time (the field is editable on a parentless record), so per form this script only:
       - registers the library sprk_accesspermission_inherited and its OnLoad handler

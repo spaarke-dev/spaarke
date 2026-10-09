@@ -1,22 +1,37 @@
 /**
  * Inherited Access Permission - form library for To Do, Event, Communication and Document (unified-access-control-r2
- * task 173, GitHub #1423; owner rounds 81 and 84), and for Work Assignment and Project (task 175; owner round 84).
+ * task 173, GitHub #1423; owner rounds 81 and 84), and for Work Assignment and Project (task 175; owner round 87).
  *
  * Web Resource Name: sprk_accesspermission_inherited   (namespace Spaarke.AccessPermissionInherited)
  * Registered by:     scripts/Set-InheritedAccessPermissionFormLock.ps1 (OnLoad, pass execution context)
  *
- * The rule (owner round 81, widened by round 84 "a child's access always follows its parent ... if a child has a parent
- * then the access cannot be changed manually"):
+ * The four CHILD tables (owner round 81, widened by round 84 "if a child has a parent then the access cannot be changed
+ * manually"):
  *   - a record WITH a parent shows the parent's Access Permission (the most restrictive across its parents). The BFF
  *     writes it (CoreAncestorResolver, the shared stamp path) and keeps it in step (SecureChildReconciliationJob, every 2
  *     minutes). On the form the field is LOCKED, with an info notification naming the parent;
  *   - a record WITHOUT a parent keeps its own value, which the user sets: the field is editable.
- * A work assignment or project filed under a matter or project (task 175) takes the parent's sprk_issecure AND
- * sprk_accesspermission: both are locked while it has a parent ("Access permission and Secure are inherited from ...");
- * a parentless one keeps and edits its own. sprk_issecure is locked only where the form carries it.
  *
- * This script decides nothing about the value and writes nothing (ADR-002 WP-2: the server owns the invariant; the form
- * only locks and labels). It only answers "does this record have a parent?", from the SAME filing the server reads:
+ * Work Assignment and Project (task 175, owner round 87 "the parent sets a FLOOR"): one filed under a matter or project
+ * inherits Secure and Access Permission from its parents and may never be looser, but may be made stricter by hand:
+ *   - the FLOOR is the most restrictive of the direct parents' sprk_accesspermission (Restricted > Limited > Standard;
+ *     null = Standard) and sprk_issecure, each parent read once per form load with Xrm.WebApi.retrieveRecord (again after
+ *     a save or a change of what the record is filed under);
+ *   - sprk_accesspermission stays EDITABLE: a change to a value looser than the floor is put back to the previous value,
+ *     with a warning ("Access permission cannot be lower than {floor} while this record is filed under {parent}."); an
+ *     equal or stricter value is kept;
+ *   - sprk_issecure, where the form carries it, is disabled while the record is filed (it changes only through Make
+ *     Secure / Remove Secure, which the server floors);
+ *   - an info notification says whether the value is inherited ("Access permission {value} is inherited from {parent}.")
+ *     or set on this record ("... is set on this record (the minimum from {parent} is {floor})."), plus "Secure is
+ *     inherited from {parent}." when the floor is secure;
+ *   - a parent that cannot be read (or whose sprk_issecure reads empty) fails safe: both columns are LOCKED as on a
+ *     child table, with "could not be checked" text;
+ *   - with no parent, nothing is locked.
+ *
+ * This script decides nothing on the server's behalf and writes nothing of its own (ADR-002 WP-2: the server owns the
+ * invariant and writes the inherited values; the form only locks, labels and puts back a looser pick). It reads the SAME
+ * filing the server reads:
  *   - PARENT_LOOKUPS below is the server's ParentLineage.ChildFiling for the four child tables, pinned literally by
  *     ParentLineageTests.FormLibraryParentLookups_MatchTheServerMap (a lookup that is not a parent there - a contact, an
  *     organization, a service request, a document's own current version - does not lock the field here either);
@@ -24,13 +39,13 @@
  *     for work assignment and project. Those two tables are also filed through the polymorphic pair
  *     sprk_regardingrecordid (text holding a GUID) + sprk_regardingrecordtype (lookup to sprk_recordtype_ref): the pair is
  *     a parent only when the id is a GUID AND the type's sprk_recordlogicalname is one of PAIR_PARENT_TABLES (read once per
- *     type per form load). A pair whose type cannot be read does not lock (the server reverts any edit on a parented
- *     record).
+ *     type per form load). A pair whose type cannot be read names no parent (the server floors any looser save).
  *
- * Where the parents are read:
+ * Where the filing is read:
  *   - a column ON the form: its current value (an unsaved pick or clear re-evaluates at once, through OnChange);
  *   - a column NOT on the form: the saved value, read once with Xrm.WebApi.retrieveRecord (and again after each save).
- *     A read that fails leaves only the columns on the form deciding (logged to the console).
+ *     A read that fails leaves only the columns on the form deciding on a child table (logged to the console); on a
+ *     work assignment or project it is the fail-safe lock (a parent the form does not carry may be missing).
  *
  * "Locked" means, for each locked column: every control bound to it that this script found enabled is disabled; the
  * column is not submitted (setSubmitMode "never"); and a change that still arrives (a PCF bound to the column - the
@@ -39,13 +54,14 @@
  * read-only.
  *
  * ADR-006 amendment 2.1 (owner round 86, path B, #1462) - a thin form-event script, within its limits: platform form APIs
- * only (formContext, Xrm.WebApi); no UI of its own (the platform's form notification and control state); no access
- * decision (the server decides and writes the values; this only locks and labels); fails safe (a failed read leaves the
- * columns on the form deciding, and the server's reconcile reverts any edit that slips through); namespaced
- * (Spaarke.AccessPermissionInherited) and idempotent (one wiring per form load); jest-tested
- * (Spaarke.UI.Components/src/__tests__/accessPermissionInherited*.test.ts); registered by a checked-in operator script
- * (scripts/Set-InheritedAccessPermissionFormLock.ps1). The values it relies on are pinned to the server's rules by .NET
- * tests (PARENT_LOOKUPS by ParentLineageTests; ROOT_PARENT_LOOKUPS / PAIR_PARENT_TABLES by task 175's test).
+ * only (formContext, Xrm.WebApi); no UI of its own (the platform's form notifications and control state); no access
+ * decision (the server decides and writes the values and refuses a looser save; this only locks, labels and puts back);
+ * fails safe (an unreadable parent locks; a failed filing read leaves the columns on the form deciding, and the server's
+ * reconcile reverts any edit that slips through); namespaced (Spaarke.AccessPermissionInherited) and idempotent (one
+ * wiring per form load); jest-tested (Spaarke.UI.Components/src/__tests__/accessPermissionInherited*.test.ts);
+ * registered by a checked-in operator script (scripts/Set-InheritedAccessPermissionFormLock.ps1). The maps it relies on
+ * are pinned to the server's rules by .NET tests (PARENT_LOOKUPS by ParentLineageTests; ROOT_PARENT_LOOKUPS /
+ * PAIR_PARENT_TABLES by task 175's test).
  *
  * ES5, no build step, never throws into the form.
  */
@@ -58,8 +74,10 @@ window.Spaarke.AccessPermissionInherited = (function () {
 
     var ns = {};
     // 1.0.0 - task 173: the four child tables. 1.1.0 - task 175 (owner round 84): work assignment and project (typed
-    // lookups and the polymorphic pair; sprk_issecure locked with sprk_accesspermission).
-    ns.VERSION = "1.1.0";
+    // lookups and the polymorphic pair; sprk_issecure locked with sprk_accesspermission). 1.2.0 - task 175 (owner round
+    // 87): on work assignment and project the lock is a FLOOR lock (a stricter value is allowed; a looser one is put
+    // back); the four child tables are unchanged.
+    ns.VERSION = "1.2.0";
 
     var LOG = "[Spaarke.AccessPermissionInherited v" + ns.VERSION + "]";
     var COLUMN = "sprk_accesspermission";
@@ -70,6 +88,8 @@ window.Spaarke.AccessPermissionInherited = (function () {
     var RECORD_TYPE_TABLE = "sprk_recordtype_ref";
     var RECORD_TYPE_LOGICAL_NAME = "sprk_recordlogicalname";
     var NOTIFICATION_ID = "sprk_accesspermission_inherited";
+    var FLOOR_WARNING_ID = "sprk_accesspermission_floor";
+    var PARENT_SELECT = "?$select=" + COLUMN + "," + SECURE_COLUMN;
     var FORM_TYPE_CREATE = 1;
     var FORMATTED = "@OData.Community.Display.V1.FormattedValue";
     var GUID = /^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i;
@@ -148,31 +168,109 @@ window.Spaarke.AccessPermissionInherited = (function () {
     ns.PAIR_PARENT_TABLES = ["sprk_matter", "sprk_project"];
     /* PAIR_PARENT_TABLES:END */
 
+    /** sprk_accesspermission option values (the integers the BFF reads). */
+    ns.PERMISSION = Object.freeze({ STANDARD: 100000000, LIMITED: 100000001, RESTRICTED: 100000002 });
+
+    var PERMISSION_LABELS = ["Standard", "Limited", "Restricted"];
+
     /**
-     * The notification text (owner round 81: 'Access permission is inherited from {parent name}'; task 175 for a work
-     * assignment or project: 'Access permission and Secure are inherited from {parent name}').
+     * How restrictive a sprk_accesspermission value is: Standard 0 < Limited 1 < Restricted 2. Null (and any value this
+     * script does not know) is Standard - the server's rule (null = Standard).
+     */
+    ns.rankOf = function (value) {
+        if (value === ns.PERMISSION.RESTRICTED) return 2;
+        if (value === ns.PERMISSION.LIMITED) return 1;
+        return 0;
+    };
+
+    /** The label of a value ("Standard", "Limited" or "Restricted"). */
+    ns.permissionLabel = function (value) {
+        return PERMISSION_LABELS[ns.rankOf(value)];
+    };
+
+    function nameList(names) {
+        var shown = names.filter(function (n, i) { return !!n && names.indexOf(n) === i; });
+        return shown.length > 0 ? shown.join(", ") : "its parent record";
+    }
+
+    /**
+     * The notification text on a child table (owner round 81: 'Access permission is inherited from {parent name}').
      * @param {string[]} names - the parents' display names
      * @param {boolean} pending - the parent was picked or changed on this form and is not saved yet
-     * @param {boolean} [root] - a work assignment or project (Access permission AND Secure)
      * @returns {string}
      */
-    ns.notificationText = function (names, pending, root) {
-        var shown = names.filter(function (n) { return !!n; }); // a parent whose name is not known is not named
-        var who = shown.length > 0 ? shown.join(", ") : "its parent record";
-        if (root) {
-            return pending
-                ? "Access permission and Secure are inherited from " + who + ". They are set when the record is saved."
-                : "Access permission and Secure are inherited from " + who + ".";
-        }
+    ns.notificationText = function (names, pending) {
+        var who = nameList(names);
         return pending
             ? "Access permission is inherited from " + who + ". It is set when the record is saved."
             : "Access permission is inherited from " + who + ".";
     };
 
     /**
-     * The parents a record names: each parent lookup's value from the form when the form carries it, otherwise the saved
-     * value. Pure (no Xrm), so it can be reasoned about on its own.
-     * @param {object} lookups - PARENT_LOOKUPS[table] or ROOT_PARENT_LOOKUPS[table]
+     * The floor a work assignment's or project's direct parents set (owner round 87). Pure.
+     * @param {Array<{name: string, permission: (number|null), secure: boolean}>} parents - each parent as read
+     * @returns {{rank: number, secure: boolean, floorNames: string[], secureNames: string[]}} the most restrictive Access
+     *          Permission (as a rank) and whether any parent is secure; floorNames - the parents that set the rank (all of
+     *          them when it is Standard); secureNames - the secure ones
+     */
+    ns.floorOf = function (parents) {
+        var rank = 0;
+        parents.forEach(function (p) { rank = Math.max(rank, ns.rankOf(p.permission)); });
+        return {
+            rank: rank,
+            secure: parents.some(function (p) { return p.secure === true; }),
+            floorNames: parents.filter(function (p) { return ns.rankOf(p.permission) === rank; })
+                .map(function (p) { return p.name; }),
+            secureNames: parents.filter(function (p) { return p.secure === true; }).map(function (p) { return p.name; })
+        };
+    };
+
+    /**
+     * The info notification on a filed work assignment or project (owner round 87), or null when there is nothing to say
+     * (Standard under a Standard, non-secure floor). Pure.
+     * @param {(number|null)} value - the form's sprk_accesspermission
+     * @param {object} floor - ns.floorOf(...)
+     * @returns {string|null}
+     */
+    ns.floorNotificationText = function (value, floor) {
+        var rank = ns.rankOf(value);
+        var floorLabel = PERMISSION_LABELS[floor.rank];
+        var from = nameList(floor.floorNames);
+        var text = "";
+        if (rank < floor.rank) {
+            // Saved below the floor (a parent picked on this form, or a value the server has not raised yet).
+            text = "Access permission " + floorLabel + " is inherited from " + from + ". It is set when the record is saved.";
+        } else if (rank === floor.rank) {
+            if (floor.rank > 0) {
+                text = "Access permission " + floorLabel + " is inherited from " + from + ".";
+            }
+        } else {
+            text = "Access permission " + PERMISSION_LABELS[rank] + " is set on this record (the minimum from " + from +
+                " is " + floorLabel + ").";
+        }
+        if (floor.secure) {
+            text += (text ? " " : "") + "Secure is inherited from " + nameList(floor.secureNames) + ".";
+        }
+        return text || null;
+    };
+
+    /** The warning when a looser value is put back (owner round 87). */
+    ns.floorRevertText = function (floor) {
+        return "Access permission cannot be lower than " + PERMISSION_LABELS[floor.rank] +
+            " while this record is filed under " + nameList(floor.floorNames) + ".";
+    };
+
+    /** The text of the fail-safe lock: a parent (or the record's own saved filing) could not be read. */
+    ns.uncheckedText = function (names) {
+        var against = names.some(function (n) { return !!n; }) ? nameList(names) : "what this record is filed under";
+        return "Access permission and Secure could not be checked against " + against +
+            ", so they are locked. Reload the record to try again.";
+    };
+
+    /**
+     * The parents a CHILD record names: each parent lookup's value from the form when the form carries it, otherwise the
+     * saved value. Pure (no Xrm), so it can be reasoned about on its own.
+     * @param {object} lookups - PARENT_LOOKUPS[table]
      * @param {function(string): (null|undefined|Array)} formValue - the form attribute's getValue(), or undefined when
      *        the attribute is not on the form
      * @param {object} saved - column -> { name } for the saved, non-null lookups that are NOT on the form
@@ -217,7 +315,7 @@ window.Spaarke.AccessPermissionInherited = (function () {
     }
 
     /**
-     * OnLoad (pass execution context). Registers the re-evaluation on every parent column on the form, the guard on each
+     * OnLoad (pass execution context). Registers the re-evaluation on every filing column on the form, the guard on each
      * locked column itself, and the re-read after a save.
      */
     ns.onLoad = function (executionContext) {
@@ -229,110 +327,361 @@ window.Spaarke.AccessPermissionInherited = (function () {
             if (!lookups) {
                 return; // not one of the six tables: nothing to lock
             }
-            var attributes = (root ? [COLUMN, SECURE_COLUMN] : [COLUMN])
-                .map(function (column) { return formContext.getAttribute(column); })
-                .filter(function (a) { return !!a; });
-            if (attributes.length === 0) {
+            var entries = (root ? [COLUMN, SECURE_COLUMN] : [COLUMN])
+                .map(function (column) {
+                    var a = formContext.getAttribute(column);
+                    return a ? { column: column, attribute: a, locked: false, lockedValue: null, disabledByUs: [] } : null;
+                })
+                .filter(function (e) { return !!e; });
+            if (entries.length === 0) {
                 return; // the column is not on this form: nothing to lock
             }
             // Idempotent: a second registration on the same form load (a maker adding the handler twice) wires nothing
             // again. Keyed on the attribute AND the record, so a form the platform reuses for another record still wires.
             var recordKey = formContext.data.entity.getId() || "";
             for (var w = 0; w < wired.length; w++) {
-                if (wired[w].attribute === attributes[0] && wired[w].record === recordKey) {
+                if (wired[w].attribute === entries[0].attribute && wired[w].record === recordKey) {
                     return;
                 }
             }
-            wired.push({ attribute: attributes[0], record: recordKey });
+            wired.push({ attribute: entries[0].attribute, record: recordKey });
 
-            var state = {
-                locked: false,
-                locks: attributes.map(function (a) { return { attribute: a, lockedValue: null, disabledByUs: [] }; }),
-                saved: {},
-                savedPair: null,
-                types: {}
-            };
-
-            var formValue = function (column) {
-                var a = formContext.getAttribute(column);
-                return a ? a.getValue() : undefined;
-            };
-
-            // The columns whose change re-evaluates: the lookups, and on a root the pair.
-            var filingColumns = Object.keys(lookups).concat(root ? [PAIR_ID, PAIR_TYPE] : []);
-
-            var parentDirty = function () {
-                return filingColumns.some(function (column) {
-                    var a = formContext.getAttribute(column);
-                    return !!a && a.getIsDirty();
-                });
-            };
-
-            var evaluate = function () {
-                try {
-                    var names = ns.parentNames(lookups, formValue, state.saved);
-                    if (root) {
-                        var pairName = pairParentName(formContext, state, evaluate);
-                        if (pairName !== null && names.indexOf(pairName) < 0) {
-                            names.push(pairName);
-                        }
-                    }
-                    if (names.length > 0) {
-                        lock(formContext, state, ns.notificationText(names,
-                            formContext.ui.getFormType() === FORM_TYPE_CREATE || parentDirty(), root));
-                    } else {
-                        unlock(formContext, state);
-                    }
-                } catch (e) {
-                    console.error(LOG, "evaluate failed", e);
-                }
-            };
-
-            filingColumns.forEach(function (column) {
-                var a = formContext.getAttribute(column);
-                if (a) {
-                    a.addOnChange(evaluate);
-                }
-            });
-
-            // A bound PCF (the TrackingFieldTrio pill) changes the value without a control this script can disable.
-            state.locks.forEach(function (entry) {
-                entry.attribute.addOnChange(function () {
-                    if (state.locked && entry.attribute.getValue() !== entry.lockedValue) {
-                        entry.attribute.setValue(entry.lockedValue);
-                        evaluate();
-                    }
-                });
-            });
-
-            var reload = function () {
-                readSaved(formContext, table, lookups, root).then(function (saved) {
-                    state.saved = saved.lookups;
-                    state.savedPair = saved.pair;
-                    evaluate();
-                });
-            };
-
-            if (formContext.data.entity.addOnPostSave) {
-                formContext.data.entity.addOnPostSave(function () {
-                    state.locks.forEach(function (entry) { entry.lockedValue = entry.attribute.getValue(); });
-                    reload();
-                });
+            if (root) {
+                wireRoot(formContext, table, lookups, entries);
+            } else {
+                wireChild(formContext, table, lookups, entries);
             }
-
-            evaluate(); // at once, from the columns on the form
-            reload();   // then with the saved columns the form does not carry
         } catch (e) {
             console.error(LOG, "onLoad failed", e);
         }
     };
 
+    /** Task 173: a child table - sprk_accesspermission LOCKED while the record has a parent. */
+    function wireChild(formContext, table, lookups, entries) {
+        var state = { saved: {} };
+
+        var formValue = function (column) {
+            var a = formContext.getAttribute(column);
+            return a ? a.getValue() : undefined;
+        };
+
+        var parentDirty = function () {
+            return Object.keys(lookups).some(function (column) {
+                var a = formContext.getAttribute(column);
+                return !!a && a.getIsDirty();
+            });
+        };
+
+        var evaluate = function () {
+            try {
+                var names = ns.parentNames(lookups, formValue, state.saved);
+                if (names.length > 0) {
+                    entries.forEach(lockEntry);
+                    formContext.ui.setFormNotification(ns.notificationText(names,
+                        formContext.ui.getFormType() === FORM_TYPE_CREATE || parentDirty()), "INFO", NOTIFICATION_ID);
+                } else {
+                    entries.forEach(unlockEntry);
+                    formContext.ui.clearFormNotification(NOTIFICATION_ID);
+                }
+            } catch (e) {
+                console.error(LOG, "evaluate failed", e);
+            }
+        };
+
+        Object.keys(lookups).forEach(function (column) {
+            var a = formContext.getAttribute(column);
+            if (a) {
+                a.addOnChange(evaluate);
+            }
+        });
+
+        entries.forEach(function (entry) {
+            entry.attribute.addOnChange(function () {
+                if (putBackIfLocked(entry)) {
+                    evaluate();
+                }
+            });
+        });
+
+        var reload = function () {
+            readSaved(formContext, table, lookups, false).then(function (saved) {
+                state.saved = saved.lookups;
+                evaluate();
+            });
+        };
+
+        if (formContext.data.entity.addOnPostSave) {
+            formContext.data.entity.addOnPostSave(function () {
+                entries.forEach(function (entry) { entry.lockedValue = entry.attribute.getValue(); });
+                reload();
+            });
+        }
+
+        evaluate(); // at once, from the lookups on the form
+        reload();   // then with the saved lookups the form does not carry
+    }
+
     /**
-     * The display name of the parent the polymorphic pair names, or null when the pair names none (no id, an id that is
-     * not a GUID, no type, a type that is not a parent table, or a type not read yet / unreadable). A type not read yet is
-     * read once (cached per type id for this form load) and the form re-evaluated when the answer arrives.
+     * Task 175 (owner round 87): a work assignment or project - a FLOOR lock. Modes: "none" (no parent: nothing locked),
+     * "waiting" (a filing or parent read is in flight: nothing changes until it answers), "floor" (sprk_accesspermission
+     * editable but never looser than the floor; sprk_issecure disabled) and "locked" (a parent could not be read: both
+     * locked, fail safe).
      */
-    function pairParentName(formContext, state, evaluate) {
+    function wireRoot(formContext, table, lookups, entries) {
+        var permissionEntry = entries.filter(function (e) { return e.column === COLUMN; })[0] || null;
+        var secureEntry = entries.filter(function (e) { return e.column === SECURE_COLUMN; })[0] || null;
+        var filingColumns = Object.keys(lookups).concat([PAIR_ID, PAIR_TYPE]);
+        var hasMissingFiling = filingColumns.some(function (column) { return !formContext.getAttribute(column); });
+
+        var state = {
+            mode: "waiting",
+            saved: {},
+            savedPair: null,
+            // Whether the saved filing the form does not carry is known (nothing to read on a new record or when every
+            // filing column is on the form).
+            savedKnown: !hasMissingFiling || formContext.ui.getFormType() === FORM_TYPE_CREATE,
+            types: {},
+            parents: {},
+            generation: 0,
+            floor: null,
+            lastAccepted: permissionEntry ? permissionEntry.attribute.getValue() : null
+        };
+
+        var clearWarning = function () {
+            formContext.ui.clearFormNotification(FLOOR_WARNING_ID);
+        };
+
+        /** A looser pick than the floor is put back to the last accepted value; any other value is accepted. */
+        var checkPermission = function () {
+            if (!permissionEntry || state.mode !== "floor") {
+                return;
+            }
+            var value = permissionEntry.attribute.getValue();
+            if (ns.rankOf(value) < state.floor.rank && value !== state.lastAccepted) {
+                permissionEntry.attribute.setValue(state.lastAccepted);
+                formContext.ui.setFormNotification(ns.floorRevertText(state.floor), "WARNING", FLOOR_WARNING_ID);
+                return;
+            }
+            if (value !== state.lastAccepted) {
+                clearWarning();
+            }
+            state.lastAccepted = value;
+        };
+
+        var showFloor = function () {
+            var value = permissionEntry ? permissionEntry.attribute.getValue() : state.lastAccepted;
+            var text = ns.floorNotificationText(value, state.floor);
+            if (text) {
+                formContext.ui.setFormNotification(text, "INFO", NOTIFICATION_ID);
+            } else {
+                formContext.ui.clearFormNotification(NOTIFICATION_ID);
+            }
+        };
+
+        /** The fail-safe lock: both columns locked as on a child table. */
+        var lockUnchecked = function (names) {
+            state.mode = "locked";
+            state.floor = null;
+            entries.forEach(lockEntry);
+            clearWarning();
+            formContext.ui.setFormNotification(ns.uncheckedText(names), "INFO", NOTIFICATION_ID);
+        };
+
+        var evaluate = function () {
+            try {
+                var found = rootParentRefs(formContext, lookups, state, evaluate);
+                if (found.refs.length === 0) {
+                    if (found.pending || !state.savedKnown) {
+                        state.mode = "waiting";
+                        return;
+                    }
+                    if (state.savedFailed) {
+                        lockUnchecked([]); // whether it is filed at all is not known: fail safe
+                        return;
+                    }
+                    state.mode = "none";
+                    state.floor = null;
+                    entries.forEach(unlockEntry);
+                    formContext.ui.clearFormNotification(NOTIFICATION_ID);
+                    clearWarning();
+                    if (permissionEntry) {
+                        state.lastAccepted = permissionEntry.attribute.getValue();
+                    }
+                    return;
+                }
+
+                var reads = found.refs.map(function (ref) { return readParent(ref, state, evaluate); });
+                if (reads.some(function (r) { return !r.done; })) {
+                    state.mode = "waiting";
+                    return;
+                }
+                // Fail safe: a parent that cannot be read, or a saved filing that could not be read (a parent the form
+                // does not carry may be missing from the floor).
+                if (state.savedFailed || reads.some(function (r) { return !r.ok; })) {
+                    lockUnchecked(found.refs.map(function (r) { return r.name; }));
+                    return;
+                }
+
+                if (permissionEntry && permissionEntry.locked) {
+                    unlockEntry(permissionEntry); // out of a fail-safe lock: the floor rule applies again
+                    state.lastAccepted = permissionEntry.attribute.getValue();
+                }
+                if (secureEntry) {
+                    lockEntry(secureEntry); // changed only through Make Secure / Remove Secure
+                }
+                state.mode = "floor";
+                state.floor = ns.floorOf(found.refs.map(function (ref, i) {
+                    return { name: ref.name, permission: reads[i].permission, secure: reads[i].secure };
+                }));
+                checkPermission();
+                showFloor();
+            } catch (e) {
+                console.error(LOG, "evaluate failed", e);
+            }
+        };
+
+        /** A change of what the record is filed under: the parents are read again. */
+        var refiled = function () {
+            state.parents = {};
+            state.generation++;
+            clearWarning();
+            evaluate();
+        };
+
+        filingColumns.forEach(function (column) {
+            var a = formContext.getAttribute(column);
+            if (a) {
+                a.addOnChange(refiled);
+            }
+        });
+
+        if (permissionEntry) {
+            permissionEntry.attribute.addOnChange(function () {
+                if (putBackIfLocked(permissionEntry)) {
+                    evaluate();
+                    return;
+                }
+                if (state.mode === "floor") {
+                    checkPermission();
+                    showFloor();
+                } else if (state.mode === "none") {
+                    state.lastAccepted = permissionEntry.attribute.getValue();
+                }
+                // "waiting": checked against the floor when the reads answer (lastAccepted is not moved meanwhile).
+            });
+        }
+        if (secureEntry) {
+            secureEntry.attribute.addOnChange(function () {
+                putBackIfLocked(secureEntry);
+            });
+        }
+
+        var reload = function () {
+            readSaved(formContext, table, lookups, true).then(function (saved) {
+                state.saved = saved.lookups;
+                state.savedPair = saved.pair;
+                state.savedKnown = true;
+                state.savedFailed = saved.failed === true;
+                evaluate();
+            });
+        };
+
+        if (formContext.data.entity.addOnPostSave) {
+            formContext.data.entity.addOnPostSave(function () {
+                entries.forEach(function (entry) { entry.lockedValue = entry.attribute.getValue(); });
+                if (permissionEntry) {
+                    state.lastAccepted = permissionEntry.attribute.getValue();
+                }
+                state.parents = {};
+                state.generation++;
+                reload();
+            });
+        }
+
+        evaluate(); // at once, from the filing on the form
+        reload();   // then with the saved filing the form does not carry
+    }
+
+    /**
+     * The direct parents a work assignment or project names, as { refs: [{ table, id, name }], pending } - the typed
+     * lookups (from the form, else saved) and the pair parent. `pending`: the pair's type is being read.
+     */
+    function rootParentRefs(formContext, lookups, state, evaluate) {
+        var refs = [];
+        var add = function (ref) {
+            for (var i = 0; i < refs.length; i++) {
+                if (refs[i].table === ref.table && refs[i].id === ref.id) return;
+            }
+            refs.push(ref);
+        };
+        Object.keys(lookups).forEach(function (column) {
+            var a = formContext.getAttribute(column);
+            if (a) {
+                var value = a.getValue();
+                if (value && value.length > 0 && value[0] && value[0].id) {
+                    add({ table: lookups[column], id: normalizeId(value[0].id), name: value[0].name || "" });
+                }
+            } else if (state.saved[column] && state.saved[column].id) {
+                add({ table: lookups[column], id: normalizeId(state.saved[column].id), name: state.saved[column].name || "" });
+            }
+        });
+        var pair = pairParent(formContext, state, evaluate);
+        if (pair.ref) {
+            add(pair.ref);
+        }
+        return { refs: refs, pending: pair.pending };
+    }
+
+    /**
+     * One parent's Access Permission and Secure flag, read once per parent (cached in state.parents until a save or a
+     * re-file). Returns the cache entry { done, ok, permission, secure }; a read in flight re-evaluates when it answers.
+     * A failed read, or a sprk_issecure that reads empty, is not ok (fail safe).
+     */
+    function readParent(ref, state, evaluate) {
+        var key = ref.table + "|" + ref.id;
+        var entry = state.parents[key];
+        if (entry) {
+            return entry;
+        }
+        entry = { done: false, ok: false, permission: null, secure: false };
+        state.parents[key] = entry;
+        var generation = state.generation;
+        var settle = function (ok, permission, secure) {
+            if (generation !== state.generation) {
+                return; // re-filed or saved meanwhile: a newer read decides
+            }
+            state.parents[key] = { done: true, ok: ok, permission: permission, secure: secure };
+            evaluate();
+        };
+        try {
+            Promise.resolve(Xrm.WebApi.retrieveRecord(ref.table, ref.id, PARENT_SELECT))
+                .then(function (row) {
+                    if (!row || typeof row[SECURE_COLUMN] !== "boolean") {
+                        console.warn(LOG, "a parent's Secure flag read empty; the access columns are locked.", ref.table);
+                        settle(false, null, false);
+                        return;
+                    }
+                    var permission = typeof row[COLUMN] === "number" ? row[COLUMN] : null;
+                    settle(true, permission, row[SECURE_COLUMN] === true);
+                })
+                .catch(function (error) {
+                    console.warn(LOG, "a parent could not be read; the access columns are locked.", error);
+                    settle(false, null, false);
+                });
+        } catch (error) {
+            console.warn(LOG, "a parent could not be read; the access columns are locked.", error);
+            state.parents[key] = { done: true, ok: false, permission: null, secure: false };
+            return state.parents[key];
+        }
+        return entry;
+    }
+
+    /**
+     * The parent the polymorphic pair names, as { ref: { table, id, name } | null, pending }. No ref when the pair names
+     * none (no id, an id that is not a GUID, no type, a type that is not a parent table, or a type that cannot be read);
+     * `pending` while the type is read (once per type id for this form load; the form re-evaluates when it answers).
+     */
+    function pairParent(formContext, state, evaluate) {
         var idAttribute = formContext.getAttribute(PAIR_ID);
         var typeAttribute = formContext.getAttribute(PAIR_TYPE);
         var saved = state.savedPair || {};
@@ -352,7 +701,7 @@ window.Spaarke.AccessPermissionInherited = (function () {
         }
 
         if (!typeId || !isRecordId(recordId)) {
-            return null; // no type, or the id is not a record identifier: the pair names no parent
+            return { ref: null, pending: false }; // no type, or the id is not a record identifier: no parent
         }
 
         var type = state.types[typeId];
@@ -362,18 +711,22 @@ window.Spaarke.AccessPermissionInherited = (function () {
                 state.types[typeId] = { done: true, logicalName: logicalName };
                 evaluate();
             });
-            return null; // decided when the type is read
+            return { ref: null, pending: true };
         }
-        if (!type.done || !ns.pairIsParent(recordId, type.logicalName)) {
-            return null;
+        if (!type.done) {
+            return { ref: null, pending: true };
+        }
+        if (!ns.pairIsParent(recordId, type.logicalName)) {
+            return { ref: null, pending: false };
         }
 
         var nameAttribute = formContext.getAttribute(PAIR_NAME);
         var recordName = nameAttribute ? nameAttribute.getValue() : null;
-        if (typeof recordName === "string" && recordName.trim()) {
-            return recordName;
-        }
-        return typeName || "its parent record";
+        var name = typeof recordName === "string" && recordName.trim() ? recordName : (typeName || "its parent record");
+        return {
+            ref: { table: type.logicalName.trim().toLowerCase(), id: normalizeId(recordId.trim()), name: name },
+            pending: false
+        };
     }
 
     /** A record type's sprk_recordlogicalname; resolves null when it cannot be read (logged) - never rejects. */
@@ -385,47 +738,52 @@ window.Spaarke.AccessPermissionInherited = (function () {
                     return typeof name === "string" && name ? name : null;
                 })
                 .catch(function (error) {
-                    console.warn(LOG, "the regarding record type could not be read; the pair does not lock the form.", error);
+                    console.warn(LOG, "the regarding record type could not be read; the pair names no parent.", error);
                     return null;
                 });
         } catch (error) {
-            console.warn(LOG, "the regarding record type could not be read; the pair does not lock the form.", error);
+            console.warn(LOG, "the regarding record type could not be read; the pair names no parent.", error);
             return Promise.resolve(null);
         }
     }
 
-    function lock(formContext, state, text) {
-        if (!state.locked) {
-            state.locked = true;
-            state.locks.forEach(function (entry) {
-                entry.lockedValue = entry.attribute.getValue();
-                entry.disabledByUs = [];
-                entry.attribute.controls.forEach(function (control) {
-                    if (!control.getDisabled()) {
-                        control.setDisabled(true);
-                        entry.disabledByUs.push(control);
-                    }
-                });
-                entry.attribute.setSubmitMode("never");
-            });
+    /** A change that arrives on a locked column (a bound PCF) is put back; true when it was. */
+    function putBackIfLocked(entry) {
+        if (entry.locked && entry.attribute.getValue() !== entry.lockedValue) {
+            entry.attribute.setValue(entry.lockedValue);
+            return true;
         }
-        formContext.ui.setFormNotification(text, "INFO", NOTIFICATION_ID);
+        return false;
     }
 
-    function unlock(formContext, state) {
-        if (state.locked) {
-            state.locked = false;
-            state.locks.forEach(function (entry) {
-                entry.disabledByUs.forEach(function (control) { control.setDisabled(false); });
-                entry.disabledByUs = [];
-                entry.attribute.setSubmitMode("dirty");
-            });
+    function lockEntry(entry) {
+        if (entry.locked) {
+            return;
         }
-        formContext.ui.clearFormNotification(NOTIFICATION_ID);
+        entry.locked = true;
+        entry.lockedValue = entry.attribute.getValue();
+        entry.disabledByUs = [];
+        entry.attribute.controls.forEach(function (control) {
+            if (!control.getDisabled()) {
+                control.setDisabled(true);
+                entry.disabledByUs.push(control);
+            }
+        });
+        entry.attribute.setSubmitMode("never");
+    }
+
+    function unlockEntry(entry) {
+        if (!entry.locked) {
+            return;
+        }
+        entry.locked = false;
+        entry.disabledByUs.forEach(function (control) { control.setDisabled(false); });
+        entry.disabledByUs = [];
+        entry.attribute.setSubmitMode("dirty");
     }
 
     /**
-     * The saved filing the form does not carry: { lookups: column -> { name } for the saved parent lookups not on the
+     * The saved filing the form does not carry: { lookups: column -> { id, name } for the saved parent lookups not on the
      * form, pair: { id, typeId, typeName } for the pair columns not on the form (root tables) or null }. Resolves empty
      * for an unsaved record, when every filing column is on the form, or when the read fails (logged).
      */
@@ -454,7 +812,7 @@ window.Spaarke.AccessPermissionInherited = (function () {
                     missing.forEach(function (column) {
                         var key = "_" + column + "_value";
                         if (row && row[key]) {
-                            saved[column] = { name: row[key + FORMATTED] || "" };
+                            saved[column] = { id: row[key], name: row[key + FORMATTED] || "" };
                         }
                     });
                     var pair = null;
@@ -470,11 +828,11 @@ window.Spaarke.AccessPermissionInherited = (function () {
                 })
                 .catch(function (error) {
                     console.warn(LOG, "the saved filing could not be read; only the columns on the form decide.", error);
-                    return empty;
+                    return { lookups: {}, pair: null, failed: true };
                 });
         } catch (error) {
             console.warn(LOG, "the saved filing could not be read; only the columns on the form decide.", error);
-            return Promise.resolve(empty);
+            return Promise.resolve({ lookups: {}, pair: null, failed: true });
         }
     }
 

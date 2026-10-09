@@ -141,9 +141,10 @@ public static class RecordAccessGateEndpoint
         // Reaching this line IS the answer: DelegationRuleFilter established Write on this record, as the
         // caller, over OBO. Nothing here re-decides it.
         //
-        // Task 175 (owner round 84): whether the record's access follows a parent — the Manage Access lock and the ribbon's
-        // Make Secure / Remove Secure rule. A fact about the record (its own lookups, which the caller can already read), not
-        // about the caller's rights; DIRECT parents only (task 174 F1-d: a grandparent's name is never disclosed).
+        // Task 175 (owner round 87): the floor the record's parents set — the ribbon's Remove Secure rule, the form's and
+        // Manage Access's lowest offered Access Permission. Facts about the record (its own lookups, which the caller can
+        // already read), not about the caller's rights; DIRECT parents only by name (task 174 F1-d: a grandparent's name is
+        // never disclosed); the floor folds the whole chain.
         var parents = await ReadFollowsParentsAsync(dataverse, SecureRecordRoot.For(root.Type), root.Id, logger, ct);
         if (query.IncludeOwner != true)
         {
@@ -151,6 +152,8 @@ public static class RecordAccessGateEndpoint
             {
                 FollowsParents = parents.Parents,
                 ParentUnverifiable = parents.Unverifiable,
+                FloorSecure = parents.FloorSecure,
+                FloorAccessPermission = parents.FloorAccessPermission,
             });
         }
 
@@ -164,38 +167,50 @@ public static class RecordAccessGateEndpoint
         {
             FollowsParents = parents.Parents,
             ParentUnverifiable = parents.Unverifiable,
+            FloorSecure = parents.FloorSecure,
+            FloorAccessPermission = parents.FloorAccessPermission,
         });
     }
 
     /// <summary>
-    /// Task 175: the record's DIRECT filing parents (a work assignment or project; a matter files under nothing), through the
-    /// ONE walk (<see cref="SecureRootInheritance.ReadSecureParentsAsync"/>, one level). Never throws: an unreadable filing answers
-    /// <c>Unverifiable = true</c> with no parents, and the ribbon then hides Make Secure / Remove Secure (the routes refuse).
+    /// Task 175: the record's DIRECT filing parents and the floor they set (owner round 87), through the ONE walk
+    /// (<see cref="SecureRootInheritance.ReadSecureParentsAsync"/>, every level). A matter files under nothing; a parentless
+    /// record has no floor (both <c>null</c>). Never throws: an unreadable filing answers <c>Unverifiable = true</c> with no
+    /// parents and no floor, and the ribbon and Manage Access then fail closed.
     /// </summary>
-    private static async Task<(IReadOnlyList<RecordAccessParent> Parents, bool Unverifiable)> ReadFollowsParentsAsync(
-        IGenericEntityService dataverse, SecureRecordRoot root, Guid recordId, ILogger logger, CancellationToken ct)
+    private static async Task<(IReadOnlyList<RecordAccessParent> Parents, bool Unverifiable, bool? FloorSecure, string? FloorAccessPermission)>
+        ReadFollowsParentsAsync(IGenericEntityService dataverse, SecureRecordRoot root, Guid recordId, ILogger logger, CancellationToken ct)
     {
         if (!SecureRootInheritance.Inherits(root.LogicalName))
-            return (Array.Empty<RecordAccessParent>(), false);
+            return (Array.Empty<RecordAccessParent>(), false, null, null);
 
         try
         {
-            var answer = await SecureRootInheritance.ReadSecureParentsAsync(dataverse, logger, root.LogicalName, recordId, ct);
+            var answer = await SecureRootInheritance.ReadSecureParentsAsync(
+                dataverse, logger, root.LogicalName, recordId, ct, maxDepth: SecureRootInheritance.MaxFilingDepth);
             if (!answer.IsKnown)
             {
                 logger.LogWarning("[ACCESS-GATE] What {RecordType} {RecordId} is filed under could not be read ({Why}).",
                     root.WireToken, recordId, answer.Unverifiable);
-                return (Array.Empty<RecordAccessParent>(), true);
+                return (Array.Empty<RecordAccessParent>(), true, null, null);
             }
 
+            if (answer.DirectParents.Count == 0)
+                return (Array.Empty<RecordAccessParent>(), false, null, null);
+
+            var (floorSecure, floorRank) = SecureRootInheritance.FloorOf(answer);
             return (answer.DirectParents
-                .Select(p => new RecordAccessParent(SecureRootInheritance.WireTokenFor(p.Parent.Table), p.Parent.Id, p.Parent.Name))
-                .ToList(), false);
+                    .Select(p => new RecordAccessParent(SecureRootInheritance.WireTokenFor(p.Parent.Table), p.Parent.Id, p.Parent.Name))
+                    .ToList(),
+                false, floorSecure,
+                floorRank == 2 ? EffectiveAccessPermission.Restricted
+                : floorRank == 1 ? EffectiveAccessPermission.Limited
+                : EffectiveAccessPermission.Standard);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "[ACCESS-GATE] What {RecordType} {RecordId} is filed under could not be read.", root.WireToken, recordId);
-            return (Array.Empty<RecordAccessParent>(), true);
+            return (Array.Empty<RecordAccessParent>(), true, null, null);
         }
     }
 

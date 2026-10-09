@@ -769,12 +769,12 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
-    /// Task 175 AC 4 (round 84: "if a child has a parent then the access cannot be changed manually"): un-securing a work
-    /// assignment filed under a matter is refused 409 <c>access_follows_parent</c> naming the matter, nothing written — while
-    /// the matter is secure AND after it is not (then the work assignment has already followed it).
+    /// Task 175 AC 4 (round 87: the parent sets a floor): un-securing a work assignment filed under a SECURE matter is refused
+    /// 409 <c>access_follows_parent</c> naming the matter, nothing written. Once the matter is not secure the work assignment
+    /// has followed it (its secure was inherited), and the same call is no longer refused.
     /// </summary>
     [Fact]
-    public async Task UnsecuringAFiledRecord_IsRefusedNamingTheParent_BeforeAndAfterTheParentsUnsecure()
+    public async Task UnsecuringAFiledRecord_UnderASecureParent_IsRefusedNamingIt_AndNotOnceTheParentIsOrdinary()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter, name: "Project Falcon");
@@ -796,8 +796,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.IsSecureOf(workAssignment).Should().BeFalse("it followed the matter");
 
         var again = await UnsecureAsync("workassignment", workAssignment);
-        again.StatusCode.Should().Be(HttpStatusCode.Conflict, "it still has a parent: its access follows it");
-        (await JsonOf(again)).GetProperty("reasonCode").GetString().Should().Be(AccessFollowsParent.ReasonCode);
+        again.StatusCode.Should().Be(HttpStatusCode.OK, "round 87: its parent is no longer secure, so no floor stops it (it is already not secure)");
     }
 
     /// <summary>

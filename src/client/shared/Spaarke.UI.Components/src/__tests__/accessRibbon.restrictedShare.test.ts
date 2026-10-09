@@ -37,7 +37,7 @@ function load(retrieveRecord: jest.Mock = jest.fn()) {
   win.Spaarke = { BffAuth: { getToken: jest.fn().mockResolvedValue(null) } };
   inject(ASSIGNED_ACCESS_SCRIPT);
   inject(RIBBON_SCRIPT);
-  expect(win.Spaarke.Access.Ribbon.VERSION).toBe('1.7.0'); // the real script ran
+  expect(win.Spaarke.Access.Ribbon.VERSION).toBe('1.8.0'); // the real script ran
   expect(win.Spaarke.AssignedAccess.Config.version).toBe('1.1.1');
   return { ribbon: win.Spaarke.Access.Ribbon, assigned: win.Spaarke.AssignedAccess, retrieveRecord };
 }

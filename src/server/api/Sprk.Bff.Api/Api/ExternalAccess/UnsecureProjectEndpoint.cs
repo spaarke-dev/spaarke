@@ -212,12 +212,13 @@ public static class UnsecureProjectEndpoint
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
 
-        // ── Task 175 (owner round 84): a work assignment or project WITH a parent follows it — locked ──
+        // ── Task 175 (owner round 87): never below the floor the parents set ──
         //
-        // "If a child has a parent then the access cannot be changed manually." Refused before anything is read or written,
-        // naming the parent (409 access_follows_parent): its Secure flag follows the parent, so un-securing it is the
-        // parent's unsecure (which cascades). F3 now applies only to a parentless record. What it is filed under that cannot
-        // be read refuses too (ADR-003): never "parentless" on a guess.
+        // A work assignment or project filed under a SECURE matter or project (at any level) has its secure designation from
+        // there: removing it would make it looser than its parents, so it is refused before anything is read or written,
+        // naming the secure parent (409 access_follows_parent). One whose parents are NOT secure — its secure designation was
+        // set on it by hand — is un-secured by its F3 holder exactly as a parentless record is. What it is filed under that
+        // cannot be read refuses too (ADR-003): never "not secure" on a guess.
         if (SecureRootInheritance.Inherits(root.LogicalName))
         {
             var filing = await relatedRoots.FindFilingParentsAsync(root.LogicalName, recordId, ct);
@@ -227,18 +228,20 @@ public static class UnsecureProjectEndpoint
                     "[UNSECURE] {RecordType} {RecordId}: what it is filed under could not be read ({Why}). Nothing was changed. " +
                     "TraceId={TraceId}", root.WireToken, recordId, filing.Unverifiable, traceId);
                 return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                    $"Whether this {root.DisplayLabel.ToLowerInvariant()} is filed under a matter or project could not be " +
-                    "determined, so its secure designation was left in place and nothing was changed. Try again.",
+                    $"Whether the matter or project this {root.DisplayLabel.ToLowerInvariant()} is filed under is secure could " +
+                    "not be determined, so its secure designation was left in place and nothing was changed. Try again.",
                     traceId, (ReasonKey, ReasonParentUnverifiable));
             }
 
-            if (filing.DirectParents.Count > 0)
+            if (filing.HasSecureParent)
             {
+                var secureParents = filing.DirectParents.Where(p => p.EffectiveSecure).Select(p => p.Parent).ToList();
                 logger.LogInformation(
-                    "[UNSECURE] {RecordType} {RecordId} is filed under {Parent}; its access follows it (owner round 84). Refused. " +
-                    "TraceId={TraceId}", root.WireToken, recordId,
-                    string.Join(", ", filing.DirectParents.Select(p => $"{p.Parent.Table}:{p.Parent.Id:D}")), traceId);
-                return AccessFollowsParent.Problem(root.DisplayLabel, filing.DirectParents, "remove its secure designation", traceId);
+                    "[UNSECURE] {RecordType} {RecordId} is filed under secure {Parent}; its secure designation comes from there " +
+                    "(owner round 87). Refused. TraceId={TraceId}", root.WireToken, recordId,
+                    string.Join(", ", secureParents.Select(p => $"{p.Table}:{p.Id:D}")), traceId);
+                return AccessFollowsParent.SecureFloorProblem(root.DisplayLabel,
+                    secureParents.Count > 0 ? secureParents : filing.SecureParents.ToList(), traceId);
             }
         }
 
@@ -309,7 +312,10 @@ public static class UnsecureProjectEndpoint
         string traceId,
         CancellationToken ct)
     {
-        var pass = await relatedRoots.CascadeBelowAsync(root.LogicalName, recordId, traceId, ct);
+        // parentWasSecure only when THIS call un-secured it: a record below whose flag came from it is then inherited even
+        // before its access record exists (the backfill rule applied as of a moment ago, owner round 87).
+        var pass = await relatedRoots.CascadeBelowAsync(
+            root.LogicalName, recordId, traceId, ct, parentWasSecure: !response.AlreadyUnsecure);
         if (pass.Unreadable)
         {
             logger.LogError(

@@ -424,12 +424,17 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         parent.GetProperty("recordId").GetGuid().Should().Be(matter);
         parent.GetProperty("name").GetString().Should().Be("Falcon");
         locked.GetProperty("parentUnverifiable").GetBoolean().Should().BeFalse();
+        locked.GetProperty("floorSecure").GetBoolean().Should().BeFalse("round 87: the matter is not secure");
+        locked.GetProperty("floorAccessPermission").GetString().Should().Be("standard");
 
-        (await GateOf("workassignment", parentless)).GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+        var parentlessGate = await GateOf("workassignment", parentless);
+        parentlessGate.GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+        parentlessGate.GetProperty("floorSecure").ValueKind.Should().Be(JsonValueKind.Null, "no parent, no floor");
 
         var unknown = await GateOf("workassignment", unreadable);
         unknown.GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
         unknown.GetProperty("parentUnverifiable").GetBoolean().Should().BeTrue("never 'no parent' on a guess");
+        unknown.GetProperty("floorAccessPermission").ValueKind.Should().Be(JsonValueKind.Null);
 
         (await GateOf("matter", matter)).GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
     }

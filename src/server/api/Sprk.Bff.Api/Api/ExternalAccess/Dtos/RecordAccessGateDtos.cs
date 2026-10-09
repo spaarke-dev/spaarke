@@ -67,11 +67,10 @@ public record RecordAccessGateResponse(
     bool? OwningTeamInSecureBusinessUnit = null)
 {
     /// <summary>
-    /// Task 175 (owner round 84): the matters / projects a work assignment or project is filed under DIRECTLY — non-empty
-    /// means its Secure designation and Access Permission follow them and are LOCKED (Make Secure / Remove Secure hidden,
-    /// Manage Access read-only, a manual change refused 409 <c>sdap.access.access_follows_parent</c>). Always empty for a
-    /// matter. A caller without Write never gets here (the filter's 403 is the "no permission" state), so a 200 with parents
-    /// is "locked: follows parent". Additive: an older client ignores it.
+    /// Task 175 (owner rounds 84 / 87): the matters / projects a work assignment or project is filed under DIRECTLY — non-empty
+    /// means they set a FLOOR for its Secure designation and Access Permission (<see cref="FloorSecure"/>,
+    /// <see cref="FloorAccessPermission"/>): it may be made stricter, never looser (a looser change is refused 409
+    /// <c>sdap.access.access_follows_parent</c>). Always empty for a matter. Additive: an older client ignores it.
     /// </summary>
     public IReadOnlyList<RecordAccessParent> FollowsParents { get; init; } = Array.Empty<RecordAccessParent>();
 
@@ -80,6 +79,19 @@ public record RecordAccessGateResponse(
     /// empty). A client MUST NOT read it as "no parent": the ribbon hides Make Secure / Remove Secure.
     /// </summary>
     public bool ParentUnverifiable { get; init; }
+
+    /// <summary>
+    /// Task 175 (owner round 87): whether the floor the parents set is secure (any ancestor is) — <c>true</c>: the record's
+    /// Secure comes from there and cannot be removed on it (the ribbon hides Remove Secure). <c>null</c> for a parentless
+    /// record, a matter, or when <see cref="ParentUnverifiable"/>.
+    /// </summary>
+    public bool? FloorSecure { get; init; }
+
+    /// <summary>
+    /// Task 175 (owner round 87): the lowest Access Permission the parents allow — <c>standard</c> | <c>limited</c> |
+    /// <c>restricted</c>. The record may be set stricter, never looser. <c>null</c> as <see cref="FloorSecure"/>.
+    /// </summary>
+    public string? FloorAccessPermission { get; init; }
 }
 
 /// <summary>Task 175: a record a work assignment or project is filed under directly.</summary>

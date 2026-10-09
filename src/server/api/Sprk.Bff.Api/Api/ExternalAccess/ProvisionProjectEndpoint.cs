@@ -437,13 +437,6 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonCallerRightsUnverifiable = "sdap.provision.caller_rights_unverifiable";
 
     /// <summary>
-    /// Task 175 (owner round 84): what a work assignment or project is filed under could not be read, so whether its access
-    /// follows a parent (and may not be set here) is unknown. 500, nothing written (ADR-003: never "parentless" on a guess);
-    /// the same caller may call again.
-    /// </summary>
-    internal const string ReasonParentUnverifiable = "sdap.provision.parent_unverifiable";
-
-    /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
     /// email-processing default (task 133; the AI staging container went with its setting in task 227f). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
@@ -588,43 +581,34 @@ public static class ProvisionProjectEndpoint
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        // ── Task 175 (owner round 84): a work assignment or project WITH a parent follows it — locked ──
-        //
-        // "If a child has a parent then the access cannot be changed manually": securing it is its parent's act (task 158's
-        // inheritance secures it when a parent is secure; ProvisionInheritedAsync, which never comes through here). Refused
-        // before anything is read or written, naming the parent. What it is filed under that cannot be read refuses too.
-        var target = ResolveRoot(request);
-        if (target.Ok && SecureRootInheritance.Inherits(ExternalGrantRoot.LogicalNameFor(target.Type)))
-        {
-            var root = SecureRecordRoot.For(target.Type);
-            var filing = await relatedRoots.FindFilingParentsAsync(root.LogicalName, target.Id, ct);
-            if (!filing.IsKnown)
-            {
-                logger.LogWarning(
-                    "[PROVISION] {RecordType} {RecordId}: what it is filed under could not be read ({Why}); refused. TraceId={TraceId}",
-                    root.WireToken, target.Id, filing.Unverifiable, httpContext.TraceIdentifier);
-                return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                    $"Whether this {root.DisplayLabel.ToLowerInvariant()} is filed under a matter or project could not be " +
-                    "determined, so it was not made secure and nothing was changed. Try again.",
-                    httpContext.TraceIdentifier, (ReasonKey, ReasonParentUnverifiable));
-            }
-
-            if (filing.DirectParents.Count > 0)
-            {
-                logger.LogInformation(
-                    "[PROVISION] {RecordType} {RecordId} is filed under {Parent}; its access follows it (owner round 84). Refused. " +
-                    "TraceId={TraceId}", root.WireToken, target.Id,
-                    string.Join(", ", filing.DirectParents.Select(p => $"{p.Parent.Table}:{p.Parent.Id:D}")), httpContext.TraceIdentifier);
-                return AccessFollowsParent.Problem(root.DisplayLabel, filing.DirectParents, "make it secure", httpContext.TraceIdentifier);
-            }
-        }
-
-        return await ProvisionCoreAsync(
+        var result = await ProvisionCoreAsync(
             request,
             ProvisioningCreator.Caller(callerAccessProbe, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
             httpContext.TraceIdentifier,
             dataverseClient, speFileStore, recordShare, secureChildren, relatedRoots, configuration, noAccessGuard,
             accessCacheInvalidator, fileRelocator, callerAccessProbe, httpContext, logger, ct);
+
+        // ── Task 175 (owner round 87): a work assignment or project made secure BY HAND keeps it as its own ──
+        //
+        // Making a record stricter is never refused (a child may be stricter than its parent). Its access record now says the
+        // secure designation was set on it, so a parent that is later secured and then un-secured does not take it away (round
+        // 87 item 2). Best effort: a failure here is logged, and the job reads the same fact from the record within 5 minutes.
+        var target = ResolveRoot(request);
+        if (result is Microsoft.AspNetCore.Http.HttpResults.Ok<ProvisionProjectResponse> && target.Ok
+            && SecureRootInheritance.Inherits(ExternalGrantRoot.LogicalNameFor(target.Type)))
+        {
+            try
+            {
+                await relatedRoots.FollowParentsAsync(ExternalGrantRoot.LogicalNameFor(target.Type), target.Id,
+                    httpContext.TraceIdentifier, CancellationToken.None, ownSecureSetNow: true);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[PROVISION] Recording that {RecordId} was made secure by hand failed; the job records it.", target.Id);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

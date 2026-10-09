@@ -1199,8 +1199,24 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 .\Set-DocumentAccessPermissionSchema.ps1 -Apply       # operator only
 ```
 
+### `Set-AccessInheritanceSchema.ps1`
+**Purpose:** Creates `sprk_accessinheritance` (Multiple lines of text, 4000) on `sprk_workassignment` and `sprk_project` and ships it in `SpaarkeCore` (task 175, owner round 87). The BFF writes there, as versioned JSON, what each record's stored Secure / Access Permission were derived from: the parents' floor, the parents, and what was set on the record (see `docs/data-model/access-inheritance.md`). `-Apply` creates the column where absent (or adds it to the solution) and publishes; it never alters an existing one (`COLUMN_MISMATCH` refuses). No data backfill: the BFF's job writes each record the first time it sees it.
+**Usage:** 🟡 Per environment, BEFORE deploying a BFF with task 175; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-09 by `unified-access-control-r2` task 175)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-09 — `-SelfTest` PASS (8 checks). Not run against any environment yet.
+
+**Command:**
+```powershell
+.\Set-AccessInheritanceSchema.ps1 -SelfTest    # offline
+.\Set-AccessInheritanceSchema.ps1 -Verify      # read-only (exit 0 / 1)
+.\Set-AccessInheritanceSchema.ps1              # dry run
+.\Set-AccessInheritanceSchema.ps1 -Apply       # operator only
+```
+
 ### `Set-InheritedAccessPermissionFormLock.ps1`
-**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Since task 175 (owner round 84) it also registers the library on every Work Assignment and Project MAIN form that shows `sprk_accesspermission` (the TrackingFieldTrio pill; no plain control is added there): a work assignment or project filed under a matter or project has `sprk_accesspermission` and, where the form carries it, `sprk_issecure` locked ("Access permission and Secure are inherited from …"). Additive string insertions proven by a parse check; snapshot before every write.
+**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Since task 175 it also registers the library on every Work Assignment and Project MAIN form that shows `sprk_accesspermission` (the TrackingFieldTrio pill; no plain control is added there). There the lock is a FLOOR (owner round 87): a work assignment or project filed under a matter or project may not go below its parents' Access Permission (a looser pick is put back, a stricter one kept), `sprk_issecure` is disabled while it is filed, and the notification says whether the value is inherited or set on the record. Additive string insertions proven by a parse check; snapshot before every write.
 **Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
 **Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173; Work Assignment / Project main forms added by task 175)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+

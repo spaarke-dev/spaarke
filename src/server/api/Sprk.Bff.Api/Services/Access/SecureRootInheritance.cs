@@ -532,20 +532,16 @@ public sealed partial class SecureRootInheritance
         var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct).ConfigureAwait(false);
         if (setsLocked)
         {
-            if (filedUnder.Count > 0)
-            {
-                var noun = table.Trim().Equals(Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment";
-                return Refusal(AccessFollowsParent.ReasonCode,
-                    $"this {noun} is filed under {AccessFollowsParent.Describe(filedUnder.Select(p => new SecureFilingParent(p.Table, p.Id, p.Name)).ToList())}, " +
-                    $"and its Secure designation and Access Permission follow it (owner round 84); they cannot be set on the {noun}, " +
-                    "so it was not written");
-            }
-
             if (!answer.IsKnown)
-                return Refused(table, answer.Unverifiable!); // whether it has a parent is unknown: never "parentless" on a guess
+                return Refused(table, answer.Unverifiable!); // what it is filed under is unknown: never "no floor" on a guess
+
+            if (filedUnder.Count > 0
+                && await FloorRefusalAsync(table, recordId!.Value, materialized, filingWrites.Count == 0, answer, filedUnder, ct)
+                    .ConfigureAwait(false) is { } belowFloor)
+                return belowFloor;
 
             if (filingWrites.Count == 0)
-                return null; // a parentless record keeps and edits its own values
+                return null; // at or above the floor (or no parent): the record's own value
         }
 
         // Secure-if-any: a readable secure parent means the record is secured after the write whatever another parent says
@@ -567,6 +563,112 @@ public sealed partial class SecureRootInheritance
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Task 175 (owner round 87): the refusal of a BFF write that would make a filed work assignment or project LOOSER than the
+    /// floor its parents set — an Access Permission below theirs, or its Secure flag cleared while a parent is secure — or
+    /// <c>null</c>. Tightening (or an equal value) is never refused. The floor: the whole chain (the 174 walk) when the write
+    /// does not change the filing; the new parents' own values when it does (the job raises anything their own parents
+    /// raise). A value that cannot be read is refused (never "looser is fine" on a guess).
+    /// </summary>
+    private async Task<RecordOwnerResolution?> FloorRefusalAsync(
+        string table, Guid recordId, IReadOnlyCollection<KeyValuePair<string, object?>> writes, bool filingUnchanged,
+        SecureParentsAnswer direct, IReadOnlyList<FiledParent> filedUnder, CancellationToken ct)
+    {
+        bool floorSecure;
+        int floorRank;
+        if (filingUnchanged)
+        {
+            var chain = await ReadSecureParentsAsync(_dataverse, _logger, table, recordId, ct, _recordTypes, MaxFilingDepth)
+                .ConfigureAwait(false);
+            if (!chain.IsKnown)
+                return Refused(table, chain.Unverifiable!);
+            (floorSecure, floorRank) = FloorOf(chain);
+        }
+        else
+        {
+            floorSecure = direct.HasSecureParent || filedUnder.Any(p => p.Flag == true);
+            floorRank = filedUnder.Select(p => Math.Max(0, RankOf(p.Permission))).DefaultIfEmpty(0).Max();
+        }
+
+        var noun = table.Trim().Equals(Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment";
+        var parents = AccessFollowsParent.Describe(filedUnder.Select(p => new SecureFilingParent(p.Table, p.Id, p.Name)).ToList());
+        foreach (var (key, written) in writes)
+        {
+            var column = NormalizeColumn(key);
+            if (string.Equals(column, AccessPermissionColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadOption(written, out var option) || RankOf(option) < 0)
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the Access Permission written to this {noun} could not be read, so it was not written");
+                if (RankOf(option) < floorRank)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, so its Access Permission cannot be lower than " +
+                        $"{(floorRank == 2 ? "Restricted" : "Limited")} (owner round 87); it was not written");
+                }
+            }
+            else if (string.Equals(column, IsSecureColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadBool(written, out var secure))
+                    return Refusal(AccessFollowsParent.ReasonCode, $"the secure flag written to this {noun} could not be read, so it was not written");
+                if (secure == false && floorSecure)
+                {
+                    return Refusal(AccessFollowsParent.ReasonCode,
+                        $"this {noun} is filed under {parents}, which is secure, so it cannot be made not secure (owner round 87); it " +
+                        "was not written");
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>An option value as a BFF writer spells it: an OptionSetValue, a number, a numeric string or JSON; null is Standard.</summary>
+    private static bool TryReadOption(object? value, out int? option)
+    {
+        option = null;
+        switch (value)
+        {
+            case null or DBNull:
+                return true;
+            case OptionSetValue o:
+                option = o.Value;
+                return true;
+            case int i:
+                option = i;
+                return true;
+            case long l when l is >= int.MinValue and <= int.MaxValue:
+                option = (int)l;
+                return true;
+            case string text when int.TryParse(text, out var parsed):
+                option = parsed;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Null:
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Number && json.TryGetInt32(out var number):
+                option = number;
+                return true;
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(json.GetString(), out var fromText):
+                option = fromText;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>A Yes/No value as a BFF writer spells it; null is not a value (refused).</summary>
+    private static bool TryReadBool(object? value, out bool? flag)
+    {
+        flag = value switch
+        {
+            bool b => b,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.True } => true,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.False } => false,
+            _ => null,
+        };
+        return flag is not null;
     }
 
     /// <summary>
@@ -657,10 +759,10 @@ public sealed partial class SecureRootInheritance
                     "secure-root inheritance job retries it.", table, recordId, result.Outcome, result.ReasonCode, result.Detail);
             }
 
-            // Task 175 (owner round 84, goal 2): a re-file recomputes its stored values both ways — re-filed away from its
-            // secure parent it follows its new parents out of isolation (the unsecure endpoint's own steps), and its Access
-            // Permission follows them. A record left with no parent keeps its values (and becomes editable). Never throws;
-            // what does not complete is left at the more restrictive state for the job.
+            // Task 175 (owner round 87, goal 2): a re-file recomputes its stored values against the NEW floor — and never
+            // loosens: what the record held beyond the new parents' floor becomes its own (its access record says it was
+            // re-filed); it can only be raised to the new floor. A record left with no parent keeps its values (and becomes
+            // editable). Never throws; what does not complete is left at the more restrictive state for the job.
             if (result.Outcome is not (SecureRootInheritOutcome.NotFound or SecureRootInheritOutcome.Unverifiable))
             {
                 var follow = await FollowParentsAsync(table, recordId, trace, ct).ConfigureAwait(false);
