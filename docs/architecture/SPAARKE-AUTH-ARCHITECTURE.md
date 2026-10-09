@@ -1,6 +1,6 @@
 # Spaarke Authentication and Authorization Architecture
 
-> **Status**: DRAFT for owner review (2026-10-09). On sign-off this document becomes the canonical description of how Spaarke authenticates and authorizes every user and service, and the source from which ADR-028, `.claude/patterns/auth/*` and `.claude/constraints/auth.md` are re-derived.
+> **Status**: DRAFT for owner review (2026-10-09). Independently trace-checked 2026-10-09 (`projects/spaarke-auth-system-of-record-r1/working/x08-architecture-trace-check.md`: 236 statements, 26 corrected). On sign-off this document becomes the canonical description of how Spaarke authenticates and authorizes every user and service, and the source from which ADR-028, `.claude/patterns/auth/*` and `.claude/constraints/auth.md` are re-derived.
 > **Describes**: what the code does at `master` @ `8a9ecaac1`, re-checked against `master` @ `231c5ab2b` on 2026-10-09 (§0.3).
 > **Verification companion**: [`projects/spaarke-auth-system-of-record-r1/auth-system-of-record.md`](../../projects/spaarke-auth-system-of-record-r1/auth-system-of-record.md) (the "record") — every statement here traces to a section of the record, its evidence files (`working/a01`–`a09`, `x01`–`x07`) or a cited `path:line`.
 > **Governing ADRs**: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (auth architecture — partly stale, §7.3), ADR-034 (membership), ADR-008 (endpoint filters).
@@ -96,14 +96,14 @@ flowchart LR
 
 ### 1.2 The architecture in eight statements
 
-1. **The BFF is the single backend** for every client surface. Clients acquire a token for the BFF's API; they never call Graph or SPE directly. Dataverse-hosted pages may also call Dataverse directly with the Dataverse session (`Xrm.WebApi`).
+1. **The BFF is the single backend** for every client surface. Clients acquire a token for the BFF's API. They never call Graph or SPE directly, with one exception: for large uploads the client PUTs chunks, without a bearer, straight to the Graph upload-session URL the BFF issued (`BFF/Api/OBOEndpoints.cs:389-392`). Dataverse-hosted pages may also call Dataverse directly with the Dataverse session (`Xrm.WebApi`).
 2. **There are two identity planes.** The workforce plane is Entra ID — Spaarke's tenant for Model 1 stamps. The CIAM plane is a separate Microsoft Entra External ID tenant for external contacts. The BFF validates each with its own JwtBearer scheme, and only the collaboration surface `/api/v1/external/**` accepts both (§4.7).
 3. **On internal routes, record authorization is Dataverse's answer, asked as the caller.** The BFF exchanges the inbound bearer on-behalf-of (OBO) for a Dataverse token and asks `RetrievePrincipalAccess`. No caller token means deny — there is no app-only fallback (`CORE/Auth/AuthorizationService.cs:54-72`).
 4. **On the collaboration surface, authorization is a composed record set.** The caller is resolved to a principal (`SystemUser` or `ContactOnly`), the BFF composes the set of records that principal may read, and reads Dataverse app-only, scoped to that set. The caller token is never exchanged (`BFF/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:23-25`).
 5. **SPE bytes move as the BFF.** Since task 171 every id-keyed document route checks rights in Dataverse as the user, then reads or writes SPE app-only through `SpeContainerOwnershipGuard`. The user's token reaches Graph/SPE on six named surfaces only (§4.9.5).
 6. **The BFF's own credential is secret-free.** The stamp's user-assigned managed identity (UAMI) is used directly for app-only data-plane access, and it proves the BFF app registration through a federated identity credential (MI-FIC) wherever a confidential client is needed (OBO, app-only Graph/Dataverse when the MI flag is off) — `BFF/Infrastructure/Auth/OrderedCredentialClientProvider.cs:422-494`.
 7. **One BFF app registration per customer**, created by provisioning (H3) in the tenant that hosts the stamp, trusting only that stamp's UAMI (`L2/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs:1097-1141,1241-1262`).
-8. **Every route declares its authorization.** No `[Authorize]` attributes; each route carries `RequireAuthorization(...)` or `AllowAnonymous()`, and an architecture test fails the build on any route that is anonymous by omission (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:35-42`). Authorization beyond the scheme is done by endpoint filters (ADR-008); there is no global authorization middleware.
+8. **Every route declares its authorization.** No `[Authorize]` attributes; each route carries `RequireAuthorization(...)` or `AllowAnonymous()`, and an architecture test fails the build on any route that is anonymous by omission (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:35-42` rule, `:3240` test). Authorization beyond the scheme is done by endpoint filters (ADR-008); there is no global authorization middleware.
 
 ---
 
@@ -115,11 +115,11 @@ flowchart LR
 |---|---|---|
 | **Spaarke workforce tenant** `a221a95e-6abc-4434-aecc-e48338a1b2f2` | Spaarke staff; Model 1 customer staff as B2B guests; the per-customer BFF app registrations, UAMIs, the client app registrations (Office add-in, PCF client, Teams/Copilot), the L2 identities | **Workforce** — default `Bearer` scheme, `AzureAd` authority |
 | **Customer workforce tenants** | Customer staff home accounts. In Model 1 they appear in Spaarke's tenant as guests (U2); licence-free customer users (U3) sign in from here | **Workforce** |
-| **CIAM tenant** `spaarkeextid` (`7052feba-bfc4-43e0-b09e-65014b429131`, `spaarkeextid.ciamlogin.com`) | External contacts' local accounts (U4); the External Workspace SPA client and the CIAM-side BFF API registration; the CIAM Graph provisioner app | **CiamContact** — `Ciam` scheme |
+| **CIAM tenant** `spaarkeextid` (`7052feba-bfc4-43e0-b09e-65014b429131`, `spaarkeextid.ciamlogin.com`) | External contacts' local accounts (U4); the External Workspace SPA client and the CIAM-side BFF API registration; the CIAM Graph provisioner app (registration state not probed — ⚠ Unproven B4) | **CiamContact** — `Ciam` scheme |
 
-**Model 1** — the customer's stamp (BFF app registration, UAMI, Dataverse) lives in Spaarke's tenant, and customer staff are B2B guests there. Every non-`customer-owned-model2` provisioning profile resolves the stamp tenant to Spaarke's (`GraphAppRegistrationProvisioner.cs:1097-1121`; `L2/Handlers/ControlPlaneIdentityOptions.cs:17-24`).
+**Model 1** — the customer's stamp (BFF app registration, UAMI, Dataverse) lives in Spaarke's tenant, and customer staff are B2B guests there. Every non-`customer-owned-model2` provisioning profile resolves the stamp tenant to Spaarke's (`ResolveUamiTenantId`, `GraphAppRegistrationProvisioner.cs:1241-1244`, called at `:1100`).
 
-**Model 2** — the `customer-owned-model2` profile, with the stamp in the customer's own tenant and customer staff as native accounts. It is not provisionable today (→ Gap M-9).
+**Model 2** — the `customer-owned-model2` profile, with the stamp in the customer's own tenant and customer staff as native accounts. It is not provisionable today (`L2/Handlers/ControlPlaneIdentityOptions.cs:15-24`; → Gap M-9).
 
 ### 2.2 User types
 
@@ -130,7 +130,7 @@ flowchart LR
 | **U3** | Licence-free workforce user | Member of a customer tenant, no Dataverse seat | No `systemuser`. A `contact` bound by `sprk_externalobjectid = oid`, created or e-mail-bound on first sign-in only when `tid ∈ WorkforceIdentity:CustomerTenantIds` and `acct = "0"` (`BFF/Infrastructure/ExternalAccess/ContactIdentityBinder.cs:163-186`) | Workforce · `ContactOnly`. Every internal route that needs a systemuser denies |
 | **U4** | External contact | Local account in the CIAM tenant, created admin-side by `CiamUserProvisioningService` | `contact` with `sprk_externalobjectid` = CIAM `oid`; bound by e-mail only, never created on sign-in (`ContactIdentityBinder.cs:190-202`) | CiamContact · `ContactOnly`. Authenticates only on `/api/v1/external/**`; 401 everywhere else |
 | **U5** | Model 2 customer staff | Native account in the customer's tenant | Would be a `systemuser` in a customer-tenant Dataverse | Would behave as U1 on a Model 2 stamp. Not provisionable; no code branches on tenancy model |
-| **U6** | Services and non-user callers | Managed identities, app registrations, webhook senders, API-key holders (§2.3) | Application users | Outbound callers; inbound only via keyless proof, the RAG API key and the HMAC webhooks |
+| **U6** | Services and non-user callers | Managed identities, app registrations, webhook senders, API-key holders (§2.3) | Application users | Outbound callers. The only routes **designed** for non-user callers are keyless proof, the RAG API key and the HMAC webhooks. But an app-only token for the BFF audience still **authenticates** on every bare `RequireAuthorization()` route; it is admitted wherever only `oid` + `tid` are checked (context-free AI chat, `BFF/Api/Filters/AiAuthorizationFilter.cs:174`) and fails only where a `systemuser` or OBO step runs (→ Gap L-5) |
 
 **Contact binding columns.** `contact.sprk_externalobjectid` holds the bound `oid` and is field-security protected (the Identity Link FLS profiles that H7b maintains). `contact.sprk_externalobjectidkey` is an **unsecured** uniqueness mirror of it, because Dataverse cannot key a secured column (`L2/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs:109`). It carries the alternate key `sprk_externalobjectiduniquekey`, so one `oid` binds to at most one contact (`BFF/Infrastructure/ExternalAccess/ContactBindingDecision.cs:1102-1107`; packaged in SpaarkeMaster 1.2.1.0).
 
@@ -184,7 +184,7 @@ The one sign-in library for Dataverse-hosted code pages, PCFs and solutions, and
 | `SpaarkeAuthProvider` | `LIB/SpaarkeAuthProvider.ts` | Holds the strategy; proactive refresh every 4 min while a token is cached (`:242-261`); `logout()` broadcasts on `BroadcastChannel('spaarke-auth-events')` (`:114-122`) | — |
 | `BrowserMsalStrategy` | `LIB/strategies/BrowserMsalStrategy.ts` | MSAL `PublicClientApplication`, `localStorage` + auth-state cookie (`:137-156`); account pick: last page account → the one cached account whose tenant matches the authority → the single account (`:278-290`); ladder `acquireTokenSilent` → `ssoSilent(loginHint = UPN)` → `acquireTokenPopup` unless `requireSilentOnly` (`:162-218`); accepts a token only with ≥ 5 min left (`:306-324`) | — |
 | `OfficeNaaStrategy` | `LIB/strategies/OfficeNaaStrategy.ts` | Nested app authentication (`createNestablePublicClientApplication`, redirect `brk-multihub://{host}`) where supported, else a popup `PublicClientApplication` on `/auth-callback.html`; `sessionStorage`, no cookie (`:86-149,378-463`); ladder silent → popup | `fallbackRedirectUri` |
-| `authenticatedFetch` | `LIB/authenticatedFetch.ts:31-82` | Adds `Authorization: Bearer`; on 401 clears the in-memory cache and retries up to 3 times; throws `AuthError('auth_exhausted')` or `ApiError` — never returns a non-2xx response | — |
+| `authenticatedFetch` | `LIB/authenticatedFetch.ts:31-82` | Adds `Authorization: Bearer`; on 401 clears the in-memory cache and retries up to twice (3 attempts in all, `:10,39,55`); throws `AuthError('auth_exhausted')` or `ApiError` — never returns a non-2xx response | — |
 | Error guards | `LIB/errorGuards.ts` (master `231c5ab2b`) | `isApiError(err, …statuses)`, `problemOf(err)`, `isAuthFailure(err)` — structural checks that survive duplicate bundled copies of the library | — |
 | `useAuth()`, `createCodePageAuthInitializer` | `LIB/` | Convenience accessors over the initialized provider (`useAuth` is a plain function, not a React hook) | — |
 
@@ -194,7 +194,7 @@ PCFs read the same four env vars through `getEnvironmentVariable(context.webAPI,
 
 | Component | Location | Responsibility | Configuration |
 |---|---|---|---|
-| Office add-in `AuthService` | `src/client/office-addins/shared/services/AuthService.ts:80-104` | Builds `OfficeNaaStrategy` + `SpaarkeAuthProvider` directly (bypassing `initAuth`); pins `login.microsoftonline.com/{TENANT_ID}`; scope `api://{BFF_API_CLIENT_ID}/user_impersonation` | Build-time `ADDIN_CLIENT_ID`, `TENANT_ID`, `BFF_API_CLIENT_ID`, `BFF_API_BASE_URL` (webpack refuses a build without the tenant) |
+| Office add-in `AuthService` | `src/client/office-addins/shared/services/AuthService.ts:80-104` | Builds `OfficeNaaStrategy` + `SpaarkeAuthProvider` directly (bypassing `initAuth`); pins `login.microsoftonline.com/{TENANT_ID}`; scope `api://{BFF_API_CLIENT_ID}/user_impersonation`. The source carries a hard-coded dev fallback for an empty BFF client id (`:81`); webpack's required-variable check makes it unreachable in a built artefact (→ Gap H-6) | Build-time `ADDIN_CLIENT_ID`, `TENANT_ID`, `BFF_API_CLIENT_ID`, `BFF_API_BASE_URL` (webpack refuses a build without the tenant) |
 | Add-in manifest packaging | `src/client/office-addins/packaging/mergeUnifiedManifest.js:265-269,401-408` | Refuses a `webApplicationInfo` entry in the unified manifest — that entry made customer tenants consent to Spaarke's single-tenant app (AADSTS700016) | — |
 | External SPA MSAL config | `SPA/auth/msal-config.ts:78-159` | Two planes from one module: CIAM singleton (`VITE_MSAL_AUTHORITY`, `knownAuthorities`, `sessionStorage`, `:94-138`) and workforce config on `/organizations` with an optional authority override (`:147-159`) | `VITE_MSAL_*`, `VITE_TEAMS_MSAL_CLIENT_ID`, `VITE_TEAMS_BFF_SCOPE` (baked at build) |
 | Realm chooser / standalone plane | `SPA/main.tsx:100-143`; `SPA/auth/standalone-plane.ts:51-74`; `SPA/auth/realm.ts` | In a browser, choose "work account" (workforce) or "partner" (CIAM); remember the realm in `sessionStorage['spaarke.ext.realm']` | — |
@@ -208,21 +208,21 @@ PCFs read the same four env vars through `getEnvironmentVariable(context.webAPI,
 
 | Component | Location | Responsibility | Configuration |
 |---|---|---|---|
-| Middleware pipeline | `BFF/Infrastructure/DI/MiddlewarePipelineExtensions.cs:21-170` | `UseCors` → security headers → exception handler → token logger → `UseAuthentication` → `UseAuthorization` → `AuditEnrichmentMiddleware` (`oid`, `appid`, `obo`, `tenantId`, `correlationId`) → rate limiter → endpoint filters | — |
+| Middleware pipeline | `BFF/Infrastructure/DI/MiddlewarePipelineExtensions.cs:21-170` | `UseCors` → security headers → exception handler → token logger → `UseAuthentication` → `UseAuthorization` → `AuditEnrichmentMiddleware` (`oid`, `appid`, `obo`, `tenantId`, `correlationId`) → rate limiter → endpoint filters. Two known hazards: the exception handler echoes any request `Origin` on error responses (`:88-94`), and the Warning-level token logger is marked "remove before production" (`:121-158`) (→ Gap M-5) | — |
 | `AuthorizationModule` — schemes | `BFF/Infrastructure/DI/AuthorizationModule.cs:49-167` | Default `Bearer` = `AddMicrosoftIdentityWebApi("AzureAd")` (Microsoft.Identity.Web 4.14.2); `Ciam` JwtBearer (`Authority = {Ciam:Instance}/{Ciam:TenantId}/v2.0`, `Audience = Ciam:Audience`); `RagApiKey` header scheme. `PostConfigure` merges `AzureAd:Audience` ∪ `ValidAudiences` ∪ `AgentToken:CopilotAudience` (`:106-126`). `OnAuthenticationFailed` logs `aud`/`iss`/`appid` (`:143-166`) | `AzureAd:*`, `Ciam:*`, `Rag:ApiKey`, `AgentToken:CopilotAudience` |
 | `AuthorizationModule` — policies | `:224-418` | `FallbackPolicy` (authenticated); `SystemAdmin` (`roles` ∋ `Admin`/`SystemAdmin`); `ExternalCollaboration` (schemes `{Ciam, Bearer}`); `RagApiKey`; `CiamExternal` (unused); 23 `can*` resource policies (unused, → Gap M-12) | — |
-| `CorsModule` | `BFF/Infrastructure/DI/CorsModule.cs:17-132` | Absolute-HTTPS allow-list, never `*`; also allows hosts ending `.dynamics.com`, `.powerapps.com`, `.powerappsportals.com`; empty list outside Development throws | `Cors:AllowedOrigins` |
+| `CorsModule` | `BFF/Infrastructure/DI/CorsModule.cs:17-132` | Absolute-HTTPS allow-list, never `*`; also allows hosts ending `.dynamics.com`, `.powerapps.com`, `.powerappsportals.com`; an empty list throws outside Development/Testing (`:22-44`) | `Cors:AllowedOrigins` |
 | Caller primitives | `CallerResolution.cs:89-95`; `TenantResolution.cs:39-69`; `CORE/Auth/CallerIdentity.cs:229-322` | Caller `oid`, `tid`, and UserDelegated / Application / Indeterminate classification | — |
 | `CallerPrincipalAuthorizationFilter` + `CallerPrincipalResolver` | `BFF/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:386-406,456-514,617-637` | Collaboration surface: select the plane from validated claims; resolve a `CallerPrincipal` through the plane's strategy; 401/403 when none | `Ciam:TenantId` |
 | `WorkforcePrincipalResolver` | `BFF/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs:88-233` | Workforce strategy: `systemuser` by `oid` first (cached 10 min); else contact via the member test | `IdentityLink:Reconciliation:WritesEnabled` |
-| Workforce member test | `BFF/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs:182-240` | Fixed-order decision over (token kind, list, `tid`, `acct`) — §4.7.2 | `WorkforceIdentity:CustomerTenantIds` |
+| Workforce member test | `BFF/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs:182-240` | Fixed-order decision over (token kind, list, `tid`, `acct`) with seven outcomes: `NotUserToken`, `TenantListEmpty`, `ForeignTenant`, `AcctMissing`, `Guest`, `AcctUnrecognized`, `Member` (`:190-191,224-241`) — §4.7.2 | `WorkforceIdentity:CustomerTenantIds` |
 | `ContactIdentityBinder` | `BFF/Infrastructure/ExternalAccess/ContactIdentityBinder.cs:163-202` | Bind an `oid` to a contact: workforce `Member` → e-mail-bind-and-create; CIAM → e-mail-bind only | — |
-| Endpoint filters (35 under `BFF/Api/Filters`) | `BFF/Api/Filters/*` | Record filters (§5.2), AI filters (§5.9), Office filters, admin/reporting/registration filters, keyless proof, webhook signatures | per filter |
+| Endpoint filters (38 `IEndpointFilter` implementations: 31 in `BFF/Api/Filters`, 7 beside their routes — agent, reporting, external-access delegation, contact grants, Office exceptions, tenant routing, Dataverse) | `BFF/Api/Filters/*` and others | Record filters (§5.2), AI filters (§5.9), Office filters, admin/reporting/registration filters, keyless proof, webhook signatures | per filter |
 | `OfficeAuthFilter` | `BFF/Api/Filters/OfficeAuthFilter.cs:76-134` | 401 without `oid` on `/api/office/*` | — |
 | `KeylessProofAuthorizationFilter` | `BFF/Api/Filters/KeylessProofAuthorizationFilter.cs:101-123` | Admits only `tid == AzureAd:TenantId`, `aud ∈ {ClientId, api://ClientId}`, no `scp`, role `Provisioning.KeylessProof` | — |
 | `ApiKeyAuthenticationHandler` | `BFF/Infrastructure/Authentication/ApiKeyAuthenticationHandler.cs:47-104` | `X-Api-Key` compared with `FixedTimeEquals`; principal has no `oid`/`tid` | `Rag:ApiKey` |
 | `WebhookSignatureFilter` | `BFF/Api/Filters/WebhookSignatureFilter.cs:86-180` | HMAC-SHA256 `X-Hub-Signature-256`, fail closed on an empty key, `?validationToken=` handshake passes | `Communication:WebhookSigningKey`, `Compose:Webhook:SigningKey` |
-| Route guard tests | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:35-42`; `…Ledger.cs:1037-1058` | Every route declares authorization; the anonymous set is pinned | — |
+| Route guard tests | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:35-42,3240,3966,4540`; `…Ledger.cs:1039-1056` | Every route declares authorization; the anonymous set is pinned | — |
 
 ### 3.4 BFF — outbound credentials
 
@@ -232,7 +232,7 @@ PCFs read the same four env vars through `getEnvironmentVariable(context.webAPI,
 | `OrderedCredentialClientProvider` | `BFF/Infrastructure/Auth/OrderedCredentialClientProvider.cs:211-274,357-368,422-494` | The single source of the BFF's confidential client (MSAL CCA): tries `ManagedIdentityFederated` → `KeyVaultCertificate` → `ClientSecret` in configured order; caches CCAs keyed `tenant|client|kind|fingerprint` | `Graph:Credentials:Order`, `RequireSecretFreeIdentity` |
 | `ManagedIdentityAssertionProvider` | `BFF/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs:57-119` | Gets a UAMI token for `api://AzureADTokenExchange` and presents it as the client assertion (MI-FIC) | UAMI client id |
 | `IdentityConfigurationValidator` | `BFF/Configuration/IdentityConfigurationValidator.cs:78-297` | Fails startup when the UAMI id equals the app id, MI-FIC has no UAMI id, no credential is obtainable, or `ClientSecret` is in the order with `RequireSecretFreeIdentity` outside Development | — |
-| `GraphClientFactory` | `BFF/Infrastructure/Graph/GraphClientFactory.cs:117-367` | `ForUserAsync` = Graph OBO (`:251-299`); `ForApp()` = app-only (UAMI or CCA, `:138-194`) | `Graph:ManagedIdentity:Enabled` |
+| `GraphClientFactory` | `BFF/Infrastructure/Graph/GraphClientFactory.cs:117-367` | `ForUserAsync` = Graph OBO (`:335-344`, exchange at `:251-299`); `ForApp()` = app-only (UAMI or CCA; `:362`, client built at `:134-205`) | `Graph:ManagedIdentity:Enabled` |
 | `GraphTokenCache` | `BFF/Services/GraphTokenCache.cs:38-46` | Redis cache of Graph OBO results keyed by the SHA-256 of the user token, 55 min | Redis |
 | `SpeContainerOwnershipGuard` | `BFF/Infrastructure/Graph/SpeContainerOwnershipGuard.cs:116-132` | The only door to app-only SPE: `ForOwnedContainerAsync` / `ForTypeWideOperation`; ArchTest-enforced (`tests/Spaarke.ArchTests/TenantIsolation/SpeAppOnlyContainerGuardTests.cs`) | owned container ids |
 | Dataverse app-only clients | `DV/DataverseServiceClientImpl.cs:89-186`; `DV/DataverseWebApiService.cs:96-142`; `DataverseWebApiClient` | SDK `ServiceClient` and Web API clients acting as the BFF (UAMI when the MI flag is on, else the app registration) | `Dataverse:ServiceUrl`, MI flag |
@@ -268,15 +268,15 @@ PCFs read the same four env vars through `getEnvironmentVariable(context.webAPI,
 | Step | Location | Auth responsibility |
 |---|---|---|
 | **H3** Entra app registration | `L2/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs` | Creates `spaarke-bff-api-{customerId}` (`:180`): identifier `api://{appId}`, scope `user_impersonation` only (`:523`), SPA redirect = customer Dataverse origin, pre-authorized client = the production Office add-in, `acct` optional claim, FIC `spaarke-uami-trust` → stamp UAMI, role `Provisioning.KeylessProof` assigned to the L2 principal (not for Model 2). `AssertFicTenancy` refuses a cross-tenant FIC (`:1241-1262`). Default audience `AzureADMultipleOrgs` (`EntraAppRegOptions.cs:57`) |
-| **H4 / H4b** App Service settings | `L2/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs:483-527` | Writes the BFF's identity settings; a plain per-environment value wins over a Key Vault reference for `AzureAd__*`; writes no secret slots |
+| **H4 / H4b** App Service settings | `L2/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs:483-527` | Writes the BFF's identity settings; a plain per-environment value wins over a Key Vault reference for `AzureAd__*`; secret-backed settings are written only as Key Vault references (`:494-497`). H4 seeds no BFF credential secret into the stamp vault (record §10 R53) |
 | **H7** environment variables | — | Writes the `sprk_*` env vars (`sprk_MsalClientId` defaults to the H3 app id) |
 | **H7b** Secure Record setup | `L2/Handlers/SecureRecordSetup/` | Secure Record BU/team/role and FLS memberships; signs in as the BFF app registration (→ Gap M-17 for what it omits) |
 | **H8** SPE container type | `L2/Handlers/SpeContainer/H8SpeContainerHandler.cs:935-943` | Container-type grants: UAMI application `full`, BFF app delegated `full` |
-| **H10** Dataverse app users + Graph roles | `L2/Handlers/DataverseAppUserGraphParity/` | Application users for the app and UAMI (default role System Administrator, `H10…Options.cs:23`); 11 of 15 Graph app roles to the stamp UAMI (`GraphRestAppRoleGranter.cs:55-110`) |
+| **H10** Dataverse app users + Graph roles | `L2/Handlers/DataverseAppUserGraphParity/` | Application users for the app and UAMI (default role System Administrator, `H10…Options.cs:23`); 11 of 15 Graph app roles to the stamp UAMI — the four `Mail.*` roles are left to Exchange RBAC (`L2GraphAppRolesRegistry.cs:40-66`; `IGraphAppRolesRegistry.cs:65-82`; `H10DataverseAppUserGraphParityHandler.cs:352-357`) |
 | **H11** user provisioning | `L2/Handlers/UserProvisioning/` | Invites B2B guests, adds them to the environment security group, creates the `systemuser` by guest `oid`, associates `Spaarke Basic User` |
 | **H13** end-to-end acceptance | `L2/Handlers/E2EAcceptance/E2EValidationRunner.cs:280-340` | Keyless proof: calls `POST /api/platform/keyless-proof` app-only as the L2 UAMI |
 | **H14a/b/c** integration wiring | `L2/Handlers/IntegrationWiring/` | Exchange RBAC for the UAMI's `Mail.*` roles; Graph and Dataverse webhook subscriptions (→ Gap H-3: wrong routes) |
-| Credentials | `L2/Handlers/Credentials/WorkerDataverseCredentialFactory.cs:135-274` | Worker signs in as the customer BFF app via MI-FIC (`ClientSecret` fallback allow-listed with a sunset of 2026-11-23) |
+| Credentials | `L2/Handlers/Credentials/WorkerDataverseCredentialFactory.cs:135-274` | Worker signs in as the customer BFF app via MI-FIC (`ClientSecret` fallback allow-listed with a sunset of 2026-11-23, `tests/Spaarke.ArchTests/CredentialGuardTests.cs:79-101`) |
 | Tenant rules | `L2/Models/CustomerWorkforceTenantsRule.cs:22-23,100-105`; `ReservedTenantsOptions.cs` | The customer workforce tenant list is required and may not contain Spaarke's or the CIAM tenant |
 
 ---
@@ -386,7 +386,7 @@ sequenceDiagram
 
 1. `StandaloneBootstrap` reads the stored realm; with none it shows the realm chooser (`SPA/main.tsx:100-143`).
 2. "Sign in with your work account" builds a fresh `PublicClientApplication` on `/organizations` (`sessionStorage`) and redirects (`SPA/auth/standalone-plane.ts:56-59`; `SPA/components/AuthGuard.tsx:66-94`).
-3. Scope `api://{BFF app}/access_as_user`. The user's home tenant mints the token.
+3. Scope `api://{BFF app}/access_as_user`. No tenant is pinned (`/organizations`, no `domainHint`), so the IdP session decides which tenant mints the token — for a Model 1 guest, home or Spaarke — ⚠ Unproven (A4).
 4. Per call: `acquireTokenSilent`, then `acquireTokenRedirect` on interaction; `bffApiCall` retries once on 401.
 5. Server side: identical to S3 (§4.7).
 
@@ -457,6 +457,7 @@ flowchart TD
   AC -- missing --> D4["deny: workforce_acct_claim_missing"]
   AC -- "1 (guest)" --> D5["deny: workforce_guest<br/>(unless an existing oid binding)"]
   AC -- "0 (member)" --> M["bind contact by oid, else e-mail,<br/>else create"]
+  AC -- "other value" --> D6["deny: workforce_acct_unrecognized"]
   M --> WCP["ContactOnly principal<br/>(grants + standing grant + org expansion)"]
 ```
 
@@ -479,14 +480,14 @@ Internal routes are Workforce-only. The filter reads `oid` and `tid`; the record
 | `/api/platform/keyless-proof` | default + `KeylessProofAuthorizationFilter` | App-only token, `tid`/`aud` pinned, role `Provisioning.KeylessProof` |
 | `/api/ai/rag/enqueue-indexing` | `RagApiKey` | API key |
 | `/api/ai/**`, `/api/agent/**`, `/api/compose/**`, `/api/memory/**`, `/api/workspace/**` | default + AI/session/document filters | `oid` + `tid`; record rights as the caller |
-| `/api/communications/**`, `/api/documents/**`, `/api/v1/documents/**`, `/api/v1/events`, `/api/v1/child-records`, `/api/obo/**`, `/api/finance/**`, `/api/insights/**`, `/api/v1/field-mappings`, `/api/me*`, `/api/notifications`, `/api/navmap` | default + record filters, or handler OBO / impersonation | `oid` → `systemuser`; rights as the caller |
+| `/api/communications/**`, `/api/documents/**`, `/api/v1/documents/**`, `/api/v1/events`, `/api/v1/child-records`, `/api/obo/**`, `/api/finance/**`, `/api/insights/**`, `/api/v1/field-mappings`, `/api/users/me/memberships`, `/api/me*`, `/api/notifications`, `/api/navmap`, `/api/dataverse/{gridconfigurations,savedquery,savedqueries,metadata}` | default + record filters, or handler OBO / impersonation | `oid` → `systemuser`; rights as the caller |
 | `/api/office/**` | default + Office filters | `oid`; OBO probes; impersonated search |
 | `/api/reporting/**` | default + `ReportingAuthorizationFilter` | Module flag + `roles` ∋ `sprk_ReportingAccess` |
 | `/api/v1/external/**` | `ExternalCollaboration` + `CallerPrincipalAuthorizationFilter` | Composed record set (§5.3) |
 | `/api/v1/external-access/**` (grant, revoke, share, invite, provision) | default + `DelegationRuleFilter` | Caller's Write on the target, by OBO |
 | `/api/v1/records/{table}/{id}/no-access` | default + `RecordRouteAccessAuthorizationFilter` | Rights as the caller |
 
-Unmatched routes fall to `FallbackPolicy`: anonymous → 401, authenticated → 404. The full 70-row census is in the record's evidence (a05 §2.10).
+Unmatched routes fall to `FallbackPolicy`: authenticated → 404; anonymous → 401 (framework behaviour, ⚠ Unproven J2). The full 70-row census is in the record's evidence (a05 §2.10).
 
 ### 4.9 Outbound credential paths
 
@@ -539,6 +540,7 @@ An app-only Dataverse request carries `MSCRMCallerID = systemuserid`, so Dataver
 - **Writers:** field-mapping push; owner-revoke.
 - It requires `prvActOnBehalfOfAnotherUser` on the active application user. No code grants that privilege explicitly; H10 gives application users the System Administrator role by default (`H10DataverseAppUserGraphParityOptions.cs:23`). Dev: held.
 - A U3 contact-only caller has no `systemuser`, so impersonated routes return 403 (`THREAD_READ_FORBIDDEN`, `OFFICE_SEARCH_FORBIDDEN`).
+- The `oid` → `systemuser` lookup is not uniform. `CallerSystemUserResolver`, which serves communications send, thread reads and impersonated reads, applies **no** `isdisabled` filter. `SystemUserIdentityResolver` and `MembershipEndpoints` do (→ Gap M-13).
 
 #### 4.9.5 Who touches SPE, as whom
 
@@ -577,7 +579,7 @@ The full table is in the record §6.2. The architecturally significant effects:
 **Keyless proof (H13).**
 1. The L2 Worker acquires an app-only token for `api://{stamp app}/.default` as the L2 UAMI (`L2/Handlers/E2EAcceptance/E2EValidationRunner.cs:280-340`).
 2. `KeylessProofAuthorizationFilter` admits it only if `tid == AzureAd:TenantId`, `aud` is the app, there is no `scp`, and the token carries `Provisioning.KeylessProof`.
-3. The endpoint answers with the stamp's key-credential census, which H13 uses as the keyless proof (record a08 §2.5).
+3. The endpoint probes each stamp data-plane service with the configured identity and answers one status per service (`proved`, `key-credential`, …; `BFF/Api/Platform/KeylessProofEndpoints.cs:55`; `src/server/shared/Contracts/KeylessProofContract.cs:34-40`). H13 records a `keyless-proof-{service}` check per service and fails acceptance unless every one is `proved` (`E2EValidationRunner.cs:240-241`).
 
 **Webhooks and API keys.**
 
@@ -588,7 +590,7 @@ The full table is in the record §6.2. The architecturally significant effects:
 | `POST /api/onboarding/consent-callback` | Mapped only when `Onboarding:Enabled`; HMAC `X-Signature-256` |
 | `POST /api/ai/rag/enqueue-indexing` | `RagApiKey`; the tenant comes from the body (→ Gap M-16) |
 
-**Anonymous routes (pinned by the route ledger test).** `GET /healthz`, `/healthz/catalog`, `/ping`, `/healthz/dataverse`, `/healthz/dataverse/crud`, `/status`, `GET /api/config/client`, `GET /api/config`, `GET /api/office/health`, `POST /api/office/save-debug` (Development only), `POST /api/registration/demo-request`, and the four webhook routes above. Any change to this set fails `RouteAuthorizationGuardTests.Ledger`.
+**Anonymous routes (pinned by the route ledger test).** `GET /healthz`, `/healthz/catalog`, `/ping`, `/healthz/dataverse`, `/healthz/dataverse/crud`, `/status`, `GET /api/config/client`, `GET /api/config`, `GET /api/office/health`, `POST /api/office/save-debug` (Development only), `POST /api/registration/demo-request`, and the four webhook routes above. Any change to this set fails `RouteAuthorizationGuardTests.TheExplicitlyAnonymousSurfaceIsPinned` (`:4540`; list at `…Ledger.cs:1039-1056`).
 
 ---
 
@@ -613,7 +615,7 @@ The full table is in the record §6.2. The architecturally significant effects:
    - If RPA fails it degrades to a Read-only probe, so every Write+ gate denies (`:763-862`).
 3. `OperationAccessPolicy` maps operations to rights. Downloading a document requires **Write**; sharing requires **Share** (`CORE/Auth/OperationAccessPolicy.cs:37,140,307`).
 4. The entity-generic probe (`CallerRecordAccessProbe`: OBO → `WhoAmI` → RPA) covers `contact`, `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event` and `sprk_todo` (`BFF/Api/Filters/EntityAccessFilter.cs:116-138`).
-5. Access snapshots are cached 60 s per `(tid, oid, document)`; a faulted result is never cached (`CachedAccessDataSource.cs:89-192`).
+5. Access snapshots are cached for 60 s, keyed per `(tid, oid, document)` for documents and per `(tid, entity set, oid, record)` for the entity-generic probe. A faulted result is never cached (`CachedAccessDataSource.cs:19-20,89-192`).
 
 ### 5.3 The accessible record set (collaboration surface)
 
@@ -636,7 +638,7 @@ Then apply the vetoes:
 
 Finally, remove every entry that does not hold Read.
 
-**ADR-028 A5 — deriving this set from an impersonated read — is not in force.** `ImpersonatedRootSetSource` is registered but nothing consumes it (`BFF/Infrastructure/DI/ExternalAccessModule.cs:270`). The ADR-034 approximation can over-grant BU-matched records past role depth and miss POA shares (→ Gap H-1).
+**ADR-028 A5 — deriving this set from an impersonated read — is not in force.** `ImpersonatedRootSetSource` is registered (`BFF/Infrastructure/DI/ExternalAccessModule.cs:270-273`), but no consumer reads the root set: `IImpersonatedRootSetSource` is injected nowhere, and only its static cache-invalidation helpers are called (`InternalShareEndpoints.cs:539,760`). The ADR-034 approximation can over-grant BU-matched records past role depth and miss POA shares (→ Gap H-1).
 
 **`ContactOnly` principal** (`AccessibleRecordSetService.cs:2078-2331`; `ExternalParticipationService.cs:85-96`):
 
@@ -722,6 +724,7 @@ It governs:
 - Restricted share removal;
 - Office JIT writer grants;
 - standing BU-container writers;
+- record-less content placement (`RecordContainerResolver.cs:2186,2248-2262`);
 - communication internal-only visibility and fan-out.
 
 **No BFF or provisioning code writes it.** The only writer is the operator script `scripts/Set-ExternalFlagForB2BGuests.ps1`. Until it runs, Model 1 guests are treated as internal (→ Gap H-2; dev: confirmed for one guest).
@@ -778,15 +781,17 @@ The model below is what provisioning writes for a **stamp**. Template placeholde
 |---|---|---|
 | `AzureAd__Instance` / `TenantId` / `ClientId` / `Audience` | Default scheme: stamp tenant, BFF app id, `api://{app}` | H4b (plain per-env value wins over the KV reference; `H4bBulkAppSettingsHandler.cs:483-527`) |
 | `AzureAd__ValidAudiences__{i}` | Extra accepted audiences (Teams-SSO resource, bare GUID) | **Nothing** — not in the template or the manifest (→ Gap M-8) |
-| `PublicConfig__BffUrl` / `MsalClientId` / `TenantId` | Published by anonymous `GET /api/config` | H4b: stamp URL, the H3 app id, the intake tenant (`StampBffUrl.cs:19-26`; `PerEnvSourceCatalog.cs:76-78`) |
-| `WorkforceIdentity__CustomerTenantIds__{i}` | Member-test tenant list | H4b from the required intake `customerWorkforceTenantIds`; other entries removed; H13 T7 verifies both slots (`CustomerWorkforceTenantsRule.cs:42-116`) |
-| `Graph__ManagedIdentity__Enabled` / `ClientId`, `ManagedIdentity__ClientId`, `AZURE_CLIENT_ID` | UAMI selection | Stamp bicep / settings (`customer.bicep:645-646`) |
+| `PublicConfig__BffUrl` / `MsalClientId` / `TenantId` | Published by anonymous `GET /api/config` | H4b: stamp URL, the H3 app id, the intake tenant (`manifest.yaml:658-690`; `PerEnvSourceCatalog.cs:76-79`; `StampBffUrl.cs:19-26`) |
+| `WorkforceIdentity__CustomerTenantIds__{i}` | Member-test tenant list | H4b from the required intake `customerWorkforceTenantIds`; other entries removed; H13 T7 verifies both slots (`manifest.yaml:608-626`; `CustomerWorkforceTenantsRule.cs:42-116`; `H4bBulkAppSettingsHandler.cs:529-543`; `CustomerIdentityT7Probe.cs:255-272`) |
+| `Graph__ManagedIdentity__Enabled` (`true`), `Graph__ManagedIdentity__ClientId`, `ManagedIdentity__ClientId`, `AZURE_CLIENT_ID` | UAMI selection | H4b (manifest literal and the H2a UAMI client id, `manifest.yaml:697-735`); `AZURE_CLIENT_ID` and `ManagedIdentity__ClientId` also from the stamp bicep (`customer.bicep:645-646`) |
 | `Graph__Credentials__Order__0` = `ManagedIdentityFederated`, `Graph__Credentials__RequireSecretFreeIdentity` = `true` | Secret-free confidential client | Template + stamp settings |
 | `Graph__Scopes__0` | Graph `.default` (required option) | Manifest literal |
-| `Cors__AllowedOrigins__{i}` | Customer Dataverse origins, `https://addins.spaarke.com`, `https://external.spaarke.com` | Generated settings |
+| `Cors__AllowedOrigins__{i}` | `https://addins.spaarke.com`, `https://external.spaarke.com` | H4b manifest literals (`manifest.yaml:974-992`). Dataverse origins need no entry: the BFF allows hosts ending `.dynamics.com` / `.powerapps.com` by suffix (`CorsModule.cs:81-116`) |
 | `Ciam__*`, `Ciam__GraphProvisioner__*` | CIAM scheme and provisioner | **No stamp channel writes them** (record §12c, 240d) |
-| `AgentToken__*` | Copilot audience and dormant agent OBO | Template shape `api://{copilot SSO app}/{app}` |
-| `Rag__ApiKey`, `Communication__Webhook*`, `Compose__Webhook__*`, `PowerBi__*` | Shared secrets | Key Vault references in the template; must not be plain values (ADR-028 R17) |
+| `AgentToken__TenantId` / `ClientId` | Agent identity | H4b, as Key Vault references of the tenant id and the H3 app id (`manifest.yaml:181-185,206-210`) |
+| `AgentToken__CopilotAudience` / `AgentAppId` / `DataverseEnvironmentUrl` / `CacheTtlMinutes` | Copilot audience; dormant agent OBO | **Nothing** — template placeholders only (`appsettings.template.json:353-362`), so a stamp does not accept the Copilot audience (→ Gap M-8) |
+| `Communication__Webhook*`, `Compose__Webhook__*` | Webhook signing keys and client states | Key Vault references in the template (`appsettings.template.json:399-401,434-436`); on stamps, H4b writes them as Key Vault references under the stamp secret names (`manifest.yaml:405,448`; → Gap H-3 for the name split) |
+| `Rag__ApiKey`, `PowerBi__*` | Shared secrets | **Not in the template and written by no stamp channel.** Dev: plain settings, so ADR-028 R17 is not met for them (record §13a) |
 | `Onboarding__Enabled`, `TenantRouting__*`, `IdentityLink__Reconciliation__WritesEnabled` | Feature gates | Not written on stamps; `TenantRouting` is never set anywhere |
 
 ### 6.2 Dataverse environment variables
@@ -810,15 +815,15 @@ The **solution-shipped defaults** of all four are Spaarke dev values. An environ
 
 ### 6.4 App registrations
 
-| Registration | Tenant | Shape (code) |
+| Registration | Tenant | Shape (code; rows marked "live" are dev-tenant reads, x04) |
 |---|---|---|
 | Per-customer BFF app (`spaarke-bff-api-{customerId}`, H3) | Stamp tenant (Spaarke's for Model 1) | `AzureADMultipleOrgs` by default; `api://{appId}`; scope `user_impersonation`; SPA redirect = customer Dataverse origin; pre-authorized client = production Office add-in; `acct` optional claim; FIC to the stamp UAMI; role `Provisioning.KeylessProof`; no secret |
-| Office add-in client | Spaarke | Single-tenant (`AzureADMyOrg`); NAA (`brk-multihub://{host}`) and `/auth-callback.html` SPA redirects. Dev and production registrations exist; only dev is built |
+| Office add-in client | Spaarke | Single-tenant (`AzureADMyOrg`); NAA (`brk-multihub://{host}`) and `/auth-callback.html` SPA redirects. Dev and production registrations exist; only dev is built (live, x04 A6/A7) |
 | CIAM External Workspace SPA client and CIAM BFF API | CIAM | SPA client requests `api://{CIAM BFF API}/SDAP.Access` |
 | CIAM Graph provisioner | CIAM | Certificate credential |
-| Control-plane API | Spaarke | Audience `api://spaarke.com/provisioning-controlplane-{env}`; roles `Operator`/`Reader` |
+| Control-plane API (S9) | Spaarke | Audience `api://spaarke.com/provisioning-controlplane-{env}`; roles `Operator`/`Reader` (`Sprk.Provisioning.ControlPlane.Api/Modules/AuthModule.cs:74-100`). Dev: `AzureAd__ClientId` is the L2 UAMI as a placeholder, and the audience belongs to a separate app (x04 A15; x06) |
 | SPE owning app; Exchange Admin app | Spaarke | MI-FIC from the L2 UAMI |
-| GitHub deploy app | Spaarke | OIDC FICs |
+| GitHub deploy app | Spaarke | OIDC FICs (live, x04 A20) |
 
 ### 6.5 Managed identities and directory roles
 
@@ -853,7 +858,7 @@ Dev (`spaarke-bff-dev`) is not an L2-shaped stamp. Each difference below changes
 | MSAL public client | The BFF app (H7 default) | A separate PCF client registration |
 | App roles | `Provisioning.KeylessProof` | `Admin` only |
 | BFF app credentials | None | One remaining client secret |
-| Pre-authorized clients | Production Office add-in | Nine, including Azure CLI and the Microsoft Authentication Broker |
+| Pre-authorized clients | Production Office add-in | Nine, including Azure CLI, and an app with no service principal in the tenant that project notes identify as the Microsoft Authentication Broker (identity DOC CLAIM ONLY, record H-13) |
 | Dataverse role of BFF identities | System Administrator (H10 default) | System Administrator, including the **production** BFF app |
 | Plain-setting secrets | None expected | Four (record §13a) |
 
@@ -867,7 +872,7 @@ Each reason is the one stated in the cited ADR or code comment. Where none is st
 
 | Decision | Stated reason / effect | Source |
 |---|---|---|
-| Tenant-pinned authority for Dataverse-hosted clients; throw instead of `/organizations` on a Dataverse host | ADR-028 requires a tenant-specific authority. Effect of the throw: an unresolved tenant fails sign-in visibly instead of signing in on `/organizations` | ADR-028 :21; `LIB/config.ts:134-140` |
+| Tenant-pinned authority for Dataverse-hosted clients; throw instead of `/organizations` on a Dataverse host | Stated in code: `/organizations` fails for B2B guests (AADSTS700016) and defeats `ssoSilent`. ADR-028 :21 requires the tenant-specific authority | `LIB/config.ts:136-144`; ADR-028 :21 |
 | Record authorization as the caller (OBO + RPA), never app-only | Effect: internal users get exactly the rights Dataverse's security model gives them; a missing caller token is a deny (`sdap.access.deny.no_caller_token`), not the BFF's rights | `CORE/Auth/AuthorizationService.cs:54-72` |
 | SPE as the BFF behind the ownership guard (task 171) | Effect: access is decided once, in Dataverse; no per-user SPE container roles are needed for document routes; app-only SPE is confined to owned containers (ArchTest) | `SpeContainerOwnershipGuard.cs:116-132` |
 | MI-FIC instead of secrets for the BFF identity | ADR-028 A4: the confidential client must be secret-free; E-3 closed the last secret consumer | ADR-028 :216-256; `OrderedCredentialClientProvider.cs` |
@@ -876,7 +881,7 @@ Each reason is the one stated in the cited ADR or code comment. Where none is st
 | The collaboration surface never exchanges the caller token | ADR-028 A1/A3 forbid it on either plane. Effect: one app-only read path, scoped by the composed set, serves CIAM and workforce callers alike | ADR-028 A1 :50, A3 :123; `CallerPrincipalResolver.cs:23-25` |
 | The plane is chosen only from validated `iss`/`tid` | ADR-028 A3: client input must not select the plane | ADR-028 :116; `CallerPrincipalResolver.cs:386-406` |
 | Fixed-order member test; `acct` required | The member test fails closed when `acct` is missing, so H3 ensures the claim on every stamp app | `GraphAppRegistrationProvisioner.cs:86-90`; `WorkforceIdentityOptions.cs:185` |
-| Customer tenant list never contains Spaarke's tenant | "would bind Spaarke's staff into this customer's environment" | `CustomerIdentityT7Probe.cs:261-269`; `CustomerWorkforceTenantsRule.cs:25` |
+| Customer tenant list never contains Spaarke's tenant | "would bind Spaarke's staff into this customer's environment" | `CustomerWorkforceTenantsRule.cs:22-24,100-106`; `CustomerIdentityT7Probe.cs:261-269` |
 | Effective flags fail closed (undecidable → secure + Restricted) | A missed stamp must hide a record, never expose one | `EffectiveRootFlags.cs:104-131`; DATAVERSE-WRITE-PATH-ARCHITECTURE §1 |
 | No `webApplicationInfo` in the Office package | Including it made customer tenants consent to Spaarke's single-tenant app (AADSTS700016) | `mergeUnifiedManifest.js:265-269,401-408` |
 | Every route declares its authorization; filters, not global middleware | ADR-008; the route guard test makes "anonymous by omission" a build failure | `RouteAuthorizationGuardTests.cs:35-42` |
@@ -893,8 +898,8 @@ Each reason is the one stated in the cited ADR or code comment. Where none is st
 | ADR-028 A5 (impersonated root set, :289-355) | Workforce `systemuser` set on the collaboration surface | **Not implemented** — written as in force, coded as an inert future swap |
 | ADR-028 A6 (keyless stamps, :399-423) | Local auth disabled, keyless proof | Holds (ACS excepted); proof not yet run live |
 | ADR-028 E-1 / E-2 / E-3 | Exceptions | E-1 stale (removed 2026-10-04); E-2 holds; E-3 closed |
-| **ADR-034** | Membership resolution | In force; it is the current basis of the `SystemUser` record set (§5.3) |
-| **ADR-008** | Endpoint filters for authorization | Holds; 35 filters, no global authorization middleware |
+| **ADR-034** | Membership resolution | Not reconciled rule by rule in the record. Its `MembershipResolverService` is the current basis of the `SystemUser` record set (§5.3), and the approximation ADR-028 A5 was written to replace (→ Gap H-1) |
+| **ADR-008** | Endpoint filters for authorization | Holds; 38 endpoint filters, no global authorization middleware |
 
 Rule-by-rule verdicts (59 rules, 19 violated or stale): record §10. What an ADR-028 amendment must change: record §12b. Challenge-path (CLAUDE.md §6.5) candidates: R37 (CIAM Tier-1), R46 (A5), and the Office `sessionStorage` rule.
 

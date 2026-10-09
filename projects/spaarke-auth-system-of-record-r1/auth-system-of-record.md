@@ -247,7 +247,7 @@ Collaboration group `/api/v1/external` (`BFF/Api/ExternalAccess/ExternalAccessEn
 **Workforce member test — fixed order** (`WorkforcePrincipalResolver.ResolveAsync`, `WorkforcePrincipalResolver.cs:111-210`; `WorkforceIdentityOptions.cs:199-240`):
 
 1. (a) `oid` → enabled `systemuser` (`azureactivedirectoryobjectid = oid`, `isdisabled = false`, cached 10 min) → `SystemUser` principal; derived contact via `IdentityNormalizationService`; member test **never consulted**.
-2. (b) No systemuser → `ContactIdentityBinder.ResolveWorkforceCallerAsync` → `WorkforceMembershipTest.Evaluate(kind, tid, acct, CustomerTenantIds)` in this order: not a user token → `NotUserToken` (`sdap.access.deny.workforce_app_only_token`); list empty → `TenantListEmpty` (`…workforce_tenant_list_empty`); `tid` not listed → `ForeignTenant` (`…workforce_tenant_not_customer`, `WorkforceIdentityOptions.cs:182,216`); `acct` missing → `AcctMissing` (`…workforce_acct_claim_missing`); `acct="1"` → `Guest` (`…workforce_guest`); `acct="0"` → `Member` → `EmailBindAndCreate`. Anything but `Member` resolves only through an existing `oid` binding and otherwise denies with that code (`ContactIdentityBinder.cs:163-186`; x01 #2, #7).
+2. (b) No systemuser → `ContactIdentityBinder.ResolveWorkforceCallerAsync` → `WorkforceMembershipTest.Evaluate(kind, tid, acct, CustomerTenantIds)` in this order: not a user token → `NotUserToken` (`sdap.access.deny.workforce_app_only_token`); list empty → `TenantListEmpty` (`…workforce_tenant_list_empty`); `tid` not listed → `ForeignTenant` (`…workforce_tenant_not_customer`, `WorkforceIdentityOptions.cs:182,216`); `acct` missing → `AcctMissing` (`…workforce_acct_claim_missing`); `acct="1"` → `Guest` (`…workforce_guest`); `acct="0"` → `Member` → `EmailBindAndCreate`; any other `acct` value → `AcctUnrecognized` (`…workforce_acct_unrecognized`, `WorkforceIdentityOptions.cs:190-191,224-229`) [ADDED by x08]. Anything but `Member` resolves only through an existing `oid` binding and otherwise denies with that code (`ContactIdentityBinder.cs:163-186`; x01 #2, #7).
 3. (c) Neither → 401 (no `oid`) or 403 (`CallerPrincipalResolver.cs:617-637`).
 
 Consequences: a U2 token (`tid` = Spaarke) with no systemuser is `ForeignTenant` wherever Spaarke's tenant is not listed and `Guest` where it is. On the **dev** stamp Spaarke's own tenant **is** listed (`WorkforceIdentity__CustomerTenantIds__0 = a221a95e…`, VERIFIED LIVE x04 §2), so dev reaches the `acct` branch; on L2-provisioned stamps that configuration is impossible (`L2/Models/CustomerWorkforceTenantsRule.cs:22-23,100-105`). The inline contact link runs only when `IdentityLink:Reconciliation:WritesEnabled=true` (`WorkforcePrincipalResolver.cs:225-233`).
@@ -269,7 +269,7 @@ CIAM strategy: `oid` + email (`preferred_username`→`upn`→`email`) → `Resol
 | Office filters (`OfficeAuthFilter`, `JobOwnershipFilter`, `OfficeVersionSaveAuthorizationFilter`, `OfficeRateLimitFilter`) | §4.3; a03 §2.4–2.5 | |
 | `SpeAdminAuthorizationFilter` + `SpeAdminTenantScopeFilter`, `ReportingAuthorizationFilter`, `RegistrationAuthorizationFilter`, `KeylessProofAuthorizationFilter`, `WebhookSignatureFilter` | §4.8, §5.6, a08 §2.2–2.5 | |
 
-35 endpoint filters exist under `Api/Filters`; there is no global authorization middleware (ADR-008; a05 §1.2).
+38 `IEndpointFilter` implementations exist (31 under `Api/Filters`, 7 beside their routes) [CORRECTED by x08: was "35 endpoint filters exist under `Api/Filters`"]; there is no global authorization middleware (ADR-008; a05 §1.2).
 
 ### 5.5 Anonymous surface (pinned)
 

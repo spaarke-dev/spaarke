@@ -1,6 +1,6 @@
 # Current Task State - spaarke-auth-system-of-record-r1
 
-> **Last Updated**: 2026-10-09 (architecture draft committed; trace check running)
+> **Last Updated**: 2026-10-09 (architecture trace-checked and corrected; awaiting owner review)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Write the canonical auth architecture document (no POML; owner-directed) |
-| **Step** | 2 of 4: draft committed (`06ccb14b1`); independent trace check running (one Fable agent, read-only) |
-| **Status** | in-progress |
-| **Next Action** | When the checker finishes, read `working/x08-architecture-trace-check.md`, apply every WRONG/OVERSTATED/citation fix to `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`, commit + push, then hand to the owner for review. If the agent died, re-launch the check (prompt: verify every statement against record/evidence/code at `8a9ecaac1`, drift to `231c5ab2b`; write findings to x08; no edits) |
+| **Step** | 3 of 4: owner review of the architecture doc (draft + trace-check fixes committed) |
+| **Status** | waiting on owner |
+| **Next Action** | Owner reviews `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` (and §8.2 open decisions). Apply review changes; then, with owner approval, step 4 (supersede old docs; amend ADR-028 / patterns / constraints / CLAUDE.md §17 pointer) |
 
 ### Files Modified This Session
 All committed and pushed on `work/spaarke-auth-system-of-record-r1` (HEAD `589b2f0ce` + this checkpoint commit). No uncommitted work.
@@ -29,7 +29,7 @@ Owner wants a **canonical auth architecture** that becomes the source for ADRs a
 
 ## Active Task
 
-**Canonical auth architecture doc** — `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`. Draft committed `06ccb14b1` (8 sections + glossary; master drift to `231c5ab2b` reviewed, additive only, §0.3). Trace check in progress → `working/x08-architecture-trace-check.md`.
+**Canonical auth architecture doc** — `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`. Drafted, trace-checked (`working/x08-architecture-trace-check.md`: 236 statements; 6 wrong, 2 unsupported, 9 overstated, 9 citation fixes — all applied; 7 statements left undecided, listed in x08 §3). Record §5.3/§5.4 corrected to match (AcctUnrecognized outcome; 38 endpoint filters).
 
 ## Next Actions
 
