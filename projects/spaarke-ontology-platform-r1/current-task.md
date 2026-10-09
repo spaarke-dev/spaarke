@@ -21,7 +21,7 @@
 |---|---|---|
 | `afc4660035026f317` (author) / `a85de685334513317` (reviewer) | **044** #1515 round 2 (`576517b0f`: PascalCase nav names, `PreflightAsync` on every executor, revision owner via resolver + `sprk_budgetrevision` lineage/config entries, census) in re-check | **Merge only after uac-r2 OKs the lineage/config entries** (#1355 comment 6083936041) + green CI (D-107). Live proof needs: a low-privilege user token + zz-044 test matter/budget (+ a Secure one) → owner decision |
 | `a9ff474067cdc0aa5` / `a6a2b6b48dc7c9a1e` / `ae631a5184b49f2f7` | **066** eventstatus inventory (`C:\wts-066`) · **067** To Do score (`C:\wts-067`) · **123** triage enabled/active, ISS-010 only (`C:\wts-123`) — all off the project branch | PR → independent review → merge per D-107 |
-| bg `bm3gs401l` | **070** #1512 approved (`2103825d8`) | Merges into the project branch when CI green (D-107) |
+| (agent) | **071** disposition accrual (`C:\wts-071`) — 070 merged 19e2720c9 | PR → review → merge (D-107) |
 | `a9de4b9dd3d9105b0` / `ae2b8cf45db19864a` | **052** MetricCard count filters + C-9 (`C:\wts-052`) · **054** reconciliation tab + aggregate (`C:\wts-054`) | PR → review → merge (D-107) |
 | bg `bz01xg8cg` | **130** #1467 approved (`cc8f49fa5`) | Merges into master when CI green (D-102) → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → owner: 4 live proofs |
 

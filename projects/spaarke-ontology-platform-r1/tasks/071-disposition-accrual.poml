@@ -4,7 +4,7 @@
     <title>Disposition accrual per matter and per outside firm</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>070 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Produces the compounding asset the product claim rests on.</rigor-reason>
     <model-tier>sonnet</model-tier>
