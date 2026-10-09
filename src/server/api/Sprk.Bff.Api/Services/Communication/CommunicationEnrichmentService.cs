@@ -643,6 +643,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TopCount = 1,
         };
         exact.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, categoryName);
+        // Only a row the classifier was offered (active AND enabled) can be saved (#1387): one shared predicate.
+        LookupChoicesResolver.AddOfferedRowPredicate(exact.Criteria, "sprk_triagecategory");
         var exactResult = await _genericEntityService.RetrieveMultipleAsync(exact, ct).ConfigureAwait(false);
         if (exactResult.Entities.Count > 0)
             return exactResult.Entities[0].Id;
@@ -659,6 +661,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ColumnSet = new ColumnSet("sprk_name"),
             TopCount = 200,
         };
+        LookupChoicesResolver.AddOfferedRowPredicate(all.Criteria, "sprk_triagecategory");
         var allResult = await _genericEntityService.RetrieveMultipleAsync(all, ct).ConfigureAwait(false);
         foreach (var row in allResult.Entities)
         {
