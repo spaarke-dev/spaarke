@@ -6,7 +6,7 @@
 #
 # Approach: direct Web API DELETE on attribute metadata against spaarkedev1.
 # Pre-flight: re-check field exists; capture metadata id; DELETE; verify gone.
-# Post-step: PublishAllXml to refresh customizations.
+# Post-step: PublishXml of the sprk_event entity only (never a tenant-wide publish).
 
 $ErrorActionPreference = "Stop"
 $Environment = "spaarkedev1.crm.dynamics.com"

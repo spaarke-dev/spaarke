@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -39,8 +40,15 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// event via the captured writer delegate.
 /// </para>
 /// <para>
-/// <strong>Dependencies</strong>: <see cref="IRagService"/> only. Resolved via constructor
-/// injection (auto-discovered by <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>).
+/// <strong>Dependencies</strong>: <see cref="IRagService"/> and <see cref="IRetrievalAccessTrim"/>. Resolved via
+/// constructor injection (auto-discovered by <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>).
+/// </para>
+/// <para>
+/// <strong>Access trim (unified-access-control-r2 task 176, #1511)</strong>: both methods pass every row through
+/// <see cref="IRetrievalAccessTrim"/> before it reaches the text, the citations or the widget. A knowledge-source chunk
+/// with no <c>sprk_document</c> id is dropped like any other unattributable row (the rule task 163 applied to
+/// <c>/api/ai/rag/search</c>). The caller is <see cref="ChatInvocationContext.UserId"/> (chat) or
+/// <see cref="ToolExecutionContext.CallerObjectId"/> (playbook); without one, no rows are returned and the result says so.
 /// </para>
 /// <para>
 /// <strong>Invocation contexts</strong>: <see cref="InvocationContextKind.Both"/>. Playbook
@@ -85,13 +93,16 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
     private const int GetKnowledgeSourceTopK = 10;
 
     private readonly IRagService _ragService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly ILogger<KnowledgeRetrievalHandler> _logger;
 
     public KnowledgeRetrievalHandler(
         IRagService ragService,
+        IRetrievalAccessTrim accessTrim,
         ILogger<KnowledgeRetrievalHandler> logger)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -220,6 +231,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
                 query: args.Query,
                 topK: args.TopK ?? DefaultTopK,
                 knowledgeSourceIds: null, // No knowledge scope in playbook path (FR-12 path is forward-compat)
+                callerObjectId: context.CallerObjectId,
                 tool: tool,
                 emitWidget: false,
                 startedAt: startedAt,
@@ -277,6 +289,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
                 query: args.Query,
                 topK: args.TopK ?? DefaultTopK,
                 knowledgeSourceIds: knowledgeSourceIds,
+                callerObjectId: context.UserId,
                 tool: tool,
                 emitWidget: true,
                 startedAt: startedAt,
@@ -311,6 +324,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
         string? query,
         int topK,
         IReadOnlyList<string>? knowledgeSourceIds,
+        string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
         DateTimeOffset startedAt,
@@ -333,7 +347,8 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
             }
 
             return await ExecuteGetKnowledgeSourceAsync(
-                tenantId, knowledgeSourceId!, tool, emitWidget, startedAt, stopwatch, correlationLogId, cancellationToken);
+                tenantId, knowledgeSourceId!, callerObjectId, tool, emitWidget, startedAt, stopwatch, correlationLogId,
+                cancellationToken);
         }
 
         // SearchKnowledgeBase
@@ -348,7 +363,8 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
         }
 
         return await ExecuteSearchKnowledgeBaseAsync(
-            tenantId, query!, topK, knowledgeSourceIds, tool, startedAt, stopwatch, correlationLogId, cancellationToken);
+            tenantId, query!, topK, knowledgeSourceIds, callerObjectId, tool, startedAt, stopwatch, correlationLogId,
+            cancellationToken);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -358,6 +374,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
     private async Task<ToolResult> ExecuteGetKnowledgeSourceAsync(
         string tenantId,
         string knowledgeSourceId,
+        string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
         DateTimeOffset startedAt,
@@ -376,9 +393,15 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
             UseKeywordSearch = true
         };
 
-        var response = await _ragService.SearchAsync("*", options, cancellationToken);
+        var (response, trim) = await _accessTrim.SearchReadableAsync(
+            _ragService, "*", options, callerObjectId, cancellationToken);
 
         stopwatch.Stop();
+
+        if (trim.Withheld)
+        {
+            return BuildWithheldResult(MethodGetKnowledgeSource, trim, tool, startedAt, correlationLogId, stopwatch);
+        }
 
         if (response.Results.Count == 0)
         {
@@ -467,6 +490,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
         string query,
         int topK,
         IReadOnlyList<string>? knowledgeSourceIds,
+        string? callerObjectId,
         AnalysisTool tool,
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
@@ -485,9 +509,15 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
             UseKeywordSearch = true
         };
 
-        var response = await _ragService.SearchAsync(query, options, cancellationToken);
+        var (response, trim) = await _accessTrim.SearchReadableAsync(
+            _ragService, query, options, callerObjectId, cancellationToken);
 
         stopwatch.Stop();
+
+        if (trim.Withheld)
+        {
+            return BuildWithheldResult(MethodSearchKnowledgeBase, trim, tool, startedAt, correlationLogId, stopwatch);
+        }
 
         if (response.Results.Count == 0)
         {
@@ -677,6 +707,39 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Access-trim helper (task 176)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The result when the access check could not run (no verified caller, or the check failed): no rows, no citations,
+    /// no widget, and a message that says why. ADR-015: the log line carries the outcome only.
+    /// </summary>
+    private ToolResult BuildWithheldResult(
+        string method,
+        RetrievalTrimResult<RagSearchResult> trim,
+        AnalysisTool tool,
+        DateTimeOffset startedAt,
+        string correlationLogId,
+        Stopwatch stopwatch)
+    {
+        _logger.LogWarning(
+            "KnowledgeRetrievalHandler ({Correlation}) {Method} withheld all rows: {Outcome} in {Duration}ms",
+            correlationLogId, method, trim.Outcome, stopwatch.ElapsedMilliseconds);
+
+        return ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new KnowledgeRetrievalPayload
+            {
+                Method = method,
+                Message = trim.WithheldMessage,
+                ResultCount = 0
+            },
+            summary: trim.WithheldMessage,
+            confidence: 0.0,
+            execution: new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

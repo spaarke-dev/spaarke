@@ -37,6 +37,7 @@ import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
 import { cleanGuid } from '../utils/guid';
+import type { ResponseFetchFn } from '../utils/fetchTypes';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -160,8 +161,16 @@ export interface IUploadProgress {
   error?: string;
 }
 
-/** Authenticated fetch function signature (injected by caller). */
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+/**
+ * Authenticated fetch function signature (injected by caller).
+ *
+ * Despite the name, this is the EITHER-shape fetch ({@link ResponseFetchFn}), not `@spaarke/auth`'s
+ * throwing `AuthenticatedFetchFn`: the send path is also reached from the Outlook add-in, whose fetch
+ * returns failures (`spaarke-send-email-pane.d.ts`). The name is kept because it is public. Surfaces
+ * that are only ever given `@spaarke/auth`'s `authenticatedFetch` should take the throwing type from
+ * `utils/fetchTypes` instead.
+ */
+export type AuthenticatedFetchFn = ResponseFetchFn;
 
 // ---------------------------------------------------------------------------
 // EntityCreationService

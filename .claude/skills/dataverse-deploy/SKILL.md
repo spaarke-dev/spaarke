@@ -18,6 +18,8 @@ last-reviewed: 2026-05-16
 
 ---
 
+> **Never publish tenant-wide (owner decision D-83).** Publishing every customization in the environment also publishes other people's unpublished work, so no deploy may use the all-customizations publish action, the solution-wide publish commands of `pac`, or the publish-after-import flag of `pac solution import` (the exact banned forms are listed in `tests/scripts/Publish-SolutionComponents.Tests.ps1`). Import with `scripts/Import-SolutionScoped.ps1` (import without publish, then `PublishXml` of exactly the solution's components). `PublishXml` accepts entities, web resources, option sets, site maps, dashboards and app modules. A PCF control's new build is served only after its bundle web resources are published (the script does this). If a component type cannot be published through `PublishXml`, STOP and ask the owner; never fall back to a tenant-wide publish. CI (`scoped-publish-lint`) fails a PR that reintroduces one.
+
 ## Critical Rules
 
 **These rules are MANDATORY. See [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for full details.**
@@ -96,7 +98,7 @@ mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{,.disabled}
 cd Solution && powershell -ExecutionPolicy Bypass -File pack.ps1
 
 # Import
-pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
 
 # Restore CPM
 mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{.disabled,}
@@ -166,7 +168,7 @@ If you've deployed but the control is still cached:
 pac solution delete --solution-name {SolutionName}
 
 # Reimport fresh
-pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
 
 # Verify
 pac solution list | grep -i "{SolutionName}"
@@ -434,7 +436,7 @@ cp out/controls/control/bundle.js \
 
 # 4. Pack and import
 pac solution pack --zipfile Solution_vX.Y.Z.zip --folder {Solution}
-pac solution import --path Solution_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath Solution_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
 
 # 5. Verify
 pac solution list | grep -i "{SolutionName}"
@@ -463,11 +465,8 @@ pac solution export --name "{SolutionName}" --path "./{SolutionName}.zip" --mana
 **Use when**: Deploying a solution package to an environment.
 
 ```bash
-# Import and publish in one step
-pac solution import --path "./{SolutionName}.zip" --publish-changes
-
-# Force import (overwrites conflicts)
-pac solution import --path "./{SolutionName}.zip" --force-overwrite --publish-changes
+# Import, then publish only the imported components (the script already passes --force-overwrite)
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "./{SolutionName}.zip" -SolutionUniqueName {SolutionName}
 ```
 
 #### Post-Import Verification
@@ -476,8 +475,9 @@ pac solution import --path "./{SolutionName}.zip" --force-overwrite --publish-ch
 # Check solution was imported
 pac solution list | grep -i "{SolutionName}"
 
-# If not auto-published, publish manually
-pac solution publish
+# The script reads web resources and app modules back and fails if any is still unpublished.
+# To see what would be published without importing:
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -SolutionUniqueName {SolutionName} -PlanOnly
 ```
 
 ---
@@ -496,22 +496,32 @@ pac solution export --name "SpaarkeCore" --path "./SpaarkeCore.zip" --managed fa
 unzip SpaarkeCore.zip -d SpaarkeCore_extracted
 # ... modify files in WebResources folder ...
 pac solution pack --zipfile SpaarkeCore_modified.zip --folder SpaarkeCore_extracted
-pac solution import --path SpaarkeCore_modified.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath SpaarkeCore_modified.zip -SolutionUniqueName SpaarkeCore
 ```
 
 ---
 
 ### Scenario 5: Publish Customizations
 
-**Use when**: Making customizations visible to users.
+**Use when**: a change was made outside a solution import (a Web API PATCH of a web resource, view, form or entity). Publish only that component: `POST /api/data/v9.2/PublishXml` with `{ParameterXml}` built by `New-PublishParameterXml` in `scripts/lib/Publish-SolutionComponents.ps1` (for example `-WebResources <id>` or `-Entities sprk_event`). **Entity publishes are entity-wide:** `PublishXml` has no per-view or per-form element, so publishing an entity also publishes every pending view and form of that entity. The script STOPS before any import or publish when that would also publish someone else's pending change (D-103); see "Pending collateral" below. Never a tenant-wide publish.
 
-```bash
-# Publish all customizations
-pac solution publish
+### Workflows, resume, read-back and the probe method (task 130)
 
-# Or use publish-all for everything
-pac solution publish-all
-```
+**A solution that contains a workflow or cloud flow (component type 29).** The scoped import refuses it by default: the `RetrieveUnpublished` probe answers "record does not exist" (error 0x80040217) for workflows, so the function is bound to the table and a draft layer cannot be ruled out, and a workflow is activated by the import, not by `PublishXml`. When the solution really contains one, run the import with `-AllowWorkflows`:
+`pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath <zip> -SolutionUniqueName <name> -AllowWorkflows`
+This adds `--activate-plugins` to the pac import (pac's help: "Activate plug-ins and workflows on the solution"), publishes the rest as usual, and afterwards reads `workflows(id).statecode` for every workflow in the solution; it fails unless each is 1 (Activated).
+
+**If a publish request fails part-way.** The error prints the resume command; run it, it does not re-import:
+`pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -SolutionUniqueName <name> -PublishOnly`
+Requests go out in this order so nothing goes live before what it uses: option sets and web resources, entities, the application ribbon, site maps and dashboards, app modules last. Components a caller published outside the solution are listed in the failure and carried by the resume command (`-ExtraWebResources` / `-ExtraEntities`).
+
+**Read-back and its known limit.** After every request the script compares web resources, app modules, app settings, site maps, dashboards and (for each published entity) system forms, saved queries and charts with their unpublished copies. Option sets and the application ribbon have no read-back surface: check them by effect.
+
+**Probe method (why a type is on the no-publish list).** Call `<set>(<fake id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished()`. Only error code 0x80060888 ("Resource not found for the segment") proves the table is not bound to the unpublished-layer function. Error 0x80040217 ("... Does Not Exist") means the function is bound and only the record is missing, so the table has a draft layer.
+
+### Pending collateral stops the publish (D-103)
+
+Publishing an entity also publishes every pending (unpublished) view, form and chart of that entity, and publishing an app setting publishes its whole parent app. If that would publish someone else's pending change, `scripts/Import-SolutionScoped.ps1` STOPS before `pac solution import` and before any `PublishXml`, lists each entity or app and each pending component, and prints the exact re-run command with the opt-in flag `-AllowPendingCollateral`. **Do not add the flag unless the owner has said publishing those items is intended.** With the flag the script warns, lists and continues. `-PublishOnly` applies the same rule, and the resume command carries the flag only if the original run had it. The solution's own items (including every subcomponent of an entity included with all its subcomponents) and parent apps that are part of the solution are not collateral.
 
 ---
 
@@ -594,7 +604,7 @@ pac pcf push --publisher-prefix sprk
 
 # If you get file lock error during cleanup, ignore it - solution is already packed
 # Import the generated solution
-pac solution import --path "out/PowerAppsTools_sprk/bin/Debug/PowerAppsTools_sprk.zip" --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "out/PowerAppsTools_sprk/bin/Debug/PowerAppsTools_sprk.zip" -SolutionUniqueName PowerAppsTools_sprk
 
 # Verify
 pac solution list | grep -i "{ControlName}"
@@ -669,7 +679,7 @@ pac auth select --index N               # Switch profile
 pac solution list                       # List all solutions
 pac solution export --name X --path Y   # Export solution (add --managed false)
 pac solution import --path Y            # Import solution
-pac solution publish                    # Publish customizations
+# no tenant-wide publish: use scripts/Import-SolutionScoped.ps1
 
 # PCF Controls - Use pack.ps1 workflow (see Deployment Workflow above)
 pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .   # in src/client/pcf/X: build control (fails on a failed build)
@@ -771,4 +781,4 @@ If `pac solution pack` + `pac solution import` succeeds but the solution is empt
 | Empty solution import succeeds but no controls deploy | Solution ZIP missing the control root in `Solution/src/WebResources/<sprk_...>/`, OR `customizations.xml` doesn't reference the control | Verify ZIP contents BEFORE import: `unzip -l <solution>.zip` should show the control bundle.js + ControlManifest.xml at the expected path. |
 | Solution import fails with "missing dependency" | Required entity/option set not yet in the target environment | Run `pac solution check --solution-zip <path>` BEFORE import. Resolve dependencies upstream first. |
 | Bundle deployed but PCF renders blank | Bundle is dev-mode (not tree-shaken) — exceeded Dataverse runtime size limit silently. See `pcf-deploy` AP-1 for canonical fix | Always use `npm run build:prod` (NOT `npm run build`). Bundle size sanity check: `out/controls/<name>/bundle.js` should be < 1 MB for typical controls. |
-| Web resource import succeeds but resource doesn't appear in form | Cache or publish step missing | After import, ALWAYS run `pac solution publish-customizations` (or click "Publish All Customizations" in maker portal). Refresh browser. |
+| Web resource import succeeds but resource doesn't appear in form | Cache or publish step missing | Publish the web resource only: re-run `scripts/Import-SolutionScoped.ps1`, or POST `PublishXml` with `<webresources>` for it. Never the maker portal's all-customizations publish button. Refresh browser. |

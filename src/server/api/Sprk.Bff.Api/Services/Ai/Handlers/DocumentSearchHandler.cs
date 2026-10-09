@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -51,8 +53,17 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// filter semantics).
 /// </para>
 /// <para>
-/// <strong>Dependencies</strong>: <see cref="IRagService"/> only. Resolved via constructor
-/// injection (auto-discovered by <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>).
+/// <strong>Dependencies</strong>: <see cref="IRagService"/> and <see cref="IRetrievalAccessTrim"/>. Resolved via
+/// constructor injection (auto-discovered by <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>).
+/// </para>
+/// <para>
+/// <strong>Access trim (unified-access-control-r2 task 176, #1511)</strong>: every row passes through
+/// <see cref="IRetrievalAccessTrim"/> before it reaches the text, the citations or the widget, so a caller sees only
+/// documents they can Read. The caller is <see cref="ChatInvocationContext.UserId"/> on the chat path and
+/// <see cref="ToolExecutionContext.CallerObjectId"/> (the run principal) on the playbook path; without one, no rows
+/// are returned and the result says so. SearchDocuments searches the tenant (never bound to the host; the trim is the
+/// access control). SearchDiscovery binds to the host only for matter, project and invoice hosts; any other host, or
+/// none (task 164 drops it), gets the trimmed tenant search. Retrieval never returns an untrimmed tenant-wide page.
 /// </para>
 /// <para>
 /// <strong>Invocation contexts</strong>: <see cref="InvocationContextKind.Both"/>. Playbook
@@ -101,13 +112,16 @@ public sealed class DocumentSearchHandler : IToolHandler
     private const int DocumentsExcerptCap = 400;
 
     private readonly IRagService _ragService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly ILogger<DocumentSearchHandler> _logger;
 
     public DocumentSearchHandler(
         IRagService ragService,
+        IRetrievalAccessTrim accessTrim,
         ILogger<DocumentSearchHandler> logger)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -221,6 +235,7 @@ public sealed class DocumentSearchHandler : IToolHandler
                 knowledgeSourceIds: null, // No playbook-level scope on the playbook path (forward-compat)
                 parentEntityType: null,
                 parentEntityId: null,
+                callerObjectId: context.CallerObjectId,
                 tool: tool,
                 emitWidget: false,
                 startedAt: startedAt,
@@ -265,7 +280,8 @@ public sealed class DocumentSearchHandler : IToolHandler
             var args = ParseChatArgs(context.ToolArgumentsJson);
 
             // SearchDocuments uses knowledge-source-ID scoping (when bound to a playbook).
-            // SearchDiscovery uses parent-entity scoping (when the playbook supplies a host context).
+            // SearchDiscovery uses parent-entity scoping for a matter/project/invoice host; SearchDocuments never does
+            // (task 176 fix round 2). Both are trimmed to what the caller can read.
             IReadOnlyList<string>? knowledgeSourceIds =
                 context.KnowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 } ids
                     ? ids
@@ -281,6 +297,7 @@ public sealed class DocumentSearchHandler : IToolHandler
                 knowledgeSourceIds: knowledgeSourceIds,
                 parentEntityType: parentEntityType,
                 parentEntityId: parentEntityId,
+                callerObjectId: context.UserId,
                 tool: tool,
                 emitWidget: true,
                 startedAt: startedAt,
@@ -316,6 +333,7 @@ public sealed class DocumentSearchHandler : IToolHandler
         IReadOnlyList<string>? knowledgeSourceIds,
         string? parentEntityType,
         string? parentEntityId,
+        string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
         DateTimeOffset startedAt,
@@ -336,8 +354,8 @@ public sealed class DocumentSearchHandler : IToolHandler
         if (string.Equals(method, MethodSearchDocuments, StringComparison.Ordinal))
         {
             return await ExecuteSearchDocumentsAsync(
-                tenantId, query!, topK ?? DefaultDocumentsTopK, knowledgeSourceIds, tool, emitWidget,
-                startedAt, stopwatch, correlationLogId, cancellationToken);
+                tenantId, query!, topK ?? DefaultDocumentsTopK, knowledgeSourceIds,
+                callerObjectId, tool, emitWidget, startedAt, stopwatch, correlationLogId, cancellationToken);
         }
 
         // SearchDiscovery (the dispatcher's else branch — ValidateChat already enforced
@@ -345,8 +363,8 @@ public sealed class DocumentSearchHandler : IToolHandler
         // discovery if the configuration discriminator is missing/unknown, matching the
         // less-destructive default convention used by KnowledgeRetrievalHandler).
         return await ExecuteSearchDiscoveryAsync(
-            tenantId, query!, topK ?? DefaultDiscoveryTopK, parentEntityType, parentEntityId, tool, emitWidget,
-            startedAt, stopwatch, correlationLogId, cancellationToken);
+            tenantId, query!, topK ?? DefaultDiscoveryTopK, parentEntityType, parentEntityId, callerObjectId, tool,
+            emitWidget, startedAt, stopwatch, correlationLogId, cancellationToken);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -358,6 +376,7 @@ public sealed class DocumentSearchHandler : IToolHandler
         string query,
         int topK,
         IReadOnlyList<string>? knowledgeSourceIds,
+        string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
         DateTimeOffset startedAt,
@@ -367,6 +386,9 @@ public sealed class DocumentSearchHandler : IToolHandler
     {
         var clampedTopK = Math.Clamp(topK, 1, MaxTopK);
 
+        // Task 176 fix round 2 (main-session decision; supersedes POML goal 4 for SearchDocuments): NOT bound to
+        // the host. The trim is the access control, and binding only cost findability: a work-assignment host found
+        // nothing, and after #1517 a matter host would miss documents filed under its work assignments.
         var options = new RagSearchOptions
         {
             TenantId = tenantId,
@@ -377,9 +399,15 @@ public sealed class DocumentSearchHandler : IToolHandler
             UseKeywordSearch = true
         };
 
-        var response = await _ragService.SearchAsync(query, options, cancellationToken);
+        var (response, trim) = await _accessTrim.SearchReadableAsync(
+            _ragService, query, options, callerObjectId, cancellationToken);
 
         stopwatch.Stop();
+
+        if (trim.Withheld)
+        {
+            return BuildWithheldResult(MethodSearchDocuments, trim, tool, startedAt, correlationLogId, stopwatch);
+        }
 
         if (response.Results.Count == 0)
         {
@@ -480,6 +508,7 @@ public sealed class DocumentSearchHandler : IToolHandler
         int topK,
         string? parentEntityType,
         string? parentEntityId,
+        string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
         DateTimeOffset startedAt,
@@ -488,6 +517,7 @@ public sealed class DocumentSearchHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var clampedTopK = Math.Clamp(topK, 1, MaxTopK);
+        var (scopeType, scopeId) = CanonicalParentScope(parentEntityType, parentEntityId);
 
         var options = new RagSearchOptions
         {
@@ -498,14 +528,21 @@ public sealed class DocumentSearchHandler : IToolHandler
             UseVectorSearch = true,
             UseKeywordSearch = true,
             // Entity scope: when host context is present, constrain discovery to the parent
-            // entity boundary; otherwise discovery remains tenant-wide (backward compatible).
-            ParentEntityType = parentEntityType,
-            ParentEntityId = parentEntityId
+            // entity boundary; otherwise discovery searches the tenant, and the access trim below keeps
+            // only what the caller can read (task 176 goal 4: never an untrimmed tenant-wide page).
+            ParentEntityType = scopeType,
+            ParentEntityId = scopeId
         };
 
-        var response = await _ragService.SearchAsync(query, options, cancellationToken);
+        var (response, trim) = await _accessTrim.SearchReadableAsync(
+            _ragService, query, options, callerObjectId, cancellationToken);
 
         stopwatch.Stop();
+
+        if (trim.Withheld)
+        {
+            return BuildWithheldResult(MethodSearchDiscovery, trim, tool, startedAt, correlationLogId, stopwatch);
+        }
 
         if (response.Results.Count == 0)
         {
@@ -714,6 +751,77 @@ public sealed class DocumentSearchHandler : IToolHandler
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Access-trim helpers (task 176)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The host types SearchDiscovery binds to: the parent types the document index holds TODAY (matter, project,
+    /// invoice; task 176 fix round 2, main-session decision). <c>workassignment</c> is excluded until existing chunks
+    /// are backfilled with it (task 177 writes it only for new indexing). A host of any other type (a work assignment,
+    /// a document, an analysis output, an event, …) gets the trimmed tenant search instead of an always-empty one.
+    /// </summary>
+    private static readonly HashSet<string> IndexedParentTypes = new(StringComparer.Ordinal)
+    {
+        ParentEntityContext.EntityTypes.Matter,
+        ParentEntityContext.EntityTypes.Project,
+        ParentEntityContext.EntityTypes.Invoice,
+    };
+
+    /// <summary>
+    /// The SearchDiscovery parent scope: both values or neither. The host type is normalized to the index's form
+    /// (<c>sprk_matter</c> → <c>matter</c>) and the scope is applied ONLY for a type in <see cref="IndexedParentTypes"/>
+    /// with a GUID id; otherwise the search is the trimmed tenant search, the same as a dropped host. A GUID id is
+    /// written bare and lowercase (ADR-044).
+    /// </summary>
+    internal static (string? Type, string? Id) CanonicalParentScope(string? parentEntityType, string? parentEntityId)
+    {
+        if (string.IsNullOrWhiteSpace(parentEntityType)
+            || string.IsNullOrWhiteSpace(parentEntityId)
+            || !Guid.TryParse(parentEntityId.Trim(), out var parsed)
+            || parsed == Guid.Empty)
+        {
+            return (null, null);
+        }
+
+        var type = parentEntityType.Trim().ToLowerInvariant();
+        if (type.StartsWith("sprk_", StringComparison.Ordinal))
+        {
+            type = type[5..];
+        }
+
+        return IndexedParentTypes.Contains(type) ? (type, parsed.ToString("D")) : (null, null);
+    }
+
+    /// <summary>
+    /// The result when the access check could not run (no verified caller, or the check failed): no rows, no citations,
+    /// no widget, and a message that says why. ADR-015: the log line carries the outcome only.
+    /// </summary>
+    private ToolResult BuildWithheldResult(
+        string method,
+        RetrievalTrimResult<RagSearchResult> trim,
+        AnalysisTool tool,
+        DateTimeOffset startedAt,
+        string correlationLogId,
+        Stopwatch stopwatch)
+    {
+        _logger.LogWarning(
+            "DocumentSearchHandler ({Correlation}) {Method} withheld all rows: {Outcome} in {Duration}ms",
+            correlationLogId, method, trim.Outcome, stopwatch.ElapsedMilliseconds);
+
+        return ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new DocumentSearchPayload
+            {
+                Method = method,
+                Message = trim.WithheldMessage,
+                ResultCount = 0
+            },
+            summary: trim.WithheldMessage,
+            confidence: 0.0,
+            execution: new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

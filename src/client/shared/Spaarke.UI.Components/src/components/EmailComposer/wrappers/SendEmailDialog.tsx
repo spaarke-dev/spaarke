@@ -163,7 +163,13 @@ export interface ISendEmailDialogProps {
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;
+  /** Notified of every failed send — see the engine's `onError`. Does not, by itself, silence the failure dialog. */
   onError?: (err: SendCommunicationError) => void;
+  /**
+   * Forwarded to the engine. `'host'` turns off the composer's "Email not sent" dialog because the host shows
+   * the failure itself (e.g. an error toast from `onError`). Default `'dialog'`.
+   */
+  sendFailureDisplay?: 'dialog' | 'host';
 
   // — Conversation context (R3 task 020, FR-07/FR-19) — all optional/additive —
   /**

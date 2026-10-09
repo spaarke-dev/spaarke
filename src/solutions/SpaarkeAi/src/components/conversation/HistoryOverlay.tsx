@@ -1039,15 +1039,9 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         bffBaseUrl,
         `/api/ai/chat/sessions/${encodeURIComponent(deleteTarget.sessionId)}`
       );
-      const response = await authenticatedFetch(url, { method: "DELETE" });
-      // 204 = deleted; 404 = already gone (e.g., raced with another tab) — both
-      // mean the row should disappear from THIS list. Any other non-ok status
-      // is a genuine failure.
-      if (!response.ok && response.status !== 404) {
-        setDeleteError("Couldn't delete this conversation. Try again.");
-        setDeleting(false);
-        return;
-      }
+      // 204 = deleted. A failure is THROWN (handled below): 404 = already gone (e.g., raced with
+      // another tab) also removes the row; any other status is a genuine failure.
+      await authenticatedFetch(url, { method: "DELETE" });
 
       setSessions((prev) => prev.filter((s) => s.sessionId !== deleteTarget.sessionId));
       setDeleting(false);

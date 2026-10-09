@@ -193,6 +193,24 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 175: every access-record (<c>sprk_accessinheritance</c>) write, in order.</summary>
+    public List<(string Table, Guid Id, string Text)> AccessRecordWrites { get; } = new();
+
+    /// <summary>
+    /// Task 175 fix round: the BFF has lost READ on the field-secured <c>sprk_accessinheritance</c> (its writes still land) —
+    /// every read answers the column as empty, as Dataverse does for a secured column the caller cannot read.
+    /// </summary>
+    public bool HidesAccessRecords { get; set; }
+
+    private readonly HashSet<Guid> _refusedAccessRecordWrites = new();
+
+    /// <summary>Task 175: an access-record write to THIS row throws (recorded first).</summary>
+    public SecureChildShareWorld RefusingAccessRecordWritesOf(Guid id)
+    {
+        _refusedAccessRecordWrites.Add(id);
+        return this;
+    }
+
     /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
     public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
 
@@ -285,6 +303,12 @@ internal sealed class SecureChildShareWorld
                     ? DataversePrincipalRef.User(user.Id)
                     : null;
 
+    /// <summary>Task 175: a column's current value on a row (<c>default</c> when the row or the column is absent).</summary>
+    public T? ValueOf<T>(string table, Guid id, string column) =>
+        _rows.TryGetValue((table, id), out var row) && row.Attributes.TryGetValue(column, out var value) && value is T typed
+            ? typed
+            : default;
+
     /// <summary>Task 148: sets a column on an existing row (a host harness mirroring its root's flag).</summary>
     public void Set(string table, Guid id, string column, object? value)
     {
@@ -337,6 +361,18 @@ internal sealed class SecureChildShareWorld
             if (!_rows.TryGetValue((table, id), out var target))
                 throw new InvalidOperationException($"Test: {table} {id} does not exist.");
             target["sprk_accesspermission"] = option;
+            return;
+        }
+
+        // Task 175 (round 87): the follow writes ONE column, the access record (sprk_accessinheritance).
+        if (fields.Count == 1 && fields.TryGetValue("sprk_accessinheritance", out var marker) && marker is string text)
+        {
+            AccessRecordWrites.Add((table, id, text));
+            if (_refusedAccessRecordWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the access-record write.");
+            if (!_rows.TryGetValue((table, id), out var row))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            row["sprk_accessinheritance"] = text;
             return;
         }
 
@@ -524,6 +560,8 @@ internal sealed class SecureChildShareWorld
         var copy = new Entity(row.LogicalName, row.Id);
         foreach (var (column, value) in row.Attributes)
         {
+            if (HidesAccessRecords && column == "sprk_accessinheritance")
+                continue; // field-level security without read: Dataverse answers as if the column were empty
             if (columns.AllColumns || columns.Columns.Contains(column))
                 copy[column] = value;
         }

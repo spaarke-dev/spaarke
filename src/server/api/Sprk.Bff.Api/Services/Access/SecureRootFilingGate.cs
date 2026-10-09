@@ -45,8 +45,25 @@ public sealed class SecureRootFilingGate
             return null;
 
         var materialized = writes.ToArray();
+        if (AccessInheritance.IsNamedIn(materialized))
+        {
+            // Task 175 fix round (verifier F1-1): refused whatever the host — the access record is the cascade's alone.
+            return RecordOwnerResolution.Refused(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so it was not written");
+        }
+
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+        {
+            // Task 175 fix round 2 (K3): the secure flag is the transitions' and the cascade's alone, whatever the host.
+            return RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode, SecureRootInheritance.SecureFlagRefusalText);
+        }
+
         var filing = SecureRootInheritance.FilingColumnsOf(table.Trim().ToLowerInvariant());
-        if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
+        // Task 175 (owner round 84): a write of sprk_accesspermission / sprk_issecure on an existing record is checked too —
+        // refused when the record has a parent (its access follows it).
+        if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))
+                                   || (recordId is not null
+                                       && AccessFollowsParent.LockedColumns.Contains(SecureRootInheritance.NormalizeColumn(w.Key)))))
             return null;
 
         using var scope = _scopeFactory.CreateScope();
@@ -54,7 +71,7 @@ public sealed class SecureRootFilingGate
         if (inheritance is null)
         {
             _logger.LogError(
-                "[SECURE-INHERIT] A {Table} write changes what it is filed under, and this host cannot check whether that " +
+                "[SECURE-INHERIT] A {Table} write changes what it is filed under (or its access), and this host cannot check whether that " +
                 "record is secure (SecureRootInheritance is not registered). Refused (fail closed).", table);
             return RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.ParentUndetermined,
@@ -80,6 +97,20 @@ public sealed class SecureRootFilingGate
 
         var materialized = writes.ToArray();
         var filing = SecureRootInheritance.FilingColumnsOf(table.Trim().ToLowerInvariant());
+        if (AccessInheritance.IsNamedIn(materialized))
+        {
+            // Task 175 fix round (verifier F1-1): refused whatever the host — the access record is the cascade's alone.
+            return SecureRootCreatePlan.Refused(RecordOwnerResolution.Refused(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so it was not created"));
+        }
+
+        if (AccessFollowsParent.NamesSecureFlag(materialized))
+        {
+            // Task 175 fix round 2 (K3): a create never carries the secure flag — a secure create is planned here, not asked.
+            return SecureRootCreatePlan.Refused(RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode,
+                SecureRootInheritance.SecureFlagRefusalText));
+        }
+
         if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
             return SecureRootCreatePlan.Ordinary;
 

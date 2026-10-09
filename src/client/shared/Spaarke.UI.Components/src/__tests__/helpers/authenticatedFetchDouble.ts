@@ -12,6 +12,7 @@
  * test fails on code that only handles the returned-response shape.
  */
 import { ApiError, AuthError } from '../../../../Spaarke.Auth/src/errors';
+import type { OkResponse } from '../../utils/fetchTypes';
 
 export { ApiError, AuthError };
 
@@ -39,17 +40,20 @@ type Respond = (url: string, init?: RequestInit) => Response | Promise<Response>
  * Test `Response` stand-ins often omit `headers`; a missing `headers` is read as a JSON body. When
  * `headers` is present the real content-type rule applies.
  */
-export function throwingAuthenticatedFetch(respond: Respond): jest.Mock<Promise<Response>, [string, RequestInit?]> {
+export function throwingAuthenticatedFetch(respond: Respond): jest.Mock<Promise<OkResponse>, [string, RequestInit?]> {
   return jest.fn(async (url: string, init?: RequestInit) => {
     const res = await respond(url, init);
-    if (res.ok) return res;
+    // Typed like the real fetch (`OkResponse`), so the double fits a throwing-typed prop.
+    if (res.ok) return res as OkResponse;
     if (res.status === 401) throw authExhausted();
 
     let problem: ProblemBody | null = null;
     try {
       const contentType = (res as { headers?: Headers }).headers?.get?.('content-type');
       const isJson =
-        contentType == null || contentType.includes('application/json') || contentType.includes('application/problem+json');
+        contentType == null ||
+        contentType.includes('application/json') ||
+        contentType.includes('application/problem+json');
       if (isJson) {
         const body = (await res.json()) as unknown;
         if (body && typeof body === 'object') problem = body as ProblemBody;

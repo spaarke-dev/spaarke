@@ -7,6 +7,46 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — Model choice is deliberate: every agent states its model; no blanket default (model-selection-r1)
+
+Owner direction 2026-10-09: no arbitrary model, and spend what improves the code, nothing more. A session picks the model and effort per piece of work and never asks the user. This replaces the `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default added earlier the same day (#1538).
+
+- **`.claude/constraints/agent-cost.md`:**
+  - Rule 1 now says every agent states its model and effort.
+  - New section "Choosing a model and effort": a work → model → effort → why table, Anthropic's guidance (overthinking at `max`, lower effort scopes to the ask, Opus 5.5 effort), escalation on evidence, no mid-session switches.
+- **`.claude/agents/`:** new `implementer` (sonnet/high), `adversarial-reviewer` (fable/high, read-only) and `code-mapper` (sonnet/low, read-only).
+- **`scripts/quality/require-agent-model.py`:** new `PreToolUse` hook on `Agent|Task|Workflow`.
+  - It denies a launch with no `model` and no definition `model:` (built-ins included; forks and plugin agents allowed), and a workflow script whose `agent()` calls name no model.
+  - The reason goes to Claude, which re-issues the call; the hook fails open.
+  - Tests: `scripts/quality/tests/test_require_agent_model.py`, 5 must-fire and 7 must-not-fire.
+- **`.claude/settings.json`:** `CLAUDE_CODE_SUBAGENT_MODEL` removed; `PreToolUse` hook added.
+- **Root `CLAUDE.md`:** §8.5 and §16 updated.
+- **`FAILURE-MODES.md`:** G-19's enforcement list updated.
+
+---
+###### 2026-10-09 — Agent cost controls: Sonnet sub-agents, concurrency caps, earlier compaction (agent-cost-controls-r1)
+
+Owner direction 2026-10-09 after estimated spend rose to $1–2.5k a day. The number of calls had grown about 20×, 65–92% of them from sub-agents (mostly Opus, inherited from `"model": "opus"`). Windows ran out of memory from the parallelism.
+
+- **`.claude/settings.json`:**
+  - `env` gains `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4` and `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`.
+  - New top-level `workflowSizeGuideline: "small"` and `autoCompactWindow: 400000`.
+  - The main-session `model` is unchanged. A per-call `model` still overrides the sub-agent default, for planning and reviews.
+- **`.claude/constraints/agent-cost.md`** (new, binding), with the evidence table and the settings reference (docs confirmed 2026-10-09). Seven rules:
+  1. sub-agents default to Sonnet;
+  2. one top-tier review per change set;
+  3. small, scoped agents;
+  4. don't resume an idle agent;
+  5. concurrency, including one or two heavy projects per machine;
+  6. earlier compaction;
+  7. research fans out once.
+  Indexed in `.claude/constraints/INDEX.md`.
+- **Root `CLAUDE.md`:**
+  - §8.5 gains an "Agent cost" bullet.
+  - §16 names the new settings.
+- **`.claude/FAILURE-MODES.md`:** G-19.
+
+---
 ###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
 
 `customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.

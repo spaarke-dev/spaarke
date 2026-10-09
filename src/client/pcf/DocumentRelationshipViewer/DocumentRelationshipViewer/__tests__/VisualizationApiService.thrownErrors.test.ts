@@ -18,7 +18,8 @@ import * as pcf from '../services/VisualizationApiService';
 import * as codePage from '../../../../code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService';
 import { formatVisualizationError } from '../hooks/useVisualizationApi';
 
-const params = { tenantId: 'tenant-1' };
+// No tenantId: the BFF resolves the tenant from the token's `tid` and the query params no longer carry it (#1453).
+const params = {};
 
 describe.each([
   ['PCF', pcf],

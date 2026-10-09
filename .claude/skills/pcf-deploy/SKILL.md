@@ -303,7 +303,7 @@ Controls/sprk_Spaarke.Controls.{ControlName}/css/*.css  (if applicable)
 # Disable CPM if needed
 mv /c/code_files/{worktree}/Directory.Packages.props{,.disabled}
 
-pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
 
 # Restore CPM
 mv /c/code_files/{worktree}/Directory.Packages.props{.disabled,}
@@ -396,7 +396,8 @@ When the user wants to deploy manually for fastest iteration:
    cp out/controls/SemanticSearchControl/ControlManifest.xml Solution/Controls/sprk_Sprk.SemanticSearchControl/
    ```
 3. **Pack**: `cd Solution && powershell -File pack.ps1`
-4. **Import**: `pac solution import --path "Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip" --publish-changes`
+4. **Import**: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip" -SolutionUniqueName SpaarkeSemanticSearch`
+   **PCF publish:** an imported PCF build is NOT served until its bundle web resources (`cc_<Namespace>.<Control>/bundle.js` and `styles.css`) are published (task 129, 2026-10-08: the import rewrote bundle.js but the published copy stayed old; a `PublishXml` of `<webresources>` served the new bundle). The script does that. `customcontrols.version` can keep reading the old version after that publish; do not treat it as a failed deploy. Always bump the `ControlManifest.Input.xml` version: model-driven apps invalidate their cache on a version bump.
 5. **Verify**: Hard refresh browser (`Ctrl+Shift+R`), check version footer
 
 ### When the User Says "I'll deploy manually"

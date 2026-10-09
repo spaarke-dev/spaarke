@@ -1,4 +1,4 @@
-import type { IProblemDetails } from './types';
+import type { IProblemDetails, OkResponse } from './types';
 import { ApiError, AuthError } from './errors';
 import { getAuthProvider } from './initAuth';
 import { buildBffApiUrl } from './buildBffApiUrl';
@@ -23,12 +23,13 @@ const MAX_RETRIES = 3;
  *
  * @param url Full or relative URL to fetch
  * @param init Standard fetch RequestInit options
- * @returns Fetch Response (status 2xx-3xx)
- * @throws ApiError for non-2xx responses with ProblemDetails
+ * @returns The successful Response (`ok: true`, a 2xx status) — typed {@link OkResponse},
+ *   so a `res.status === 404` check after the call does not compile
+ * @throws ApiError for every non-2xx response (`.status`, parsed ProblemDetails)
  * @throws AuthError `no_token` when no token can be acquired (the request is not sent),
  *   or `auth_exhausted` when the BFF still answers 401 after retries
  */
-export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+export async function authenticatedFetch(url: string, init?: RequestInit): Promise<OkResponse> {
   const provider = getAuthProvider();
 
   // Resolve relative URLs against the configured BFF base URL
@@ -46,9 +47,10 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
 
     lastResponse = await fetch(resolvedUrl, { ...init, headers });
 
-    // Success — return immediately
+    // Success — return immediately. The one place an `OkResponse` is made: `ok` is true here, so the
+    // status is 2xx (lib.dom types `ok` as boolean and `status` as number, so the narrowing is asserted).
     if (lastResponse.ok) {
-      return lastResponse;
+      return lastResponse as OkResponse;
     }
 
     // 401 — clear cache and retry with backoff

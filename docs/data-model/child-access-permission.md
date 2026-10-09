@@ -16,7 +16,7 @@
 - **The top of a filing.** Walk the record's filing lookups up to records that have no filing parent of their own: a root (project, matter, work assignment), or a parentless child (a document under nothing, an unfiled invoice, a thread with no regarding). A To Do under a document under a Restricted matter is Restricted; a To Do under a parentless document whose own value is Restricted is Restricted.
 - **Un-filing keeps the last value.** A record whose last parent is removed keeps the value it had, which becomes editable (round 81).
 - **Undecidable filings are left alone.** A parent that cannot be read, does not exist, a filing deeper than 6 levels, or one that loops without reaching a record that has no parent: nothing is written and a warning is logged (`[INHERITED-ACCESS-PERMISSION]` at create, `[CHILD-ACCESS-PERMISSION]` in the job). The create never fails because of it.
-- **Work assignments and projects** filed under a parent follow the same rule for `sprk_accesspermission` AND `sprk_issecure` (owner round 84): tasks 174/175, through the same walk.
+- **Work assignments and projects** filed under a parent follow a FLOOR for `sprk_accesspermission` AND `sprk_issecure` (owner rounds 84 and 87): never looser than their parents, stricter by hand allowed (own values stay when the parent loosens) — enforcement through the filing walk (task 174), the stored values through `SecureRootInheritance.FollowParentsAsync` and `sprk_accessinheritance` (task 175; [access-inheritance.md](access-inheritance.md); write-path invariant I-17). On their main forms the same library is a floor lock (a looser pick is put back), not a read-only lock.
 
 ## Which lookups are "filing" lookups
 
