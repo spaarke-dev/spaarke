@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (58 ✅ · 7 🔄 · 38 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
+> (spec §9) · **116 tasks** across 14 phases (59 ✅ · 6 🔄 · 38 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -248,7 +248,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 064 | [Replace the Briefing tab](064-replace-briefing-tab-with-worklist.poml) | FULL | sonnet/high | 062, 063, 055, 059, 065 | — | Only once BOTH lanes exist. **Amended**: HANDOFF §1.4 as the cutover check |
 | ✅ [done] 065 | [Daily Briefing reads `sprk_duedate`](065-briefing-reads-sprk-duedate.poml) | FULL | sonnet/high | 098 | R | **D-27**; other `sprk_finalduedate` readers listed, not changed |
 | 🔄 [wip] 066 | [Deprecate `sprk_eventstatus`: inventory, move readers to `statuscode`](066-deprecate-sprk-eventstatus-inventory.poml) | FULL | sonnet/high | 098 | — | **D-28**. Column removal needs the owner after the inventory |
-| 🔄 [wip] 067 | [To Do composite score on calendar days, one shared function](067-todo-composite-score-calendar-days.poml) | FULL | sonnet/high | 081, 098 | R | **D-29**; boards re-rank once |
+| ✅ [done] 067 | [To Do composite score on calendar days, one shared function](067-todo-composite-score-calendar-days.poml) | FULL | sonnet/high | 081, 098 | R | **D-29**; boards re-rank once |
 
 ### Phase 7 — Inquiry and the classifier
 

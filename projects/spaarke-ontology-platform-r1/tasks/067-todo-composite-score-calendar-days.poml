@@ -4,7 +4,7 @@
     <title>To Do composite score on calendar days, one shared function</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>081, 098 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the ranking of every To Do board (a user-visible re-rank).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,6 +84,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-63; D-29.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1525 merged into docs/ontology-platform-design (ee9617058) after independent review (approved, no F-class). One shared function computeTodoScoreBreakdown/todoUrgencyRaw in Spaarke.UI.Components/src/utils/dateLocal.ts on calendar days (daysBetweenLocalMidnight + dueUrgencyForDays); five old copies removed or delegated; New_York DST tests (9/12 fail on the old math). Deviation: placed in ui-components (TodoDetail cannot import SmartTodo.Components); kanbanParity test left unchanged (covered by the new NY test). Built bundles carry the old math until redeployed. D-106 items: F-30..F-32, F-40.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
