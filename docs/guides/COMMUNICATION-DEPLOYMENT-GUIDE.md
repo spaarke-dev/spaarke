@@ -287,9 +287,7 @@ The Communication solution (`CommunicationSolution`) includes:
 
 ```bash
 # Import solution (with publish)
-pac solution import \
-  --path "artifacts/CommunicationSolution.zip" \
-  --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "artifacts/CommunicationSolution.zip" -SolutionUniqueName CommunicationSolution
 ```
 
 ### Deploy Web Resource to Dataverse
@@ -305,8 +303,7 @@ pac webresource push \
   --name "sprk_communication_send" \
   --type "JScript"
 
-# Publish customizations
-pac solution publish
+# then publish only this web resource with PublishXml (scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish
 ```
 
 ### Option B: Dataverse Web API
@@ -477,9 +474,7 @@ Compress-Archive `
   -Force
 
 # Import with publish
-pac solution import `
-  --path "infrastructure\dataverse\ribbon\temp\CommunicationRibbons_modified.zip" `
-  --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "infrastructure\dataverse\ribbon\temp\CommunicationRibbons_modified.zip" -SolutionUniqueName <name>
 ```
 
 ### Verify Ribbon Deployment
@@ -985,9 +980,7 @@ az webapp deploy \
 
 ```powershell
 # Import the backup solution
-pac solution import `
-  --path "infrastructure\dataverse\ribbon\CommunicationRibbons\CommunicationRibbons_backup_{timestamp}.zip" `
-  --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "infrastructure\dataverse\ribbon\CommunicationRibbons\CommunicationRibbons_backup_{timestamp}.zip" -SolutionUniqueName <name>
 ```
 
 ### Rollback Web Resource
@@ -999,7 +992,7 @@ pac webresource push `
   --name "sprk_communication_send" `
   --type "JScript"
 
-pac solution publish
+# then publish only this web resource with PublishXml (scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish
 ```
 
 ---
@@ -1020,7 +1013,7 @@ pac solution publish
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Send button not visible | Ribbon not published | Run `pac solution publish` |
+| Send button not visible | Ribbon not published | Re-import with scripts/Import-SolutionScoped.ps1 (publishes the ribbon entity only) |
 | Send button always disabled | EnableRule JS error | Check browser console (F12) for errors |
 | "Web resource not found" on import | Web resource not deployed | Deploy web resource first (Step 4) |
 | Solution import fails with "duplicate ID" | Conflicting ribbon elements | Use unique `sprk.communication.` prefixed IDs |

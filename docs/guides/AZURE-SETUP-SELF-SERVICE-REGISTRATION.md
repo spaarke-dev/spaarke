@@ -388,7 +388,7 @@ Ribbon buttons enable approve/reject actions directly from the MDA grid and form
 2. Inject `RibbonDiffXml` using the ribbon-edit skill or Ribbon Workbench
 3. Re-import the solution
 4. Upload the `sprk_/js/registrationribbon.js` web resource if not already present
-5. Publish all customizations
+5. Publish only the imported components (`scripts/Import-SolutionScoped.ps1`)
 
 ---
 
