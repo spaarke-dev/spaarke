@@ -290,14 +290,22 @@ describe('SaveView', () => {
         canProvideDocumentName: true,
       };
       const adapter = makeWordAdapter({ getCapabilities: () => capabilities });
-      renderSaveView(adapter);
+      // Task 120: `canOpenRecord` is the pane's one open gate (`canOpenSpaarkeRecords`), which also needs ORG_URL.
+      const previousOrgUrl = process.env.ORG_URL;
+      process.env.ORG_URL = 'https://contoso.crm.dynamics.com';
+      try {
+        renderSaveView(adapter);
 
-      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+        await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
-      const props = lastSaveFlowProps();
-      expect(props.canOpenRecord).toBe(true);
-      expect(props.canSuggestRelatedRecords).toBe(true);
-      expect(props.canProvideDocumentName).toBe(true);
+        const props = lastSaveFlowProps();
+        expect(props.canOpenRecord).toBe(true);
+        expect(props.canSuggestRelatedRecords).toBe(true);
+        expect(props.canProvideDocumentName).toBe(true);
+      } finally {
+        if (previousOrgUrl === undefined) delete process.env.ORG_URL;
+        else process.env.ORG_URL = previousOrgUrl;
+      }
     });
 
     it('defaults to false when the adapter reports those capabilities as false', async () => {

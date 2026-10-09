@@ -31,6 +31,9 @@ resource docIntelligence 'Microsoft.CognitiveServices/accounts@2023-10-01-previe
     networkAcls: {
       defaultAction: 'Allow'
     }
+    // Keyless (owner D13, task 244): Microsoft Entra only. Entra needs the custom subdomain above; the
+    // stamp BFF calls with its UAMI (Cognitive Services User below) since T243.
+    disableLocalAuth: true
   }
 }
 

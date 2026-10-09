@@ -49,7 +49,11 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             // 503: the record's access settings could not be read (task 138), or the contact lookup could not be read
             // (task 141, sdap.access.invite.contact_lookup_failed). Every 409/422/503 above is decided BEFORE
-            // onboarding, so it leaves no Contact, CIAM account or email behind.
+            // onboarding, so it leaves no Contact, CIAM account or email behind — with two exceptions decided AFTER it,
+            // which carry the onboarded contactId: the grant core's own refusal when the record or grant changed while
+            // the account was provisioned (the re-run checks, a race), and the expired_not_restored 409 backstop (owner
+            // round 80 restores a lapsed grant, so no request is known to reach it). Onboarding is idempotent; a retry
+            // re-issues only the grant.
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
@@ -279,9 +283,12 @@ public static class InviteAndGrantExternalUserEndpoint
         {
             // The SAME ceiling the pre-check used — the core re-runs every check itself (WP-1), so a record or a grant
             // that changed while the account was being provisioned is still judged at write time.
+            // Owner round 80: the modal's "+ Contact" re-add sends no date, so a re-add over a LAPSED grant is a SET —
+            // restored at the picked (ceiling-capped) level with today + 90, never answered 200 over a write that did
+            // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct, reAddRestoresLapsed: true);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -297,16 +304,27 @@ public static class InviteAndGrantExternalUserEndpoint
 
             accessRecordId = grantOutcome.AccessRecordId;
 
-            // Task 023: the upsert can succeed structurally while conferring no access — it matched an
-            // EXPIRED row and this request carried no new expiry. On the invite path that is logged
-            // rather than failed: the Contact WAS provisioned, so failing here would strand a real
-            // onboarding over a grant the operator can fix by re-granting with an expiry date.
+            // Task 023 / owner round 80: a grant that confers no access is never answered 200 "granted" — that told the
+            // modal a level was written when nothing was, and adopted an Assigned-To ledger entry for it. With the round-80
+            // restore a dateless re-add over a lapsed grant IS written (today + 90), and a past date is a 400 above, so no
+            // request is known to reach this; if one does, the Contact stays onboarded (idempotent) and the caller gets the
+            // same 409 as /grant, with the contact id — and nothing is adopted.
             if (grantOutcome.Warning is { } warning)
             {
                 logger.LogWarning(
-                    "[INVITE-GRANT] Contact {ContactId} was onboarded and the grant row {AccessRecordId} " +
-                    "exists, but it confers no access: {Warning}",
-                    grantRequest.ContactId, accessRecordId, warning);
+                    "[INVITE-GRANT] Contact {ContactId} was onboarded, but the grant on row {AccessRecordId} confers no " +
+                    "access: {Warning}", grantRequest.ContactId, accessRecordId, warning);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Grant did not take effect",
+                    detail: warning,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["traceId"] = httpContext.TraceIdentifier,
+                        ["reasonCode"] = "sdap.grant.expired_not_restored",
+                        ["accessRecordId"] = accessRecordId,
+                        ["contactId"] = contactId,
+                    });
             }
         }
         catch (Exception ex)

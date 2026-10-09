@@ -210,6 +210,22 @@ public sealed class IntakeSchemaProfileParityTests
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.B2BGuest, ["email"]))
             .Should().BeTrue("B2BGuest users need an email — H11's rule");
 
+        // T232: Model1 → B2BGuest only (owner D2); B2BGuest → the environment security group, a GUID.
+        allOf.Any(r => r.TryGetProperty("if", out var c)
+                && c.GetProperty("properties").TryGetProperty("tenancyModel", out var tm)
+                && tm.GetProperty("const").GetString() == UserProvisioningIntake.Model1TenancyModel
+                && r.GetProperty("then").GetProperty("properties").TryGetProperty("identityPreset", out var p)
+                && p.GetProperty("const").GetString() == UserProvisioningIntake.B2BGuest)
+            .Should().BeTrue("a Model1 run takes only B2BGuest — H11's rule (userprov-model1-requires-b2b-guest)");
+        allOf.Any(r => r.TryGetProperty("if", out var c)
+                && c.GetProperty("properties").TryGetProperty("identityPreset", out var p)
+                && p.GetProperty("const").GetString() == UserProvisioningIntake.B2BGuest
+                && r.GetProperty("then").TryGetProperty("required", out var req)
+                && Strings(req).Contains("environmentSecurityGroupId"))
+            .Should().BeTrue("a B2BGuest run needs the environment security group — H11's rule");
+        properties.GetProperty("environmentSecurityGroupId").GetProperty("format").GetString().Should().Be("uuid",
+            "POST /api/runs refuses a group id that is not a GUID (userprov-invalid-security-group-id)");
+
         static IEnumerable<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!);
 
         static bool IsAtLeastOneGraphResourceRule(JsonElement rule)
@@ -241,23 +257,105 @@ public sealed class IntakeSchemaProfileParityTests
         foreach (var example in examples)
         {
             var nonSecret = ToOperatorNonSecret(example);
-            RunsEndpoints.ValidateOperatorIntake(nonSecret).Should().BeNull(
+            var tenancyModel = example.GetProperty("tenancyModel").GetString();
+            RunsEndpoints.ValidateOperatorIntake(tenancyModel, nonSecret).Should().BeNull(
                 "a schema example ({0}) is a complete intake", example.GetProperty("customerId").GetString());
 
             foreach (var (schemaKey, apiKey) in OperatorKeys.Where(k => schemaRequired.Contains(k.SchemaKey)))
             {
                 var without = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
                 without.Remove(apiKey);
-                RunsEndpoints.ValidateOperatorIntake(without).Should().NotBeNull(
+                RunsEndpoints.ValidateOperatorIntake(tenancyModel, without).Should().NotBeNull(
                     "the schema requires '{0}', so POST /api/runs must refuse a run without '{1}'", schemaKey, apiKey);
             }
 
             var noGraphResource = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
             noGraphResource.Remove("communicationGraphResource");
             noGraphResource.Remove("emailGraphResource");
-            RunsEndpoints.ValidateOperatorIntake(noGraphResource).Should().NotBeNull(
+            RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGraphResource).Should().NotBeNull(
                 "the schema requires at least one Graph resource, so POST /api/runs must too");
+
+            // T232: the schema requires the group for B2BGuest — so must POST /api/runs.
+            if (nonSecret.GetValueOrDefault("identityPreset") == UserProvisioningIntake.B2BGuest)
+            {
+                var noGroup = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
+                noGroup.Remove("environmentSecurityGroupId");
+                RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGroup).Should().NotBeNull(
+                    "the schema requires environmentSecurityGroupId for B2BGuest, so POST /api/runs must too");
+            }
         }
+    }
+
+    /// <summary>
+    /// T228: the schema requires the customer's subscription and Dataverse environment for every model, as POST /api/runs
+    /// does, and each example's environment passes the endpoint's rule (DataverseEnvironmentUrlRule) for that example's
+    /// customer — so a batch intake ajv accepts is not refused at the edge.
+    /// </summary>
+    [Fact]
+    public void T228_SubscriptionAndEnvironment_AreRequiredByBoth_AndTheExamplesPassTheEndpointRule()
+    {
+        var schemaRequired = ReadStringArrayFromSchema("required");
+        schemaRequired.Should().Contain(new[] { "subscriptionId", "dataverseEnvUrl" });
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
+        {
+            var customerId = example.GetProperty("customerId").GetString()!;
+            Guid.TryParse(example.GetProperty("subscriptionId").GetString(), out _).Should().BeTrue();
+            Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule.TryNormalize(
+                    example.GetProperty("dataverseEnvUrl").GetString(), customerId,
+                    Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.DefaultEnvironmentName, out _, out var error)
+                .Should().BeTrue("example '{0}': {1}", customerId, error);
+        }
+    }
+
+    /// <summary>
+    /// T229: the schema's tier enum is exactly the tiers H0 has ceilings for (CostEnvelopeIntake.Tiers — the keys of
+    /// H0Options.DefaultCeilingsUsd), both cost inputs are required, and the retired waiver is not in the schema.
+    /// </summary>
+    [Fact]
+    public void T229_TierEnumIsH0sCeilingTable_BothCostInputsAreRequired_AndNoWaiverExists()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var properties = doc.RootElement.GetProperty("properties");
+        properties.GetProperty("tier").GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Handlers.Preflight.CostEnvelopeIntake.Tiers,
+                "a tier the schema accepts but H0 has no ceiling for would be refused at POST /api/runs");
+        ReadStringArrayFromSchema("required").Should().Contain(new[] { "tier", "estimatedMonthlyUsd" });
+        properties.TryGetProperty("costEnvelopePolicy", out _).Should().BeFalse(
+            "warnAndProceed was the shared-trial waiver; a dedicated stamp's overrun has none (T229)");
+    }
+
+    /// <summary>
+    /// T254 (G37): the OpenAI spend limit is OPTIONAL in the schema (no limit is the default) and its bounds are the ones
+    /// POST /api/runs applies (OpenAiMonthlyLimitRule).
+    /// </summary>
+    [Fact]
+    public void T254_OpenAiMonthlyLimit_IsOptional_WithTheIntakeBounds()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var limit = doc.RootElement.GetProperty("properties").GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.OpenAiMonthlyLimitUsd);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("openAiMonthlyLimitUsd", "no limit is the default (G37)");
+        limit.GetProperty("exclusiveMinimum").GetDecimal().Should().Be(0m);
+        limit.GetProperty("maximum").GetDecimal()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule.MaxLimitUsd);
+    }
+
+    /// <summary>
+    /// T218b: solutionPackageType is OPTIONAL (managed is the default) and the schema's enum is exactly the set
+    /// POST /api/runs accepts (IntakeParameterCatalog.AllowedSolutionPackageTypes).
+    /// </summary>
+    [Fact]
+    public void T218b_SolutionPackageType_IsOptional_WithTheIntakeValues()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.SolutionPackageType);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("solutionPackageType", "managed is the default (D8)");
+        property.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
     }
 
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
@@ -265,10 +363,13 @@ public sealed class IntakeSchemaProfileParityTests
     [
         ("identityPreset", "identityPreset"),
         ("users", "usersJson"),
+        ("environmentSecurityGroupId", "environmentSecurityGroupId"),   // T232
         ("exchangePolicyScopeGroupId", "exchangePolicyScopeGroupId"),
         ("communicationGraphResource", "communicationGraphResource"),
         ("emailGraphResource", "emailGraphResource"),
         ("communicationDefaultMailbox", "communicationDefaultMailbox"),
+        ("tier", "tier"),                                   // T229
+        ("estimatedMonthlyUsd", "estimatedMonthlyUsd"),
     ];
 
     private static Dictionary<string, string> ToOperatorNonSecret(JsonElement example)

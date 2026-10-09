@@ -18,6 +18,7 @@ import {
   type ResolvedRelatedRecord,
 } from '../../services/documentIdentityService';
 import { subscribeToDocumentChanges } from '../../services/documentChangeDetectionService';
+import { canOpenSpaarkeRecords } from '../../services/openRecordLauncher';
 import type { ContactOption } from './CreateTodoView';
 import { EmailContentCaptureContext, type CaptureEmailContent } from '../../hooks/emailContentCaptureContext';
 import {
@@ -376,7 +377,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
   // task 027 / FR-10 (NFR-10): decided from the live adapter's capabilities, never a `hostType`
   // check — `false` (including while `hostAdapter` is absent/loading) renders SaveFlow's
   // related-record card and Document-record affordance without their open action.
-  const canOpenRecord = hostAdapter?.getCapabilities().canOpenBrowserWindow ?? false;
+  // Task 120: the pane's one open gate (`canOpenSpaarkeRecords`) — ORG_URL plus `openBrowserWindow` OR `window.open`,
+  // so View Document / Open Document / the "Filed to" card also open on Office on the web.
+  const canOpenRecord = hostAdapter ? canOpenSpaarkeRecords(hostAdapter.getCapabilities()) : false;
 
   // task 040 / FR-19 (NFR-10): same pattern as canOpenRecord above — decided from the live
   // adapter's capabilities, never a `hostType` check. `false` (including while `hostAdapter` is

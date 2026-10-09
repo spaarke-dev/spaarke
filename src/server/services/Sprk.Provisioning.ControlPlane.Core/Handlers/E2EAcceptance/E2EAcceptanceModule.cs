@@ -2,17 +2,15 @@
 // E2EAcceptanceModule.cs
 //
 // L2 CONTROL-PLANE DI composition for the H13 E2E acceptance-gate handler +
-// its 6 collaborator seams (task 055, wave C4 Batch 4E).
+// its 5 collaborator seams (task 055, wave C4 Batch 4E).
 //
 // SCOPE:
-//   - Bind E2EAcceptance:{PwshExecutable, AzCliExecutable, ValidateDeployed
-//     EnvironmentScriptPath, NamingConformanceScriptPath, various timeouts,
-//     cost envelope thresholds, CostDriftFailsRun, TargetSlotName,
-//     HonorRegistryStatusReadyShortCircuit} options.
-//   - Register the 6 collaborator seams (IE2EValidationRunner,
-//     IE2ETrapVerifier, IE2EInvariantVerifier, INamingConformanceChecker,
-//     ICostEnvelopeChecker, IRegistrySetupStatusUpdater) + the H13 handler
-//     itself as Scoped.
+//   - Bind E2EAcceptance:{probe timeouts, cost envelope + thresholds,
+//     CostDriftFailsRun, TargetSlotName, HonorRegistryStatusReadyShortCircuit}
+//     options.
+//   - Register the 5 collaborator seams (IE2EValidationRunner,
+//     IE2ETrapVerifier, IE2EInvariantVerifier, ICostEnvelopeChecker,
+//     IRegistrySetupStatusUpdater) + the H13 handler itself as Scoped.
 //
 // UNCONDITIONAL REGISTRATION (ADR-032): every registration below is
 // UNCONDITIONAL — no feature-gate branch.
@@ -25,7 +23,7 @@
 // PLACEMENT JUSTIFICATION (CLAUDE.md §10):
 //   H13 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
 //   AI-internal types (ADR-013 forcing-function rule). H13 uses
-//   IProvisioningRunRepository (task 037) + 6 dedicated seams + reuses
+//   IProvisioningRunRepository (task 037) + 5 dedicated seams + reuses
 //   IDataverseEnvironmentRegistryClient (task 042 H0.5 seam) for the
 //   idempotency-short-circuit registry lookup; no BFF-facade dependencies.
 // -----------------------------------------------------------------------------
@@ -35,7 +33,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
-/// DI registration for the H13 E2E acceptance-gate handler + its 6
+/// DI registration for the H13 E2E acceptance-gate handler + its 5
 /// collaborator seams. Composed behind a single
 /// <see cref="AddH13E2EAcceptanceGateHandler"/> extension method to minimize
 /// Program.cs edit surface.
@@ -46,7 +44,7 @@ public static class E2EAcceptanceModule
     public const string ConfigSection = "E2EAcceptance";
 
     /// <summary>
-    /// Registers <see cref="H13E2EAcceptanceGateHandler"/> + its 6 collaborator
+    /// Registers <see cref="H13E2EAcceptanceGateHandler"/> + its 5 collaborator
     /// seams with the DI container.
     /// </summary>
     public static IServiceCollection AddH13E2EAcceptanceGateHandler(
@@ -65,10 +63,9 @@ public static class E2EAcceptanceModule
             }, "E2EAcceptance options failed validation — see inner exception (Validate throws).")
             .ValidateOnStart();
 
-        // Production seam registrations. All 7 trap + 5 invariant probes are
-        // real as of task 185 (Wave G-7 Batch G-7D) -- PlaceholderTrapVerifier
-        // and PlaceholderInvariantVerifier are retained on disk UNREGISTERED
-        // per this project's retirement convention.
+        // Production seam registrations. All 7 trap + 4 runtime invariant (I2–I5)
+        // probes are real as of task 185 (Wave G-7 Batch G-7D). Task 230a deleted
+        // the unregistered PlaceholderTrapVerifier / PlaceholderInvariantVerifier.
         //
         // IE2ETrapVerifier -- Wave G-7 Batch G-7D composite migration (task 185).
         // CompositeTrapVerifier dispatches per-TrapKind to registered ITrapProbe
@@ -96,17 +93,15 @@ public static class E2EAcceptanceModule
         // preserving PlaceholderInvariantVerifier's Resumable semantics for
         // un-wired kinds. Sibling wave-G-7 tasks each add ONE
         // AddSingleton<IInvariantProbe, TProbe>() line here:
-        //   - task 170 (I1) — PackagedScriptTenantLiteralInvariantProbe adapter
-        //                     preserves task-170's real packaged-scripts I1 check
-        //                     under the composite pattern.
+        //   - task 170 (I1) — packaged-scripts probe DELETED by task 230a: no
+        //                     scripts ship with the Worker publish; I1 is
+        //                     build-time (the I1 ArchTest).
         //   - task 173 (I2)  — sibling I2 AI Search tenant-filter probe.
         //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe.
-        //   - task 176 (I4)  — SpeContainerResolverInvariantProbe (real BFF
-        //                     diagnostic call; LIVE-verification deferred to
-        //                     task 186 per that POML's escalation trigger).
+        //   - task 176 (I4)  — a BFF-diagnostic resolver probe, superseded by task 204c's
+        //                     SpeContainerTenantDerivationInvariantProbe and retired with the
+        //                     diagnostic route by task 227f.
         //   - task 179 (I5)  — I5GraphTokenTenantScopeProbe.
-        // PlaceholderInvariantVerifier.cs is retained on disk unregistered
-        // per the Wave G-6 retirement convention.
         // Task 181 (Phase C'' Wave G-7 Batch G-7B): pure-C# port replaces the
         // ValidateDeployedEnvironmentScriptRunner shell-out per DS-4 section 6 --
         // ZERO ProcessStartInfo / pwsh dependency; the port issues live HttpClient
@@ -133,6 +128,9 @@ public static class E2EAcceptanceModule
         services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
         services.AddSingleton<IE2ETrapVerifier, CompositeTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
+        // Task 230b — the ARM half of the keyless gate (key auth off, no key setting on any slot).
+        services.AddHttpClient(ArmStampKeylessVerifier.HttpClientName);
+        services.AddSingleton<IStampKeylessVerifier, ArmStampKeylessVerifier>();
         // Task 185 (Wave G-7 Batch G-7D): 7 real ITrapProbe registrations (T7 added by task 238) for
         // the composite trap verifier. Order does not matter (composite
         // dispatches per Kind); each probe's own file header documents its
@@ -162,12 +160,7 @@ public static class E2EAcceptanceModule
         services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainersListAppOnlyProbe>(); // task 248
         services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
         services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();                // T7 (task 238, D-14 — ArmClient)
-        // I1 adapter (task 173) — preserves task-170's real packaged-scripts
-        // I1 check under the composite pattern by wrapping its internal-static
-        // ProbeI1 in an IInvariantProbe (see PackagedScriptTenantLiteralInvariantProbe.cs
-        // rationale). Without this adapter, the composite swap would silently
-        // regress task-170's shipped Wave G-7 I1 real check to InfraFault.
-        services.AddSingleton<IInvariantProbe, PackagedScriptTenantLiteralInvariantProbe>(); // I1 (task 170 IP; task 173 adapter)
+        // Task 230a: the I1 PackagedScriptTenantLiteralInvariantProbe registration DELETED (I1 is build-time).
         // I2 (task 173) — real AI Search tenant-filter probe. Issues a live
         // /docs/search POST on each canonical index of the stamp's own AI
         // Search service asserting `tenantId eq '{TenantId}'` is enforced
@@ -183,10 +176,10 @@ public static class E2EAcceptanceModule
         // I4 (task 204c B07 — Wave G-7 replacement of task 176, 2026-08-26).
         // INDEPENDENT re-verification variant: reads DEPLOYED App Service
         // config directly via ARM `Microsoft.Web/sites/{name}/config/appsettings/list`
-        // and classifies the `SharePointEmbedded__ContainerTypeId` value
-        // (`@Microsoft.KeyVault(...)` reference → Passed; canonical `b!` SPE
-        // container-id literal → Failed CATASTROPHIC; empty / non-KV-ref
-        // string → Failed). Task 204c dispatch directive: "do NOT trust
+        // and compares the SPE settings with the run's own values (task 227c):
+        // container type = the run's; EmailProcessing__DefaultContainerId and
+        // Communication__ArchiveContainerId = H8's container (another id →
+        // Failed CATASTROPHIC, owner D28). Task 204c dispatch directive: "do NOT trust
         // RunStatus.HandlerReports; re-read the underlying Azure/Cosmos/
         // Graph/SPE surface directly" — task 176's BFF-diagnostic pattern
         // trusts the BFF's own self-report and cannot detect a compromised
@@ -194,21 +187,14 @@ public static class E2EAcceptanceModule
         // is hardcoded (§4D I4 CATASTROPHIC class). See probe file header
         // § SILENT-FAIL AUDIT for the failure-mode delta. Needs a NAMED
         // HttpClient (registered below) + the shared UAMI-pinned
-        // TokenCredential + IOptions<H13AcceptanceOptions>. Task 176's
-        // SpeContainerResolverInvariantProbe is retained on disk UNREGISTERED
-        // per Wave G-6 retirement convention (see its retirement banner);
-        // its BFF-diagnostic complementary coverage may be re-registered
-        // under a distinct InvariantKind post-186 if operator sign-off.
+        // TokenCredential + IOptions<H13AcceptanceOptions>. (Task 176's BFF-diagnostic
+        // resolver probe, kept unregistered after this replaced it, was deleted with the
+        // diagnostic route by task 227f — nothing could call it.)
         services.AddHttpClient(SpeContainerTenantDerivationInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, SpeContainerTenantDerivationInvariantProbe>();   // I4 (task 204c B07; supersedes task 176)
         services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)
-        // Task 182 (Phase C'' Wave G-7 Batch G-7A1): pure-C# port replaces the
-        // NamingConformanceScriptRunner shell-out per DS-4 section 6 (this script
-        // has 0 az/REST calls -- pure convention checks, so the port is a trivial
-        // mechanical translation). NamingConformanceScriptRunner is retained on
-        // disk UNREGISTERED per this project's retirement convention (see its
-        // retirement banner). Registration remains UNCONDITIONAL (ADR-032).
-        services.AddSingleton<INamingConformanceChecker, NamingConformanceChecker>();
+        // Task 230a: INamingConformanceChecker DELETED — it linted Spaarke repo files absent from the
+        // Worker publish; scripts/naming-conformance-check.ps1 runs once as a blocking CI step.
         // Task 183 (Phase C'' Wave G-7 Batch G-7A2.2): Azure.ResourceManager.
         // CostManagement SDK port replaces the AzCliCostEnvelopeChecker shell-out
         // per DS-4 section 6 (mechanical REST/SDK swap; threshold arithmetic

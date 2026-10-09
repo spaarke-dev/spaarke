@@ -806,7 +806,7 @@ public class ConditionNodeExecutorTests
     {
         _templateEngineMock
             .Setup(t => t.HasVariables(It.IsAny<string>()))
-            .Returns(true);
+            .Returns((string s) => s.Contains("{{", StringComparison.Ordinal)); // as the real engine: literals are not templates
 
         _templateEngineMock
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>()))
@@ -817,7 +817,7 @@ public class ConditionNodeExecutorTests
     {
         _templateEngineMock
             .Setup(t => t.HasVariables(It.IsAny<string>()))
-            .Returns(true);
+            .Returns((string s) => s.Contains("{{", StringComparison.Ordinal)); // as the real engine: literals are not templates
 
         _templateEngineMock
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>()))

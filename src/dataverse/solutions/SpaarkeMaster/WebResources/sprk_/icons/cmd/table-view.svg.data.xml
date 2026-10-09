@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{bd91a50e-d823-f111-88b5-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_/icons/cmd/table-view.svg</Name>
+  <DisplayName>Table View Icon</DisplayName>
+  <Description>Fluent UI icon: Table20Regular - Dataset grid table view — tabular data display</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconscmdtable-viewsvgBD91A50E-D823-F111-88B5-7C1E520AA4DF</FileName>
+</WebResource>

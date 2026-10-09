@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_periodtype" localizedName="Period Type" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Period Type" languagecode="1033" />
+  </displaynames>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Month" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Quarter" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Year" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="ToDate" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

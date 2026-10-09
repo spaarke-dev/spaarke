@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-005",
     "name": "New Events on Matters/Projects",
-    "description": "Notifies users when new sprk_event records (of types Action, Deadline, Meeting, Milestone, Reminder) have been created on their assigned matters or projects since the last check. Uses Spaarke custom sprk_event entity (NOT OOB appointment activity).",
+    "description": "Notifies the user of new sprk_event records of types Action, Deadline, Meeting, Milestone and Reminder created in the last 24 hours by someone else on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_event entity (NOT OOB appointment activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -44,6 +44,7 @@
     {
       "name": "Start",
       "nodeType": "Control",
+      "executorType": 33,
       "actionType": null,
       "canvasType": "start",
       "outputVariable": "start",
@@ -60,6 +61,7 @@
     {
       "name": "Lookup My Matters",
       "nodeType": "Workflow",
+      "executorType": 52,
       "actionType": 52,
       "canvasType": "lookupUserMembership",
       "outputVariable": "myMatters",
@@ -71,12 +73,13 @@
         "entityType": "sprk_matter",
         "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids)."
       }
     },
     {
       "name": "Query New Events",
       "nodeType": "Workflow",
+      "executorType": 51,
       "actionType": 51,
       "canvasType": "queryDataverse",
       "outputVariable": "newEvents",
@@ -87,16 +90,17 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_event",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_meetingdate\"/><attribute name=\"sprk_plannedstart\"/><attribute name=\"sprk_plannedend\"/><attribute name=\"createdon\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><condition attribute=\"sprk_eventtype_ref\" operator=\"in\"><value>5a1c56c3-98ff-f011-8406-7c1e525abd8b</value><value>e0043c4b-99ff-f011-8406-7c1e525abd8b</value><value>8fb9b5a7-99ff-f011-8406-7c1e525abd8b</value><value>b86d712b-99ff-f011-8406-7c1e525abd8b</value><value>da6bc005-99ff-f011-8406-7c1e525abd8b</value></condition><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_meetingdate\"/><attribute name=\"sprk_plannedstart\"/><attribute name=\"sprk_plannedend\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><condition attribute=\"sprk_eventtype_ref\" operator=\"in\"><value>5a1c56c3-98ff-f011-8406-7c1e525abd8b</value><value>e0043c4b-99ff-f011-8406-7c1e525abd8b</value><value>8fb9b5a7-99ff-f011-8406-7c1e525abd8b</value><value>b86d712b-99ff-f011-8406-7c1e525abd8b</value><value>da6bc005-99ff-f011-8406-7c1e525abd8b</value></condition><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "New sprk_event records (eventtype IN {Action, Deadline, Meeting, Milestone, Reminder}, createdby != current user, createdon in last {{timeWindowHours}}, default 24h) where EITHER (a) sprk_regardingmatter is in the user's myMatters.ids membership set [LookupUserMembership branch], OR (b) the event owner is the current user, OR (c) the sprk_regardingmatter owner is the current user."
+        "description": "sprk_event rows of types Action, Deadline, Meeting, Milestone and Reminder (five sprk_eventtype_ref ids as <value> children) created in the last 24 hours (timeWindowHours; the scheduler passes 24) by someone other than the user, where (a) sprk_regardingmatter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the event's own owner is the user. Newest first, at most 50."
       }
     },
     {
       "name": "Has New Events?",
       "nodeType": "Control",
+      "executorType": 30,
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewEvents",
@@ -117,6 +121,7 @@
     {
       "name": "Create Notification",
       "nodeType": "Workflow",
+      "executorType": 50,
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
@@ -148,7 +153,7 @@
           "sourceModifiedOn": "{{item.createdon}}",
           "sourceOwningUser": "{{item.ownerid}}",
           "viaMatterId": "{{item.sprk_regardingmatter}}",
-          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
           "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {

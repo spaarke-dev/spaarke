@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{aecbd6c8-46a6-f011-bbd3-7c1e5217cd7c}</WebResourceId>
+  <Name>sprk_subgrid_commands</Name>
+  <DisplayName>subgrid_commands</DisplayName>
+  <Description>version 3.0.3_10.23.2025-16:25</Description>
+  <LanguageCode>0</LanguageCode>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_subgrid_commandsAECBD6C8-46A6-F011-BBD3-7C1E5217CD7C</FileName>
+</WebResource>

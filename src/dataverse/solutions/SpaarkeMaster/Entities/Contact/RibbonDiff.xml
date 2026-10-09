@@ -1,0 +1,129 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.Activate.Hide" Location="Mscrm.Form.contact.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.AddConnection.Hide" Location="Mscrm.Form.contact.AddConnection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.Deactivate.Hide" Location="Mscrm.Form.contact.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.Form.contact.Flows.RefreshCommandBar.Flows" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.Flows.RefreshCommandBar.Hide" Location="Mscrm.Form.contact.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.FormDesign.Hide" Location="Mscrm.Form.contact.FormDesign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.OpenActiveStage.Hide" Location="Mscrm.Form.contact.OpenActiveStage" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.Reports.Hide" Location="Mscrm.Form.contact.Reports" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.RunScript.Hide" Location="Mscrm.Form.contact.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.RunWorkflow.Hide" Location="Mscrm.Form.contact.RunWorkflow" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.contact.SaveAsComplete.Hide" Location="Mscrm.Form.contact.SaveAsComplete" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.Activate.Hide" Location="Mscrm.HomepageGrid.contact.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.AddConnection.Hide" Location="Mscrm.HomepageGrid.contact.AddConnection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.ChangeDataSetControlButton.Hide" Location="Mscrm.HomepageGrid.contact.ChangeDataSetControlButton" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.Deactivate.Hide" Location="Mscrm.HomepageGrid.contact.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.Detect.Hide" Location="Mscrm.HomepageGrid.contact.Detect" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.HomepageGrid.contact.Flows.RefreshCommandBar.Flows" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.Flows.RefreshCommandBar.Hide" Location="Mscrm.HomepageGrid.contact.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.MainTab.QuickPowerBI.Button.Hide" Location="Mscrm.HomepageGrid.contact.MainTab.QuickPowerBI.Button" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.MergeRecords.Hide" Location="Mscrm.HomepageGrid.contact.MergeRecords" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.RunScript.Hide" Location="Mscrm.HomepageGrid.contact.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.contact.RunWorkflow.Hide" Location="Mscrm.HomepageGrid.contact.RunWorkflow" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.Activate.Hide" Location="Mscrm.SubGrid.contact.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.AddConnection.Hide" Location="Mscrm.SubGrid.contact.AddConnection" />
+    <CustomAction Id="sprk.Mscrm.SubGrid.contact.AddExistingAssoc.CustomAction" Location="Mscrm.SubGrid.contact.MainTab.Management.Controls._children" Sequence="40">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Mscrm.SubGrid.contact.AddExistingAssoc.Alt" Command="Mscrm.AddExistingRecordFromSubGridAssociated" Id="Mscrm.SubGrid.contact.AddExistingAssoc" Image32by32="/_imgs/ribbon/AddExistingStandard_32.png" Image16by16="/_imgs/ribbon/AddExistingStandard_16.png" LabelText="$LocLabels:Mscrm.SubGrid.contact.AddExistingAssoc.LabelText" Sequence="40" TemplateAlias="o1" ToolTipTitle="$LocLabels:Mscrm.SubGrid.contact.AddExistingAssoc.ToolTipTitle" ToolTipDescription="$LocLabels:Mscrm.SubGrid.contact.AddExistingAssoc.ToolTipDescription" ModernImage="AddExisting" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Mscrm.SubGrid.contact.AddExistingStandard.CustomAction" Location="Mscrm.SubGrid.contact.MainTab.Management.Controls._children" Sequence="30">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Mscrm.SubGrid.contact.AddExistingStandard.Alt" Command="Mscrm.AddExistingRecordFromSubGridStandard" Id="Mscrm.SubGrid.contact.AddExistingStandard" Image32by32="/_imgs/ribbon/AddExistingStandard_32.png" Image16by16="/_imgs/ribbon/AddExistingStandard_16.png" LabelText="$LocLabels:Mscrm.SubGrid.contact.AddExistingStandard.LabelText" Sequence="30" TemplateAlias="o1" ToolTipTitle="$LocLabels:Mscrm.SubGrid.contact.AddExistingStandard.ToolTipTitle" ToolTipDescription="$LocLabels:Mscrm.SubGrid.contact.AddExistingStandard.ToolTipDescription" ModernImage="AddExisting" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Mscrm.SubGrid.contact.AddNewStandard.CustomAction" Location="Mscrm.SubGrid.contact.MainTab.Management.Controls._children" Sequence="20">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Mscrm.SubGrid.contact.AddNewStandard.Alt" Command="Mscrm.AddNewRecordFromSubGridStandard" Id="Mscrm.SubGrid.contact.AddNewStandard" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/New_16.png" LabelText="$LocLabels:Mscrm.SubGrid.contact.AddNewStandard.LabelText" Sequence="20" TemplateAlias="o1" ToolTipTitle="$LocLabels:Mscrm.SubGrid.contact.AddNewStandard.ToolTipTitle" ToolTipDescription="$LocLabels:Mscrm.SubGrid.contact.AddNewStandard.ToolTipDescription" ModernImage="New" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.AddToQueue.Hide" Location="Mscrm.SubGrid.contact.AddToQueue" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.AdvMergeRecords.Hide" Location="Mscrm.SubGrid.contact.AdvMergeRecords" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.Assign.Hide" Location="Mscrm.SubGrid.contact.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.AssociateParentChildCase.Hide" Location="Mscrm.SubGrid.contact.AssociateParentChildCase" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.ChangeDataSetControlButton.Hide" Location="Mscrm.SubGrid.contact.ChangeDataSetControlButton" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.Deactivate.Hide" Location="Mscrm.SubGrid.contact.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.Detect.Hide" Location="Mscrm.SubGrid.contact.Detect" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.Flows.RefreshCommandBar.Hide" Location="Mscrm.SubGrid.contact.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.MailMerge.Hide" Location="Mscrm.SubGrid.contact.MailMerge" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.MergeRecords.Hide" Location="Mscrm.SubGrid.contact.MergeRecords" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.OpenAssociatedGridViewStandard.Hide" Location="Mscrm.SubGrid.contact.OpenAssociatedGridViewStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.RunReport.Hide" Location="Mscrm.SubGrid.contact.RunReport" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.RunScript.Hide" Location="Mscrm.SubGrid.contact.RunScript" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.contact.RunWorkflow.Hide" Location="Mscrm.SubGrid.contact.RunWorkflow" />
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions />
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules />
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingAssoc.Alt">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingAssoc.LabelText">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingAssoc.ToolTipDescription">
+      <Titles>
+        <Title description="Add a {0} to the record you are working with." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingAssoc.ToolTipTitle">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingStandard.Alt">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingStandard.LabelText">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingStandard.ToolTipDescription">
+      <Titles>
+        <Title description="Add a {0} to the record you are working with." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddExistingStandard.ToolTipTitle">
+      <Titles>
+        <Title description="Add​​ {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddNewStandard.Alt">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddNewStandard.LabelText">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddNewStandard.ToolTipDescription">
+      <Titles>
+        <Title description="Add a {0} to this record." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Mscrm.SubGrid.contact.AddNewStandard.ToolTipTitle">
+      <Titles>
+        <Title description="Add {0}" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

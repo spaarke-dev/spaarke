@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<AppModule>
+  <UniqueName>sprk_SpaarkeAISetup</UniqueName>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <WebResourceId>953b9fac-1e5e-e611-80d6-00155ded156f</WebResourceId>
+  <OptimizedFor></OptimizedFor>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+  <FormFactor>1</FormFactor>
+  <ClientType>4</ClientType>
+  <NavigationType>0</NavigationType>
+  <AppModuleComponents>
+    <AppModuleComponent type="1" schemaName="appnotification" />
+    <AppModuleComponent type="1" schemaName="sprk_aiactiontype" />
+    <AppModuleComponent type="1" schemaName="sprk_aichatcontextmap" />
+    <AppModuleComponent type="1" schemaName="sprk_aichatmessage" />
+    <AppModuleComponent type="1" schemaName="sprk_aichatsummary" />
+    <AppModuleComponent type="1" schemaName="sprk_aiknowledgedeployment" />
+    <AppModuleComponent type="1" schemaName="sprk_aiknowledgesource" />
+    <AppModuleComponent type="1" schemaName="sprk_aiknowledgetype" />
+    <AppModuleComponent type="1" schemaName="sprk_aimodeldeployment" />
+    <AppModuleComponent type="1" schemaName="sprk_aioutputtype" />
+    <AppModuleComponent type="1" schemaName="sprk_aipersona" />
+    <AppModuleComponent type="1" schemaName="sprk_airetrievalmode" />
+    <AppModuleComponent type="1" schemaName="sprk_aisearchindex" />
+    <AppModuleComponent type="1" schemaName="sprk_aiskilltype" />
+    <AppModuleComponent type="1" schemaName="sprk_aitooltype" />
+    <AppModuleComponent type="1" schemaName="sprk_aitopicregistry" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisaction" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisactiontype" />
+    <AppModuleComponent type="1" schemaName="sprk_analysischatmessage" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisdeliverytype" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisemailmetadata" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisknowledge" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisoutput" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisplaybook" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisskill" />
+    <AppModuleComponent type="1" schemaName="sprk_analysistool" />
+    <AppModuleComponent type="1" schemaName="sprk_communication" />
+    <AppModuleComponent type="1" schemaName="sprk_event" />
+    <AppModuleComponent type="1" schemaName="sprk_outputtypes" />
+    <AppModuleComponent type="1" schemaName="sprk_playbookconsumer" />
+    <AppModuleComponent type="1" schemaName="sprk_playbooknode" />
+    <AppModuleComponent type="1" schemaName="sprk_playbooknoderun" />
+    <AppModuleComponent type="1" schemaName="sprk_playbookrun" />
+    <AppModuleComponent type="1" schemaName="sprk_precedent" />
+    <AppModuleComponent type="1" schemaName="sprk_processingjob" />
+    <AppModuleComponent type="1" schemaName="sprk_todo" />
+    <AppModuleComponent type="62" schemaName="sprk_SpaarkeAISetup" />
+  </AppModuleComponents>
+  <AppModuleRoleMaps>
+    <Role id="{627090ff-40a3-4053-8790-584edc5be201}" />
+    <Role id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+  </AppModuleRoleMaps>
+  <LocalizedNames>
+    <LocalizedName description="Spaarke AI Setup" languagecode="1033" />
+  </LocalizedNames>
+  <appsettings>
+    <appsetting settingdefinitionid.uniquename="AppChannel">
+      <iscustomizable>1</iscustomizable>
+      <value>1</value>
+    </appsetting>
+  </appsettings>
+</AppModule>

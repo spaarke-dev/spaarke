@@ -1153,8 +1153,8 @@ public static class ChatDocumentEndpoints
     /// 1. Extract tenant ID and verify session ownership
     /// 2. Check idempotency marker (doc-persist:{sessionId}:{documentId})
     /// 3. Retrieve original binary from Redis (doc-binary:{sessionId}:{documentId})
-    /// 4. Resolve SPE container ID from CONFIGURATION — SharePointEmbedded:StagingContainerId, falling back
-    ///    to EmailProcessing:DefaultContainerId. (⚠️ Corrected 2026-08-29: this step used to read "from
+    /// 4. Resolve SPE container ID from CONFIGURATION — EmailProcessing:DefaultContainerId (task 227f retired
+    ///    the optional staging container read first). (⚠️ Corrected 2026-08-29: this step used to read "from
     ///    ChatHostContext or configuration fallback". <see cref="ResolveContainerId"/> takes a ChatSession
     ///    and never reads it — there is no per-entity container decision on this path, which is why the
     ///    sink is classified ServerDerivedConfig in SpeWriteSinkContainerProvenanceGuardTests.)
@@ -1278,7 +1278,7 @@ public static class ChatDocumentEndpoints
             return Results.Problem(
                 statusCode: 422,
                 title: "Unprocessable Entity",
-                detail: "Cannot resolve SPE container for file upload. Ensure the chat session has a valid host context.");
+                detail: "Cannot resolve the SPE container for file upload: EmailProcessing:DefaultContainerId is not configured on this BFF.");
         }
 
         logger.LogInformation(
@@ -1659,16 +1659,9 @@ public static class ChatDocumentEndpoints
         // passing it and the surrounding logging stays coherent. Do not re-document this as record-scoped.
         _ = session;
 
-        // Use the staging container (consistent with ChatWordExportEndpoints and MatterPreFillService pattern).
-        var stagingContainerId = configuration["SharePointEmbedded:StagingContainerId"];
-        if (!string.IsNullOrEmpty(stagingContainerId))
-        {
-            return stagingContainerId;
-        }
-
-        // Fallback: default container from email processing config
-        var defaultContainerId = configuration["EmailProcessing:DefaultContainerId"];
-        return defaultContainerId;
+        // The stamp's default container. (An optional staging container was read here first; no environment ever
+        // configured it, and it was retired by customer-provisioning-orchestration-r1 task 227f.)
+        return configuration["EmailProcessing:DefaultContainerId"];
     }
 }
 

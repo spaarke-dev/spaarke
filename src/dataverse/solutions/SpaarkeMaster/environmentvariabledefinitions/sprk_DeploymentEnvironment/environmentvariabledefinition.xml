@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_DeploymentEnvironment">
+  <defaultvalue>Development</defaultvalue>
+  <description default="Identifies the deployment environment for configuration and logging. Valid values: Development, Test, Staging, Production.">
+    <label description="Identifies the deployment environment for configuration and logging. Valid values: Development, Test, Staging, Production." languagecode="1033" />
+  </description>
+  <displayname default="Deployment Environment">
+    <label description="Deployment Environment" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

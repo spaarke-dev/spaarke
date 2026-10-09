@@ -8,6 +8,7 @@ using Microsoft.Graph;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Contract.SpeAdmin;
@@ -92,6 +93,15 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
         created!.Id.Should().Be("c-new");
         AssertStamped(Unit);
+
+        // Then the ownership marker (task 227d) — its own PATCH, after the stamp read back, so a container whose
+        // stamp did not land is never marked.
+        var requests = _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).ToList();
+        requests.Should().Equal("PATCH", "GET", "PATCH");
+        var marker = _graph.PatchRequestsFor($"{ContainersPath}/c-new")
+            .Single(p => p.Body!.Contains(SpeContainerOwnershipGuard.MarkerPropertyName));
+        using var body = JsonDocument.Parse(marker.Body!);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(SpeContainerOwnershipGuard.MarkerPropertyName);
     }
 
     [Fact]
@@ -150,7 +160,9 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
     private void AssertStamped(Guid unit)
     {
-        var patch = _graph.PatchRequestsFor($"{ContainersPath}/c-new").Should().ContainSingle().Subject;
+        // The stamp's own PATCH (the provisioning path then writes the ownership marker in a second one — task 227d).
+        var patch = _graph.PatchRequestsFor($"{ContainersPath}/c-new")
+            .Should().ContainSingle(p => p.Body!.Contains(SpeContainerBusinessUnitStamp.PropertyName)).Subject;
         patch.Path.Should().EndWith("/customProperties", "customProperties is its own sub-resource");
         using var body = JsonDocument.Parse(patch.Body!);
         body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(new[] { SpeContainerBusinessUnitStamp.PropertyName },
@@ -160,8 +172,11 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         stamp.GetProperty("isSearchable").GetBoolean().Should().BeFalse();
     }
 
-    private ContainerOperations ProvisioningOperations() =>
-        new(new WireMockGraphFactory(_graph), NullLogger<ContainerOperations>.Instance);
+    private ContainerOperations ProvisioningOperations()
+    {
+        var factory = new WireMockGraphFactory(_graph);
+        return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
+    }
 
     private static SpeAdminGraphService AdminGraph()
     {

@@ -1,6 +1,7 @@
 /** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
- * Daily Briefing — event due dates are calendar dates (spaarke-ontology-platform-r1 task 098, 2026-10-05).
+ * Daily Briefing — event due dates are calendar dates (spaarke-ontology-platform-r1 task 098, 2026-10-05), and so is the
+ * To Do it creates (task 106: sprk_todo.sprk_duedate is Date Only and refuses a timestamp).
  *
  * sprk_event's due dates are Dataverse Date Only: a notification's dueDate can be a bare "YYYY-MM-DD". Read with
  * new Date() / Date.parse that is UTC midnight — the previous day in New York — so "Add to To Do" dated the To Do a
@@ -39,12 +40,18 @@ describe('Date Only due dates in the Daily Briefing (task 098)', () => {
   });
 
   it('computeDueDate: a bare YYYY-MM-DD dates the To Do on THAT local day', () => {
-    const due = new Date(computeDueDate(item('2026-10-02'), new Date(2026, 9, 1, 9, 0)));
-    expect([due.getFullYear(), due.getMonth(), due.getDate()]).toEqual([2026, 9, 2]);
+    // Task 106: the To Do's sprk_duedate is Date Only, so the value is the calendar day itself.
+    expect(computeDueDate(item('2026-10-02'), new Date(2026, 9, 1, 9, 0))).toBe('2026-10-02');
   });
 
-  it('computeDueDate: a timestamp is still used verbatim', () => {
-    expect(computeDueDate(item('2026-06-25T17:00:00Z'))).toBe('2026-06-25T17:00:00.000Z');
+  it('computeDueDate: a timestamp dates the To Do on the LOCAL day of that instant (task 106)', () => {
+    // 2026-10-03T01:30Z is 21:30 on Oct 2 in New York — the day this user saw. Sent as a timestamp it was HTTP 400.
+    expect(computeDueDate(item('2026-10-03T01:30:00Z'))).toBe('2026-10-02');
+  });
+
+  it('computeDueDate: the +3-day default is three LOCAL days on, also in the evening (task 106)', () => {
+    // 21:30 on Oct 1 in New York (01:30Z Oct 2): the UTC date is already Oct 2, the user's day is Oct 1.
+    expect(computeDueDate(item(null), new Date(Date.parse('2026-10-02T01:30:00Z')))).toBe('2026-10-04');
   });
 
   it('filterByDueWithinDays: a bare date is measured from its LOCAL midnight', () => {

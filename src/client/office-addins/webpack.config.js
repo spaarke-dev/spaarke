@@ -345,8 +345,13 @@ module.exports = async (env, options) => {
             // URL substitution (ADDIN_BASE_URL) that resolves the manifest's Commands.Url also
             // resolves this page when word/commands/index.ts builds its displayDialogAsync URL
             // from window.location.origin at runtime (no separate substitution needed here).
-            from: './word/commands/notify.html',
+            from: './shared/commands/notify.html',
             to: 'word/commands-notify.html',
+          },
+          {
+            // task 118: the SAME page for the Outlook ribbon Quick Save dialog (one page, served per host).
+            from: './shared/commands/notify.html',
+            to: 'outlook/commands-notify.html',
           },
           {
             // Unified JSON manifest (email-communication-solution-r4 task 072 / FR-25) —

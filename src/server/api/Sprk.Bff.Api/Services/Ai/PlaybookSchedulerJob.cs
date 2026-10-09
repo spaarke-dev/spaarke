@@ -97,6 +97,16 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
+    /// <summary>
+    /// The event logged (at Error) when a notification playbook failed for every user (ISS-018, D-78). The App Insights
+    /// alert rule (<c>infrastructure/bicep/notification-playbook-alerts.bicep</c>) matches its message text; keep the
+    /// phrase "failed for every user" stable or update the rule with it.
+    /// </summary>
+    internal static readonly EventId TotalFailureEventId = new(46101, "NotificationPlaybookTotalFailure");
+
+    /// <summary>True when every one of at least one targeted user's runs failed (ISS-018, D-78).</summary>
+    internal static bool IsTotalFailure(int userCount, int failureCount) => userCount > 0 && failureCount >= userCount;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<PlaybookSchedulerJob> _logger;
@@ -222,6 +232,34 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                         childCorrelationId,
                         cancellationToken).ConfigureAwait(false);
 
+                    // ISS-018 (#1452, owner decision D-78): a playbook that failed for EVERY user is a failed run, not
+                    // a "PartialFailure" with Success=true. All 7 notification playbooks failed for every user for
+                    // 89+ days in dev while this job reported success and advanced sprk_lastrundate, so nothing ever
+                    // retried and nobody was told. Now: an Error trace (the App Insights alert rule in
+                    // infrastructure/bicep/notification-playbook-alerts.bicep fires on it), Status=Failed, the job run
+                    // fails, and sprk_lastrundate is NOT advanced, so the next hourly tick runs it again.
+                    // A partial failure (some users) keeps its per-user Warning traces and does not hold back the
+                    // others: the run advances like a success.
+                    if (IsTotalFailure(userCount, failureCount))
+                    {
+                        _logger.LogError(
+                            TotalFailureEventId,
+                            "Notification playbook {PlaybookId} ({Name}) failed for every user — {FailureCount}/{UserCount} user runs failed; " +
+                            "run marked Failed, sprk_lastrundate not advanced, retrying next tick (childCorrelationId={ChildCorrelationId})",
+                            playbookId, playbookName, failureCount, userCount, childCorrelationId);
+
+                        children.Add(new ChildPlaybookRun(
+                            PlaybookId: playbookId,
+                            PlaybookName: playbookName,
+                            CorrelationId: childCorrelationId,
+                            Status: "Failed",
+                            UserCount: userCount,
+                            SuccessCount: successCount,
+                            FailureCount: failureCount,
+                            ErrorMessage: $"All {userCount} user run(s) failed; see the per-user traces (childCorrelationId={childCorrelationId})."));
+                        continue;
+                    }
+
                     // Persist sprk_lastrundate AFTER successful fan-out (matches legacy
                     // PlaybookSchedulerService.PersistLastRunTimestampAsync). Failure here is
                     // non-fatal — the next tick re-reads the (still-stale) value and will
@@ -283,12 +321,18 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                 children.Count(c => c.Status == "Skipped"),
                 (long)sw.Elapsed.TotalMilliseconds);
 
-            // Success is true even if individual playbooks failed — per-playbook errors are
-            // reported in children[].errorMessage. Only an unhandled exception ABOVE the per-
-            // playbook try/catch turns the run into a failure (see outer catch).
+            // ISS-018 (D-78): the job run fails when any playbook FAILED (every user failed, or its fan-out
+            // threw) — the run record no longer reads "succeeded" over a playbook that produced nothing. A
+            // PartialFailure (some users) does not fail the run; its per-user traces carry the detail. Failing
+            // here never retries the tick in-process (ScheduledJobHost retries only on an exception); the retry is
+            // the next tick, because a failed playbook's sprk_lastrundate was not advanced.
+            var failedPlaybooks = children.Where(c => c.Status == "Failed").ToList();
             return new JobRunResult(
-                Success: true,
-                ErrorMessage: null,
+                Success: failedPlaybooks.Count == 0,
+                ErrorMessage: failedPlaybooks.Count == 0
+                    ? null
+                    : $"{failedPlaybooks.Count} notification playbook(s) failed: "
+                      + string.Join("; ", failedPlaybooks.Select(c => $"{c.PlaybookName} ({c.PlaybookId}): {c.ErrorMessage}")),
                 ProcessedItems: children.Count,
                 Duration: sw.Elapsed,
                 ResultJson: SerializeChildren(children));
@@ -658,9 +702,9 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
     /// <param name="PlaybookName">Playbook display name (<c>sprk_name</c>), or <c>"(unnamed)"</c> on null.</param>
     /// <param name="CorrelationId">Fresh per-child correlationId (Q1; <see cref="Guid.NewGuid"/> N-format).</param>
     /// <param name="Status">
-    /// One of: <c>"Succeeded"</c> (all users OK), <c>"PartialFailure"</c> (some users failed),
-    /// <c>"Failed"</c> (fan-out aborted), <c>"Skipped"</c> (not due per schedule), <c>"Cancelled"</c>
-    /// (host shutdown).
+    /// One of: <c>"Succeeded"</c> (all users OK), <c>"PartialFailure"</c> (some, not all, users failed),
+    /// <c>"Failed"</c> (every user failed — ISS-018 / D-78 — or the fan-out aborted; <c>sprk_lastrundate</c> is not
+    /// advanced), <c>"Skipped"</c> (not due per schedule), <c>"Cancelled"</c> (host shutdown).
     /// </param>
     /// <param name="UserCount">Total active users targeted for this playbook.</param>
     /// <param name="SuccessCount">Users where orchestration completed without a RunFailed event.</param>

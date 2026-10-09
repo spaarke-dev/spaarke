@@ -2,7 +2,7 @@
 // AiSearchTenantFilterInvariantProbe.cs
 //
 // H13 I2 REAL invariant probe (task 173, Phase C'' Wave G-7 Batch G-7A1)
-// REPLACING the wave-C4 <see cref="PlaceholderInvariantVerifier"/>'s I2 branch
+// REPLACING the wave-C4 PlaceholderInvariantVerifier's I2 branch (the placeholder was deleted by task 230a)
 // (which returned InfraFault unconditionally). Composed into the aggregate
 // <see cref="IE2EInvariantVerifier"/> via <see cref="CompositeInvariantVerifier"/>.
 //
@@ -66,7 +66,7 @@
 //
 // SEAM JUSTIFICATION (ADR-010 / CLAUDE.md §11 extension test):
 //   Existing: <see cref="IE2EInvariantVerifier"/> aggregate seam +
-//   <see cref="PlaceholderInvariantVerifier"/> stub existed pre-Wave-G7. Task
+//   PlaceholderInvariantVerifier stub existed pre-Wave-G7. Task
 //   173 adds ONE per-invariant probe class that plugs into the sibling-
 //   composite pattern (see IInvariantProbe.cs coordination note).
 //   Extension: this class is composable side-by-side with sibling I1/I3/I4/I5
@@ -356,8 +356,8 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
             {
                 return Failed(
                     $"Index '{indexName}' NOT FOUND at endpoint '{endpoint}' — I2 cannot be enforced on a " +
-                    "missing index; H2b did not provision (Model 2) or shared platform is under-provisioned " +
-                    "(Model 1). Diagnostic: " + Truncate(respBody, 300));
+                    "missing index; H2b did not create it on the stamp's own AI Search service (either model). " +
+                    "Diagnostic: " + Truncate(respBody, 300));
             }
             if (response.StatusCode == HttpStatusCode.BadRequest)
             {
