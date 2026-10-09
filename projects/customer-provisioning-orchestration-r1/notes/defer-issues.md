@@ -143,7 +143,7 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 | **Urgency** | before T186 Ready (the census is run by hand until then) |
 | **Filed** | 2026-10-09 (T259) |
 | **Source** | T259 step 5 (ISS-010's H13 half) |
-| **GitHub Issue** | (not filed — T259 ran with no live action; the main session files it) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1527 |
 
 **Description**
 
