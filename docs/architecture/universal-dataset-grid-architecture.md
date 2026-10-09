@@ -62,7 +62,7 @@ The shared library (`@spaarke/ui-components`) supports both PCF controls (platfo
 - **`src/pcf-safe.ts`** — PCF-only barrel. Exports ONLY components and services verified compatible with React 16/17 (`React.createElement` / `ReactDOM.render` patterns). Excludes anything that depends on React 18+ APIs (`useId`, `useSyncExternalStore`, `use()`, `createRoot`) or Lexical.
 - **`src/index.ts`** — Main barrel used by Code Pages. May include React 18/19 components (e.g., `SprkChat`, `WizardShell`, rich-text editors backed by Lexical).
 
-PCF controls import from `@spaarke/ui-components/src/pcf-safe`. Code Pages import from `@spaarke/ui-components`. The `peerDependency` declares `"react": ">=16.14.0"` so a single package publish serves both consumers.
+PCF controls import compiled `dist/` paths (deep `dist/components/…` per ADR-012, or `dist/pcf-safe`) — never `src/`. Code Pages import from `@spaarke/ui-components`. The `peerDependency` declares `"react": ">=16.14.0"` so a single package publish serves both consumers.
 
 Grid components in `src/components/DatasetGrid/` use only stable cross-version hooks (`useState`, `useEffect`, `useMemo`, `useCallback`) so they render identically in both worlds.
 

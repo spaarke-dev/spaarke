@@ -134,7 +134,7 @@ The static scan above catches the obvious case. The audit W4-2 finding recommend
 public async Task EveryPublicEndpoint_ResolvesItsHandlerCtorParams(bool analysisEnabled, bool docIntelEnabled) { /* ... */ }
 ```
 
-When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implementation queued** as Migration PR #8 per [`migration-plan.md` §2.8](../../projects/bff-ai-architecture-audit-r1/notes/migration-plan.md); Insights team owns. Until that fixture ships, the static-scan rule + explicit reviewer discipline remain the only enforcement.
+When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implemented 2026-10-09 (task 204e)** as `tests/Spaarke.ArchTests/Adr032/GateCombinationConstructibilityTests.cs`: it boots the real BFF per gate combination with `ValidateOnBuild`, ratcheted against a ledger of filed defects. The static half is `AsymmetricRegistrationTests` (scans `Program.cs` → every `Add*` registration → `if`/`else` paths). Both run in the blocking `arch-tests` job.
 
 #### F.2 Fixture-Config-FIRST Inspection Protocol (Binding per r2 task 081 / D-13)
 
@@ -234,6 +234,19 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 4. **After merge to master, watch the auto-deploy**: it triggers immediately on push-to-master with matching path filter. `gh run watch` confirms the deploy completes successfully before the next project's merge can run cleanly.
 
 **Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
+
+#### F.5 Tier-1-IOptions Deploy Checklist (Binding per customer-provisioning-orchestration-r1 task 204e / punch row B15)
+
+**Codified 2026-10-09** from the F20/F20a SIGABRT chain (2026-08-24) and the task 081.5 rollback: an options type registered with `AddOptions<T>()…ValidateOnStart()` refuses to boot a stamp whose settings do not satisfy it, and nothing used to connect "this type demands key K" to "something deploys K". `IOptionsDriftTests.IOptionsInventoryMustMatchManifest` now enforces it in the blocking `arch-tests` job; this checklist is what the reviewer applies when a PR adds or changes such a chain.
+
+1. **Manifest entry.** Every key `T` demands at startup (each `[Required]` member, and each key a custom `IValidateOptions<T>` or `.Validate(…)` lambda demands outside Development/Testing) has an entry in `scripts/canonical-secret-catalog/manifest.yaml`: a secret's `app_settings` or a `per_env_settings` key (with a `per_env_source` from the closed `PerEnvSourceCatalog` set), or a setting in `customer.bicep`. `appsettings.template.json` does not count: it is not published to a stamp.
+2. **Secret binding provisioned.** If a demanded key is a secret, the manifest `secrets:` entry exists, `customer.bicep`'s `kvSecretValues` (or the entry's `value_source`) writes it, and the app setting is a Key Vault reference to the canonical secret name. A reference with no value surfaces the literal `@Microsoft.KeyVault(...)` string as the setting.
+3. **Fail-fast path tested.** A test proves the missing-config failure is the intended one: `T`'s validator rejects an empty value with a message naming the key (a pure `Validate(…)` unit test), and for an environment-conditional rule a case per environment class. Do not rely on the booted-host route guard to notice.
+4. **Local run before approving.** The reviewer runs `dotnet test tests/Spaarke.ArchTests --filter "FullyQualifiedName~IOptionsDriftTests"`. A failure is one of: `NO CHANNEL` (do step 1; never weaken the validator), `NO CENSUS ENTRY` (add the type to `IOptionsDriftTests.Census` with the keys its validator demands, each `Supplied`, `Exempt` with the gate that is off for every stamp, named in the row's `Gate` — the test fails if a stamp channel writes that gate, or `KnownDrift` with a filed row), `NOW SUPPLIED` (change the ledger entry to `Supplied`).
+
+A `KnownDrift` entry is a confirmed deployment gap with a filed punch-list row, never a way to make CI pass. Case study: SESSION 5 Model 1 Prod stand-up (the sequential-gate chain behind `e3a15db91`) and the task 204e findings (rows 204e-F5..F8: `Onboarding:HmacSigningKey`, `PublicConfig:*`, `Graph:Scopes`, `ServiceBus:QueueName` had no stamp channel). Closed by task 258: PublicConfig/Graph:Scopes/ServiceBus:QueueName are written by H4b; the Onboarding consent callback is off unless `Onboarding:Enabled`.
+
+**Cross-reference**: `tests/Spaarke.ArchTests/IOptionsDriftTests.cs`; `.claude/constraints/provisioning.md` "Progressive fail-fast recovery"; `.claude/patterns/provisioning/manifest-driven-secret-catalog.md`.
 
 ### G. Action / Node / Playbook Config Boundary — Dispatch + Prompt + Categorization (Binding per R4 canonical-truth loop 2026-06-26; rewritten per R7 spec FR-29 on 2026-06-29)
 

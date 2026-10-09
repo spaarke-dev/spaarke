@@ -38,6 +38,7 @@ import {
 import { CheckmarkCircleFilled, DismissRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
+import type { SprkModalSize } from '../SprkModal/sizes';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { SendEmailStep } from '../EmailStep/SendEmailStep';
@@ -116,29 +117,13 @@ export interface IDocumentEmailWizardProps {
    */
   clientUrl?: string;
   /**
-   * Optional dialog surface `max-width` override. Threaded through to
-   * {@link WizardShell}'s `maxWidth` prop. Defaults to `'95vw'`
-   * (WizardShell default) when omitted — back-compat for existing
-   * consumers (SemanticSearchControl pre-v1.1.63, code pages).
+   * Named modal size, threaded through to {@link WizardShell}'s `size` (modal mode only).
+   * Defaults to `'wizard'` when omitted. SemanticSearchControl passes `'lg'` (1280px / 85vh) to match
+   * the FilePreviewDialog footprint when the wizard is stacked over an open preview.
    *
-   * Pass `'1280px'` to mirror the SemanticSearchControl FilePreviewDialog
-   * footprint so the wizard sits at the same width when launched as a
-   * modal-over-modal on top of the preview.
-   *
-   * @since v1.1.63 (SemanticSearchControl UAT polish round — match
-   *   preview footprint)
+   * @since ontology task 111 (replaces the removed raw `maxWidth` / `height` strings)
    */
-  maxWidth?: string;
-  /**
-   * Optional dialog surface `height` override. Threaded through to
-   * {@link WizardShell}'s `height` prop. Defaults to `'70vh'`
-   * (WizardShell default) when omitted.
-   *
-   * Pass `'85vh'` to mirror the FilePreviewDialog vertical footprint.
-   *
-   * @since v1.1.63
-   */
-  height?: string;
+  size?: SprkModalSize;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +378,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   clientUrl,
   // v1.1.63 — sizing pass-through (defaults left undefined so WizardShell's
   // own defaults — 95vw / 70vh — apply when consumers don't override).
-  maxWidth,
-  height,
+  size,
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
@@ -893,11 +877,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       finishLabel="Send"
       embedded={embedded}
       hideTitle={embedded}
-      // v1.1.63 — when omitted, WizardShell falls back to its 95vw/70vh
-      // defaults; when set (e.g. SemanticSearchControl passes 1280px/85vh
-      // to match the FilePreviewDialog footprint) the values pass through.
-      maxWidth={maxWidth}
-      height={height}
+      // Named size; when omitted WizardShell uses its `wizard` default.
+      size={size}
     />
   );
 };

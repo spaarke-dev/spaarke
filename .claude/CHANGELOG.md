@@ -76,6 +76,29 @@ and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationMo
 2026-10-07); alternatives A (project exception) and C (build on `WizardModal`, a second engine) rejected. Record:
 `projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
 
+---
+###### 2026-10-07 — Module CLAUDE.md files corrected against the code: 89,166 → 45,733 bytes (−43,433) across 8 files (module-claude-md-cleanup-r1)
+
+A module `CLAUDE.md` loads whenever an agent reads a file in its folder, and agents treat it as ground truth. Checked line by line against the code, the older files were giving wrong instructions, not just long ones. Originals are archived verbatim at `.claude/archive/2026-10-07/modules/`. Each file now carries maintainer notes in a stripped HTML comment, with a **size target, not a cap**.
+
+**Wrong instructions removed** (each verified against the code; two independent audits):
+- `Sprk.Bff.Api`: described `BFF-API-ClientSecret` as both removed (E-3 closed) and the live OBO fallback; called the managed identity system-assigned (it is user-assigned); 7 wrong paths; two dead links; a retired runbook; a unit-test sample contradicting ADR-038. Mailbox Graph now cites Exchange RBAC for Applications, not the legacy ApplicationAccessPolicy.
+- `pcf`: manifest sample used React 18.2.0 (platform is 16.14.0, ADR-022); deploy workflow still said `npm run build`; 4 version locations (pcf-deploy: 5); the auth sample's BFF scope `SDAP.Access` (PCFs use `user_impersonation`) and a nonexistent helper. Adds: BFF base URL is host only (`getApiBaseUrl()`); shared-library imports are deep `dist/` paths per ADR-012.
+- `server/shared`: `Guard`, `Result<T>`, `QueryExtensions`, `EntityExtensions`, `DataverseService` do not exist; csproj sample showed the dependency direction reversed; test sample used `Mock<IServiceClient>` (banned B2).
+- `client/shared`: `StatusBadge`, `usePagination`, `formatters.ts` do not exist; `workspace:*` (actual: `file:`); covered 1 of 15 packages. Adds ADR-012's new-package rule.
+- `tests`: `dotnet test tests/integration/contract/` cannot work (KEEP folders compile into `tests/unit/Sprk.Bff.Api.Tests`); `appsettings.Test.json` and `Shared/Builders/` do not exist; KEEP count said 6/7 (ADR-038: 8). Adds: scope is .NET xUnit only; `Spaarke.ArchTests` is not in `Spaarke.sln`; never add a second KEEP glob (NETSDK1022). B6–B17 examples → pointer to ADR-038 §7, which holds equivalent or richer pairs (compared ban by ban).
+
+**Moved, not deleted:** version-bump list, Custom Page republish, hard refresh → `pcf-deploy` + `PCF-DEPLOYMENT-GUIDE.md`; settings → `appsettings.template.json`; Kiota history → csproj comment; endpoint/error samples → `.claude/patterns/api/`; auth status → ADR-028 (pointer, not paraphrase). Headings cited elsewhere are unchanged ("Expect to Defend at Project Close", the integration template, "Package Management", "Scrollable Lists").
+
+**Adjacent fixes:** `TEST-ARCHITECTURE.md` §3 listed six KEEP categories and called anything outside them a DELETE candidate — that made every seam test and fitness function a delete target; now eight, illustrative examples labelled. KEEP count also corrected in ADR-038 §2/§3, both ADR indexes, `docs/INDEX.md`, `constraints/testing.md`. `CODE-REVIEW-BY-MODULE.md` stated the Core/Dataverse dependency backwards. `provisioning-runs/_templates/CLAUDE.md`: Key Vault paraphrase → pointer to the live "KV credential lifecycle" rule; root §6.5 escalation fields. `office-addins`: header history trimmed.
+
+**Drift found by the audits and fixed here:**
+- Exchange mailbox access: control-plane stamps use Exchange RBAC for Applications (H14a, owner D26); Application Access Policies are legacy. Legacy-mechanism notes added to `COMMUNICATION-DEPLOYMENT-GUIDE.md`, `MI-CONFIGURATION-PATTERNS.md`, `SPAARKE-SELF-SERVICE-USER-REGISTRATION.md`; `bff-deploy` / `spe-integration` / `azure-deploy` skills, `sdap-auth-patterns.md` (also: MI is user-assigned), `sdap-overview.md`, `docs/architecture/INDEX.md`, `DATAVERSE-AUTHENTICATION-GUIDE.md`, `docs/guides/INDEX.md` stop pointing at the retired `auth-deployment-setup.md` stub; `GraphAppRoles.cs` comment.
+- PCF shared-library imports: `pcf-safe.ts` header, `.claude/constraints/react-versioning.md`, `universal-dataset-grid-architecture.md` no longer say `src/pcf-safe` (ADR-012/022: compiled `dist/` paths). The nine PCFs importing the bare barrel are documented as working only through their per-control webpack stubs (task 092).
+- Stale KEEP counts and cites in test comments/READMEs (`tests/integration/auth/README.md`, `tests/eval/*`, `contract/README.md`, `LayerDependencyTests`, `ComposeEndpointsContractTests`, `FetchXmlGuardSelfJoinTests`, `AnalysisOrchestrationServiceTests`) — comments only.
+- Left to the owning project (its branch is editing these files): `AZURE-SETUP-SELF-SERVICE-REGISTRATION.md`, `PROVISIONING-PREREQUISITES.md`, ControlPlane comments naming ApplicationAccessPolicy, and five ControlPlane test comments citing "7 KEEP paths".
+
+---
 ###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 18,569 bytes (−48,088), 499 → 215 lines; 16.6 KB / 187 lines as injected (claude-md-cleanup-r1)
 
 The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows alone were 30 KB; incident write-ups sat inside rules; nothing limited growth. It now holds only binding every-turn rules, safety guards and one-line triggers, per Anthropic's guidance (< 200 lines per CLAUDE.md). Section numbers are unchanged. The previous file is archived verbatim at `.claude/archive/2026-10-07/CLAUDE.md`.

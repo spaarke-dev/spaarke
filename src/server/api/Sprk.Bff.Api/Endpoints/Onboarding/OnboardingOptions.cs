@@ -32,6 +32,26 @@ public sealed class OnboardingOptions
     /// <summary>Configuration section name (root-level <c>Onboarding</c>).</summary>
     public const string SectionName = "Onboarding";
 
+    /// <summary>The configuration key of <see cref="Enabled"/> (<c>Onboarding:Enabled</c>).</summary>
+    public const string EnabledConfigKey = SectionName + ":" + nameof(Enabled);
+
+    /// <summary>
+    /// Whether this BFF hosts the H0.5 consent-callback at all (task 258). Default <c>false</c>:
+    /// the module registers nothing and the route is not mapped.
+    /// </summary>
+    /// <remarks>
+    /// <para>H0.5 is the Model 2 self-service entry (a DAG root beside H0 — <c>DagAdvancer</c>; design.md
+    /// §4.1), and Model 2 is out of scope (plan D3). The callback enqueues to the L2 queue
+    /// (<see cref="QueueName"/>) through this BFF's own Service Bus client — on a customer stamp that is
+    /// the stamp's namespace, which has no such queue and which L2 does not drain. So no customer stamp
+    /// can serve it, and none sets this key (the stamp channels are
+    /// <c>scripts/canonical-secret-catalog/manifest.yaml</c> and <c>customer.bicep</c>).</para>
+    /// <para>When <c>true</c>, the existing Tier-1 rule applies unchanged: <see cref="HmacSigningKey"/>
+    /// is required outside Development/Testing unless <see cref="EnableDevBypass"/>. A host that turns
+    /// this on owns supplying the key as a Key Vault reference (never a literal).</para>
+    /// </remarks>
+    public bool Enabled { get; set; }
+
     /// <summary>
     /// HMAC-SHA256 shared signing key for the consent-callback endpoint.
     /// Bound via KV URI reference from the Spaarke platform vault in

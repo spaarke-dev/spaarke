@@ -77,6 +77,7 @@ public sealed class RunContextContractTests
         ["DataverseEnvCreation"] = HandlerIds.H5,
         ["SolutionImport"] = HandlerIds.H6,
         ["EnvVarValues"] = HandlerIds.H7,
+        ["SecureRecordSetup"] = HandlerIds.H7b,
         ["SpeContainer"] = HandlerIds.H8,
         ["BffDeploy"] = HandlerIds.H9,
         ["DataverseAppUserGraphParity"] = HandlerIds.H10,

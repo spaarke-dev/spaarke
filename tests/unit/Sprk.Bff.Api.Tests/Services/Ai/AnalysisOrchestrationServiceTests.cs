@@ -144,7 +144,7 @@ public class AnalysisOrchestrationServiceTests
     // ContinueAnalysisAsync Tests region (1 test) was DELETED here: the legacy in-memory session
     // production method was deleted in the same task (superseded by ChatEndpoints Redis→Cosmos
     // model per task 020), so the test could no longer defend any contract. Per ADR-038 §7
-    // build-vs-maintain criteria — this test lived outside the 7 KEEP paths (build-class), so no
+    // build-vs-maintain criteria — this test lived outside the KEEP paths (build-class), so no
     // same-PR replacement is required.
 
     // unified-access-control-r2 task 162 (owner round 10 item 1): the SaveWorkingDocumentAsync and
