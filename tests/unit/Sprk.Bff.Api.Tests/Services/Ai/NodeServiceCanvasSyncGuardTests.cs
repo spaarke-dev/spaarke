@@ -32,11 +32,13 @@ public class NodeServiceCanvasSyncGuardTests
         public string PlaybookJson = "{\"sprk_name\":\"Test\",\"sprk_issystemplaybook\":null,\"sprk_playbooktype\":0}";
         public HttpStatusCode PlaybookStatus = HttpStatusCode.OK;
         public HttpStatusCode NodesStatus = HttpStatusCode.OK;
+        public bool ThrowTimeout;
         public List<(string? ConfigJson, Guid Id)> Nodes = [];
         public List<string> Writes { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            if (ThrowTimeout) throw new TaskCanceledException("timeout");
             var url = request.RequestUri!.ToString();
             if (request.Method != HttpMethod.Get)
             {
@@ -206,6 +208,7 @@ public class NodeServiceCanvasSyncGuardTests
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_read_only");
         problem.ProblemDetails.Detail.Should().Contain(name).And.Contain("read-only");
         h.Writes.Should().BeEmpty("no node may be deleted, created or updated");
         playbookService.VerifyNoOtherCalls(); // canvas JSON not persisted either
@@ -231,5 +234,32 @@ public class NodeServiceCanvasSyncGuardTests
         result.Should().BeOfType<Ok<CanvasLayoutResponse>>();
         playbookService.Verify(p => p.SaveCanvasLayoutAsync(PlaybookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Once);
         h.Writes.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveCanvasLayout_WhenPlaybookCannotBeRead_Returns503_PersistsNothing()
+    {
+        var h = new FakeDataverse { PlaybookStatus = HttpStatusCode.InternalServerError };
+        var playbookService = new Mock<IPlaybookService>(MockBehavior.Strict);
+
+        var result = await PlaybookEndpoints.SaveCanvasLayout(
+            PlaybookId, new SaveCanvasLayoutRequest { Layout = Canvas() },
+            playbookService.Object, CreateService(h), NullLoggerFactory.Instance, CancellationToken.None);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_canvas_unverifiable");
+        h.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Guard_HttpTimeoutWithoutCancelledToken_IsUnverifiable_NotRethrown()
+    {
+        var h = new FakeDataverse { ThrowTimeout = true };
+
+        var act = () => CreateService(h).EnsureCanvasSyncAllowedAsync(PlaybookId);
+
+        (await act.Should().ThrowAsync<ProtectedPlaybookCanvasSyncException>())
+            .Which.Reason.Should().Be(ProtectedPlaybookReason.Unverifiable);
     }
 }

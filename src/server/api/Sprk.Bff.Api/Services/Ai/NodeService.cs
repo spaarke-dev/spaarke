@@ -413,7 +413,7 @@ public class NodeService : INodeService
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
