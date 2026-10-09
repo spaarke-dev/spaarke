@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-09, checkpoint 5 (main session, `/context-handoff`). State only — history is in git log, task
+> **Last Updated**: 2026-10-09, checkpoint 5 + master merge (main session). State only — history is in git log, task
 > `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md) (§3 no-parking
 > rule D-81; §6 gotchas incl. "never save a system playbook in the Designer"). Decisions: [`notes/decisions.md`](notes/decisions.md) +
 > spec §9 (D-1..D-101). Sub-agents never edit this file.
@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 113 tasks, **55 ✅** (board synced). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. **206 commits behind origin/master** → merge master first (expect route-ledger / write-path-doc conflicts; see CLAUDE.md §6). |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. synced with origin/master 2026-10-09 (`217b8f3c6`; Signal-ownership invariant now **I-17** — uac-r2 took I-16). |
 | **Critical context** | Every PR gets an independent review + a re-check of each fix round before the owner's merge; the owner pre-approves "merge when green" per PR (I build / merge-tree against current master first). No tenant-wide publish (D-83). Dev deploys/data changes need an owner decision. Never park an issue (D-81). **Notification playbooks are RETIRED (D-100)** — bell-only; the Briefing never reads `appnotification`. AI playbooks: Matter Health only (D-101). |
-| **Next Action** | (1) Merge origin/master into this branch. (2) Act on agent notifications below as they arrive (each PR → independent review → owner merge question). (3) Bring the owner the open questions at the bottom. |
+| **Next Action** | (1) Act on agent notifications below as they arrive (each PR → independent review → owner merge question). (2) Bring the owner the open questions at the bottom. |
 
 ## Running now (SendMessage resumes an agent by ID)
 
@@ -23,7 +23,7 @@
 | `ada91107a9efd8931` | **133** system playbooks read-only in the Designer (`C:\wts-133`) | PR → review → owner merge |
 | `aaa74682a6e89bfc8` | **135** Matter Health fix + deactivate demo/junk playbooks (full GUIDs; dev data approved D-96/D-99/D-101) (`C:\wts-135`) | PR → review → owner merge |
 | `aae6c79edd0f863de` | Task 120 author: turning off the last 2 notification playbooks (Due Soon, Work Assignments) in dev (D-100) | Evidence in `notes/deploy-log.md` "D-100 retire"; then idle (`C:\wt120d` can be removed) |
-| `afa95b62d109541c3` | **130** author: #1467 round-4 fixes pushed (`7dccee82c`: per-chunk read-back, chunk order, resume command, app-setting pre-flight, workflow activation doc) | Light re-check by `afead9298bddac72a` → owner merge + 4 live proofs → main session applies `notes/task-130-skill-amendments.md` to the 3 skills and drops the 3 allow-list lines in the same commit |
+| `afa95b62d109541c3` | **130** author: #1467 round-4 fixes pushed (`7dccee82c`: per-chunk read-back, chunk order, resume command, app-setting pre-flight, workflow activation doc) | Round-4 re-check APPROVABLE (51/51). Round 5 sent: K1 dashboard read-back + K2 resume names out-of-solution components (fix), K3/K4 recorded as known limits → light re-check → CI green → owner merge + 4 live proofs → main session applies `notes/task-130-skill-amendments.md` to the 3 skills and drops the 3 allow-list lines in the same commit |
 | `a6aba9e72ed9b1343` + bg `bcpu6whdj` | **113** #1480 at `83b8a19ce`, approved; bg job merges when CI green (**D-93**) | Mark 113 ✅ → Console auto-deploys to dev → task 114 = live checklist |
 
 ## Waiting on others
