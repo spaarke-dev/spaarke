@@ -520,8 +520,10 @@ secrets:
 # `az webapp config appsettings set --settings @settings` call per slot is
 # preserved). Runtime consumer: H4bBulkAppSettingsHandler resolves each
 # non-literal entry through PerEnvSourceCatalog (task 245a) — a typed
-# InterStepState output of a named handler, or an intake parameter — then
-# shells to the generated script.
+# InterStepState output of a named handler, or an intake parameter — and
+# writes the same settings the generated script writes (secrets' app_settings
+# as KV references + these entries) through the ARM SDK on both slots (task
+# 253: the L2 Worker host has no pwsh; a parity test pins H4b to the script).
 #
 # Per-entry schema:
 #   - key                — App Service app-setting name (double underscore for
@@ -541,6 +543,13 @@ secrets:
 #                          (per-env-literal drives the F20/F20a fail-fast chain).
 #   - required           — bool; defaults true if absent. Required-and-missing
 #                          in envelope → Resumable Failure BEFORE any script call.
+#   - indexed?           — bool (task 255); true = the key is a .NET
+#                          configuration LIST fed by a list source
+#                          (PerEnvSourceCatalog). H4b and the generated script
+#                          write {key}__0 … {key}__{n-1} and REMOVE every other
+#                          {key}__* setting on both slots, so a dropped value
+#                          cannot linger. Must be required; only a list source
+#                          may feed it, and a list source feeds only it.
 #   - notes?             — free-form.
 #
 # BINDING guard: entries whose `key` matches a never_delete secret name from
@@ -596,6 +605,25 @@ per_env_settings:
       observability handle — not the customer boundary (that is the dedicated
       per-customer resource).
 
+  - key: 'WorkforceIdentity__CustomerTenantIds'
+    per_env_source: 'from-intake-parameter:customer_workforce_tenant_ids'
+    indexed: true
+    iOptionsModule: 'ExternalAccessModule (WorkforceIdentityOptions)'
+    required: true
+    notes: >-
+      T255 (INCOMING-141 from unified-access-control-r2 task 141). The CUSTOMER's
+      Entra tenant id(s) whose employees use this stamp, written as
+      WorkforceIdentity__CustomerTenantIds__0, __1, … on BOTH slots. The BFF's
+      member test admits a first-sign-in email bind or contact creation only for
+      a member (acct = 0) of a listed tenant; empty or absent DENIES everyone
+      (workforce_tenant_list_empty), so every stamp needs it. Model 1: the
+      customer's home tenant — never Spaarke's tenant or the run's tenantId
+      (AzureAd__TenantId), which would bind Spaarke's staff into the customer's
+      environment. Never a CIAM tenant (the BFF's ValidateOnStart refuses it).
+      Intake customerWorkforceTenantIds, checked by CustomerWorkforceTenantsRule
+      at POST /api/runs and again by H4b; H13 T7 fails a stamp whose slots do
+      not carry exactly this list. Indices the list no longer has are removed.
+
   - key: 'Dataverse__EnvironmentUrl'
     per_env_source: 'from-h5-output:dataverse_env_url'
     iOptionsModule: 'DataverseOptions'
@@ -622,6 +650,39 @@ per_env_settings:
     notes: >-
       Public identifier; H3 Entra-app-reg populates when it creates the BFF
       client app-registration for this customer stamp.
+
+  # Task 258 (204e-F6): PublicConfigOptionsValidator refuses to start the BFF
+  # outside Development/Testing unless all three PublicConfig values are set
+  # (GET /api/config, read anonymously by the browser clients). Public values
+  # only: never a Key Vault reference, a key or a connection string.
+  - key: 'PublicConfig__BffUrl'
+    per_env_source: 'from-h2a-output:bff_url'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The stamp BFF's own public URL, https://{appServiceName}.azurewebsites.net
+      from H2a's App Service name, derived by StampBffUrl.Production, which is
+      also the URL H9 probes and records as BffApiUrl (H7 writes it to Dataverse
+      as sprk_BffApiBaseUrl). Both slots carry the production URL, so a
+      staging-to-production swap keeps it right.
+
+  - key: 'PublicConfig__MsalClientId'
+    per_env_source: 'from-h3-output:bff_app_client_id'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The customer BFF app registration H3 creates, the same value as
+      AzureAd__ClientId and as H7's default sprk_MsalClientId: on a stamp that
+      registration is the browser clients' MSAL client (H3 sets its SPA redirect
+      to the customer's Dataverse origin).
+
+  - key: 'PublicConfig__TenantId'
+    per_env_source: 'from-intake-parameter:tenant_id'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The intake tenantId, the same value as AzureAd__TenantId (the
+      tenant holding the BFF app registration).
 
   - key: 'SharePointEmbedded__ContainerTypeId'
     per_env_source: 'from-intake-parameter:container_type_id'
@@ -651,6 +712,17 @@ per_env_settings:
       UAMI client-id H2a Bicep emits. Consumed by GraphClientFactory to pin
       DefaultAzureCredential to the L2/BFF UAMI (rather than any other MI
       the App Service may have).
+
+  - key: 'Graph__Scopes__0'
+    per_env_source: 'literal'
+    literal_value: 'https://graph.microsoft.com/.default'
+    iOptionsModule: 'GraphOptions'
+    required: true
+    notes: >-
+      Task 258 (204e-F7). GraphOptions.Scopes is [Required] with MinLength 1 and
+      an empty default, so the BFF does not start without it in any environment.
+      The app-only Graph default scope; the value Configure-ProductionAppSettings.ps1
+      writes. Global literal.
 
   - key: 'ManagedIdentity__ClientId'
     per_env_source: 'from-h2a-output:uami_client_id'
@@ -763,6 +835,19 @@ per_env_settings:
       a Key Vault reference. Enables BFF to authenticate to Service Bus via
       its runtime UAMI (A36 RBAC: Data Sender + Data Receiver) instead of the
       SAS connection string H4 previously wrote to KV.
+
+  - key: 'ServiceBus__QueueName'
+    per_env_source: 'literal'
+    literal_value: 'sdap-jobs'
+    iOptionsModule: 'ServiceBusOptions'
+    required: true
+    notes: >-
+      Task 258 (204e-F8). ServiceBusOptions.QueueName is [Required] with an empty
+      default, so the BFF does not start without it in any environment. The BFF
+      job queue (ServiceBusJobProcessor receives from it, JobSubmissionService
+      sends to it, H13's keyless proof reads it). customer.bicep creates it: the
+      serviceBusQueues default, which H2a does not override
+      (H4bBulkAppSettingsHandlerTests pins the two together). Global literal.
 
   - key: 'Membership__EventPublisher__ServiceBusNamespace'
     per_env_source: 'from-h2a-output:service_bus_fqns'

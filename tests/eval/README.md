@@ -7,7 +7,7 @@
 > **Standard measured against**: the 6-NDA closed set is the shipped exemplar, measured against the NDA
 > standard [`projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md`](../../projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md) (B1-B16, now supplied by the NDA knowledge pack / KNW-011, not the prompt)
 > **ADR-038**: this is an OBSERVATION harness (reports scores). It is NOT part of the .NET
-> unit/seam pyramid and does not use the 7 KEEP-path mechanism — it is the project's own
+> unit/seam pyramid and does not use the KEEP-path mechanism — it is the project's own
 > graduation instrument for proving and guarding the north star (advisory output quality
 > >= a strong general LLM, empirically, not asserted).
 

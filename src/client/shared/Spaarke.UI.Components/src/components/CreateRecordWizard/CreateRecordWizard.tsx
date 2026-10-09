@@ -155,8 +155,6 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   onClose,
   config,
   embedded,
-  maxWidth,
-  height,
   uiScale,
 }) => {
   const styles = useStyles();
@@ -852,8 +850,6 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       onFinish={handleFinish}
       finishingLabel={config.finishingLabel ?? 'Creating\u2026'}
       finishLabel="Finish"
-      {...(maxWidth ? { maxWidth } : {})}
-      {...(height ? { height } : {})}
       {...(uiScale !== undefined ? { uiScale } : {})}
     />
   );

@@ -358,6 +358,65 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
     }
 
+    /// <summary>
+    /// T256: secureRecordSetupDryRun is OPTIONAL (apply is the default), a boolean in the intake file — sent as the
+    /// exact lower-case 'true' / 'false' strings SecureRecordSetupIntake accepts, under the same key.
+    /// </summary>
+    [Fact]
+    public void T256_SecureRecordSetupDryRun_IsAnOptionalBoolean_UnderTheIntakeKey()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.SecureRecordSetupDryRun);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("secureRecordSetupDryRun", "apply is the default");
+        property.GetProperty("type").GetString().Should().Be("boolean");
+        property.GetProperty("default").GetBoolean().Should().BeFalse();
+
+        foreach (var literal in new[] { "true", "false" })
+        {
+            Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordSetupIntake.TryReadDryRun(
+                new Dictionary<string, string> { ["secureRecordSetupDryRun"] = literal }, out var dryRun).Should().BeTrue();
+            dryRun.Should().Be(literal == "true");
+        }
+    }
+
+    /// <summary>
+    /// T255 (INCOMING-141): customerWorkforceTenantIds is REQUIRED for every model, an array of 1..MaxTenants distinct
+    /// non-zero GUIDs — the bounds POST /api/runs applies (CustomerWorkforceTenantsRule) — and every schema example's
+    /// value, sent as the skill sends it (the JSON array as a string), passes that rule.
+    /// </summary>
+    [Fact]
+    public void T255_CustomerWorkforceTenantIds_IsRequired_WithTheIntakeBounds_AndTheExamplesPassTheRule()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var key = Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.CustomerWorkforceTenantIds;
+        var property = doc.RootElement.GetProperty("properties").GetProperty(key);
+
+        ReadStringArrayFromSchema("required").Should().Contain(key, "POST /api/runs refuses a run without it (every model)");
+        property.GetProperty("type").GetString().Should().Be("array");
+        property.GetProperty("minItems").GetInt32().Should().Be(1);
+        property.GetProperty("maxItems").GetInt32()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsRule.MaxTenants);
+        property.GetProperty("uniqueItems").GetBoolean().Should().BeTrue();
+        var items = property.GetProperty("items");
+        items.GetProperty("format").GetString().Should().Be("uuid");
+        items.GetProperty("not").GetProperty("const").GetString().Should().Be("00000000-0000-0000-0000-000000000000");
+
+        var reserved = new Sprk.Provisioning.ControlPlane.Core.Models.ReservedTenants(
+            Guid.Parse("5a5a5a5a-0000-4000-8000-000000000001"), new HashSet<Guid> { Guid.Parse("c1a0c1a0-0000-4000-8000-000000000002") });
+        foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
+        {
+            var outcome = Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsRule.Validate(
+                example.GetProperty("tenancyModel").GetString(),
+                example.GetProperty("tenantId").GetString(),
+                example.GetProperty(key).GetRawText(),
+                reserved);
+            outcome.Should().BeOfType<Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsOutcome.Valid>(
+                $"the {example.GetProperty("customerId").GetString()} example must pass POST /api/runs");
+        }
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [

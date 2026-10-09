@@ -80,7 +80,7 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 - [ ] **Theme Tokens**: Colors use semantic tokens (`tokens.colorNeutralBackground1`), not hard-coded hex values; dark mode must work
 - [ ] **FluentProvider Wrapper**: Root component wrapped in `<FluentProvider theme={webLightTheme}>` (or auto-detected theme)
 - [ ] **Version Footer**: Control displays version in UI footer (`v{X.Y.Z} - Built {date}`)
-- [ ] **Version Bump (4 locations)**: If releasing, version updated in: ControlManifest.Input.xml, UI footer, solution.xml, solution ControlManifest.xml
+- [ ] **Version Bump**: If releasing, version updated in every location the `pcf-deploy` skill's version table lists (ControlManifest.Input.xml, UI footer, solution.xml, solution ControlManifest.xml, pack.ps1)
 - [ ] **Shared Component Library (ADR-012)**: Reusable components imported from `@spaarke/ui-components`, not duplicated locally
 - [ ] **No `any` Types**: TypeScript strict mode; no `any` without explicit justification comment
 - [ ] **Destroy Cleanup**: `destroy()` method calls `ReactDOM.unmountComponentAtNode(container)` and removes event listeners
@@ -154,7 +154,7 @@ Spaarke ships **no Dataverse plugins** (the former "Dataverse Plugins" module ch
 
 ### Checklist
 
-- [ ] **No Circular Dependencies**: `Spaarke.Core` has no dependencies on other Spaarke libraries; `Spaarke.Dataverse` can depend on `Spaarke.Core`; both are consumed by `Sprk.Bff.Api`
+- [ ] **No Circular Dependencies**: `Spaarke.Dataverse` is the base layer (no Spaarke references); `Spaarke.Core` references `Spaarke.Dataverse`; `Spaarke.Scheduling` references `Spaarke.Core`; all are consumed by `Sprk.Bff.Api` (enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs`)
 - [ ] **Context-Agnostic Components (ADR-012)**: Shared UI components must not reference PCF `ComponentFramework` types or Dataverse-specific APIs
 - [ ] **React Compatibility**: `@spaarke/ui-components` peer dependencies require React >=16.14.0 to work in both PCF (React 16) and code pages (React 18)
 - [ ] **Fluent UI v9 Only**: Shared components use only Fluent UI v9; no v8 imports

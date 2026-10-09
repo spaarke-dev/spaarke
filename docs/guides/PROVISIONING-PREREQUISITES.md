@@ -1,9 +1,35 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 7 · **Last Updated**: 2026-10-07
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 9)
+> **Version**: 8 · **Last Updated**: 2026-10-08
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 10)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+>
+> **v10 (2026-10-08, `customer-provisioning-orchestration-r1` T206 + T207 re-measured)**: every check recipe now decides by
+> exit code and asserts the condition its `expect` field describes (before: 33 of 36 active recipes had no `exit 1`, so a
+> failing check printed a result and passed). Recipes that were wrong rather than merely unguarded: `PRQ-E-01` /
+> `PRQ-E-02` / `PRQ-E-09` named resources that do not exist (`sprk{env}artifacts`, `sprk{env}acr`, `sprk-{env}-kv`; the
+> real names are `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`, `sprk-controlplane-{env}-kv`); `PRQ-E-07` queried
+> the Graph service principal's own `appRoleAssignments` instead of the L2 identity's; `PRQ-E-08` / `PRQ-E-13` used `pac`
+> commands and a column (`sprk_environmentid`) that do not exist; `PRQ-C-01` / `PRQ-C-02` still checked `gpt-5` /
+> `GlobalStandard` instead of the three `DataZoneStandard` pins in `openai.bicep` / `PinnedModelCatalog.cs`;
+> `PRQ-C-07` ran PowerShell `Select-String` under `bash -c`. **Rescoped** `once_per_tenant` -> `once_per_env`:
+> `PRQ-T-01` … `PRQ-T-05` (they use `{containerTypeId}` / `{env}`, which are unknown while skill Step 0.5 runs the tenant
+> scope, so they could never resolve there). `validate.ps1` now lints every recipe for the defect classes above
+> (token available at the step that runs its scope, no undefined bash variable, explicit `exit 1`, no PowerShell cmdlet
+> under bash, no parenthesis in an `az` argument, no `grep -i -F`), and `tests/scripts/Prereqs-Recipes.Tests.ps1` runs
+> the recipes against fake `az` / `curl` / `pac` and proves each exits 1 on the defect it exists to catch.
+> **Same version, 2026-10-09:** `PRQ-T-05` (Copilot bot app — superseded by the T257 design: one shared OAuth client
+> app, no bot) and `PRQ-T-06` (Power BI service principal — BI is out of scope for r1) **retired**. The skill now RUNS
+> the `once_per_customer` recipes: Step 1e-ter, after the intake names the customer and before Step 1f writes anything,
+> with the same HARD STOP as Step 0.5 (previously no step ran them).
+> **Same version, T255 — INCOMING-141 (2026-10-09):** `PRQ-C-13` **added** — the customer's workforce tenant id(s),
+> intake `customerWorkforceTenantIds` (required for every run). H4b writes them as `WorkforceIdentity__CustomerTenantIds__N`
+> on both BFF slots; without them the stamp denies every first sign-in of a customer employee.
+> **Same version, T253 — G38 (2026-10-08):** `PRQ-C-07` **retired** — the CI-built
+> SpaarkeMaster needs no Power BI Extensions and H6 installs no application. `PRQ-C-06`: H6 applies the org-settings
+> contract through the Dataverse Web API (the L2 Worker host has no pac).
 >
 > **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
 > users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
@@ -87,14 +113,14 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 37 prereqs across 3 scopes (33 active)
+## Summary — 41 prereqs across 3 scopes (37 active)
 
 | Scope | Count | IDs |
 |---|---|---|
-| `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
-| `once_per_env` | 12 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 18 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-12` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **40** (36 active) | Authoritative count: `validate.ps1` over the YAML |
+| `once_per_tenant` | 1 active (+1 retired) | `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
+| `once_per_env` | 17 active (+1 retired) | `PRQ-T-01` … `PRQ-T-05` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_customer` | 19 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-13` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232; C-13 T255), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
+| **Total** | **41** (37 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -118,7 +144,7 @@ Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-
 
 Grouped by scope. Programmatic check recipes in the YAML.
 
-### Once-per-tenant (6 active, 1 retired)
+### Once-per-tenant (1 active, 1 retired) — plus PRQ-T-01 … PRQ-T-05, which are `once_per_env` since 2026-10-08 and listed here for continuity
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -179,17 +205,18 @@ Grouped by scope. Programmatic check recipes in the YAML.
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
-| PRQ-C-01 | OpenAI regional TPM headroom (frontier models) | Spaarke admin | `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs |
+| PRQ-C-01 | OpenAI regional TPM headroom for the pinned deployments (gpt-4o 150, gpt4.1-mini 200, text-embedding-3-large 350 — DataZoneStandard) | Spaarke admin | `InsufficientQuota - <model> - DataZoneStandard` on a subscription without the grant |
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | ~~PRQ-C-04~~ | **Retired 2026-10-06 (T228).** Dataverse environment-creation rate — L2 no longer creates environments (PRQ-C-09). | — | — |
 | ~~PRQ-C-05~~ | **Retired 2026-10-06 (T227a).** Model 2 only (out of scope, D-12), and the customer's BFF app registration does not exist before the run (H3 creates it), so no pre-run check could hold its id. | — | — |
-| PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
-| PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
+| PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) — H6 applies it before the import (Dataverse Web API `organization` PATCH, T253) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
+| ~~PRQ-C-07~~ | **Retired 2026-10-08 (T253).** Required applications (Power BI Extensions) — the CI-built SpaarkeMaster depends on no application a fresh environment lacks (`SpaarkeMasterApplicationDependencyTests`); H6 installs none. | — | — |
 | PRQ-C-09 | The customer's Dataverse environment, created by the operator: domain `spaarke-{customerId}` (or `-{environmentName}`), URL = intake `dataverseEnvUrl`; the L2 Worker identity is its System Administrator application user (T228) | Spaarke admin (Power Platform admin) | POST /api/runs 400 `dataverse-env-url-invalid`; H5 `worker-not-app-user` / `env-health-check-failed` |
 | PRQ-C-10 | The environment's security group `sprk-{customerId}-users` (Entra security group, assigned membership) exists and is set on the Dataverse environment; its object id is the intake value `environmentSecurityGroupId` (T232) | Spaarke admin (Entra + Power Platform admin) | POST /api/runs 400 `userprov-missing-security-group-id`; H11 `userprov-security-group-rejected`; **not set on the environment → every user of Spaarke's tenant (other customers' guests included) is admitted** |
 | PRQ-C-11 | The environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Spaarke pays guest access; no per-user licences — owner 2026-10-07, T232) | Spaarke admin (Power Platform admin) | Guests are refused at sign-in; L2 cannot detect it (billing is not visible to Dataverse) |
 | PRQ-C-12 | Guest access allowed in the environment (`organization.restrictguestuseraccess = false`; new environments default to restricted) (T232) | Spaarke admin (System Administrator of the environment) | H11 `userprov-guest-access-restricted` before any invitation |
+| PRQ-C-13 | The customer's workforce tenant id(s) — the tenant(s) its staff sign in from (Model 1: their HOME tenant, never Spaarke's) — intake `customerWorkforceTenantIds`, every run (T255, INCOMING-141) | Spaarke admin, with the customer's IT | POST /api/runs 400 `workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`; a wrong but valid tenant → the stamp denies every customer employee's first sign-in (`workforce_tenant_not_customer`) |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
 | PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |

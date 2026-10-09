@@ -200,7 +200,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         var svc = new ExternalParticipationService(
             new HttpClient(), cache, configuration: null!, credential: null!,
             httpContextAccessor: new NoopHttpContextAccessor(),
-            logger: NullLogger<ExternalParticipationService>.Instance);
+            logger: NullLogger<ExternalParticipationService>.Instance,
+            filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
 
         (await cache.GetAsync<List<int>>(Tenant, ExternalAccessResource, ContactId.ToString(), CacheVersion))
             .Should().NotBeNull("precondition: the contact's participation data is cached");
@@ -265,7 +266,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
 
         public FakeParticipationService(IEnumerable<Guid> projectIds)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
             => _grantSet = new ExternalGrantSet
             {
                 Projects = projectIds

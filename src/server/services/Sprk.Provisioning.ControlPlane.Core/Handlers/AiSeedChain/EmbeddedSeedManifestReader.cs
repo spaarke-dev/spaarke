@@ -1,10 +1,20 @@
 // -----------------------------------------------------------------------------
-// FileSeedManifestReader.cs
+// EmbeddedSeedManifestReader.cs
 //
-// Production <see cref="ISeedManifestReader"/> implementation — reads the
-// on-disk manifest.yaml, computes its SHA-256 content hash, and scans the
-// body for retired-artifact patterns as a defense-in-depth layer beneath
-// task 069's Invoke-SeedManifest.ps1 <c>retiredArtifacts</c> enforcement.
+// Production <see cref="ISeedManifestReader"/> implementation — reads
+// scripts/seed-data/manifest.yaml from this assembly's embedded resources
+// (the SAME resource YamlSeedManifestEngine seeds from), computes its SHA-256
+// content hash, and scans the body for retired-artifact patterns as a
+// defense-in-depth layer beneath task 069's Invoke-SeedManifest.ps1
+// <c>retiredArtifacts</c> enforcement. Consumed by H12a AND H12b (one
+// manifest state for both).
+//
+// Task 253 (G38): formerly FileSeedManifestReader, which read
+// AiSeedChainOptions.ManifestPath = {AppContext.BaseDirectory}/scripts/seed-data/
+// manifest.yaml from DISK. The Worker publish has no scripts/ folder, so H12a
+// (and H12b, which read the same path) failed every live run with
+// manifest-not-found. The embedded bytes are the same file's bytes, so the
+// hash — H12a's idempotency key — is unchanged.
 //
 // DESIGN NOTES:
 //   1. Hash is computed over the RAW BYTES (not the parsed structure), so a
@@ -31,15 +41,15 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 
 /// <inheritdoc/>
-public sealed class FileSeedManifestReader : ISeedManifestReader
+public sealed class EmbeddedSeedManifestReader : ISeedManifestReader
 {
     private readonly AiSeedChainOptions _options;
-    private readonly ILogger<FileSeedManifestReader> _logger;
+    private readonly ILogger<EmbeddedSeedManifestReader> _logger;
 
-    /// <summary>Constructs the reader bound to the manifest path in <see cref="AiSeedChainOptions"/>.</summary>
-    public FileSeedManifestReader(
+    /// <summary>Constructs the reader (the retired-artifact patterns come from <see cref="AiSeedChainOptions"/>).</summary>
+    public EmbeddedSeedManifestReader(
         IOptions<AiSeedChainOptions> options,
-        ILogger<FileSeedManifestReader> logger)
+        ILogger<EmbeddedSeedManifestReader> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
@@ -50,16 +60,21 @@ public sealed class FileSeedManifestReader : ISeedManifestReader
     /// <inheritdoc/>
     public async Task<SeedManifestReadResult> ReadAsync(CancellationToken cancellationToken)
     {
-        var path = _options.ManifestPath;
-        if (!File.Exists(path))
+        cancellationToken.ThrowIfCancellationRequested();
+        const string resourceName = YamlSeedManifestEngine.ManifestResourceName;
+        await using var stream = typeof(EmbeddedSeedManifestReader).Assembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
         {
-            _logger.LogWarning(
-                "H12a seed manifest not found at {ManifestPath}. Verify scripts/seed-data/ ships in the L2 publish output.",
-                path);
-            return new SeedManifestReadResult.NotFound(path);
+            // A build defect (the .csproj <EmbeddedResource> for scripts/seed-data/manifest.yaml is gone), never an
+            // environment state.
+            _logger.LogError(
+                "Seed manifest embedded resource {ResourceName} is missing from the L2 assembly.", resourceName);
+            return new SeedManifestReadResult.NotFound($"embedded resource '{resourceName}'");
         }
 
-        var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+        var bytes = buffer.ToArray();
         var hash = ComputeSha256Hex(bytes);
 
         var text = System.Text.Encoding.UTF8.GetString(bytes);
@@ -68,8 +83,8 @@ public sealed class FileSeedManifestReader : ISeedManifestReader
         if (violation is not null)
         {
             _logger.LogError(
-                "H12a manifest defense-in-depth check FAILED: retired-artifact pattern '{Pattern}' matched at line {LineNumber} of {ManifestPath}. Excerpt: {LineExcerpt}",
-                violation.Pattern, violation.LineNumber, path, violation.LineExcerpt);
+                "Seed manifest defense-in-depth check FAILED: retired-artifact pattern '{Pattern}' matched at line {LineNumber} of {ResourceName}. Excerpt: {LineExcerpt}",
+                violation.Pattern, violation.LineNumber, resourceName, violation.LineExcerpt);
         }
 
         return new SeedManifestReadResult.Success(hash, violation);

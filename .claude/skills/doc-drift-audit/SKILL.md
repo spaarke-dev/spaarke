@@ -202,7 +202,7 @@ This skill implements the **compact version** of R2's full-repo audit. Key princ
 
 A successful audit:
 - Completes in <30 minutes for typical project diffs (<200 files)
-- Auto-fixes at least 50% of findings
+- Auto-fixes only unambiguous findings (a clear successor exists); reports the auto-fix ratio for information, never as a target
 - Produces an actionable report for the remaining items
 - Updates Last Reviewed stamps on verified files
 - Leaves a commit trail in the project's notes/

@@ -506,6 +506,34 @@ public sealed class NoAccessShareEnforcer
                         .FindSecureRootsReferencingOrganizationAsync(type, orgId, MaxCoveredRecords, ct).ConfigureAwait(false);
                     run.Truncated |= truncated;
                     records.AddRange(ids.Select(id => (type, id)));
+
+                    // Task 174 (owner rounds 82/84; verifier pass 2 F1): a work assignment or project that references the
+                    // organization and is NOT flagged secure (yet — or left so by a Refused or Failed inheritance) is secure
+                    // through what it is filed under, so the wall covers it too. ONE batched walk over those candidates; an
+                    // ancestry that cannot be decided is a failure on that record (nothing removed on a guess).
+                    if (SecureRootInheritance.Inherits(type))
+                    {
+                        var (unflagged, moreUnflagged) = await _participations
+                            .FindUnflaggedRootsReferencingOrganizationAsync(type, orgId, MaxCoveredRecords, ct).ConfigureAwait(false);
+                        run.Truncated |= moreUnflagged;
+                        var ancestry = await EffectiveRootFlags
+                            .ReadAncestryAsync(_dataverse, _logger, type, unflagged, ct).ConfigureAwait(false);
+                        foreach (var id in unflagged.Distinct())
+                        {
+                            if (ancestry is null || !ancestry.TryGetValue(id, out var answer) || !answer.IsKnown)
+                            {
+                                run.Fail(type, id, null, "covered-records-unreadable",
+                                    "What this record is filed under could not be read, so whether this entry covers it is " +
+                                    "unknown and nothing was enforced on it. Try again.");
+                                continue;
+                            }
+
+                            if (answer.HasSecureParent)
+                            {
+                                records.Add((type, id));
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
@@ -567,6 +595,18 @@ public sealed class NoAccessShareEnforcer
             _logger.LogError(ex, "[NO-ACCESS-ENFORCE] Entry {EntryId}: flags of {Type} {RecordId} unreadable.",
                 run.EntryId, logicalName, recordId);
             flags = new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        // Task 174 (owner rounds 82/84: Q4's "secure" means the record or any filing ancestor): a work assignment or project
+        // whose own flag is not set yet but which is filed under a secure matter or project IS secure for the entry on it.
+        // Only then is the single-record walk read; an undecidable filing is unreadable (nothing enforced, reported).
+        if (flags.TryGetValue(recordId, out var own) && !own.IsUnreadable && !own.IsSecure)
+        {
+            flags = new Dictionary<Guid, RootRecordFlags>
+            {
+                [recordId] = await EffectiveRootFlags.FoldOneAsync(_dataverse, _logger, logicalName, recordId, own, ct)
+                    .ConfigureAwait(false),
+            };
         }
 
         if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)

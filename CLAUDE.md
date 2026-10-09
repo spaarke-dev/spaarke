@@ -99,7 +99,7 @@ There is no fourth path: no silent violation, no "fix it later". This is not a l
 ### 8.5 Execution and review
 
 - Planning (`design-to-spec`, `project-pipeline`) runs on the top tier (Opus / Fable). Execution defaults to Sonnet 5 at effort `high`; each POML's `<model-tier>` and `<effort>` can raise it (`task-create` Step 3.5.5b). Write POMLs for literal execution: scoped constraints, closed-set acceptance criteria including negative cases, exact files and the reference implementation to copy (`task-create`).
-- **Review limits ceremony, never fixing.** Findings are classified fix-now (F1–F4) or known-limit (K1–K4); a known-limit class never holds a confirmed defect on a real path. Re-checks cover the fix diff and its direct callers and callees; one full adversarial-verifier pass per task (two for `auth`, `security`, `tenant-isolation`). Fixing continues until no F-class finding remains.
+- **Review limits ceremony, never fixing.** Findings are classified fix-now (F1–F4) or known-limit (K1–K4); a known-limit class never holds a confirmed defect on a real path. Re-checks cover the fix diff and its direct callers and callees; one full adversarial-verifier pass per task by default (two for `auth`, `security`, `tenant-isolation`), more when a fix changes the approach, with a one-line reason in the task notes. Fixing continues until no F-class finding remains.
 - **Every defect found is fixed in scope, or filed and reported to the operator** — whether the work caused it or only uncovered it (pre-existing code, another project's code, config, data). Escalate when fixes are not converging, not on a round count. This applies to task-execute Step 9.5 and to verifier loops in workflow scripts sessions write themselves.
 
 ## 9. Security
