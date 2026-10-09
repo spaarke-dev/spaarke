@@ -1006,8 +1006,7 @@ delays #1386 for no user benefit, when task 111 deploys the same consumers next.
 | 10 | **Something happens in the world**: a confirmed Signal produces an Inquiry through the gate, ~~carrying an SLA~~ *(SLA deferred after R1 — amended 2026-10-07, D-20)*, and the reply resolves it with a `sprk_disposition` queryable per matter and per outside firm | End-to-end on seeded data |
 | 11 | **Classifier recall meets its floor** — **≥ 80% on ≥ 50 labelled items** (D-10) | Labelled-set measurement, number recorded |
 
-**Standing metric, not a criterion**: *action rate per policy* = acted ÷ surfaced, a zero-code Dataverse
-rollup. Below roughly half, a policy is generating noise and is a candidate for retirement or re-thresholding.
+**Standing metric, not a criterion**: *action rate per policy* = acted ÷ (acted + dismissed), per policy version, over the last 90 days, "too few to judge" below 5 (**H-7**, owner-confirmed D-111; administrative closures — Superseded, Policy Retired, Condition Cleared — and open Signals are excluded), computed server-side over `sprk_signal`. Below roughly half, a policy is generating noise and is a candidate for retirement or re-thresholding.
 ⚠️ For **Do** rules this must be computed from **`sprk_signal.sprk_resolutiontype`** — built the other way it
 would report ~0% action rate on every Do rule, making a noisy policy and a perfect one look identical.
 
