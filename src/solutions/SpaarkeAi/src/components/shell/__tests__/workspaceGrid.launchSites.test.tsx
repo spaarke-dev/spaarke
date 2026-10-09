@@ -308,6 +308,20 @@ describe("WorkspaceGrid launch sites — Workspace layout wizard", () => {
     expect(mockRefetchLayouts).toHaveBeenCalledTimes(2);
   });
 
+  it("a hostless navigateTo REJECTION (a real dialog failure) does not refetch the layouts, as before", async () => {
+    navigateTo.mockRejectedValue(new Error("dialog blew up"));
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    mountGrid();
+
+    await act(async () => {
+      await headerState.onEditClick();
+      await headerState.onCreateClick();
+    });
+
+    expect(navigateTo).toHaveBeenCalledTimes(2);
+    expect(mockRefetchLayouts).not.toHaveBeenCalled();
+  });
+
   it("with neither a host nor Xrm nothing opens and nothing refetches", async () => {
     delete (window as unknown as { Xrm?: unknown }).Xrm;
     mountGrid();

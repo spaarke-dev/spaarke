@@ -116,3 +116,53 @@ describe('FindSimilarWizardWidget — launches through navigateToWebResourceSurf
     expect(await screen.findByText(/only available inside a Dataverse host/)).toBeInTheDocument();
   });
 });
+
+describe('wizard widget launch states (honest outcomes)', () => {
+  it.each([
+    ['CreateProject', CreateProjectWizardWidget, 'sprk_createprojectwizard', 'create-project-wizard-retry'],
+    ['FindSimilar', FindSimilarWizardWidget, 'sprk_findsimilar', null],
+  ] as const)(
+    '%s: a real navigateTo failure shows the error state with Retry, not "opened"',
+    async (_n, Widget, _name, retryId) => {
+      navigateTo.mockRejectedValue(new Error('dialog blew up'));
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      render(<Widget data={{ bffBaseUrl: BFF }} />);
+
+      expect(await screen.findByText(/could not be opened/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument();
+      if (retryId) expect(screen.getByTestId(retryId)).toBeInTheDocument();
+      expect(screen.queryByText(/dialog has closed/)).toBeNull();
+      jest.restoreAllMocks();
+    }
+  );
+
+  it.each([
+    ['CreateProject', CreateProjectWizardWidget, 'create-project-wizard-relaunch'],
+    ['FindSimilar', FindSimilarWizardWidget, null],
+  ] as const)('%s: a user cancel (errorCode 2) is not a failure', async (_n, Widget, relaunchId) => {
+    navigateTo.mockRejectedValue({ errorCode: 2 });
+    render(<Widget data={{ bffBaseUrl: BFF }} />);
+
+    await waitFor(() => expect(navigateTo).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/dialog has closed/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
+    if (relaunchId) expect(screen.getByTestId(relaunchId)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['CreateProject', CreateProjectWizardWidget, 'sprk_createprojectwizard'],
+    ['FindSimilar', FindSimilarWizardWidget, 'sprk_findsimilar'],
+  ] as const)(
+    '%s: when another in-app wizard is open it says so with Retry instead of "opened"',
+    async (_n, Widget, name) => {
+      const opener = jest.fn().mockResolvedValue({ busy: true });
+      unregister = registerInAppWizardHost(opener, [name]);
+      render(<Widget data={{ bffBaseUrl: BFF }} />);
+
+      expect(await screen.findByText(/Another wizard is already open/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument();
+      expect(screen.queryByText(/dialog has closed/)).toBeNull();
+      expect(navigateTo).not.toHaveBeenCalled();
+    }
+  );
+});

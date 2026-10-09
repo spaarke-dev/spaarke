@@ -154,10 +154,18 @@ async function openCreateProjectWizard(bffBaseUrl: string | undefined): Promise<
     data: params.join('&'),
     title: DISPLAY_NAME,
   });
+  // Another in-app wizard is open: nothing opened. Say so (the error state offers Retry).
+  if (outcome.busy) {
+    throw new Error('Another wizard is already open. Close it, then retry.');
+  }
   if (!outcome.launched) {
     throw new Error(
       'Xrm.Navigation is unavailable. The Create Project wizard can only be opened from a Dataverse host.'
     );
+  }
+  // A real dialog failure (not the user closing it): surface it with Retry, not "opened".
+  if (outcome.failed) {
+    throw new Error('The Create Project wizard could not be opened. Try again.');
   }
 }
 

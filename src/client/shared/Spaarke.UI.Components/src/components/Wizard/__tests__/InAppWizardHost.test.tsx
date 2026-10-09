@@ -187,12 +187,16 @@ describe('InAppWizardHost — the five Create launches open in-app', () => {
     await screen.findByTestId('wizard-matter');
 
     let secondSettled = false;
+    let secondOutcome: unknown;
     await act(async () => {
-      await navigateToWebResourceSurfaceAsync({ webresourceName: 'sprk_createprojectwizard', data: '' }).then(() => {
+      await navigateToWebResourceSurfaceAsync({ webresourceName: 'sprk_createprojectwizard', data: '' }).then(o => {
         secondSettled = true;
+        secondOutcome = o;
       });
     });
     expect(secondSettled).toBe(true);
+    // Honest outcome: nothing opened because another wizard is open (not "opened and closed").
+    expect(secondOutcome).toEqual({ launched: false, busy: true });
     expect(screen.getByTestId('wizard-matter')).toBeInTheDocument();
     expect(screen.queryByTestId('wizard-project')).toBeNull();
     expect(navigateTo).not.toHaveBeenCalled();

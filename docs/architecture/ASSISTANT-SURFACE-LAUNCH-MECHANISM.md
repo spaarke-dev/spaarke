@@ -57,7 +57,8 @@ ConversationPane.handleSurfaceLaunch({ consumerType, payload })
   │
   └─ kind = wizard | oob-form       →  launchSurface(...)
                                         → sessionStorage hand-off envelope
-                                        → Xrm.Navigation.navigateTo(web-resource / entityrecord)
+                                        → in-app InAppWizardHost (SprkModal) when mounted + supported,
+                                          else Xrm.Navigation.navigateTo(web-resource / entityrecord)
                                         → surface reads the envelope on boot, pre-seeds, returns an outcome
 ```
 
@@ -66,7 +67,7 @@ ConversationPane.handleSurfaceLaunch({ consumerType, payload })
 | Family | Kinds | Channel | Used for | Seeding |
 |---|---|---|---|---|
 | **Event-bus** | `workspace-tab`, `layout` | `PaneEventBus` `widget_load` on the `"workspace"` channel (in-app, no server round-trip) | grids, widgets, workspace layouts | via `widgetData` on the registry entry (widget self-sources its data) |
-| **Hand-off** | `wizard`, `oob-form` | `sessionStorage` envelope + `Xrm.Navigation.navigateTo` | create wizards, OOB entity forms | via the `SurfaceHandoffEnvelope` (draft values + `resolvedLookups` + `fileIds`) |
+| **Hand-off** | `wizard`, `oob-form` | `sessionStorage` envelope + the in-app `InAppWizardHost` (wizards, §4.1) or `Xrm.Navigation.navigateTo` (OOB forms, and wizards with no host) | create wizards, OOB entity forms | via the `SurfaceHandoffEnvelope` (draft values + `resolvedLookups` + `fileIds`) |
 
 **Two entry paths, one router.** A surface can be triggered by the **text/agent path** (an SSE `surface_launch` event) or the **click/chip path** (a terminal chunk carrying `disposition:"surface_launch"`). Both converge on the same `handleSurfaceLaunch` → `resolveSurfaceLaunch` router — the routing is identical regardless of how the capability was invoked.
 
@@ -126,6 +127,16 @@ For the hand-off kinds, the surface is opened in a separate navigation context, 
 
 **Shaping happens here, and only here.** Surfaces are otherwise **self-sourcing** — a grid queries Dataverse itself, a wizard has its own form. The action's output is *not* reshaped into the surface (for `list-tasks` it's just the chat acknowledgement). The only "shape the output to the surface" step is this optional seeding.
 
+### 4.1 Where a `wizard` opens: the in-app host (tasks 112 and 113, D-26)
+
+`launchSurface` (and every wizard launcher in `wizardLaunchers.ts`) goes through `navigateToWebResourceSurfaceAsync`, which first asks whether an **`InAppWizardHost`** is mounted and supports the wizard (`canOpenInApp(name)`). If so, the wizard opens **in-app, in `SprkModal`** (named size, explicit dismiss, `uiScale`, the host's theme, no platform header) and the same promise resolves when it closes; otherwise it falls back to the unchanged `Xrm.Navigation.navigateTo(webresource)` call. Ribbon and subgrid scripts and PCFs never reach the host and stay on `navigateTo` (ADR-050 launch rule (b)).
+
+- **Mount**: the Console mounts the host once in `ThreePaneShell`. LegalWorkspace running inside the Console reaches it through the same shared launchers.
+- **Built in** (`sprk_creatematterwizard`, `_createprojectwizard`, `_createeventwizard`, `_createtodowizard`, `_createworkassignmentwizard`, `_summarizefileswizard`): the host renders the shared component itself, seeding it from the hand-off envelope exactly as the code page does, and on a successful create writes the committed `SurfaceHandoffResult` before closing.
+- **Supplied by the mounting app** (`renderers` prop): wizards that live in code-page solutions a shared library cannot import - `sprk_documentuploadwizard`, `sprk_findsimilar`, `sprk_workspacelayoutwizard`. SpaarkeAi supplies them in `components/shell/inAppWizardRenderers.tsx`, parsing the same launch `data` as the code page through each solution's `launchParams`. `registerInAppWizardHost(opener, names)` declares only the names that have a renderer, so a host without one leaves that launch on `navigateTo`.
+- **Outcome flags** on `NavigateToOutcome`: `cancelled` (closed or failed), `failed` (a real dialog failure, also logged with the surface name), `busy` with `launched:false` (another in-app wizard is open; one at a time, nothing opened).
+- **Closing**: a hosted wizard closes only through the host's `onClose`. It must never click the parent document's `dialogCloseIconButton` or call `window.close()`.
+
 ## 5. The BFF side (kept intentionally thin)
 
 **File pointers**: `Services/Ai/PublicContracts/Binding.cs` (the `BindingDisposition` enum) · `Services/Ai/Chat/BindingCapabilityTool.cs` (emits the SSE) · `Api/Ai/ChatEndpoints.cs` (`ChatSseSurfaceLaunchData`) · `Services/Ai/OutputRouter.cs` (routing) · `Services/Ai/SurfaceLaunchEnricher.cs` (`resolvedLookups`).
@@ -160,7 +171,9 @@ For the hand-off kinds, the surface is opened in a separate navigation context, 
 | Hand-off launcher (wizard/oob-form) | `.../services/surfaceHandoff/launchSurface.ts` |
 | Hand-off storage (sessionStorage) | `.../services/surfaceHandoff/handoffStorage.ts` |
 | Launched-surface read side | `.../services/surfaceHandoff/readHandoff.ts` |
-| Wizard web-resource launchers | `.../components/WorkspaceShell/wizardLaunchers.ts` |
+| Wizard web-resource launchers + in-app routing seam | `.../components/WorkspaceShell/wizardLaunchers.ts` |
+| In-app wizard host | `.../components/Wizard/InAppWizardHost.tsx` |
+| Code-page wizard renderers (Console) | `src/solutions/SpaarkeAi/src/components/shell/inAppWizardRenderers.tsx` |
 | **The router** (branches on `entry.kind`) | `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` → `handleSurfaceLaunch` |
 | SSE parse of `surface_launch` | `.../SprkChat/…/useSseStream.ts` |
 | Workspace widget registry (widget types) | `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts` |

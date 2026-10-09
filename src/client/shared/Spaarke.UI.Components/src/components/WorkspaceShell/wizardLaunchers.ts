@@ -129,8 +129,11 @@ export interface InAppWizardRequest {
   readonly data: string;
 }
 
-/** Opens a wizard in-app; the promise resolves when it closes (the `navigateTo` promise equivalent). */
-export type InAppWizardOpener = (request: InAppWizardRequest) => Promise<void>;
+/**
+ * Opens a wizard in-app; the promise resolves when it closes (the `navigateTo` promise equivalent).
+ * It resolves `{ busy: true }` at once, opening nothing, when another in-app wizard is already open.
+ */
+export type InAppWizardOpener = (request: InAppWizardRequest) => Promise<void | { readonly busy: true }>;
 
 /** What a host with nothing but its built-in wizards can open (the task 112 five + Summarize Files). */
 export const DEFAULT_IN_APP_WIZARD_NAMES: readonly InAppWizardName[] = [
@@ -174,7 +177,7 @@ export function canOpenInApp(name: string): boolean {
 }
 
 /** Open in-app when a host is mounted and supports the wizard; `null` → use `navigateTo`. */
-function tryOpenInApp(webresourceName: string, data: string): Promise<void> | null {
+function tryOpenInApp(webresourceName: string, data: string): Promise<void | { readonly busy: true }> | null {
   if (inAppWizardOpener === null || !isInAppWizardName(webresourceName)) return null;
   if (!inAppSupportedNames.has(webresourceName)) return null;
   return inAppWizardOpener({ webresourceName, data });
@@ -242,12 +245,13 @@ interface NavigateToParams {
 /**
  * A `navigateTo` rejection that is NOT the user closing/cancelling the dialog (Dataverse errorCode 2)
  * is a real dialog failure: log it with the surface name (never a token or payload; ADR-019) instead
- * of swallowing it. Cancels stay silent.
+ * of swallowing it. Cancels stay silent. Returns `true` for a real failure.
  */
-function logNavigateFailure(webresourceName: string, err: unknown): void {
+function logNavigateFailure(webresourceName: string, err: unknown): boolean {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((err as any)?.errorCode === 2) return;
+  if ((err as any)?.errorCode === 2) return false;
   console.error(`[wizardLaunchers] navigateTo failed for ${webresourceName}:`, err);
+  return true;
 }
 
 function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): void {
@@ -435,6 +439,17 @@ export interface NavigateToOutcome {
    */
   readonly cancelled?: boolean;
   /**
+   * `true` (with `cancelled`) when the `navigateTo` promise rejected for a reason that is NOT the
+   * user closing the dialog - a real dialog failure (also logged with the surface name). Carries no
+   * rejection detail (ADR-019).
+   */
+  readonly failed?: boolean;
+  /**
+   * `true` (with `launched: false`) when an in-app host is mounted but another in-app wizard is
+   * already open, so this launch opened nothing. Distinct from "no Xrm host".
+   */
+  readonly busy?: boolean;
+  /**
    * The saved-entity reference returned by an `entityrecord` navigation when a
    * record was created/saved (OOB-form return path). Absent for web resources
    * (those return their outcome via the sessionStorage result envelope instead).
@@ -455,7 +470,9 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
   // promise resolves when the wizard closes, exactly like the `navigateTo` one.
   const inApp = tryOpenInApp(params.webresourceName, params.data);
   if (inApp !== null) {
-    await inApp;
+    const opened = await inApp;
+    // Another in-app wizard is open: nothing opened. Say so (callers must not report "opened").
+    if (opened && opened.busy) return { launched: false, busy: true };
     return { launched: true };
   }
   const nav = resolveXrmNavigation();
@@ -475,8 +492,8 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
     return { launched: true };
   } catch (err) {
     // The outcome (if any) is in sessionStorage; a real dialog failure is logged, a cancel is silent.
-    logNavigateFailure(params.webresourceName, err);
-    return { launched: true, cancelled: true };
+    const failed = logNavigateFailure(params.webresourceName, err);
+    return failed ? { launched: true, cancelled: true, failed: true } : { launched: true, cancelled: true };
   }
 }
 

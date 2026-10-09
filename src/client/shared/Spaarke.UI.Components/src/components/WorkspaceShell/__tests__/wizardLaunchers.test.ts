@@ -306,7 +306,7 @@ describe('navigateTo failure logging', () => {
       data: 'x=1',
     });
 
-    expect(outcome).toEqual({ launched: true, cancelled: true });
+    expect(outcome).toEqual({ launched: true, cancelled: true, failed: true });
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(String(consoleError.mock.calls[0][0])).toContain('sprk_documentuploadwizard');
   });

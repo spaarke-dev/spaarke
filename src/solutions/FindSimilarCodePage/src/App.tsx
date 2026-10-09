@@ -47,12 +47,6 @@ export interface IFindSimilarAppProps {
     readonly fileNames?: ReadonlyArray<string>;
   };
   /**
-   * Task 113 (ontology-platform-r1 D-26). Present = IN-APP: the form renders inside `SprkModal`
-   * (named size, explicit dismiss, shell-owned header and Cancel-left / action-right footer) and
-   * closes ONLY through this callback. Absent = the code-page layout under the Dataverse
-   * `navigateTo` dialog's chrome, whose Cancel clicks the platform close button.
-   */
-  /**
    * Preselected document from the launch data (`documentId` / `containerId`; #1479). A non-empty
    * `documentId` opens with Path A already chosen; `containerId` is carried but never used to select anything.
    */
@@ -60,6 +54,12 @@ export interface IFindSimilarAppProps {
     readonly documentId: string;
     readonly containerId?: string;
   };
+  /**
+   * Task 113 (ontology-platform-r1 D-26). Present = IN-APP: the form renders inside `SprkModal`
+   * (named size, explicit dismiss, shell-owned header and Cancel-left / action-right footer) and
+   * closes ONLY through this callback. Absent = the code-page layout under the Dataverse
+   * `navigateTo` dialog's chrome, whose Cancel clicks the platform close button.
+   */
   inApp?: {
     readonly onClose: () => void;
     /** App-shell `--sprk-ui-scale`. */
@@ -235,6 +235,30 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
     setSelectedRecord(null);
     setError(null);
   }, []);
+
+  // #1479: the launch carries an id, not a name. Resolve the real document name cheaply (fail-soft:
+  // on any failure the placeholder label stays and the preselection still works).
+  const preselectedId = props.initialDocument?.documentId;
+  React.useEffect(() => {
+    if (!preselectedId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any = getXrm("webApi");
+        const row = await xrm?.WebApi?.retrieveRecord?.("sprk_document", preselectedId, "?$select=sprk_documentname");
+        const name = row?.sprk_documentname;
+        if (!cancelled && typeof name === "string" && name) {
+          setSelectedRecord(prev => (prev && prev.id === preselectedId ? { id: preselectedId, name } : prev));
+        }
+      } catch {
+        /* keep the placeholder label */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [preselectedId]);
 
   // R5-8: pre-select the session's first attached file (Find Similar is single-document). Fetch its
   // binary from the session document-content endpoint and run it through the same validated

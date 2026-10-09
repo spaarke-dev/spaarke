@@ -179,8 +179,16 @@ async function openFindSimilar(
     data: params.join('&'),
     title: DISPLAY_NAME,
   });
+  // Another in-app wizard is open: nothing opened. Say so (the error state offers Retry).
+  if (outcome.busy) {
+    throw new Error('Another wizard is already open. Close it, then retry.');
+  }
   if (!outcome.launched) {
     throw new Error('Xrm.Navigation is unavailable. Find Similar Documents can only be opened from a Dataverse host.');
+  }
+  // A real dialog failure (not the user closing it): surface it with Retry, not "opened".
+  if (outcome.failed) {
+    throw new Error('Find Similar Documents could not be opened. Try again.');
   }
 }
 

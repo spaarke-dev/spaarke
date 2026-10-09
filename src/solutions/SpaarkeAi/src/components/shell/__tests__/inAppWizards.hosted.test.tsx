@@ -88,6 +88,18 @@ describe("FindSimilarApp — in-app (SprkModal)", () => {
     expect(screen.getByRole("button", { name: /Find Similar/ })).toBeEnabled();
   });
 
+  it("resolves the preselected document's real name when the Xrm lookup works (#1479)", async () => {
+    const retrieveRecord = jest.fn().mockResolvedValue({ sprk_documentname: "Master Services Agreement.pdf" });
+    (window as unknown as { Xrm?: unknown }).Xrm = { WebApi: { retrieveRecord }, Navigation: {} };
+    try {
+      inHost(<FindSimilarApp {...baseProps} initialDocument={{ documentId: "abc-123" }} inApp={{ onClose: jest.fn() }} />);
+      expect(await screen.findByText("Master Services Agreement.pdf")).toBeInTheDocument();
+      expect(retrieveRecord).toHaveBeenCalledWith("sprk_document", "abc-123", "?$select=sprk_documentname");
+    } finally {
+      delete (window as unknown as { Xrm?: unknown }).Xrm;
+    }
+  });
+
   it("an empty documentId preselects nothing", () => {
     inHost(<FindSimilarApp {...baseProps} initialDocument={{ documentId: "" }} inApp={{ onClose: jest.fn() }} />);
     expect(screen.queryByText("Selected document")).toBeNull();
@@ -203,6 +215,31 @@ describe("WorkspaceLayoutWizard App — in-app (SprkModal)", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/workspace/layouts/L1", { method: "DELETE" });
       expect(platformClose).not.toHaveBeenCalled();
       expect(windowClose).not.toHaveBeenCalled();
+    });
+
+    it("in-app, Save never writes window.__dialogResult onto the Console window; the code page still does", async () => {
+      delete (window as any).__dialogResult;
+      const first = mountEdit({ onClose: jest.fn() });
+      fireEvent.click(await screen.findByRole("button", { name: "Save Layout" }));
+      await screen.findByRole("button", { name: "Done" });
+      expect((window as any).__dialogResult).toBeUndefined();
+      first.unmount();
+
+      mountEdit();
+      fireEvent.click(await screen.findByRole("button", { name: "Save Layout" }));
+      await screen.findByRole("button", { name: "Done" });
+      expect((window as any).__dialogResult).toMatchObject({ confirmed: true, layoutId: "L1" });
+      delete (window as any).__dialogResult;
+    });
+
+    it("an in-app load failure is shown inside the modal with a token class, not an inline colour (ADR-050)", async () => {
+      fetchMock.mockImplementation(async () => ({ ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }));
+      mountEdit({ onClose: jest.fn() });
+
+      const message = await screen.findByText(/Could not load workspace/);
+      expect(screen.getByRole("dialog")).toContainElement(message);
+      expect(message.getAttribute("style") ?? "").not.toMatch(/color/);
+      expect(message.className).not.toBe("");
     });
 
     it("with no host the code-page Done still clicks the platform close button, unchanged", async () => {

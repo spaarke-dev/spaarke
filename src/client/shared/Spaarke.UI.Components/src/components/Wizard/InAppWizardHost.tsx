@@ -170,9 +170,10 @@ export const InAppWizardHost: React.FC<IInAppWizardHostProps> = ({
       ...(rendererNamesKey ? (rendererNamesKey.split(',') as InAppHostedWizardName[]) : []),
     ];
     const unregister = registerInAppWizardHost((request: InAppWizardRequest) => {
-      // One wizard at a time: a second launch while one is open is ignored (it resolves at once,
-      // as a cancelled launch) rather than replacing — and losing — the open one.
-      if (activeRef.current) return Promise.resolve();
+      // One wizard at a time: a second launch while one is open is ignored rather than replacing -
+      // and losing - the open one. It resolves at once, flagged busy, so the launcher reports
+      // "opened nothing" instead of "opened and closed".
+      if (activeRef.current) return Promise.resolve({ busy: true as const });
       return new Promise<void>(resolve => {
         sequenceRef.current += 1;
         const next: IActiveWizard = {

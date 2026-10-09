@@ -783,8 +783,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         data: dataParams,
         title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
       });
-      // Wizard closed — refetch layouts in case changes were saved (nothing opened → nothing to refetch)
-      if (outcome.launched) refetchLayouts();
+      // Wizard closed — refetch layouts in case changes were saved (nothing opened or a dialog failure → nothing to refetch)
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }
@@ -798,7 +798,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
         title: "Create New Workspace",
       });
-      if (outcome.launched) refetchLayouts();
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }

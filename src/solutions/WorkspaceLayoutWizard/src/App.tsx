@@ -19,10 +19,11 @@
 
 import * as React from "react";
 import { FluentProvider } from "@fluentui/react-components";
-import { tokens, Text, Button } from "@fluentui/react-components";
+import { tokens, Text, Button, makeStyles } from "@fluentui/react-components";
 import { CheckmarkCircle24Regular, DeleteRegular } from "@fluentui/react-icons";
 import {
   WizardShell,
+  SprkModal,
   getLayoutTemplate,
   SECTION_METADATA_CATALOG,
 } from "@spaarke/ui-components";
@@ -33,7 +34,6 @@ import type {
   LayoutTemplateId,
   SectionMetadata,
 } from "@spaarke/ui-components";
-import { SprkModal } from "@spaarke/ui-components/components/SprkModal";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
 import type { SectionCatalogItem, SlotAssignments, SectionInstance } from "./steps";
@@ -455,6 +455,11 @@ export function buildSectionsJson(
   return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
 }
 
+const useStyles = makeStyles({
+  // ADR-050: no inline colour inside SprkModal - a token class.
+  loadError: { color: tokens.colorPaletteRedForeground1 },
+});
+
 // ---------------------------------------------------------------------------
 // Code-page close (navigateTo path ONLY)
 // ---------------------------------------------------------------------------
@@ -483,6 +488,7 @@ function closeCodePageDialog(): void {
 // ---------------------------------------------------------------------------
 
 export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter, startAtStep, inApp }) => {
+  const styles = useStyles();
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
@@ -786,7 +792,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       // `window.__dialogResult` doesn't survive. sessionStorage IS shared
       // per-origin per-tab-set, so the host can read the same value.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
+      // Never written in-app: it would land on the Console window's globals.
+      if (!inApp) (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
       try {
         window.sessionStorage?.setItem(
           "spaarke:workspace-wizard:last-result",
@@ -1014,7 +1021,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
           {isLoadingLayout ? (
             <span>Loading workspace…</span>
           ) : (
-            <span style={{ color: tokens.colorPaletteRedForeground1 }}>Could not load workspace: {loadLayoutError}</span>
+            <span className={styles.loadError}>Could not load workspace: {loadLayoutError}</span>
           )}
         </SprkModal>
       );
