@@ -46,7 +46,11 @@ public sealed class SecureRootFilingGate
 
         var materialized = writes.ToArray();
         var filing = SecureRootInheritance.FilingColumnsOf(table.Trim().ToLowerInvariant());
-        if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))))
+        // Task 175 (owner round 84): a write of sprk_accesspermission / sprk_issecure on an existing record is checked too —
+        // refused when the record has a parent (its access follows it).
+        if (!materialized.Any(w => filing.Contains(SecureRootInheritance.NormalizeColumn(w.Key))
+                                   || (recordId is not null
+                                       && AccessFollowsParent.LockedColumns.Contains(SecureRootInheritance.NormalizeColumn(w.Key)))))
             return null;
 
         using var scope = _scopeFactory.CreateScope();
@@ -54,7 +58,7 @@ public sealed class SecureRootFilingGate
         if (inheritance is null)
         {
             _logger.LogError(
-                "[SECURE-INHERIT] A {Table} write changes what it is filed under, and this host cannot check whether that " +
+                "[SECURE-INHERIT] A {Table} write changes what it is filed under (or its access), and this host cannot check whether that " +
                 "record is secure (SecureRootInheritance is not registered). Refused (fail closed).", table);
             return RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.ParentUndetermined,

@@ -45,6 +45,14 @@
  * team in ANOTHER business unit - a secure record reassigned outside Spaarke - unfinished, Make Secure offered. An
  * answer that cannot be had keeps Make Secure hidden on that record (Remove Secure still follows the flag).
  *
+ * A record that follows a parent (task 175, owner round 84: "a child's access always follows its parent, both ways, and
+ * is locked while it has a parent"): a work assignment or project filed under a matter or project takes its Secure
+ * designation from that parent, so Make Secure and Remove Secure are HIDDEN on it. The same can-manage-access answer that
+ * gives the Write verdict names the record's direct filing parents (`followsParents`) and whether they could be read
+ * (`parentUnverifiable`); a non-empty list, or parentUnverifiable === true, hides both commands (fail closed). An answer
+ * without those fields (an older BFF) is "no parent". The server refuses both calls on such a record anyway (409
+ * sdap.access.access_follows_parent). A matter never has a parent. Update Access is unaffected.
+ *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
  *   1. sprk_/scripts/bff_auth.js            - Spaarke.BffAuth (MSAL silent SSO; never a popup - ADR-028 INV-5)
@@ -77,12 +85,20 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
     // isShareAllowed / isShareAllowedForSelection, the rules that hide the platform's form and grid Share commands on a
     // Restricted record (any selected Restricted row, on a grid); the principal_external_on_restricted warning and the
-    // server's no-internal-reader sentence after Make Secure.
-    ns.VERSION = "1.6.0";
+    // server's no-internal-reader sentence after Make Secure. 1.7.0 - task 175 (owner round 84): Make Secure / Remove
+    // Secure hidden on a record that follows a parent (can-manage-access followsParents / parentUnverifiable, from the
+    // same cached answer); the access_follows_parent refusal.
+    ns.VERSION = "1.7.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
     var CACHE_KEY_PREFIX = "sprk_access_canmanage_";
+
+    /**
+     * How long the secure-command rules trust a cached gate answer's parent facts (task 175): a record filed or un-filed
+     * since is seen within this time. Update Access keeps the cached Write verdict for the session, as before.
+     */
+    var GATE_FRESH_MS = 30000;
 
     function safeSessionGet(key) {
         try { return window.sessionStorage.getItem(key); } catch (e) { return null; }
@@ -90,6 +106,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     function safeSessionSet(key, value) {
         try { window.sessionStorage.setItem(key, value); } catch (e) { /* private mode: no cache, still correct */ }
+    }
+
+    function safeSessionRemove(key) {
+        try { window.sessionStorage.removeItem(key); } catch (e) { /* nothing cached */ }
     }
 
     function helpersLoaded() {
@@ -108,34 +128,110 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         return !!body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
     }
 
-    /** Asks the server whether the caller may manage access on the record; caches true/false (never an error). */
+    /** "No" for the caller: no Write verdict (the parent facts are moot then). */
+    var NO_VERDICT = Object.freeze({ can: false, followsParent: true });
+
+    /**
+     * Task 175: whether a gate answer says the record follows a parent - a non-empty `followsParents` (its direct filing
+     * parents), or `parentUnverifiable === true` (what it is filed under could not be read: fail closed). An answer without
+     * either field (an older BFF) is "no parent".
+     */
+    function followsParentOf(body) {
+        if (body.parentUnverifiable === true) {
+            return true;
+        }
+
+        return Array.isArray(body.followsParents) && body.followsParents.length > 0;
+    }
+
+    /** Caches one verdict for the record: { can, followsParent, at } as JSON. */
+    function cacheVerdict(cacheKey, verdict) {
+        safeSessionSet(cacheKey, JSON.stringify({ can: verdict.can, followsParent: verdict.followsParent, at: Date.now() }));
+    }
+
+    /**
+     * The cached verdict for the record, or null when there is none - or only a value an older version of this script
+     * cached ("true"/"false" carries no parent facts, so it is asked again).
+     */
+    function cachedVerdict(cacheKey) {
+        var raw = safeSessionGet(cacheKey);
+        if (!raw) {
+            return null;
+        }
+
+        try {
+            var v = JSON.parse(raw);
+            return v && typeof v === "object" && typeof v.can === "boolean" && typeof v.followsParent === "boolean" &&
+                typeof v.at === "number" ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /** The gate questions in flight, per cache key: rules evaluated together share one call. */
+    var pendingGate = {};
+
+    /**
+     * Asks the server whether the caller may manage access on the record and (task 175) whether the record follows a
+     * parent - ONE call. Resolves { can, followsParent } and caches it; never rejects (a failure is NO_VERDICT, not cached -
+     * retried on the next evaluation).
+     */
     function queryCanManage(record, cacheKey) {
-        return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
+        if (pendingGate[cacheKey]) {
+            return pendingGate[cacheKey];
+        }
+
+        var promise = Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
             return Spaarke.BffAuth.getToken(baseUrl).then(function (token) {
                 if (!token) {
-                    return false; // no silent token: "no" (not cached - a later evaluation may have one)
+                    return NO_VERDICT; // no silent token: "no" (not cached - a later evaluation may have one)
                 }
 
                 var url = gateUrl(baseUrl, record, false);
                 return fetch(url, { headers: { "Accept": "application/json", "Authorization": "Bearer " + token } })
                     .then(function (response) {
                         if (response.status !== 200) {
-                            safeSessionSet(cacheKey, "false");
-                            return false;
+                            cacheVerdict(cacheKey, NO_VERDICT);
+                            return NO_VERDICT;
                         }
 
                         return response.json().then(function (body) {
                             // The answer must be about THIS record (the gate echoes the id it answered about).
                             var can = answersFor(body, record) && body.canManageAccess === true;
-                            safeSessionSet(cacheKey, can ? "true" : "false");
-                            return can;
+                            var verdict = can ? { can: true, followsParent: followsParentOf(body) } : NO_VERDICT;
+                            cacheVerdict(cacheKey, verdict);
+                            return verdict;
                         });
                     });
             });
         }).catch(function (error) {
             console.warn(LOG, "can-manage-access could not be asked; the command stays hidden.", error);
-            return false; // not cached: retried on the next evaluation
+            return NO_VERDICT;
         });
+
+        pendingGate[cacheKey] = promise;
+        var settled = function () { delete pendingGate[cacheKey]; };
+        promise.then(settled, settled);
+        return promise;
+    }
+
+    function gateCacheKey(record) {
+        return CACHE_KEY_PREFIX + record.recordType + "_" + record.recordId;
+    }
+
+    /**
+     * The gate verdict for the record: the cached one when there is one (with `fresh`, only when younger than
+     * GATE_FRESH_MS), otherwise the question to the server. A cache HIT answers synchronously.
+     * @returns {{can: boolean, followsParent: boolean}|Promise<{can: boolean, followsParent: boolean}>}
+     */
+    function gateVerdict(record, fresh) {
+        var cacheKey = gateCacheKey(record);
+        var cached = cachedVerdict(cacheKey);
+        if (cached && (!fresh || Date.now() - cached.at < GATE_FRESH_MS)) {
+            return cached;
+        }
+
+        return queryCanManage(record, cacheKey);
     }
 
     /**
@@ -156,11 +252,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return false; // unsaved record
             }
 
-            var cacheKey = CACHE_KEY_PREFIX + record.recordType + "_" + record.recordId;
-            var cached = safeSessionGet(cacheKey);
-            if (cached === "true") return true;
-            if (cached === "false") return false;
-            return queryCanManage(record, cacheKey);
+            var verdict = gateVerdict(record, false);
+            if (typeof verdict.then === "function") {
+                return verdict.then(function (v) { return v.can === true; });
+            }
+
+            return verdict.can === true;
         } catch (error) {
             console.error(LOG, "canUpdateAccess failed:", error);
             return false;
@@ -536,8 +633,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
-     * the record, the same rule as Update Access) AND `wanted(state)` holds for the record's secure state. An unknown flag
-     * satisfies neither rule, so a failed or masked read hides both commands.
+     * the record, the same rule as Update Access) AND the record does not follow a parent (task 175: the same answer's
+     * followsParents / parentUnverifiable, at most GATE_FRESH_MS old) AND `wanted(state)` holds for the record's secure
+     * state. An unknown flag satisfies neither rule, so a failed or masked read hides both commands.
      */
     function secureCommandEnabled(primaryControl, wanted) {
         try {
@@ -551,9 +649,20 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return false;
             }
 
-            return Promise.all([Promise.resolve(ns.canUpdateAccess(primaryControl)), readSecureState(entityName, record)])
+            return Promise.all([Promise.resolve(gateVerdict(record, true)), readSecureState(entityName, record)])
                 .then(function (answers) {
-                    return answers[0] === true && wanted(answers[1]) === true;
+                    var verdict = answers[0];
+                    if (verdict.can !== true) {
+                        return false;
+                    }
+
+                    if (verdict.followsParent !== false) {
+                        console.info(LOG, "This record follows a parent (or what it is filed under could not be read): " +
+                            "its Secure designation is set there, so Make Secure and Remove Secure stay hidden.");
+                        return false;
+                    }
+
+                    return wanted(answers[1]) === true;
                 })
                 .catch(function (error) {
                     console.warn(LOG, "A secure-command rule failed; the command stays hidden.", error);
@@ -637,11 +746,30 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             "access. Nothing was changed; you may try again."
     });
 
-    /** A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled), else refusalText. */
+    /**
+     * Task 175 (owner round 84): the server's 409 refusal of Make Secure and Remove Secure on a work assignment or project
+     * filed under a parent (extensions parentRecordType, parentRecordId, parentName). Its `detail` is shown as sent.
+     */
+    ns.ACCESS_FOLLOWS_PARENT = "sdap.access.access_follows_parent";
+
+    /** That refusal's text when the server sent no `detail`: {record} per table, {parent} its parentName or "its parent". */
+    ns.ACCESS_FOLLOWS_PARENT_FALLBACK = "This {record} is filed under {parent}, and its access follows it. Change it there.";
+
+    /**
+     * A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled); for access_follows_parent
+     * without a server message, ACCESS_FOLLOWS_PARENT_FALLBACK; else refusalText (the server's message).
+     */
     ns.refusalFor = function (commandName, result, entityName) {
         var code = reasonCodeOf(result);
+        var word = ns.RECORD_WORDS[entityName] || "record";
         if (code !== null && Object.prototype.hasOwnProperty.call(ns.REFUSAL_COPY, code)) {
-            return ns.REFUSAL_COPY[code].split("{record}").join(ns.RECORD_WORDS[entityName] || "record");
+            return ns.REFUSAL_COPY[code].split("{record}").join(word);
+        }
+
+        var body = result && result.body;
+        if (code === ns.ACCESS_FOLLOWS_PARENT && !(typeof body.detail === "string" && body.detail)) {
+            var parent = typeof body.parentName === "string" && body.parentName.trim() ? body.parentName : "its parent";
+            return ns.ACCESS_FOLLOWS_PARENT_FALLBACK.split("{record}").join(word).split("{parent}").join(parent);
         }
 
         return ns.refusalText(commandName, result);
@@ -801,6 +929,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             if (result.skipped && result.reason === "no-token") {
                 alert(commandName, "Sign-in needed - reload the page and retry. Nothing was changed.");
                 return result;
+            }
+
+            // Task 175: refused because the record follows a parent the cached gate answer did not know of - forget that
+            // answer, so the refreshed ribbon asks again and hides the command.
+            if (reasonCodeOf(result) === ns.ACCESS_FOLLOWS_PARENT) {
+                safeSessionRemove(gateCacheKey(record));
             }
 
             // Whatever the outcome, the record may have changed (a partial pass answers 500): re-read it.

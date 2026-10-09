@@ -1200,12 +1200,12 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 ```
 
 ### `Set-InheritedAccessPermissionFormLock.ps1`
-**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Additive string insertions proven by a parse check; snapshot before every write.
+**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Since task 175 (owner round 84) it also registers the library on every Work Assignment and Project MAIN form that shows `sprk_accesspermission` (the TrackingFieldTrio pill; no plain control is added there): a work assignment or project filed under a matter or project has `sprk_accesspermission` and, where the form carries it, `sprk_issecure` locked ("Access permission and Secure are inherited from …"). Additive string insertions proven by a parse check; snapshot before every write.
 **Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
-**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173; Work Assignment / Project main forms added by task 175)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-08 — `-SelfTest` PASS; dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
+**Last Used:** 2026-10-09 — `-SelfTest` PASS (47 checks, task 175). 2026-10-08 — dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
 
 **Command:**
 ```powershell

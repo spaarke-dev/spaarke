@@ -3,6 +3,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
+using Sprk.Bff.Api.Services.Access;
+
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
 /// <summary>
@@ -97,7 +99,9 @@ public static class RecordAccessGateEndpoint
                 "established. Clients gate the Manage Access affordance on this and MUST treat anything other " +
                 "than 200 + canManageAccess = true as a denial. With includeOwner=true the 200 also names the " +
                 "record's owning team, whether it is the Secure Record Owners team, and whether that team owns it inside " +
-                "the Secure Record business unit (null = could not be told).")
+                "the Secure Record business unit (null = could not be told). For a work assignment or project the 200 also " +
+                "lists followsParents — the matters / projects it is filed under directly (owner round 84: its access follows " +
+                "them and is locked) — and parentUnverifiable when that could not be read.")
             .Produces<RecordAccessGateResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -115,6 +119,7 @@ public static class RecordAccessGateEndpoint
         [AsParameters] RecordAccessGateQuery query,
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
+        IGenericEntityService dataverse,
         ILogger<Program> logger,
         HttpContext httpContext,
         CancellationToken ct)
@@ -135,8 +140,19 @@ public static class RecordAccessGateEndpoint
 
         // Reaching this line IS the answer: DelegationRuleFilter established Write on this record, as the
         // caller, over OBO. Nothing here re-decides it.
+        //
+        // Task 175 (owner round 84): whether the record's access follows a parent — the Manage Access lock and the ribbon's
+        // Make Secure / Remove Secure rule. A fact about the record (its own lookups, which the caller can already read), not
+        // about the caller's rights; DIRECT parents only (task 174 F1-d: a grandparent's name is never disclosed).
+        var parents = await ReadFollowsParentsAsync(dataverse, SecureRecordRoot.For(root.Type), root.Id, logger, ct);
         if (query.IncludeOwner != true)
-            return TypedResults.Ok(new RecordAccessGateResponse(root.Id, CanManageAccess: true));
+        {
+            return TypedResults.Ok(new RecordAccessGateResponse(root.Id, CanManageAccess: true)
+            {
+                FollowsParents = parents.Parents,
+                ParentUnverifiable = parents.Unverifiable,
+            });
+        }
 
         // Round 46 item 4: who OWNS the record — asked only by the Access ribbon's secure-state rule, for a record flagged
         // secure. Facts about the record, never about the caller's rights; the delegation answer above is unchanged.
@@ -144,7 +160,43 @@ public static class RecordAccessGateEndpoint
             dataverseClient, configuration, SecureRecordRoot.For(root.Type), root.Id, logger, httpContext.TraceIdentifier, ct);
         return TypedResults.Ok(new RecordAccessGateResponse(
             root.Id, CanManageAccess: true, owner.OwningTeamId, owner.OwnedBySecureOwnerTeam,
-            owner.OwningTeamInSecureBusinessUnit));
+            owner.OwningTeamInSecureBusinessUnit)
+        {
+            FollowsParents = parents.Parents,
+            ParentUnverifiable = parents.Unverifiable,
+        });
+    }
+
+    /// <summary>
+    /// Task 175: the record's DIRECT filing parents (a work assignment or project; a matter files under nothing), through the
+    /// ONE walk (<see cref="SecureRootInheritance.ReadSecureParentsAsync"/>, one level). Never throws: an unreadable filing answers
+    /// <c>Unverifiable = true</c> with no parents, and the ribbon then hides Make Secure / Remove Secure (the routes refuse).
+    /// </summary>
+    private static async Task<(IReadOnlyList<RecordAccessParent> Parents, bool Unverifiable)> ReadFollowsParentsAsync(
+        IGenericEntityService dataverse, SecureRecordRoot root, Guid recordId, ILogger logger, CancellationToken ct)
+    {
+        if (!SecureRootInheritance.Inherits(root.LogicalName))
+            return (Array.Empty<RecordAccessParent>(), false);
+
+        try
+        {
+            var answer = await SecureRootInheritance.ReadSecureParentsAsync(dataverse, logger, root.LogicalName, recordId, ct);
+            if (!answer.IsKnown)
+            {
+                logger.LogWarning("[ACCESS-GATE] What {RecordType} {RecordId} is filed under could not be read ({Why}).",
+                    root.WireToken, recordId, answer.Unverifiable);
+                return (Array.Empty<RecordAccessParent>(), true);
+            }
+
+            return (answer.DirectParents
+                .Select(p => new RecordAccessParent(SecureRootInheritance.WireTokenFor(p.Parent.Table), p.Parent.Id, p.Parent.Name))
+                .ToList(), false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[ACCESS-GATE] What {RecordType} {RecordId} is filed under could not be read.", root.WireToken, recordId);
+            return (Array.Empty<RecordAccessParent>(), true);
+        }
     }
 
     /// <summary>

@@ -57,7 +57,11 @@ names in `skippedPrincipals` — the creator on the record's No Access list, tha
 failed — the script shows a per-person warning after the success notification (`SKIPPED_PRINCIPAL_COPY`; an unknown
 reason gets the generic warning and is logged — never silent, round 33 item 5; a person whose name cannot be read is
 "Someone", round 40 item 3). Remove Secure confirms first too (round
-33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
+33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing. A work assignment or project filed under a matter or
+project follows that parent (task 175, owner round 84): both commands are hidden on it when the same can-manage-access
+answer lists its direct filing parents (`followsParents` non-empty) or says they could not be read
+(`parentUnverifiable: true`; an answer without these fields, from an older BFF, is "no parent"), and the server's 409
+`sdap.access.access_follows_parent` refusal shows its message (`access_ribbon.js` 1.7.0).
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in

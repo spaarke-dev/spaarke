@@ -69,7 +69,13 @@ export interface IAccessGrantRecord {
    * owner round 59) adds no provenance of its own: a row the record's policy
    * cancels, or a No Access entry walls off, is marked from this value plus
    * the record's state (`noAccess.ts`). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share';
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share' | 'inherited';
+  /**
+   * `'inherited'` rows only (unified-access-control-r2 task 175, owner round 84): the secure parent that passed this user
+   * share on to the record (`inheritedFrom` on a `/user-shares` item, task 158's provenance). Such a row is read-only
+   * here: it is changed on the parent. `recordType` is `'matter'` or `'project'` per the BFF contract.
+   */
+  inheritedFrom?: { recordType: string; recordId: string };
   /**
    * Share rows only (unified-access-control-r2 task 114, owner round 67 amendment 4(c)): the record is Restricted and
    * this user is flagged external (`externalNoAccess` from `/user-shares`). Rendered as "External user — no access"
@@ -388,6 +394,25 @@ export interface IAccessGrantModalProps {
    * lacks Write, `notShown`).
    */
   initialSection?: 'noAccess';
+  /**
+   * The record's DIRECT filing parents whose access it follows (unified-access-control-r2 task 175, owner round 84: "a
+   * child's access always follows its parent, both ways, and is locked while it has a parent"), as the host read them
+   * from `GET /api/v1/external-access/can-manage-access` (`followsParents`). Non-empty: the record's access is LOCKED
+   * here — every write affordance is hidden, Current Access and the No Access List stay visible read-only, and a banner
+   * names the parent to manage it on. Omitted or empty (a parentless record, a matter, or an older BFF): unchanged. The
+   * server refuses every write on such a record anyway (409 `sdap.access.access_follows_parent`), which the modal also
+   * shows as this locked state.
+   */
+  followsParents?: IFollowsParent[];
+  /** Opens a parent record (task 175) — the host navigates to its form. Omit and the banner names the parent as text. */
+  onOpenParent?: (parent: IFollowsParent) => void;
+}
+
+/** A direct filing parent a record's access follows (task 175; `followsParents` on `can-manage-access`). */
+export interface IFollowsParent {
+  recordType: 'matter' | 'project';
+  recordId: string;
+  name: string | null;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

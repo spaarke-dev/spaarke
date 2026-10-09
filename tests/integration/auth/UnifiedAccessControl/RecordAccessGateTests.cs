@@ -392,6 +392,48 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
             It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>
+    /// Task 175 (owner round 84): a 200 for a work assignment filed under a matter names that DIRECT parent in
+    /// <c>followsParents</c> (the locked state — distinct from "no permission", which is the filter's 403); a parentless one
+    /// answers an empty list; one whose filing cannot be read answers <c>parentUnverifiable</c>; a matter never has parents.
+    /// </summary>
+    [Fact]
+    public async Task GetCanManageAccess_NamesTheParentsAChildFollows_AndSaysWhenThatCannotBeRead()
+    {
+        var (matter, child, parentless, unreadable) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var world = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+        world.Add("sprk_matter", matter, ("sprk_issecure", false), ("sprk_mattername", "Falcon"));
+        world.Add("sprk_workassignment", child, ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)));
+        world.Add("sprk_workassignment", parentless);
+        world.Add("sprk_workassignment", unreadable, ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)));
+        world.FailingRowReadsOf("sprk_workassignment", unreadable);
+        _fixture.FilingWorld = world;
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        async Task<JsonElement> GateOf(string type, Guid id)
+        {
+            var response = await client.GetAsync($"{GatePath}?recordType={type}&recordId={id}");
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.Clone();
+        }
+
+        var locked = await GateOf("workassignment", child);
+        var parent = locked.GetProperty("followsParents").EnumerateArray().Single();
+        parent.GetProperty("recordType").GetString().Should().Be("matter");
+        parent.GetProperty("recordId").GetGuid().Should().Be(matter);
+        parent.GetProperty("name").GetString().Should().Be("Falcon");
+        locked.GetProperty("parentUnverifiable").GetBoolean().Should().BeFalse();
+
+        (await GateOf("workassignment", parentless)).GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+
+        var unknown = await GateOf("workassignment", unreadable);
+        unknown.GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+        unknown.GetProperty("parentUnverifiable").GetBoolean().Should().BeTrue("never 'no parent' on a guess");
+
+        (await GateOf("matter", matter)).GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+    }
+
     /// <summary>A caller without Write gets the filter's 403 even when asking for the owner — and no owner read is made.</summary>
     [Fact]
     public async Task GetCanManageAccess_WithIncludeOwner_ForCallerWithoutWrite_IsDeniedAndReadsNoOwner()

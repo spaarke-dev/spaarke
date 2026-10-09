@@ -303,11 +303,14 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// unreadable parent's No Access list (owner round 31 item 1), so provisioning, a create and a re-file all refuse
 /// (<c>sdap.provision.creator_no_access_unverifiable</c>) until it can be read, and the job reports it. A parent that does
 /// not exist is not a secure parent (it confers nothing).</para>
-/// <para><b>Never auto-unsecure</b> (owner round 6 item 4): nothing here ever takes a record OUT of isolation. A record re-filed
-/// away from its secure parent, or whose parent is unsecured, stays secure; unsecuring it is the unsecure endpoint's act
-/// (F3). Its ACCESS is another matter (main-session round 39 item 1): unsecuring a parent ends the unmodified shares it passed
-/// on (<see cref="EndWhatAParentPassedOnAsync"/>, called by the unsecure after it revokes the parent's own shares) — the filed
-/// record is still secure, and a sharee's access to it came only from the parent share just revoked.</para>
+/// <para><b>Both ways — task 175, owner round 84</b> ("if parent changes, then child changes"; REPLACES round 6 item 4's "never
+/// auto-unsecure" and task 158's constraint of that name): a record re-filed away from its secure parent, or whose parent is
+/// unsecured, FOLLOWS it out of isolation when no other ancestor is secure — through the unsecure endpoint's own steps
+/// (<see cref="FollowParentsAsync"/>, SecureRootInheritance.Cascade.cs), from the parent's unsecure, the re-file writers
+/// and the job — and its Access Permission follows too. A record WITH a parent cannot be un-secured (or its Access
+/// Permission set) on its own (<see cref="AccessFollowsParent"/>); F3 applies only to a parentless record. Unsecuring a
+/// parent still ends the unmodified shares it passed on first (<see cref="EndWhatAParentPassedOnAsync"/>, main-session
+/// round 39 item 1), before its filed records follow it.</para>
 /// <para><b>Triggers.</b> (1) create: the BFF writers call <see cref="PlanCreateAsync"/> before the write and create the
 /// row INTO isolation (owner round 31 item 2), then <see cref="CompleteIsolatedCreateAsync"/>; (2) re-file: they call
 /// <see cref="CheckRefileAsync"/> before the write and <see cref="SecureAfterWriteAsync"/> after it; (3) a parent becoming
@@ -319,7 +322,7 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// <c>sprk_assignedaccess</c> ledger (owner round 30) — and a parent's UNSECURE ends them all
 /// (<see cref="EndWhatAParentPassedOnAsync"/>, round 39 item 1).</para>
 /// </remarks>
-public sealed class SecureRootInheritance
+public sealed partial class SecureRootInheritance
 {
     internal const string WorkAssignment = "sprk_workassignment";
     internal const string Project = "sprk_project";
@@ -406,6 +409,7 @@ public sealed class SecureRootInheritance
     /// (3)), so there is no cycle.</param>
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? _fileRelocator;
+    private readonly IRecordOwnershipResolver _ownership;
 
     public SecureRootInheritance(
         IGenericEntityService dataverse,
@@ -423,8 +427,13 @@ public sealed class SecureRootInheritance
         // and the Make Secure file relocation (round 26 item 3). Optional so this service's test compositions keep
         // compiling; the host registers both (IMembershipCacheInvalidator unconditionally, with its Null-Object).
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null)
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null,
+        // Task 175: the ONE ownership rule, for the owner a cascaded un-secure gives a record (its parents' business unit's
+        // team). Optional for the same reason; without it the rule is constructed over this class's own reader.
+        IRecordOwnershipResolver? ownership = null)
     {
+        _ownership = ownership ?? new RecordOwnershipResolver(dataverse, configuration,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
         _accessCacheInvalidator = accessCacheInvalidator ?? new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance);
         _fileRelocator = fileRelocator;
@@ -486,10 +495,11 @@ public sealed class SecureRootInheritance
         if (!Inherits(table))
             return null;
 
+        var materialized = writes as IReadOnlyCollection<KeyValuePair<string, object?>> ?? writes.ToList();
         List<FilingWrite> filingWrites;
         try
         {
-            filingWrites = FilingWritesIn(table, writes);
+            filingWrites = FilingWritesIn(table, materialized);
         }
         catch (FilingValueException ex)
         {
@@ -498,7 +508,13 @@ public sealed class SecureRootInheritance
             return Refused(table, ex.Message);
         }
 
-        if (filingWrites.Count == 0)
+        // Task 175 (owner round 84): an UPDATE that sets sprk_accesspermission or sprk_issecure on a record that will have a
+        // parent after the write is refused — "if a child has a parent then the access cannot be changed manually". A create
+        // is not refused: the cascade sets its values from its parents (the job, ≤ 5 minutes; enforcement already follows the
+        // parent, task 174).
+        var setsLocked = recordId is not null
+                         && materialized.Any(w => AccessFollowsParent.LockedColumns.Contains(NormalizeColumn(w.Key)));
+        if (filingWrites.Count == 0 && !setsLocked)
             return null;
 
         FilingFacts after;
@@ -513,7 +529,24 @@ public sealed class SecureRootInheritance
             return Refused(table, "the record could not be read, so what it would be filed under cannot be checked");
         }
 
-        var answer = await DecideParentsAsync(after, ct).ConfigureAwait(false);
+        var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct).ConfigureAwait(false);
+        if (setsLocked)
+        {
+            if (filedUnder.Count > 0)
+            {
+                var noun = table.Trim().Equals(Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment";
+                return Refusal(AccessFollowsParent.ReasonCode,
+                    $"this {noun} is filed under {AccessFollowsParent.Describe(filedUnder.Select(p => new SecureFilingParent(p.Table, p.Id, p.Name)).ToList())}, " +
+                    $"and its Secure designation and Access Permission follow it (owner round 84); they cannot be set on the {noun}, " +
+                    "so it was not written");
+            }
+
+            if (!answer.IsKnown)
+                return Refused(table, answer.Unverifiable!); // whether it has a parent is unknown: never "parentless" on a guess
+
+            if (filingWrites.Count == 0)
+                return null; // a parentless record keeps and edits its own values
+        }
 
         // Secure-if-any: a readable secure parent means the record is secured after the write whatever another parent says
         // (securing is the closed direction). Only when no parent is readably secure does an unreadable one refuse.
@@ -615,13 +648,33 @@ public sealed class SecureRootInheritance
 
         try
         {
-            var result = await SecureIfFiledUnderSecureAsync(table, recordId, traceId ?? Guid.NewGuid().ToString("N"), ct)
-                .ConfigureAwait(false);
+            var trace = traceId ?? Guid.NewGuid().ToString("N");
+            var result = await SecureIfFiledUnderSecureAsync(table, recordId, trace, ct).ConfigureAwait(false);
             if (!result.IsComplete)
             {
                 _logger.LogError(
                     "[SECURE-INHERIT] {Table} {RecordId} was written but is not secured yet ({Outcome}, {Code}: {Detail}); the " +
                     "secure-root inheritance job retries it.", table, recordId, result.Outcome, result.ReasonCode, result.Detail);
+            }
+
+            // Task 175 (owner round 84, goal 2): a re-file recomputes its stored values both ways — re-filed away from its
+            // secure parent it follows its new parents out of isolation (the unsecure endpoint's own steps), and its Access
+            // Permission follows them. A record left with no parent keeps its values (and becomes editable). Never throws;
+            // what does not complete is left at the more restrictive state for the job.
+            if (result.Outcome is not (SecureRootInheritOutcome.NotFound or SecureRootInheritOutcome.Unverifiable))
+            {
+                var follow = await FollowParentsAsync(table, recordId, trace, ct).ConfigureAwait(false);
+                if (!follow.IsComplete)
+                {
+                    _logger.LogWarning(
+                        "[FOLLOW-PARENT] {Table} {RecordId} was re-filed but is not in step with its parents yet ({Outcome}, {Code}: " +
+                        "{Detail}); the secure-root inheritance job completes it.", table, recordId, follow.Outcome, follow.ReasonCode,
+                        follow.Detail);
+                }
+
+                // A project that changed carries the change down to what is filed under it (bounded; the job does the rest).
+                if (IsParent(table) && follow.WroteAnything)
+                    await CascadeBelowAsync(table, recordId, trace, ct).ConfigureAwait(false);
             }
 
             return result;

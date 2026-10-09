@@ -123,6 +123,15 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.44 (task 175, unified-access-control-r2 — owner round 84: "a child's access always follows its parent, both ways,
+ *   and is locked while it has a parent"): `evaluateGrantGate` also keeps `followsParents` / `parentUnverifiable` from the
+ *   same `can-manage-access` answer (only from an answer naming THIS record; reset when the form rebinds). Non-empty
+ *   `followsParents`: the Access Permission pill is read-only (`accessPermissionDisabled`), and the bundled
+ *   `AccessGrantModal` receives `followsParents` + `onOpenParent` (`context.navigation.openForm` on `sprk_matter` /
+ *   `sprk_project`), so it hides every write action and names the parent. A caller without Write still gets the filter's
+ *   403 (the "no permission" state), distinct from this locked state. The modal also shows inherited user shares
+ *   read-only and maps the 409 `sdap.access.access_follows_parent` to the same locked state.
+ *
  * v1.0.43 (task 174, unified-access-control-r2 — owner round 84; task 067's amendment): no change in this file's logic;
  *   the bundled `AccessGrantModal` gates its options, explains its banner ("It follows the {matter|project} it is filed
  *   under: {name}.") and marks "No effect" from the record's EFFECTIVE access that task 064's read now reports — the
@@ -230,7 +239,9 @@ import {
   type IContactOrganizationMembership,
   type ExternalGrantRootType,
   type AccessPermissionState,
+  type IFollowsParent,
   resolveAccessPermissionState,
+  parseFollowsParents,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Spaarke theme resolution (ADR-021 dark mode): the user's Spaarke theme choice, then the MDA's own theme — the same
 // helpers the Communication PCFs use.
@@ -409,6 +420,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * field write and form refresh — from issuing one OBO exchange plus two Dataverse calls per
    * refresh while an answer is already in flight. */
   private grantGateRequestedFor: string | null | undefined = undefined;
+
+  /** Task 175 (owner round 84): the bound record's DIRECT filing parents whose access it follows, from the same
+   * `can-manage-access` answer as {@link canGrantAccessValue} (`followsParents`). Non-empty: the record's access is locked
+   * — Manage Access shows the parent instead of its write actions, and the Access Permission pill is read-only. `[]`
+   * until a 200 naming THIS record says otherwise, and on every failure (the server refuses the writes anyway). */
+  private followsParentsValue: IFollowsParent[] = [];
+
+  /** Task 175: the server could not read what the bound record is filed under (`parentUnverifiable`). Not treated as
+   * locked here — the server decides each write; kept so the state is diagnosable. */
+  private parentUnverifiableValue = false;
 
   /** The bound record's `sprk_issecure`, read for GATING (task 138): `true` / `false` from a successful
    * read, `null` while unread or when the read fails or the value is hidden (field-level security). The
@@ -645,6 +666,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
     this.grantGateRequestedFor = recordId;
     this.canGrantAccessValue = false;
+    // Task 175: nor the previous record's parents.
+    this.followsParentsValue = [];
+    this.parentUnverifiableValue = false;
     void this.evaluateGrantGate(recordId);
   }
 
@@ -760,6 +784,22 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }
   };
 
+  /** Opens a parent the record's access follows (task 175) on its own form. Manage Access closes first: the form
+   * navigates away from this record. The BFF names the parent `'matter'` or `'project'`; this host maps it to its table. */
+  private openParentRecord = (parent: IFollowsParent): void => {
+    const entityName = parent.recordType === 'matter' ? 'sprk_matter' : 'sprk_project';
+    this.isGrantModalOpen = false;
+    this.grantModalSection = undefined;
+    this.renderControl();
+    try {
+      void Promise.resolve(this.context.navigation.openForm({ entityName, entityId: parent.recordId })).catch(err =>
+        console.warn('[TrackingFieldTrio] open parent record failed.', err)
+      );
+    } catch (err) {
+      console.warn('[TrackingFieldTrio] open parent record failed.', err);
+    }
+  };
+
   /** The bound record's primary-name value (e.g. the matter number) for the email
    * "Related to" chip (task 073 UAT v1.0.24 #9). Read from the form entity's
    * primary attribute — entity-agnostic, no metadata call. Undefined outside an
@@ -857,7 +897,13 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         return;
       }
 
-      const body = (await res.json()) as { recordId?: string; canManageAccess?: boolean } | null;
+      const body = (await res.json()) as {
+        recordId?: string;
+        canManageAccess?: boolean;
+        // Task 175: additive; absent from an older BFF (then: not locked).
+        followsParents?: unknown;
+        parentUnverifiable?: unknown;
+      } | null;
 
       // `canManageAccess === true` exactly — not truthy. A body that omits the field, or carries a
       // truthy-but-wrong value, is an answer this client does not understand, and an answer it does not
@@ -884,7 +930,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         );
       }
 
-      this.setGrantGate(recordId, answeredYes && answersThisRecord);
+      // Task 175: the parents are kept only from an answer about THIS record.
+      const followsParents = answersThisRecord ? parseFollowsParents(body?.followsParents) : [];
+      const parentUnverifiable = answersThisRecord && body?.parentUnverifiable === true;
+      if (parentUnverifiable) {
+        console.info(
+          `[TrackingFieldTrio] What ${recordType} ${recordId} is filed under could not be read; the server decides each access change.`
+        );
+      }
+
+      this.setGrantGate(recordId, answeredYes && answersThisRecord, followsParents, parentUnverifiable);
     } catch (err) {
       console.warn(
         `[TrackingFieldTrio] Could not establish whether you may manage access on ${recordType} ${recordId}; ` +
@@ -905,12 +960,19 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * staleness check belongs in ONE place: a slow answer for a record the form has since left must be
    * dropped, and dropping it in four separate places is three chances to forget.
    */
-  private setGrantGate(answeredFor: string | null, canGrant: boolean): void {
+  private setGrantGate(
+    answeredFor: string | null,
+    canGrant: boolean,
+    followsParents: IFollowsParent[] = [],
+    parentUnverifiable = false
+  ): void {
     if (this.grantGateRequestedFor !== answeredFor) {
       return;
     }
 
     this.canGrantAccessValue = canGrant;
+    this.followsParentsValue = followsParents;
+    this.parentUnverifiableValue = parentUnverifiable;
     this.renderControl();
   }
 
@@ -1382,7 +1444,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.43 • Built 2026-10-08',
+      versionText: 'v1.0.44 • Built 2026-10-09',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1434,7 +1496,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       canGrantAccess: this.canGrantAccessValue,
       // Task 138 — read-only form / non-editable column / unbound column / secure display (O1 FINAL).
       disabled: controlDisabled,
-      accessPermissionDisabled: !this.isAccessPermissionEditable(),
+      // Task 175: also read-only while the record has a parent whose access it follows (the server refuses the write).
+      accessPermissionDisabled: !this.isAccessPermissionEditable() || this.followsParentsValue.length > 0,
       showAccessPermission: accessPermissionBound,
       secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
       // Task 153: the access-status indicator (undefined while unasked or in flight → nothing drawn).
@@ -1527,6 +1590,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
                     // Task 067: contacts in a walled organization are marked walled off in Current Access.
                     fetchContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
+                    // Task 175: a record filed under a matter or project is locked here and names its parent.
+                    followsParents: this.followsParentsValue,
+                    onOpenParent: this.openParentRecord,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the

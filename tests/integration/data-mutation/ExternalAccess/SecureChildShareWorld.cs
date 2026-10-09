@@ -285,6 +285,12 @@ internal sealed class SecureChildShareWorld
                     ? DataversePrincipalRef.User(user.Id)
                     : null;
 
+    /// <summary>Task 175: a column's current value on a row (<c>default</c> when the row or the column is absent).</summary>
+    public T? ValueOf<T>(string table, Guid id, string column) =>
+        _rows.TryGetValue((table, id), out var row) && row.Attributes.TryGetValue(column, out var value) && value is T typed
+            ? typed
+            : default;
+
     /// <summary>Task 148: sets a column on an existing row (a host harness mirroring its root's flag).</summary>
     public void Set(string table, Guid id, string column, object? value)
     {

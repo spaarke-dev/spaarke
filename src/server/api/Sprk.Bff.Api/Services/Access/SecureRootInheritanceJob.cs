@@ -18,8 +18,16 @@ namespace Sprk.Bff.Api.Services.Access;
 /// path that wrote it, so no writer can hide a filed record from it (POML escalation trigger: does not fire). It is also
 /// where a parent's later share change (a model-driven-app Share, a <c>/share-user</c>) reaches its filed records.</para>
 /// <para><b>Writes ON, enabled</b> (owner R3/R4: minutes, never hourly; round 6: such a record IS secure). Every write is
-/// provisioning's own (the record's creator shared first, read back, compensated) or the synchronizer's add-only mirror —
-/// nothing here takes a record out of isolation (round 6 item 4: never auto-unsecure).</para>
+/// provisioning's own (the record's creator shared first, read back, compensated) or the synchronizer's add-only mirror.</para>
+/// <para><b>Both ways (task 175, owner round 84; replaces round 6 item 4's "never auto-unsecure").</b> After the securing
+/// loop, every work assignment and project filed under SOMETHING is decided over the one batched walk
+/// (<see cref="SecureRootInheritance.FollowParentsPassAsync"/>): one whose secure parents are all no longer secure follows
+/// them out of isolation through the unsecure endpoint's own steps (ownership to the parents' business unit's team first,
+/// the flag cleared last), and one whose Access Permission differs from its parents' is written (one column). Only what
+/// differs is written; a project changed here sends what is filed under it round again in the same run; un-secures are
+/// bounded (<see cref="MaxUnsecuresPerRun"/>, a cursor like the provisionings') and so are the Access Permission writes
+/// (<see cref="MaxPermissionWritesPerRun"/>). A record that cannot be decided, or whose step did not complete, stays at the
+/// more restrictive state and fails the run, named; the next run completes it.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: each record's step is idempotent and read back (an isolated record is only given a
 /// missing sharee), so no claim marker. Rule 4: a run that could not LIST the parents or the filed records throws — a
 /// failed scan is a failed run, nothing decided; a run in which some record could not be secured, or some record was
@@ -56,6 +64,12 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
     /// <summary>Provisionings per run (each creates a container); the rest wait for the next run.</summary>
     internal const int MaxProvisioningsPerRun = 25;
 
+    /// <summary>Task 175: un-secures per run (each moves ownership and revokes shares); the rest wait for the next run.</summary>
+    internal const int MaxUnsecuresPerRun = 25;
+
+    /// <summary>Task 175: Access Permission writes per run (one column each); the rest wait for the next run.</summary>
+    internal const int MaxPermissionWritesPerRun = 500;
+
     /// <summary>Records listed in <c>ResultJson</c> (the per-record log lines are complete).</summary>
     internal const int MaxSampledRecords = 200;
 
@@ -87,7 +101,9 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
     /// <inheritdoc />
     public string Description =>
         "Makes every work assignment and project filed under a secure matter or project secure itself (its own owner team, " +
-        "container and creator share), and gives each its secure parents' sharees (task 158, owner round 6).";
+        "container and creator share), and gives each its secure parents' sharees (task 158, owner round 6); un-secures one " +
+        "whose secure parents are no longer secure and keeps every filed one's Access Permission equal to its parents' " +
+        "(task 175, owner round 84).";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -185,8 +201,30 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
         lock (_cursorGate)
             _cursor = deferred > 0 ? lastProvisioned : null;
 
+        // Task 175 (owner round 84): the other direction, and the Access Permission. A listing that cannot complete throws
+        // (ADR-036 A1 rule 4) — a failed run, nothing decided on part of it.
+        (string Table, Guid Id)? unsecureAfter;
+        lock (_cursorGate)
+            unsecureAfter = _unsecureCursor;
+        var follow = await inheritance.FollowParentsPassAsync(
+            traceId, unsecureAfter, MaxUnsecuresPerRun, MaxPermissionWritesPerRun, cancellationToken).ConfigureAwait(false);
+        lock (_cursorGate)
+            _unsecureCursor = follow.UnsecureResumeAfter;
+        if (follow.Undetermined + follow.NotCompleted > 0)
+        {
+            incomplete.Add($"{follow.Undetermined + follow.NotCompleted} filed record(s) not brought into step with their parents " +
+                           $"(left at the more restrictive state): {string.Join("; ", follow.Problems.Take(20))}");
+        }
+
+        _logger.Log(
+            follow.IsComplete ? LogLevel.Information : LogLevel.Warning,
+            "[FOLLOW-PARENT] run={RunId} listed={Listed} parentless={Parentless} inStep={InStep} unsecured={Unsecured} " +
+            "permissions={Permissions} undetermined={Undetermined} notCompleted={NotCompleted} deferred={Deferred}",
+            context.RunId, follow.Listed, follow.Parentless, follow.InStep, follow.Unsecured, follow.PermissionsChanged,
+            follow.Undetermined, follow.NotCompleted, follow.Deferred);
+
         var duration = _timeProvider.GetElapsedTime(started);
-        var success = incomplete.Count == 0 && deferred == 0;
+        var success = incomplete.Count == 0 && deferred == 0 && follow.Deferred == 0;
         int Count(SecureRootInheritOutcome outcome) => counts.TryGetValue(outcome, out var n) ? n : 0;
 
         // THE HEARTBEAT (ADR-036 A1 rule 5) — every attempt, including one with nothing to do.
@@ -214,6 +252,9 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     deferred == 0 ? null
                         : $"{deferred} filed record(s) were deferred past this run's bound of {MaxProvisioningsPerRun} " +
                           "provisionings; the next run continues from where this one stopped.",
+                    follow.Deferred == 0 ? null
+                        : $"{follow.Deferred} filed record(s) were not brought into step with their parents past this run's bounds " +
+                          $"({MaxUnsecuresPerRun} un-secures, {MaxPermissionWritesPerRun} Access Permission writes); the next run continues.",
                 }.Where(m => m is not null)),
             ProcessedItems: filed.Count - deferred,
             Duration: duration,
@@ -234,6 +275,21 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 sharesWritten,
                 // Task 158 r1: inherited shares on records no longer filed under the parent that passed them on.
                 unfiledProvenance = new { ended = unvisited.Rows, removed = unvisited.Removed, kept = unvisited.Kept, notDone = unvisited.NotDone },
+                // Task 175 (owner round 84): every filed record brought into step with its parents, both ways.
+                followParents = new
+                {
+                    listed = follow.Listed,
+                    parentless = follow.Parentless,
+                    inStep = follow.InStep,
+                    unsecured = follow.Unsecured,
+                    permissionsChanged = follow.PermissionsChanged,
+                    undetermined = follow.Undetermined,
+                    notCompleted = follow.NotCompleted,
+                    deferred = follow.Deferred,
+                    resumeAfter = follow.UnsecureResumeAfter is { } u ? $"{u.Table}:{u.Id:D}" : null,
+                    problems = follow.Problems,
+                    changes = follow.Changes,
+                },
                 incomplete = incomplete.Take(50).ToArray(),
                 records = sampled,
                 attempt = context.Attempt,
@@ -294,4 +350,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
     // observed state.
     private readonly object _cursorGate = new();
     private (string Table, Guid Id)? _cursor;
+
+    // Task 175: the un-secure pass's cursor — the last record it tried while it deferred others (same rules as _cursor).
+    private (string Table, Guid Id)? _unsecureCursor;
 }

@@ -159,6 +159,22 @@
  *     different; a walled-off row shows the veto.
  * "No Access" is a veto, never a level (spec FR-23): it is offered by no level
  * dropdown in this modal. Rules: `noAccess.ts`.
+ *
+ * ACCESS FOLLOWS THE PARENT (unified-access-control-r2 task 175, owner round
+ * 84: "a child's access always follows its parent, both ways, and is locked
+ * while it has a parent"). A work assignment or project filed under a matter or
+ * project is LOCKED here: the host passes its direct parents as
+ * `followsParents` (from `can-manage-access`), or the server refuses a write
+ * with 409 `sdap.access.access_follows_parent`. Locked, the modal hides
+ * Suggested Access, Add Access Permissions (+ Contact / + Organization /
+ * + User, the candidates and their level dropdowns, Add) and every Revoke, and
+ * shows ONE info bar naming the parent to manage it on (a link when the host
+ * supplies `onOpenParent`). Current Access and the No Access List stay
+ * visible, read-only. This is distinct from the no-permission state
+ * (`canGrantAccess` false, the filter's 403). A user share a secure parent
+ * passed on to the record (`inheritedFrom` on `/user-shares`) is an
+ * `'inherited'` row: read-only on any record, and marked for No Access exactly
+ * as a direct user share is. Rules: `followsParent.ts`.
  */
 
 import * as React from 'react';
@@ -196,8 +212,17 @@ import type {
   IUserPick,
   ISecureOwnerInfo,
   IRecordNoAccessEntry,
+  IFollowsParent,
 } from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
+import {
+  ACCESS_FOLLOWS_PARENT_REASON_CODE,
+  followsParentFallbackMessage,
+  otherParentsSuffix,
+  parentTypeLabel,
+  parseFollowsParent,
+  describeInheritedShare,
+} from './followsParent';
 import { cleanGuid } from '../../utils/guid';
 import {
   buildNoAccessPath,
@@ -214,7 +239,7 @@ import {
   suppressionFor,
   vetoFor,
 } from './noAccess';
-import type { IEffectiveRecordAccess, NoAccessSectionState } from './noAccess';
+import type { IEffectiveRecordAccess, IKnownDirectParent, NoAccessSectionState } from './noAccess';
 
 const useStyles = makeStyles({
   section: {
@@ -407,13 +432,20 @@ class AccessGrantModalApiError extends Error {
    * build the three-outcome notice via {@link buildRevokeNotice}. */
   readonly deactivatedCount?: number;
   readonly speContainerOutcome?: SpeContainerRevokeOutcome;
+  /** The ProblemDetails' own `detail`, when it carried one (`detail` above falls back to the title or the status). */
+  readonly problemDetail?: string;
+  /** Task 175: the parent named by a 409 `access_follows_parent` (`parentRecordType`/`parentRecordId`/`parentName`). */
+  readonly followsParent?: IFollowsParent;
+  /** Task 175: the 409's `parentRecordType` as sent, kept for the fallback sentence when the parent did not parse. */
+  readonly parentRecordType?: string;
 
   constructor(
     status: number,
     detail: string,
     reasonCode?: string,
     deactivatedCount?: number,
-    speContainerOutcome?: SpeContainerRevokeOutcome
+    speContainerOutcome?: SpeContainerRevokeOutcome,
+    extras?: { problemDetail?: string; followsParent?: IFollowsParent; parentRecordType?: string }
   ) {
     super(`AccessGrantModal request failed (${status}): ${detail}`);
     this.name = 'AccessGrantModalApiError';
@@ -422,6 +454,9 @@ class AccessGrantModalApiError extends Error {
     this.reasonCode = reasonCode;
     this.deactivatedCount = deactivatedCount;
     this.speContainerOutcome = speContainerOutcome;
+    this.problemDetail = extras?.problemDetail;
+    this.followsParent = extras?.followsParent;
+    this.parentRecordType = extras?.parentRecordType;
     // Restore the prototype chain (extending built-ins across ES5/ts-jest
     // transpilation targets can otherwise break `instanceof` checks) — same
     // fix as communicationApi.ts's SendCommunicationError.
@@ -440,6 +475,10 @@ class AccessGrantModalApiError extends Error {
         // carries these today; every other ProblemDetails leaves them undefined.
         deactivatedCount?: number;
         speContainerOutcome?: string;
+        // Task 175: the 409 `access_follows_parent` extensions.
+        parentRecordType?: unknown;
+        parentRecordId?: unknown;
+        parentName?: unknown;
       };
       const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
       const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
@@ -448,7 +487,20 @@ class AccessGrantModalApiError extends Error {
         typeof body?.speContainerOutcome === 'string'
           ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
           : undefined;
-      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
+      const problemDetail = typeof body?.detail === 'string' && body.detail.trim() ? body.detail : undefined;
+      const followsParent =
+        reasonCode === ACCESS_FOLLOWS_PARENT_REASON_CODE
+          ? (parseFollowsParent({
+              recordType: body?.parentRecordType,
+              recordId: body?.parentRecordId,
+              name: body?.parentName,
+            }) ?? undefined)
+          : undefined;
+      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
+        problemDetail,
+        followsParent,
+        parentRecordType: typeof body?.parentRecordType === 'string' ? body.parentRecordType : undefined,
+      });
     } catch {
       return new AccessGrantModalApiError(status, `HTTP ${status}`);
     }
@@ -468,11 +520,29 @@ class AccessGrantModalApiError extends Error {
  * mean the same thing to this UI: "you cannot manage access on this record
  * right now," which is the one designed banner state the project constraint
  * requires (not a raw error, not a retry loop).
+ *
+ * `'followsParent'` (task 175, owner round 84) is the 409 `sdap.access.access_follows_parent`: the record is filed
+ * under a matter or project and its access follows that parent, so no access on it can be changed here. It is the
+ * modal's locked state (the parent banner, every write hidden), with the server's `detail` as its message.
  */
-function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenticated'; message: string } | null {
+interface IAccessFailure {
+  kind: 'delegation' | 'unauthenticated' | 'followsParent';
+  message: string;
+  /** `'followsParent'` only: the parent the 409 named, when it named one. */
+  parent?: IFollowsParent;
+}
+
+function classifyAccessFailure(err: unknown): IAccessFailure | null {
   if (!(err instanceof AccessGrantModalApiError)) return null;
   if (err.status === 401) {
     return { kind: 'unauthenticated', message: 'Your sign-in has expired. Refresh the page and try again.' };
+  }
+  if (err.status === 409 && err.reasonCode === ACCESS_FOLLOWS_PARENT_REASON_CODE) {
+    return {
+      kind: 'followsParent',
+      message: err.problemDetail ?? followsParentFallbackMessage(err.parentRecordType),
+      parent: err.followsParent,
+    };
   }
   if (err.status === 403 && err.reasonCode?.startsWith('sdap.access.deny.delegation_')) {
     return {
@@ -669,6 +739,8 @@ interface IGrantBatchOutcome {
   selectedCount: number;
   failures: number;
   denied: boolean;
+  /** Task 175: the denial was the 409 `access_follows_parent` (the record's access follows its parent), not Write. */
+  deniedFollowsParent?: boolean;
   anyNotifyPending: boolean;
   anyNarrowed: boolean;
   /** The server's `detail` for each grant the record's access policy refused
@@ -692,6 +764,13 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
   const relatedSuffix = relatedPending ? ` ${relatedPending}` : '';
 
+  if (denied && outcome.deniedFollowsParent) {
+    // Task 175: the banner explains the lock; the notice only counts what was written before it.
+    return {
+      intent: 'error',
+      text: `Granted access to ${granted} of ${selectedCount}. Access to this record follows its parent, so the rest were not granted.${relatedSuffix}`,
+    };
+  }
   if (denied) {
     return {
       intent: 'error',
@@ -840,6 +919,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   fetchSecureOwnerInfo,
   fetchContactOrganizationMemberships,
   initialSection,
+  followsParents,
+  onOpenParent,
 }) => {
   const styles = useStyles();
 
@@ -867,7 +948,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const organizationGrantsOffered = accessPermissionState === 'standard';
   // The one explanatory banner per non-standard state (owner O1 FINAL, 2026-10-01); task 174 names the parent the state
   // follows when it is inherited.
-  const permissionBanner = describeAccessPermission(accessPermissionState, isSecureRecord, describeInheritedFrom(serverAccess));
+  const permissionBanner = describeAccessPermission(
+    accessPermissionState,
+    isSecureRecord,
+    describeInheritedFrom(serverAccess)
+  );
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
@@ -904,10 +989,20 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // Persists across the SAME modal session (not per-call) so once the server
   // has said "no", every write action stays disabled until the modal is
   // reopened — reset alongside the rest of the transient state below.
-  const [accessDenyState, setAccessDenyState] = React.useState<{
-    kind: 'delegation' | 'unauthenticated';
-    message: string;
-  } | null>(null);
+  const [accessDenyState, setAccessDenyState] = React.useState<IAccessFailure | null>(null);
+
+  // Task 175 (owner round 84): a record filed under a matter or project follows its parent's access and is LOCKED here
+  // while it has one — from the host's `followsParents`, or from the server's 409 `access_follows_parent` on a write in
+  // this session (a stale form). Locked: every write affordance is hidden (Suggested Access, Add Access Permissions,
+  // Revoke); Current Access and the No Access List stay visible, read-only.
+  const hostLockParents = followsParents ?? [];
+  const lockedToParent = hostLockParents.length > 0 || accessDenyState?.kind === 'followsParent';
+  const lockParents: IFollowsParent[] =
+    hostLockParents.length > 0
+      ? hostLockParents
+      : accessDenyState?.kind === 'followsParent' && accessDenyState.parent
+        ? [accessDenyState.parent]
+        : [];
 
   // Secure-record owner/BU read-only display (task 065, design.md §6).
   const [secureOwnerInfo, setSecureOwnerInfo] = React.useState<ISecureOwnerInfo | null>(null);
@@ -950,7 +1045,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [showsThisRecord]
   );
   const setDenyIfCurrent = React.useCallback(
-    (deny: { kind: 'delegation' | 'unauthenticated'; message: string }) => {
+    (deny: IAccessFailure) => {
       if (showsThisRecord()) setAccessDenyState(deny);
     },
     [showsThisRecord]
@@ -997,21 +1092,37 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         accessLevel?: number | null;
         modifiedOn?: string;
         externalNoAccess?: boolean;
+        // Task 175: the secure parent that passed this share on (task 158's provenance); absent/null = a direct share.
+        inheritedFrom?: { recordType?: unknown; recordId?: unknown } | null;
       }>;
     }>(`/api/v1/external-access/user-shares?${query}`);
-    return (data.shares ?? []).map(s => ({
-      contactId: s.systemUserId,
-      fullName: s.fullName ?? '(unknown user)',
-      // Unmapped mask (a share holding rights outside the three levels) reads
-      // as `null` server-side; 0 is a safe sentinel — it matches none of the
-      // fixed ExternalAccessLevel option values, so the row falls through to
-      // the "Custom" display below rather than rendering a raw `null`.
-      accessLevel: s.accessLevel ?? 0,
-      grantedDate: s.modifiedOn,
-      provenance: 'share' as const,
-      // Task 114: Restricted record + user flagged external — shown as "External user — no access" until removed.
-      externalNoAccess: s.externalNoAccess === true,
-    }));
+    return (data.shares ?? []).map(s => {
+      const from = s.inheritedFrom;
+      // Any inheritedFrom object makes the row read-only (inherited), even one whose fields are off-contract: a share
+      // the parent owns is never offered for revoke here.
+      const inheritedFrom =
+        from && typeof from === 'object'
+          ? {
+              recordType: typeof from.recordType === 'string' ? from.recordType : '',
+              recordId: typeof from.recordId === 'string' ? from.recordId : '',
+            }
+          : undefined;
+      const row: IAccessGrantRecord = {
+        contactId: s.systemUserId,
+        fullName: s.fullName ?? '(unknown user)',
+        // Unmapped mask (a share holding rights outside the three levels) reads
+        // as `null` server-side; 0 is a safe sentinel — it matches none of the
+        // fixed ExternalAccessLevel option values, so the row falls through to
+        // the "Custom" display below rather than rendering a raw `null`.
+        accessLevel: s.accessLevel ?? 0,
+        grantedDate: s.modifiedOn,
+        provenance: inheritedFrom ? 'inherited' : 'share',
+        // Task 114: Restricted record + user flagged external — shown as "External user — no access" until removed.
+        externalNoAccess: s.externalNoAccess === true,
+      };
+      if (inheritedFrom) row.inheritedFrom = inheritedFrom;
+      return row;
+    });
   }, [getJson, recordType, recordId]);
 
   /** Reads the record's Assigned-To ledger (task 142) — a direct, entity-agnostic BFF call like `/user-shares`, behind
@@ -1325,6 +1436,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   }
   const availableItems = React.useMemo<IAvailableItem[]>(() => {
     const items: IAvailableItem[] = [];
+    // Task 175: a record whose access follows its parent offers nothing to add (and Save then stages nothing).
+    if (lockedToParent) return items;
     // Task 138: a Restricted record offers no contact rows at all (candidates or looked-up),
     // and a Limited/Secure record no organization rows — the server would refuse them.
     if (contactGrantsOffered) {
@@ -1361,7 +1474,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       });
     }
     return items;
-  }, [candidates, lookedUpContacts, lookedUpOrgs, lookedUpUsers, contactGrantsOffered, organizationGrantsOffered]);
+  }, [
+    candidates,
+    lookedUpContacts,
+    lookedUpOrgs,
+    lookedUpUsers,
+    contactGrantsOffered,
+    organizationGrantsOffered,
+    lockedToParent,
+  ]);
 
   // Only rows still offered count toward "Add (N)" — a row hidden by the Access-Permission
   // gate (task 138) is never granted, so it must not be counted or enable Add.
@@ -1426,6 +1547,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let anyNotifyPending = false;
     let anyNarrowed = false;
     let denied = false;
+    let deniedFollowsParent = false;
     const policyRefusals: string[] = [];
     const relatedRecordsPending: string[] = [];
     for (const it of selected) {
@@ -1453,6 +1575,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         if (deny) {
           setDenyIfCurrent(deny);
           denied = true;
+          // Task 175: a record whose access follows its parent refuses every further item the same way.
+          deniedFollowsParent = deny.kind === 'followsParent';
           break;
         }
         // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
@@ -1486,12 +1610,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLookedUpUsers([]);
     await loadData();
 
+    // Task 175: refused outright because the record follows its parent: the locked banner says it all.
+    if (deniedFollowsParent && granted === 0) {
+      setNoticeIfCurrent(null);
+      return false;
+    }
     setNoticeIfCurrent(
       buildGrantBatchNotice({
         granted,
         selectedCount: selected.length,
         failures,
         denied,
+        deniedFollowsParent,
         anyNotifyPending,
         anyNarrowed,
         policyRefusals,
@@ -1786,9 +1916,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
   // Task 142: suggestions the server is waiting on (secure records) — contact suggestions only where contacts may be
   // granted (never on Restricted); a linked internal user's suggestion is a share, which Restricted never limits.
-  const pendingSuggestions = assignedEntries.filter(
-    e => e.state === 'PendingConfirmation' && (e.systemUserId || contactGrantsOffered)
-  );
+  // Task 175: none on a record whose access follows its parent (Grant and Dismiss would both be refused).
+  const pendingSuggestions = lockedToParent
+    ? []
+    : assignedEntries.filter(e => e.state === 'PendingConfirmation' && (e.systemUserId || contactGrantsOffered));
   /** The automatic-grant provenance of a Current Access row — the source field that granted it (task 142). */
   const autoSourceFor = (contactId: string): IAssignedAccessEntry | undefined =>
     assignedEntries.find(
@@ -1803,6 +1934,40 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // The delegation/auth deny DOES block revoke — it is one of the "three write
   // actions" the project constraint names explicitly.
   const revokeBlocked = revoking || accessDenyState !== null;
+  // Task 175: on a record whose access follows its parent, Revoke is not offered at all (the parent owns its access).
+  const revokeOffered = !lockedToParent;
+
+  // Task 175: the direct parents the No Access List may name (only a direct parent is ever named, 064's contract).
+  /** "matter {name}" with the name (or, unnamed, the type) as a link that opens the parent when the host can. */
+  const renderParentReference = (parent: IFollowsParent): React.ReactNode => {
+    const label = parentTypeLabel(parent.recordType);
+    const open = onOpenParent ? () => onOpenParent(parent) : undefined;
+    if (!parent.name) {
+      return open ? (
+        <Link inline onClick={open}>
+          {label}
+        </Link>
+      ) : (
+        label
+      );
+    }
+    return (
+      <>
+        {label}{' '}
+        {open ? (
+          <Link inline onClick={open}>
+            {parent.name}
+          </Link>
+        ) : (
+          <strong>{parent.name}</strong>
+        )}
+      </>
+    );
+  };
+
+  const knownDirectParents: IKnownDirectParent[] = serverAccess?.inheritedFrom
+    ? [...lockParents, serverAccess.inheritedFrom]
+    : lockParents;
 
   // Task 067: the walls in force on this record, keyed by subject — what marks a Current Access row walled off.
   const vetoIndex = React.useMemo(
@@ -1869,7 +2034,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 {/* Access-Permission banner (task 073 UAT #4; task 138 + owner O1 FINAL) — ONE
                     bar per non-standard state: Restricted / Secure – Restricted / Secure /
                     Limited. It explains what the hidden options below would have done. */}
-                {permissionBanner && (
+                {/* Task 175: on a record whose access follows its parent this bar is not shown — its text
+                    describes what the dialog offers, and a locked record offers nothing; the parent bar below
+                    replaces it. */}
+                {permissionBanner && !lockedToParent && (
                   <MessageBar intent={permissionBanner.intent} style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
                       <MessageBarTitle>{permissionBanner.title}</MessageBarTitle>
@@ -1878,11 +2046,30 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </MessageBar>
                 )}
 
+                {/* Task 175 (owner round 84): the record's access follows its parent and is locked here. Named
+                    from the host's followsParents, or from the server's 409 when a write was refused. */}
+                {lockedToParent && (
+                  <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <MessageBarBody>
+                      <MessageBarTitle>Access follows the parent</MessageBarTitle>
+                      {lockParents.length > 0 ? (
+                        <>
+                          Access follows the parent {renderParentReference(lockParents[0])}
+                          {otherParentsSuffix(lockParents.length)}; manage it there.
+                        </>
+                      ) : (
+                        (accessDenyState?.message ?? followsParentFallbackMessage(null))
+                      )}
+                    </MessageBarBody>
+                  </MessageBar>
+                )}
+
                 {/* Delegation/auth deny banner (task 008 FR-07 / task 065) — a
                     DESIGNED state per the project constraint, never a toast or
                     raw error. Disables every write action below via
-                    actionsBlocked until the modal is reopened. */}
-                {accessDenyState && (
+                    actionsBlocked until the modal is reopened. Task 175's
+                    follows-parent refusal is shown by the bar above instead. */}
+                {accessDenyState && accessDenyState.kind !== 'followsParent' && (
                   <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
                       <MessageBarTitle>
@@ -1949,142 +2136,144 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 {/* Add Access Permissions (task 073 UAT v1.0.24 #2; task 065 adds "+ User") —
                     role-based members + looked-up contacts/orgs/users. "+ Contact" / "+ Organization" /
                     "+ User" (icon-only, #4) open the NATIVE advanced-lookup pane. Select, choose a
-                    level, Add. */}
-                <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
-                  <div className={styles.sectionHeaderRow}>
-                    <Text className={styles.sectionTitle}>Add Access Permissions</Text>
-                    <div className={styles.sectionHeaderActions}>
-                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
+                    level, Add. Task 175: not rendered on a record whose access follows its parent. */}
+                {!lockedToParent && (
+                  <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
+                    <div className={styles.sectionHeaderRow}>
+                      <Text className={styles.sectionTitle}>Add Access Permissions</Text>
+                      <div className={styles.sectionHeaderActions}>
+                        {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
                           open the native advanced-lookup pane (pickContact/pickOrganization/pickUser). */}
-                      {pickContact && contactGrantsOffered && (
-                        <Tooltip content="Add contact" relationship="label">
-                          <Button
-                            appearance="secondary"
-                            size="small"
-                            icon={<PersonRegular />}
-                            onClick={() => void openContactPicker()}
-                            disabled={actionsBlocked || picking}
-                            aria-label="Add contact"
-                          >
-                            +
-                          </Button>
-                        </Tooltip>
-                      )}
-                      {pickOrganization && organizationGrantsOffered && (
-                        <Tooltip content="Add organization" relationship="label">
-                          <Button
-                            appearance="secondary"
-                            size="small"
-                            icon={<BuildingRegular />}
-                            onClick={() => void openOrgPicker()}
-                            disabled={actionsBlocked || picking}
-                            aria-label="Add organization"
-                          >
-                            +
-                          </Button>
-                        </Tooltip>
-                      )}
-                      {pickUser && (
-                        <Tooltip content="Add user" relationship="label">
-                          <Button
-                            appearance="secondary"
-                            size="small"
-                            icon={<PersonAccountsRegular />}
-                            onClick={() => void openUserPicker()}
-                            disabled={actionsBlocked || picking}
-                            aria-label="Add user"
-                          >
-                            +
-                          </Button>
-                        </Tooltip>
-                      )}
+                        {pickContact && contactGrantsOffered && (
+                          <Tooltip content="Add contact" relationship="label">
+                            <Button
+                              appearance="secondary"
+                              size="small"
+                              icon={<PersonRegular />}
+                              onClick={() => void openContactPicker()}
+                              disabled={actionsBlocked || picking}
+                              aria-label="Add contact"
+                            >
+                              +
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {pickOrganization && organizationGrantsOffered && (
+                          <Tooltip content="Add organization" relationship="label">
+                            <Button
+                              appearance="secondary"
+                              size="small"
+                              icon={<BuildingRegular />}
+                              onClick={() => void openOrgPicker()}
+                              disabled={actionsBlocked || picking}
+                              aria-label="Add organization"
+                            >
+                              +
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {pickUser && (
+                          <Tooltip content="Add user" relationship="label">
+                            <Button
+                              appearance="secondary"
+                              size="small"
+                              icon={<PersonAccountsRegular />}
+                              onClick={() => void openUserPicker()}
+                              disabled={actionsBlocked || picking}
+                              aria-label="Add user"
+                            >
+                              +
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
-                  <div className={styles.listArea}>
-                    {availableItems.length === 0 ? (
-                      <Text className={styles.emptyState}>
-                        {!contactGrantsOffered
-                          ? 'No users yet. Use “+ User” to share this record with a colleague.'
-                          : !organizationGrantsOffered
-                            ? 'No contacts or users yet. Use “+ Contact” or “+ User” to add.'
-                            : 'No contacts, organizations or users yet. Use “+ Contact”, “+ Organization” or “+ User” to add.'}
-                      </Text>
-                    ) : (
-                      availableItems.map(item => (
-                        <div className={styles.row} key={item.id}>
-                          <Checkbox
-                            checked={selectedCandidateIds.has(item.id)}
-                            onChange={() => toggleCandidateSelected(item.id)}
-                            aria-label={`Select ${item.name}`}
-                            disabled={actionsBlocked}
-                          />
-                          <div className={styles.rowMain}>
-                            {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6);
+                    {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
+                    <div className={styles.listArea}>
+                      {availableItems.length === 0 ? (
+                        <Text className={styles.emptyState}>
+                          {!contactGrantsOffered
+                            ? 'No users yet. Use “+ User” to share this record with a colleague.'
+                            : !organizationGrantsOffered
+                              ? 'No contacts or users yet. Use “+ Contact” or “+ User” to add.'
+                              : 'No contacts, organizations or users yet. Use “+ Contact”, “+ Organization” or “+ User” to add.'}
+                        </Text>
+                      ) : (
+                        availableItems.map(item => (
+                          <div className={styles.row} key={item.id}>
+                            <Checkbox
+                              checked={selectedCandidateIds.has(item.id)}
+                              onChange={() => toggleCandidateSelected(item.id)}
+                              aria-label={`Select ${item.name}`}
+                              disabled={actionsBlocked}
+                            />
+                            <div className={styles.rowMain}>
+                              {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6);
                                 organization rows show a building glyph; user rows (task 065) show a
                                 person-accounts glyph — both render plain (no open-record link). */}
-                            {item.kind === 'contact' && item.contact && onOpenContact ? (
-                              <Link
-                                className={styles.contactLink}
-                                onClick={() => onOpenContact(item.contact!.contactId)}
-                              >
-                                {item.name}
-                              </Link>
-                            ) : (
-                              <Text className={styles.rowName}>
-                                {item.kind === 'organization' ? (
-                                  <BuildingRegular />
-                                ) : item.kind === 'user' ? (
-                                  <PersonAccountsRegular />
-                                ) : null}{' '}
-                                {item.name}
-                              </Text>
-                            )}
-                            <Text className={styles.rowMeta}>{item.meta}</Text>
-                          </div>
-                          <div className={styles.rowActions}>
-                            {/* Per-row access level (task 073 v1.0.23) — no default; "Pick access level". */}
-                            <Dropdown
-                              className={styles.rowLevelDropdown}
-                              placeholder="Pick access level"
-                              value={
-                                rowLevels[item.id] !== undefined
-                                  ? (accessLevelOptions.find(o => o.value === rowLevels[item.id])?.label ?? '')
-                                  : ''
-                              }
-                              selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
-                              disabled={actionsBlocked}
-                              onOptionSelect={(_, data) => {
-                                if (data.optionValue) {
-                                  const v = Number(data.optionValue);
-                                  setRowLevels(prev => ({ ...prev, [item.id]: v }));
+                              {item.kind === 'contact' && item.contact && onOpenContact ? (
+                                <Link
+                                  className={styles.contactLink}
+                                  onClick={() => onOpenContact(item.contact!.contactId)}
+                                >
+                                  {item.name}
+                                </Link>
+                              ) : (
+                                <Text className={styles.rowName}>
+                                  {item.kind === 'organization' ? (
+                                    <BuildingRegular />
+                                  ) : item.kind === 'user' ? (
+                                    <PersonAccountsRegular />
+                                  ) : null}{' '}
+                                  {item.name}
+                                </Text>
+                              )}
+                              <Text className={styles.rowMeta}>{item.meta}</Text>
+                            </div>
+                            <div className={styles.rowActions}>
+                              {/* Per-row access level (task 073 v1.0.23) — no default; "Pick access level". */}
+                              <Dropdown
+                                className={styles.rowLevelDropdown}
+                                placeholder="Pick access level"
+                                value={
+                                  rowLevels[item.id] !== undefined
+                                    ? (accessLevelOptions.find(o => o.value === rowLevels[item.id])?.label ?? '')
+                                    : ''
                                 }
-                              }}
-                            >
-                              {accessLevelOptions.map(o => (
-                                <Option key={o.value} value={String(o.value)} text={o.label}>
-                                  {o.label}
-                                </Option>
-                              ))}
-                            </Dropdown>
+                                selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
+                                disabled={actionsBlocked}
+                                onOptionSelect={(_, data) => {
+                                  if (data.optionValue) {
+                                    const v = Number(data.optionValue);
+                                    setRowLevels(prev => ({ ...prev, [item.id]: v }));
+                                  }
+                                }}
+                              >
+                                {accessLevelOptions.map(o => (
+                                  <Option key={o.value} value={String(o.value)} text={o.label}>
+                                    {o.label}
+                                  </Option>
+                                ))}
+                              </Dropdown>
+                            </div>
                           </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        ))
+                      )}
+                    </div>
 
-                  <div className={styles.levelRow}>
-                    <Button
-                      appearance="primary"
-                      disabled={selectedOfferedCount === 0 || approving || actionsBlocked}
-                      icon={approving ? <Spinner size="tiny" /> : undefined}
-                      onClick={handleGrantSelected}
-                    >
-                      Add ({selectedOfferedCount})
-                    </Button>
+                    <div className={styles.levelRow}>
+                      <Button
+                        appearance="primary"
+                        disabled={selectedOfferedCount === 0 || approving || actionsBlocked}
+                        icon={approving ? <Spinner size="tiny" /> : undefined}
+                        onClick={handleGrantSelected}
+                      >
+                        Add ({selectedOfferedCount})
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Current Access (task 073 UAT v1.0.24 #7 — extra top padding above the section) */}
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
@@ -2102,8 +2291,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         //    row to revoke here, so it renders non-revocable with a "Standing" badge;
                         //  - an organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
                         //    standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
+                        //  - an inherited share (task 175) is a user share a secure parent passed on: read-only here.
                         const rowKind = classifyCurrentAccessRow(grant);
-                        const isUserShare = rowKind === 'share';
+                        const isInherited = rowKind === 'inherited';
+                        const isUserShare = rowKind === 'share' || isInherited;
                         const isStanding = rowKind === 'standing';
                         const isOrg = rowKind === 'organization';
                         // Task 067: a wall in force overrides the row; otherwise the record's own policy may cancel
@@ -2116,9 +2307,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         const levelAppearance = vetoReason || suppressedReason ? 'outline' : 'tint';
                         const rowKey = grant.accessRecordId
                           ? grant.accessRecordId
-                          : isUserShare
-                            ? `share-${grant.contactId}`
-                            : `standing-${grant.contactId}`;
+                          : isInherited
+                            ? `inherited-${grant.contactId}`
+                            : isUserShare
+                              ? `share-${grant.contactId}`
+                              : `standing-${grant.contactId}`;
                         return (
                           <div
                             className={styles.row}
@@ -2142,7 +2335,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                 {isUserShare
                                   ? grant.externalNoAccess
                                     ? EXTERNAL_USER_NO_ACCESS_LABEL
-                                    : `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
+                                    : isInherited
+                                      ? `${describeInheritedShare(grant)} — last updated ${formatGrantDate(grant.grantedDate)}`
+                                      : `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
                                   : isStanding
                                     ? 'Standing grant — ongoing access to assigned records'
                                     : isOrg
@@ -2188,22 +2383,26 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                     {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ?? 'Custom'}
                                   </Badge>
                                   <Badge appearance="outline" size="small">
-                                    User (share)
+                                    {isInherited ? 'Inherited' : 'User (share)'}
                                   </Badge>
-                                  <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() =>
-                                      setPendingRevoke({
-                                        kind: 'share',
-                                        systemUserId: grant.contactId,
-                                        fullName: grant.fullName,
-                                      })
-                                    }
-                                    disabled={revokeBlocked}
-                                  >
-                                    Revoke
-                                  </Button>
+                                  {/* Task 175: an inherited share is changed on its parent; nothing is revocable on a
+                                      record whose access follows its parent. */}
+                                  {revokeOffered && !isInherited && (
+                                    <Button
+                                      appearance="subtle"
+                                      size="small"
+                                      onClick={() =>
+                                        setPendingRevoke({
+                                          kind: 'share',
+                                          systemUserId: grant.contactId,
+                                          fullName: grant.fullName,
+                                        })
+                                      }
+                                      disabled={revokeBlocked}
+                                    >
+                                      Revoke
+                                    </Button>
+                                  )}
                                 </>
                               ) : (
                                 <>
@@ -2215,21 +2414,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                     {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ??
                                       grant.accessLevel}
                                   </Badge>
-                                  <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() =>
-                                      setPendingRevoke({
-                                        kind: 'grant',
-                                        accessRecordId: grant.accessRecordId!,
-                                        contactId: grant.contactId,
-                                        fullName: grant.fullName,
-                                      })
-                                    }
-                                    disabled={revokeBlocked}
-                                  >
-                                    Revoke
-                                  </Button>
+                                  {revokeOffered && (
+                                    <Button
+                                      appearance="subtle"
+                                      size="small"
+                                      onClick={() =>
+                                        setPendingRevoke({
+                                          kind: 'grant',
+                                          accessRecordId: grant.accessRecordId!,
+                                          contactId: grant.contactId,
+                                          fullName: grant.fullName,
+                                        })
+                                      }
+                                      disabled={revokeBlocked}
+                                    >
+                                      Revoke
+                                    </Button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -2293,7 +2494,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                   {entry.subjectName ?? entry.name ?? '(no name)'}
                                 </Text>
                                 <Text className={styles.rowMeta}>
-                                  {describeSubjectKind(entry)} · {describeCoverage(entry)}
+                                  {describeSubjectKind(entry)} · {describeCoverage(entry, knownDirectParents)}
                                 </Text>
                                 {notInForce && <Text className={styles.notInForceReason}>{notInForce}</Text>}
                                 {(entry.modifiedByName || entry.modifiedOn) && (

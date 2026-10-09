@@ -64,4 +64,26 @@ public record RecordAccessGateResponse(
     bool CanManageAccess,
     Guid? OwningTeamId = null,
     bool? OwnedBySecureOwnerTeam = null,
-    bool? OwningTeamInSecureBusinessUnit = null);
+    bool? OwningTeamInSecureBusinessUnit = null)
+{
+    /// <summary>
+    /// Task 175 (owner round 84): the matters / projects a work assignment or project is filed under DIRECTLY — non-empty
+    /// means its Secure designation and Access Permission follow them and are LOCKED (Make Secure / Remove Secure hidden,
+    /// Manage Access read-only, a manual change refused 409 <c>sdap.access.access_follows_parent</c>). Always empty for a
+    /// matter. A caller without Write never gets here (the filter's 403 is the "no permission" state), so a 200 with parents
+    /// is "locked: follows parent". Additive: an older client ignores it.
+    /// </summary>
+    public IReadOnlyList<RecordAccessParent> FollowsParents { get; init; } = Array.Empty<RecordAccessParent>();
+
+    /// <summary>
+    /// Task 175: <c>true</c> when what the record is filed under could not be read (then <see cref="FollowsParents"/> is
+    /// empty). A client MUST NOT read it as "no parent": the ribbon hides Make Secure / Remove Secure.
+    /// </summary>
+    public bool ParentUnverifiable { get; init; }
+}
+
+/// <summary>Task 175: a record a work assignment or project is filed under directly.</summary>
+/// <param name="RecordType"><c>matter</c> | <c>project</c>.</param>
+/// <param name="RecordId">The parent's id.</param>
+/// <param name="Name">Its name, or <c>null</c> when it could not be read.</param>
+public record RecordAccessParent(string RecordType, Guid RecordId, string? Name);

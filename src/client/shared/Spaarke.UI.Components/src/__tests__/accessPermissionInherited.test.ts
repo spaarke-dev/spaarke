@@ -34,7 +34,7 @@ function load(retrieveRecord: jest.Mock = jest.fn().mockResolvedValue({})) {
   script.textContent = fs.readFileSync(SCRIPT, 'utf8');
   document.head.appendChild(script);
   const ns = win.Spaarke.AccessPermissionInherited;
-  expect(ns.VERSION).toBe('1.0.0'); // the real script ran
+  expect(ns.VERSION).toBe('1.1.0'); // the real script ran
   return ns;
 }
 
@@ -199,7 +199,7 @@ describe('sprk_accesspermission_inherited.js — lock while the record has a par
     f.pick('sprk_regardingmatter', { id: '{M1}', name: 'Acme v Beta' });
     expect(f.controls[0].disabled).toBe(true);
     expect(f.notifications[NOTIFICATION_ID].text).toBe(
-      'Access permission is inherited from Acme v Beta. It is set when the record is saved.',
+      'Access permission is inherited from Acme v Beta. It is set when the record is saved.'
     );
 
     f.pick('sprk_regardingmatter', null);
