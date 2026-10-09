@@ -10,6 +10,54 @@
 
 ## Open (in priority order)
 
+### ISS-015 — H6, H7 and H7b cannot sign in as the customer BFF app registration under either Worker credential chain
+
+| Field | Value |
+|---|---|
+| **Status** | Open — found by T252 step 1 (2026-10-09); not fixed (outside T252's scope: H3 code + an owner check) |
+| **Urgency** | now — blocks T186 at H6 (first live run) |
+| **Filed** | 2026-10-09 (T252; ISS-014 left free for a parallel agent) |
+| **Source** | T252 step 1 inventory of the dev control plane's Worker credential chain |
+| **GitHub Issue** | not yet created — the main session pairs it (`/project-defer-issue-tracking`) |
+
+**Description**
+
+H6 (solution import), H7 (environment-variable values) and H7b (Secure Record setup) sign in to the customer's
+Dataverse environment as `InterStepState.BffAppRegId` — the per-customer BFF app registration H3 creates (D-13). The
+Worker builds that credential from the FR-39 chain (`WorkerDataverseCredentialFactory.Create`):
+
+- **Secret-free chain `[ManagedIdentityFederated]`** (T252 makes it the default and dev's setting): the Worker presents
+  its own UAMI (`sprk-controlplane-{env}-uami`) as a federated assertion for that app. But H3 gives the app exactly one
+  federated credential, whose subject is the **stamp BFF's** UAMI (`GraphAppRegistrationProvisioner`, FIC recipe:
+  `Subject = request.UamiPrincipalId`). Nothing trusts the L2 Worker UAMI, so Entra refuses the assertion
+  (AADSTS70021 / 700213: no matching federated identity record) at H6's first token request.
+- **Legacy chain `[ClientSecret]`** (dev until T252): the secret slot holds `BFF-API-ClientSecret` from the platform
+  vault — on dev the sentinel `pending-oob-population`, and in any case the secret of the old shared BFF app
+  (`1e40baad`), not of the per-customer app. It cannot authenticate as the per-customer app (AADSTS7000215), and the
+  binding rule forbids creating a real one.
+
+So no configured chain can complete H6/H7/H7b on a Model 1 run today. Unit tests do not catch it: they stop at
+credential construction, and the boot tests deliberately do not exchange tokens (`WorkerSecretFreeBootTests` header).
+H3's adoption check also refuses an existing app carrying a federated credential it did not create (`foreignFics`), so a
+hand-added Worker FIC would block re-runs.
+
+**Suggested fix**
+
+H3 adds a second federated credential on every per-customer BFF app registration, subject = the L2 Worker UAMI
+(`ControlPlaneIdentityOptions.PrincipalObjectId`, already a validated Worker option), issuer = Spaarke's tenant (Model 1),
+audience `api://AzureADTokenExchange`; triple-idempotent like the first; the adoption check accepts exactly these two
+names. Then H6's first live call (T186) is the exchange proof. Owner check before building: confirm the per-customer
+app should trust L2's identity (it already holds Dataverse System Administrator through H10's app user, and L2 already
+owns the app it created), versus a different sign-in identity for H6/H7/H7b. Needed → build, else remove.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs` (FIC recipe ~L1100–1215; adoption check ~L410–440)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/WorkerDataverseCredentialFactory.cs`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/{SolutionImport/H6SolutionImportHandler.cs, EnvVarValues/H7DataverseEnvVarValuesHandler.cs, SecureRecordSetup/H7bSecureRecordSetupHandler.cs}`
+
+---
+
 ### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
 
 | Field | Value |

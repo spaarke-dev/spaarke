@@ -48,8 +48,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 
 /// <summary>
 /// Ordered credential list for the L2 Worker's confidential-client Dataverse
-/// auth as the shared BFF app registration (H7 env-var writes + H6 solution
-/// import). Bound from <c>{Section}:Credentials</c>; mirrors the BFF's
+/// auth as the customer's own BFF app registration (D-13; H7 env-var writes,
+/// H7b Secure Record setup, H6 solution import). Bound from <c>{Section}:Credentials</c>; mirrors the BFF's
 /// <c>Graph:Credentials</c> contract (FR-39 / ADR-028 A4).
 ///
 /// <para><b>Config shape (secret-free environment — §10.2 live contract):</b></para>

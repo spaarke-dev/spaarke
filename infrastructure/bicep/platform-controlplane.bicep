@@ -156,12 +156,14 @@ param serviceBusResourceGroupName string = 'SharePointEmbedded'
 // (DataverseEnvironmentRegistryClient via DefaultAzureCredential pinned to the
 // UAMI); FR-38's acceptance criterion explicitly requires the Bicep residue's
 // absence. The `Dataverse-ClientSecret` KV SECRET itself is untouched
-// (BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml).
+// (BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml)
+// and, since task 252, no longer seeded by Seed-PlatformKeyVault.ps1 --
+// nothing on the control plane references it.
 
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table -- passed through to modules/controlplane-worker-app-service.bicep as DataverseEnvironmentRegistry__AdminEnvironmentUrl (task 122 / task 112 Path X MI-native client). REQUIRED: DataverseEnvironmentRegistryOptions.Validate() fails fast at Worker boot (NFR-05) if this is missing -- no default is supplied here deliberately (dev/staging/prod each target a distinct admin Dataverse environment; a default would risk silently pointing a non-dev deploy at the dev org).')
 param adminDataverseEnvironmentUrl string
 
-@description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
+@description('LEGACY credential chain only (requireSecretFreeIdentity=false). Name of the platform Key Vault secret the Worker EnvVarValues__ClientSecret and SolutionImportOptions__ClientSecret Key Vault references resolve -- passed through to modules/controlplane-worker-app-service.bicep. NOT referenced when requireSecretFreeIdentity=true (the default since task 252). H6, H7 and H7b sign in as the per-customer BFF app registration H3 creates (D-13), so one shared platform secret cannot authenticate as it; the legacy chain survives only for the ADR-028 A4 prong-3 exception (sunset 2026-11-23). Never create, seed or restore this secret in a secret-free environment (provisioning.md KV credential lifecycle rule 1).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
 
@@ -197,8 +199,8 @@ param ciamTenantIds array
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
 
-@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record).')
-param requireSecretFreeIdentity bool = false
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H6, H7 and H7b then authenticate via the Worker UAMI federated assertion. Default TRUE since task 252 (2026-10-09): a new control-plane environment is secret-free, so it never references a secret the binding rule forbids creating. FALSE is a prong-3 opt-in for an unmigrated environment only (SS6.5 resolution record).')
+param requireSecretFreeIdentity bool = true
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -502,14 +504,15 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     ciamTenantIds: ciamTenantIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
-    // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
-    // adminDataverseEnvironmentUrl (target) + bffApiClientSecretName (secret);
-    // adds tenantId + clientId + kill-switch here. Enabled=false by default
-    // per ADR-032 null-object kill-switch (see worker module param docstring).
+    // guard config. Signs in as the control-plane UAMI against
+    // adminDataverseEnvironmentUrl (no client secret since 2026-08-27);
+    // tenantId is diagnostics-only. Enabled=false by default per ADR-032
+    // null-object kill-switch (see worker module param docstring).
     customerRunGuardTenantId: effectiveJwtTenantId
     customerRunGuardEnabled: customerRunGuardEnabled
-    // A44.5 (task 205i; restored by task 245b): secret-free identity mode -- omits the
-    // BFF-API-ClientSecret KV-refs + emits the FR-39 chain settings instead.
+    // A44.5 (task 205i; restored by task 245b; default true since task 252):
+    // secret-free identity mode -- omits the BFF-API-ClientSecret KV-refs +
+    // emits the FR-39 chain settings instead.
     requireSecretFreeIdentity: requireSecretFreeIdentity
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
