@@ -142,11 +142,6 @@ import {
   Tooltip,
   Input,
   Badge,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
   Dialog,
   DialogSurface,
   DialogTitle,
@@ -172,7 +167,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES, formatRelativeTime, getXrm } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, formatRelativeTime, getXrm, RowActionMenu } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -199,6 +194,9 @@ import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilt
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
+
+/** Keys of the per-row ⋯ menu actions. */
+type ManageMenuAction = "pin" | "default" | "up" | "down" | "edit" | "delete";
 
 const useStyles = makeStyles({
   // UAT 2026-07-21: standard Power Apps side-pane width (400px). Overriding
@@ -1079,8 +1077,8 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
         </div>
 
         {/* Three-dot (⋯) action menu */}
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
+        <RowActionMenu<ManageMenuAction>
+          trigger={
             <Tooltip content="More actions" relationship="label">
               <Button
                 className={styles.iconButton}
@@ -1091,112 +1089,90 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
                 data-testid={`manage-more-${layout.id}`}
               />
             </Tooltip>
-          </MenuTrigger>
-          <MenuPopover onClick={(e) => e.stopPropagation()}>
-            <MenuList>
-              {/* 1. Pin / Unpin */}
-              <MenuItem
-                icon={layoutIsPinned ? <PinFilled /> : <PinRegular />}
-                onClick={() => handlePinToggle(layout.id, layout.name)}
-                data-testid={`manage-menu-pin-${layout.id}`}
-              >
-                {layoutIsPinned ? "Unpin" : "Pin"}
-              </MenuItem>
-
-              {/* 2. Set as default */}
-              <Tooltip
-                content={
-                  isDefault
-                    ? "Already the default workspace."
-                    : "Move to the top of the pinned list."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<StarRegular />}
-                  disabled={isDefault}
-                  aria-disabled={isDefault}
-                  onClick={() =>
-                    !isDefault && handleSetAsDefault(layout.id, layout.name)
-                  }
-                  data-testid={`manage-menu-default-${layout.id}`}
-                >
-                  Set as default
-                </MenuItem>
-              </Tooltip>
-
-              {/* 3. Move up */}
-              <Tooltip
-                content={
-                  !layoutIsPinned
-                    ? "Pin this workspace first to reorder it."
-                    : canMoveUp
-                      ? "Move up in pinned order."
-                      : "Already at the top."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<ArrowUpRegular />}
-                  disabled={!canMoveUp}
-                  aria-disabled={!canMoveUp}
-                  onClick={() => canMoveUp && handleMoveUp(layout.id)}
-                  data-testid={`manage-menu-up-${layout.id}`}
-                >
-                  Move up
-                </MenuItem>
-              </Tooltip>
-
-              {/* 4. Move down */}
-              <Tooltip
-                content={
-                  !layoutIsPinned
-                    ? "Pin this workspace first to reorder it."
-                    : canMoveDown
-                      ? "Move down in pinned order."
-                      : "Already at the bottom."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<ArrowDownRegular />}
-                  disabled={!canMoveDown}
-                  aria-disabled={!canMoveDown}
-                  onClick={() => canMoveDown && handleMoveDown(layout.id)}
-                  data-testid={`manage-menu-down-${layout.id}`}
-                >
-                  Move down
-                </MenuItem>
-              </Tooltip>
-
-              {/* 5. Edit */}
-              <Tooltip content={editTooltip} relationship="description">
-                <MenuItem
-                  icon={<EditRegular />}
-                  onClick={() => void handleEdit(layout)}
-                  data-testid={`manage-menu-edit-${layout.id}`}
-                >
-                  Edit
-                </MenuItem>
-              </Tooltip>
-
-              {/* 6. Delete */}
-              <Tooltip content={deleteTooltip} relationship="description">
-                <MenuItem
-                  icon={<DeleteRegular />}
-                  disabled={layout.isSystem}
-                  aria-disabled={layout.isSystem}
-                  onClick={() =>
-                    !layout.isSystem && setDeleteTarget(layout)
-                  }
-                  data-testid={`manage-menu-delete-${layout.id}`}
-                >
-                  Delete
-                </MenuItem>
-              </Tooltip>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+          }
+          stopPopoverPropagation
+          groups={[
+            [
+              // 1. Pin / Unpin
+              {
+                key: "pin",
+                label: layoutIsPinned ? "Unpin" : "Pin",
+                icon: layoutIsPinned ? <PinFilled /> : <PinRegular />,
+                testId: `manage-menu-pin-${layout.id}`,
+              },
+              // 2. Set as default
+              {
+                key: "default",
+                label: "Set as default",
+                icon: <StarRegular />,
+                disabled: isDefault,
+                tooltip: isDefault
+                  ? "Already the default workspace."
+                  : "Move to the top of the pinned list.",
+                testId: `manage-menu-default-${layout.id}`,
+              },
+              // 3. Move up
+              {
+                key: "up",
+                label: "Move up",
+                icon: <ArrowUpRegular />,
+                disabled: !canMoveUp,
+                tooltip: !layoutIsPinned
+                  ? "Pin this workspace first to reorder it."
+                  : canMoveUp
+                    ? "Move up in pinned order."
+                    : "Already at the top.",
+                testId: `manage-menu-up-${layout.id}`,
+              },
+              // 4. Move down
+              {
+                key: "down",
+                label: "Move down",
+                icon: <ArrowDownRegular />,
+                disabled: !canMoveDown,
+                tooltip: !layoutIsPinned
+                  ? "Pin this workspace first to reorder it."
+                  : canMoveDown
+                    ? "Move down in pinned order."
+                    : "Already at the bottom.",
+                testId: `manage-menu-down-${layout.id}`,
+              },
+              // 5. Edit
+              {
+                key: "edit",
+                label: "Edit",
+                icon: <EditRegular />,
+                tooltip: editTooltip,
+                testId: `manage-menu-edit-${layout.id}`,
+              },
+              // 6. Delete
+              {
+                key: "delete",
+                label: "Delete",
+                icon: <DeleteRegular />,
+                disabled: layout.isSystem,
+                tooltip: deleteTooltip,
+                testId: `manage-menu-delete-${layout.id}`,
+              },
+            ],
+          ]}
+          onAction={(key) => {
+            switch (key) {
+              case "pin":
+                return handlePinToggle(layout.id, layout.name);
+              case "default":
+                return handleSetAsDefault(layout.id, layout.name);
+              case "up":
+                return handleMoveUp(layout.id);
+              case "down":
+                return handleMoveDown(layout.id);
+              case "edit":
+                return void handleEdit(layout);
+              case "delete":
+                return setDeleteTarget(layout);
+            }
+          }}
+        />
       </div>
     );
   };

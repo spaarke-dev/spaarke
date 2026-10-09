@@ -10,9 +10,9 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { MetricCard } from './MetricCard';
-import type { MetricCardConfig } from './types';
+import type { MetricCardConfig, MetricCardLayout } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -23,6 +23,10 @@ export interface MetricCardRowProps {
   cards: MetricCardConfig[];
   /** Additional className applied to the grid container. */
   className?: string;
+  /** `square` (default: the Quick Summary grid) or `wide` (not square: the worklist count filters, D-24). */
+  layout?: MetricCardLayout;
+  /** Accessible name of the group. Default "Summary metrics". Give each lane's count filters its own. */
+  ariaLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +47,11 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalL,
     // Align left — prevents last row from stretching if fewer cards than columns
     justifyContent: 'start',
+  },
+  /** Wide cards: wider columns so the note and progress lines fit; still never stretches to the full width. */
+  gridWide: {
+    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 220px))',
+    alignItems: 'stretch',
   },
 });
 
@@ -67,11 +76,20 @@ const useStyles = makeStyles({
  * />
  * ```
  */
-export const MetricCardRow: React.FC<MetricCardRowProps> = ({ cards, className }) => {
+export const MetricCardRow: React.FC<MetricCardRowProps> = ({
+  cards,
+  className,
+  layout = 'square',
+  ariaLabel = 'Summary metrics',
+}) => {
   const styles = useStyles();
 
   return (
-    <div className={`${styles.grid}${className ? ` ${className}` : ''}`} role="group" aria-label="Summary metrics">
+    <div
+      className={mergeClasses(styles.grid, layout === 'wide' && styles.gridWide, className)}
+      role="group"
+      aria-label={ariaLabel}
+    >
       {cards.map((config: MetricCardConfig) => (
         <MetricCard
           key={config.id}
@@ -84,6 +102,11 @@ export const MetricCardRow: React.FC<MetricCardRowProps> = ({ cards, className }
           badgeVariant={config.badgeVariant}
           badgeCount={config.badgeCount}
           onClick={config.onClick}
+          selected={config.selected}
+          note={config.note}
+          progress={config.progress}
+          disableWhenEmpty={config.disableWhenEmpty}
+          layout={layout}
         />
       ))}
     </div>

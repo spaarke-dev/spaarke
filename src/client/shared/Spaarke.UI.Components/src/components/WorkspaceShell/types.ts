@@ -35,14 +35,25 @@ export type MetricTrend = 'up' | 'down' | 'neutral';
 /** Badge variant for metric cards. */
 export type MetricBadgeVariant = 'new' | 'overdue';
 
+/** Card shape: `square` (the default, a Quick Summary tile) or `wide` (not square; used by the worklist count filters). */
+export type MetricCardLayout = 'square' | 'wide';
+
+/** "n of m done" progress shown on a metric card (D-24). */
+export interface MetricProgress {
+  /** Items done. */
+  done: number;
+  /** Items in total (done plus still open). Progress is hidden when this is not a positive number. */
+  total: number;
+}
+
 /** Configuration for a single metric card in the "Quick Summary" row. */
 export interface MetricCardConfig {
   /** Stable identifier used as React key. */
   id: string;
   /** Display label shown below the count. */
   label: string;
-  /** Fluent v9 icon component. */
-  icon: FluentIcon;
+  /** Fluent v9 icon component. Optional: a count-filter card may have none. */
+  icon?: FluentIcon;
   /** Accessible label for the card button. */
   ariaLabel: string;
   /** The numeric value to display. undefined renders an em-dash while loading. */
@@ -57,6 +68,14 @@ export interface MetricCardConfig {
   badgeCount?: number;
   /** Called when the card is clicked or activated via keyboard. */
   onClick?: () => void;
+  /** Count-filter state (D-24): when defined the card is a toggle and exposes `aria-pressed`. Absent = a plain button. */
+  selected?: boolean;
+  /** One line under the label, for example "oldest 4 days" or "3 past due". */
+  note?: string;
+  /** "n of m done today" line plus a thin progress bar. */
+  progress?: MetricProgress;
+  /** When true the card is disabled while its count is 0 (a filter that would show nothing). Default false. */
+  disableWhenEmpty?: boolean;
 }
 
 // ---------------------------------------------------------------------------

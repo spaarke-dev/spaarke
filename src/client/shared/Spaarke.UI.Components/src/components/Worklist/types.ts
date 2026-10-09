@@ -15,6 +15,13 @@ export type WorklistLane = 'Decide' | 'Do';
 /** Wording for a Do item past its due date. v4: tasks read "5d overdue", work assignments "3d late". */
 export type PastDueWording = 'overdue' | 'late';
 
+/**
+ * `sprk_policy.sprk_worktype` (task 007): what has to be done. Decide: askOutsideCounsel, approveOrRebudget, chaseReply.
+ * Do: finishOrReschedule, comingDue, chaseResponse. The route maps the option value; each item has exactly one.
+ */
+export type WorkType =
+  'askOutsideCounsel' | 'approveOrRebudget' | 'chaseReply' | 'finishOrReschedule' | 'comingDue' | 'chaseResponse';
+
 /** One Work Item: the display columns of one `sprk_signal` row. */
 export interface WorklistItem {
   /** `sprk_signalid` — the object this line resolves to (row-contract requirement 1). */
@@ -33,6 +40,11 @@ export interface WorklistItem {
   dueDate?: string | null;
   /** Supplied by the route from the policy's work type; defaults to `overdue`. */
   pastDueWording?: PastDueWording | null;
+  /**
+   * The policy's work type (`sprk_policy.sprk_worktype`). Read only by the lane count filters (task 052), which split
+   * a lane by it so the counts add up; the row itself does not render it.
+   */
+  workType?: WorkType | null;
 }
 
 /**
