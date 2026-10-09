@@ -259,6 +259,10 @@ public partial class RouteAuthorizationGuardTests
             + "filter with the Create privilege and AppendTo on the regarding record; GET / runs its query as the caller "
             + "(task 159, #1098). PATCH /{id}/filing (task 147, owner round 36) takes only the filing, its shape checked "
             + "before the filter, and re-files through OwnedChildWrite.RefileAsync (AppendTo on every new parent, F3). "
+            + "PATCH /{id}/due-assignee (ontology platform R1 task 044, #29) writes ONLY sprk_duedate and/or the assignee contact "
+            + "(statuscode Reassigned, reassigned-by): shape checked before the filter, the same write filter on sprk_events({id}) "
+            + "(no Read → uniform 404; Read without Write → 403), then EventDueAssigneeWrite runs AS THE CALLER through "
+            + "IDataverseUserClient (open work only). "
             + "PUT /{id}, DELETE /{id}, /{id}/cancel and /{id}/logs were deleted (round 10 item 1)."),
         new GovernedFile("Api/Signals/DecisionPlanEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/signals/{signalId}/decision-plan (ontology platform R1 task 036) -- a Signal's decision plan resolved against "
@@ -964,6 +968,10 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
+        new NotAuthorizationForm("AddEndpointFilter(ValidateDueAssigneeRequestAsync)",
+            "Ontology platform R1 task 044: PATCH /api/v1/events/{id}/due-assignee request SHAPE only (EventDueAssigneeWrite.ShapeProblem, "
+            + "no I/O): at least a due date or an assignee. It runs before the route's RecordRouteAccessAuthorizationFilter(\"write\") "
+            + "and decides nothing about any record."),
     };
 
     /// <summary>
