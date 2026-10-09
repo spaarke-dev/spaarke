@@ -35,8 +35,7 @@ $ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
 if ($PlanOnly) {
     $plan = Get-SolutionPublishPlan -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities
     if (@($plan.Unmapped).Count -gt 0) { Write-Warning "Unmapped component(s): $(@($plan.Unmapped) -join ', ')" }
-    New-PublishParameterXml -Entities $plan.Entities -WebResources $plan.WebResources -OptionSets $plan.OptionSets `
-        -SiteMaps $plan.SiteMaps -Dashboards $plan.Dashboards -AppModules $plan.AppModules
+    New-PublishParameterXmlFromPlan -Plan $plan
     return
 }
 if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) { throw "-ZipPath is required and must exist (got '$ZipPath')." }

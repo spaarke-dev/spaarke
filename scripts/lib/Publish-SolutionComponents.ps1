@@ -28,24 +28,24 @@
 # No Set-StrictMode here: a dot-sourced module's strict mode would leak into the calling script (reading a missing
 # property such as @odata.nextLink on a last page would start to throw). Task 130 review F1.
 
-# solutioncomponent.componenttype values that have nothing to publish.
+# solutioncomponent.componenttype values that have nothing to publish. Evidence for each: on spaarkedev1 the table answers 404 to
+# <set>(id)/Microsoft.Dynamics.CRM.RetrieveUnpublished() (it has no unpublished layer), probed 2026-10-08 (task 130 review rounds 1-2):
+# roles, field security profiles, field permissions, entity/attribute maps, environment variables, plug-in assemblies and steps,
+# service endpoints, canvas apps, privileges, display strings, Dataverse search tables, ai skill configs.
+# Types WITHOUT a 404 proof are deliberately absent, so they stay unmapped and block the import: workflows/flows (29, the probe
+# answered 200), SLAs and routing rules (150-154), connectors (371/372): no rows to probe in dev.
 $script:NoPublishComponentTypes = @{
-    20 = 'security role'; 21 = 'privilege'; 22 = 'display string'; 29 = 'workflow'; 91 = 'plug-in assembly'
-    92 = 'sdk message processing step'; 93 = 'sdk message processing step image'; 95 = 'service endpoint'
-    150 = 'routing rule'; 151 = 'routing rule item'; 152 = 'sla'; 153 = 'sla item'; 154 = 'convert rule'
-    300 = 'canvas app'; 371 = 'connector'; 372 = 'connector'; 380 = 'environment variable definition'
-    381 = 'environment variable value'
-    # Seen in SpaarkeMaster (task 130 review F2). Labels read from spaarkedev1 (GlobalOptionSetDefinitions componenttype and
-    # solutioncomponentdefinitions). None has an element in the PublishXml schema (Microsoft Learn lists entities, web
-    # resources, option sets, site maps, dashboards, ribbons and app modules only), so there is nothing a scoped publish can
-    # send for them. Judgement, not a documented guarantee: a security profile and these configuration tables carry no
-    # draft/unpublished layer. The owner's first real SpaarkeMaster import should confirm nothing stays pending.
+    20 = 'security role'; 21 = 'privilege'; 22 = 'display string'
+    46 = 'entity map'; 47 = 'attribute map'
     70 = 'field security profile'; 71 = 'field permission'
-    10075 = 'app setting'; 10139 = 'dataverse search table'; 10141 = 'dataverse search table entity'; 10314 = 'ai skill config'
+    91 = 'plug-in assembly'; 92 = 'sdk message processing step'; 93 = 'sdk message processing step image'; 95 = 'service endpoint'
+    300 = 'canvas app'; 380 = 'environment variable definition'; 381 = 'environment variable value'
+    10139 = 'dataverse search table'; 10141 = 'dataverse search table entity'; 10314 = 'ai skill config'
 }
 
 # Component types this module maps to a publish bucket (see Resolve-PublishPlan). 2/10 are published with their entity.
-$script:MappedComponentTypes = @(1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80)
+# 10075 (app setting) has an unpublished layer (RetrieveUnpublished answers 200 on spaarkedev1): it is published through its parent app module.
+$script:MappedComponentTypes = @(1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80, 10075)
 
 function Test-ComponentTypeKnown {
 <# True when the type is mapped to a publish bucket or is deliberately a no-publish type. Pure. #>
@@ -106,6 +106,14 @@ function New-PublishParameterXml {
     return '<importexportxml>' + ($sections.Values -join '') + '</importexportxml>'
 }
 
+function New-PublishParameterXmlFromPlan {
+<# Pure: the complete (unchunked) ParameterXml for a plan, including the application ribbon. Used by -PlanOnly. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Plan)
+    return New-PublishParameterXml -Entities $Plan.Entities -WebResources $Plan.WebResources -OptionSets $Plan.OptionSets `
+        -SiteMaps $Plan.SiteMaps -Dashboards $Plan.Dashboards -AppModules $Plan.AppModules -ApplicationRibbon:([bool]$Plan.ApplicationRibbon)
+}
+
 function Get-DataverseApiContext {
 <# Token via the operator's az CLI identity. Returns @{ Api; Headers }. #>
     [CmdletBinding()]
@@ -153,6 +161,7 @@ function Resolve-PublishPlan {
     $maps = New-Object System.Collections.Generic.HashSet[string]
     $dash = New-Object System.Collections.Generic.HashSet[string]
     $apps = New-Object System.Collections.Generic.HashSet[string]
+    $sets = New-Object System.Collections.Generic.HashSet[string]
     $skipped = @(); $unmapped = @(); $appRibbon = $false
     foreach ($c in $Components) {
         $t = [int]$c.componenttype; $id = "$($c.objectid)"
@@ -168,6 +177,11 @@ function Resolve-PublishPlan {
             61 { [void]$webs.Add($id) }
             62 { [void]$maps.Add($id) }
             80 { [void]$apps.Add($id) }
+            10075 {
+                # An app setting has an unpublished layer; PublishXml has no element for it, so publish its parent app module and read the setting back.
+                $parent = & $Lookup 'appsetting' $id
+                if ($parent) { [void]$apps.Add("$parent"); [void]$sets.Add($id) } else { $unmapped += "$t/$id (app setting with no parent app module)" }
+            }
             66 {
                 foreach ($w in @(& $Lookup 'control' $id)) { if ($w) { [void]$webs.Add("$w") } }
                 # A PCF import is NOT served until its bundle web resources are published (task 129, 2026-10-08). PublishXml has
@@ -190,6 +204,7 @@ function Resolve-PublishPlan {
         SiteMaps     = & $sorted $maps
         Dashboards   = & $sorted $dash
         AppModules   = & $sorted $apps
+        AppSettings  = & $sorted $sets
         ApplicationRibbon = $appRibbon
         Skipped      = $skipped
         Unmapped     = $unmapped
@@ -207,26 +222,96 @@ function Get-SolutionComponentRows {
     return @(Get-DvPages "$api/solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($sol[0].solutionid)" $h)
 }
 
+# What a solution ZIP carries besides its root components (K3). customizations.xml top-level elements and the ZIP's top-level
+# folders each stand for a component type. Names read from a real SpaarkeMaster export (spaarkedev1, 2026-10-08) and the
+# Dataverse Customizations.xml schema. A NON-EMPTY element or folder that is not listed here is an unknown part and blocks the import.
+$script:ZipElementTypes = @{
+    'Entities' = 1; 'EntityRelationships' = 10; 'EntityMaps' = 46; 'optionsets' = 9; 'Roles' = 20; 'Workflows' = 29
+    'FieldSecurityProfiles' = 70; 'CustomControls' = 66; 'WebResources' = 61; 'AppModuleSiteMaps' = 62; 'AppModules' = 80; 'Dashboards' = 60
+}
+$script:ZipIgnoredElements = @('Languages')
+$script:ZipFolderTypes = @{
+    'controls' = 66; 'webresources' = 61; 'workflows' = 29; 'environmentvariabledefinitions' = 380; 'environmentvariablevalues' = 381
+    'aiskillconfigs' = 10314; 'dvtablesearchs' = 10139; 'dvtablesearchentities' = 10141; 'appsettings' = 10075; 'canvasapps' = 300
+    'pluginassemblies' = 91; 'sdkmessageprocessingsteps' = 92; 'serviceendpoints' = 95
+}
+$script:ZipIgnoredEntries = @('[content_types].xml', 'solution.xml', 'customizations.xml')
+
 function Get-ZipSolutionInfo {
-<# Reads solution.xml from a solution ZIP: unique name, managed flag, root component types and root entity names. Pure file read. #>
+<#
+.SYNOPSIS  Reads a solution ZIP before anything is imported: unique name, managed flag, root component types and root entity
+           names (solution.xml), plus every component type implied by customizations.xml elements and top-level folders.
+           UnknownParts lists non-empty elements/folders this module cannot map. Pure file read.
+#>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ZipPath)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
     try {
-        $entry = $zip.Entries | Where-Object { $_.FullName -eq 'solution.xml' } | Select-Object -First 1
-        if (-not $entry) { throw "No solution.xml in $ZipPath." }
-        $reader = New-Object System.IO.StreamReader($entry.Open())
-        try { [xml]$doc = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        $readXml = {
+            param($name)
+            $entry = $zip.Entries | Where-Object { $_.FullName -ieq $name } | Select-Object -First 1
+            if (-not $entry) { return $null }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            try { return [xml]$reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        $doc = & $readXml 'solution.xml'
+        if (-not $doc) { throw "No solution.xml in $ZipPath." }
+        $cust = & $readXml 'customizations.xml'
+        $folders = @($zip.Entries | ForEach-Object { ($_.FullName -split '/')[0] } | Sort-Object -Unique)
     } finally { $zip.Dispose() }
     $m = $doc.ImportExportXml.SolutionManifest
     $roots = @($m.RootComponents.RootComponent | Where-Object { $_ })
+    $types = New-Object System.Collections.Generic.HashSet[int]
+    $unknown = @()
+    foreach ($r in $roots) { [void]$types.Add([int]$r.type) }
+    if ($cust) {
+        foreach ($n in $cust.ImportExportXml.ChildNodes) {
+            if ($n.NodeType -ne 'Element') { continue }
+            $kids = @($n.ChildNodes | Where-Object { $_.NodeType -eq 'Element' }).Count
+            if ($kids -eq 0 -or $script:ZipIgnoredElements -contains $n.LocalName) { continue }
+            $key = @($script:ZipElementTypes.Keys | Where-Object { $_ -ieq $n.LocalName }) | Select-Object -First 1
+            if ($key) { [void]$types.Add([int]$script:ZipElementTypes[$key]) } else { $unknown += "customizations.xml/$($n.LocalName)" }
+        }
+    }
+    foreach ($f in $folders) {
+        if ($script:ZipIgnoredEntries -contains $f.ToLowerInvariant()) { continue }
+        if ($script:ZipFolderTypes.ContainsKey($f.ToLowerInvariant())) { [void]$types.Add([int]$script:ZipFolderTypes[$f.ToLowerInvariant()]) } else { $unknown += "folder/$f" }
+    }
     return [pscustomobject]@{
         UniqueName   = "$($m.UniqueName)"
         Managed      = ("$($m.Managed)" -eq '1')
         RootTypes    = @($roots | ForEach-Object { [int]$_.type } | Sort-Object -Unique)
+        AllTypes     = @($types | Sort-Object)
+        UnknownParts = $unknown
         RootEntities = @($roots | Where-Object { [int]$_.type -eq 1 } | ForEach-Object { "$($_.schemaName)".ToLowerInvariant() } | Sort-Object -Unique)
     }
+}
+
+function Invoke-ImportPreflight {
+<#
+.SYNOPSIS  Runs before ANY import of an unmanaged solution: (1) every component type the ZIP carries (root components,
+           customizations.xml elements, top-level folders) and the installed solution's components must be mapped or a proven
+           no-publish type, else throws with nothing imported; (2) warns about other people's pending views/forms on the entities
+           the import will publish (the solution's own installed items are left out). Returns the ZIP info.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$SolutionUniqueName,
+        [string[]]$ExtraEntities = @()
+    )
+    $zipInfo = Get-ZipSolutionInfo -ZipPath $ZipPath
+    $installed = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
+    $types = @($zipInfo.AllTypes) + @($installed | Where-Object { $_ } | ForEach-Object { [int]$_.componenttype })
+    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_) } | ForEach-Object { "type $_" }) + @($zipInfo.UnknownParts)
+    if ($unknown.Count -gt 0) {
+        throw "Refusing to import ${SolutionUniqueName}: $($unknown -join ', ') cannot be published by the scoped procedure. Map them in scripts/lib/Publish-SolutionComponents.ps1 first. Nothing was imported."
+    }
+    $own = @($installed | Where-Object { $_ } | ForEach-Object { $_.objectid })
+    foreach ($ent in @($zipInfo.RootEntities) + $ExtraEntities | Select-Object -Unique) {
+        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $own)) { Write-Warning "Entity publish of $ent will also publish pending change: $c" }
+    }
+    return $zipInfo
 }
 
 function Get-SolutionPublishPlan {
@@ -248,6 +333,7 @@ function Get-SolutionPublishPlan {
                 $f = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($id)?`$select=objecttypecode,type"
                 if ($f.type -eq 0 -or $f.objecttypecode -eq 'none') { $null } else { $f.objecttypecode }
             }
+            'appsetting' { (Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appsettings($id)?`$select=_parentappmoduleid_value").'_parentappmoduleid_value' }
             'ribbon' { (Invoke-RestMethod -Method Get -Headers $h -Uri "$api/ribboncustomizations($id)?`$select=entity").entity }
             'controlhosts' {
                 $cc = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/customcontrols($id)?`$select=name"
@@ -332,7 +418,43 @@ function Test-PublishedReadBack {
         $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appmodules($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=modifiedon"
         if ($pub.modifiedon -ne $unp.modifiedon) { $pending += "appmodule $g" }
     }
+    foreach ($id in @($Plan.AppSettings)) {
+        $g = $id.Trim('{', '}')
+        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appsettings($g)?`$select=value,modifiedon"
+        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appsettings($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=value,modifiedon"
+        if ($pub.value -ne $unp.value -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "appsetting $g" }
+    }
     return $pending
+}
+
+function Split-PublishPlan {
+<#
+.SYNOPSIS  Pure. Splits a publish into chunks of at most ChunkSize items so one PublishXml request stays inside the request
+           time limit (SpaarkeMaster has about 129 entities and 270 web resources). Each chunk is a hashtable of the
+           New-PublishParameterXml parameters. App settings are not published by id (they ride with their parent app module);
+           they are attached to the LAST chunk for read-back only.
+#>
+    [CmdletBinding()]
+    param(
+        [string[]]$Entities = @(), [string[]]$WebResources = @(), [string[]]$OptionSets = @(), [string[]]$SiteMaps = @(),
+        [string[]]$Dashboards = @(), [string[]]$AppModules = @(), [string[]]$AppSettings = @(),
+        [switch]$ApplicationRibbon, [int]$ChunkSize = 25
+    )
+    if ($ChunkSize -lt 1) { throw 'ChunkSize must be at least 1.' }
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in @(@('Entities', $Entities), @('WebResources', $WebResources), @('OptionSets', $OptionSets), @('SiteMaps', $SiteMaps), @('Dashboards', $Dashboards), @('AppModules', $AppModules))) {
+        foreach ($v in @($spec[1] | Where-Object { $_ })) { $items.Add(@{ Kind = $spec[0]; Value = $v }) }
+    }
+    if ($ApplicationRibbon) { $items.Add(@{ Kind = 'Ribbon'; Value = 'application' }) }
+    $chunks = @()
+    for ($i = 0; $i -lt $items.Count; $i += $ChunkSize) {
+        $slice = @($items | Select-Object -Skip $i -First $ChunkSize)
+        $c = @{ Entities = @(); WebResources = @(); OptionSets = @(); SiteMaps = @(); Dashboards = @(); AppModules = @(); AppSettings = @(); ApplicationRibbon = $false }
+        foreach ($it in $slice) { if ($it.Kind -eq 'Ribbon') { $c.ApplicationRibbon = $true } else { $c[$it.Kind] += $it.Value } }
+        $chunks += , $c
+    }
+    if ($chunks.Count -gt 0) { $chunks[$chunks.Count - 1].AppSettings = @($AppSettings | Where-Object { $_ }) }
+    return $chunks
 }
 
 function Publish-SolutionComponents {
@@ -348,23 +470,35 @@ function Publish-SolutionComponents {
         [string[]]$ExtraWebResources = @(),
         [string[]]$ExtraEntities = @(),
         [switch]$IncludeControlHostEntities,
-        [switch]$SkipCollateralCheck
+        [switch]$SkipCollateralCheck,
+        [int]$ChunkSize = 25
     )
     $plan = Get-SolutionPublishPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities
     if (@($plan.Unmapped).Count -gt 0) {
         throw "Cannot publish $SolutionUniqueName without a tenant-wide publish: unmapped component(s) $(@($plan.Unmapped) -join ', '). Add a mapping in scripts/lib/Publish-SolutionComponents.ps1 (never use publish-all)."
     }
-    $xml = New-PublishParameterXml -Entities (@($plan.Entities) + $ExtraEntities) -WebResources (@($plan.WebResources) + $ExtraWebResources) `
-        -OptionSets $plan.OptionSets -SiteMaps $plan.SiteMaps -Dashboards $plan.Dashboards -AppModules $plan.AppModules
-    Write-Host "Scoped publish of ${SolutionUniqueName}: $(@($plan.Entities).Count) entities, $(@($plan.WebResources).Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules."
+    $allEntities = @(@($plan.Entities) + $ExtraEntities | Where-Object { $_ } | Select-Object -Unique)
+    $allWebs = @(@($plan.WebResources) + $ExtraWebResources | Where-Object { $_ } | Select-Object -Unique)
+    $chunks = @(Split-PublishPlan -Entities $allEntities -WebResources $allWebs -OptionSets $plan.OptionSets -SiteMaps $plan.SiteMaps `
+        -Dashboards $plan.Dashboards -AppModules $plan.AppModules -AppSettings $plan.AppSettings -ApplicationRibbon:([bool]$plan.ApplicationRibbon) -ChunkSize $ChunkSize)
+    if ($chunks.Count -eq 0) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
+    Write-Host "Scoped publish of ${SolutionUniqueName}: $($allEntities.Count) entities, $($allWebs.Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules, $(@($plan.AppSettings).Count) app settings, application ribbon: $([bool]$plan.ApplicationRibbon), in $($chunks.Count) request(s)."
     if (-not $SkipCollateralCheck) {
         $own = @(Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName | ForEach-Object { $_.objectid })
         foreach ($e in @($plan.Entities) + $ExtraEntities | Select-Object -Unique) {
             foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $e -ExcludeIds $own)) { Write-Warning "Entity publish of $e will also publish pending change: $c" }
         }
     }
-    Invoke-PublishXml -Context $Context -ParameterXml $xml
-    $pending = @(Test-PublishedReadBack -Context $Context -Plan $plan)
+    $pending = @()
+    $n = 0
+    foreach ($c in $chunks) {
+        $n++
+        $xml = New-PublishParameterXml -Entities $c.Entities -WebResources $c.WebResources -OptionSets $c.OptionSets -SiteMaps $c.SiteMaps `
+            -Dashboards $c.Dashboards -AppModules $c.AppModules -ApplicationRibbon:([bool]$c.ApplicationRibbon)
+        Invoke-PublishXml -Context $Context -ParameterXml $xml
+        # Read each chunk back as soon as it is published.
+        $pending += @(Test-PublishedReadBack -Context $Context -Plan ([pscustomobject]@{ WebResources = $c.WebResources; AppModules = $c.AppModules; AppSettings = $c.AppSettings }))
+    }
     if ($pending.Count -gt 0) { throw "Published, but still unpublished after PublishXml: $($pending -join ', ')." }
     return $plan
 }
@@ -396,20 +530,7 @@ function Invoke-ScopedSolutionImport {
     if (-not $Context) { $Context = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
 
     # PRE-FLIGHT (before anything is imported): an import must never be left unpublished.
-    #  1. every component type the ZIP's root components and the installed solution carry must be mapped or a known no-publish type;
-    #  2. report other people's pending views/forms on the entities this import will publish (warn only; the solution's own
-    #     already-installed items are left out).
-    $zipInfo = Get-ZipSolutionInfo -ZipPath $ZipPath
-    $installed = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
-    $types = @($zipInfo.RootTypes) + @($installed | Where-Object { $_ } | ForEach-Object { [int]$_.componenttype })
-    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_) })
-    if ($unknown.Count -gt 0) {
-        throw "Refusing to import ${SolutionUniqueName}: component type(s) $($unknown -join ', ') are not mapped, so they could not be published afterwards. Map them in scripts/lib/Publish-SolutionComponents.ps1 first. Nothing was imported."
-    }
-    $own = @($installed | Where-Object { $_ } | ForEach-Object { $_.objectid })
-    foreach ($ent in @($zipInfo.RootEntities) + $ExtraEntities | Select-Object -Unique) {
-        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $own)) { Write-Warning "Entity publish of $ent will also publish pending change: $c" }
-    }
+    Invoke-ImportPreflight -Context $Context -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ExtraEntities $ExtraEntities | Out-Null
 
     & $PacExe solution import --environment $EnvironmentUrl --path $ZipPath @ImportArgs
     if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }

@@ -57,7 +57,7 @@ Describe 'Resolve-PublishPlan' {
             switch ($kind) {
                 'entity' { "ent_$id" } 'optionset' { "opt_$id" } 'view' { 'sprk_event' } 'chart' { 'sprk_event' }
                 'form' { if ($id -eq 'dash') { $null } else { 'sprk_matter' } }
-                'ribbon' { 'sprk_todo' } 'control' { @('{w1}', '{w2}') } 'controlhosts' { @('sprk_host') }
+                'ribbon' { 'sprk_todo' } 'appsetting' { if ($id -eq 'orphan') { $null } else { '{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}' } } 'control' { @('{w1}', '{w2}') } 'controlhosts' { @('sprk_host') }
             }
         }
         function C($t, $id) { [pscustomobject]@{ componenttype = $t; objectid = $id } }
@@ -87,6 +87,63 @@ Describe 'Resolve-PublishPlan' {
         $p = Resolve-PublishPlan -Lookup $script:Lookup -Components @((C 9999 'x'))
         @($p.Unmapped) | Should -Be @('9999/x')
     }
+}
+
+Describe 'app settings (type 10075)' {
+    It 'publishes the parent app module and reads the setting back' {
+        $lookup = { param($kind, $id) if ($kind -eq 'appsetting') { '{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}' } }
+        $p = Resolve-PublishPlan -Lookup $lookup -Components @([pscustomobject]@{ componenttype = 10075; objectid = 's1' })
+        @($p.AppModules) | Should -Be @('{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}')
+        @($p.AppSettings) | Should -Be @('s1')
+        @($p.Unmapped).Count | Should -Be 0
+    }
+    It 'is unmapped when the setting has no parent app module' {
+        $lookup = { param($kind, $id) $null }
+        $p = Resolve-PublishPlan -Lookup $lookup -Components @([pscustomobject]@{ componenttype = 10075; objectid = 's1' })
+        @($p.Unmapped).Count | Should -Be 1
+    }
+}
+
+Describe 'application ribbon, whole path (plan to ParameterXml)' {
+    It 'a plan holding only an application ribbon produces the ribbons element and does not throw' {
+        $p = Resolve-PublishPlan -Lookup { param($kind, $id) $null } -Components @([pscustomobject]@{ componenttype = 50; objectid = 'r' })
+        New-PublishParameterXmlFromPlan -Plan $p | Should -Be '<importexportxml><ribbons><ribbon /></ribbons></importexportxml>'
+    }
+    It 'Publish-SolutionComponents posts it for a solution that holds only an application ribbon' {
+        $script:Calls = @()
+        Mock Invoke-RestMethod {
+            $script:Calls += [pscustomobject]@{ Method = $Method; Uri = "$Uri"; Body = $Body }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 50; objectid = 'r1' }) } }
+                '*/ribboncustomizations(*' { return [pscustomobject]@{ entity = $null } }
+                default { return $null }
+            }
+        }
+        { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -SkipCollateralCheck | Out-Null } | Should -Not -Throw
+        $post = @($script:Calls | Where-Object { $_.Method -eq 'Post' })
+        $post.Count | Should -Be 1
+        $post[0].Body | Should -Match 'ribbons'
+    }
+}
+
+Describe 'Split-PublishPlan (chunking)' {
+    It 'keeps every request at or under the chunk size and loses nothing' {
+        $ents = 1..60 | ForEach-Object { "sprk_e$_" }
+        $webs = 1..30 | ForEach-Object { [guid]::NewGuid().ToString() }
+        $chunks = @(Split-PublishPlan -Entities $ents -WebResources $webs -AppModules @([guid]::NewGuid().ToString()) -ChunkSize 25)
+        $chunks.Count | Should -Be 4
+        foreach ($c in $chunks) { (@($c.Entities).Count + @($c.WebResources).Count + @($c.AppModules).Count) | Should -BeLessOrEqual 25 }
+        (($chunks | ForEach-Object { @($_.Entities).Count } | Measure-Object -Sum).Sum) | Should -Be 60
+        (($chunks | ForEach-Object { @($_.WebResources).Count } | Measure-Object -Sum).Sum) | Should -Be 30
+    }
+    It 'puts the application ribbon in a chunk and attaches app settings to the last chunk' {
+        $chunks = @(Split-PublishPlan -Entities @('sprk_a') -AppSettings @('s1') -ApplicationRibbon -ChunkSize 25)
+        $chunks.Count | Should -Be 1
+        $chunks[0].ApplicationRibbon | Should -BeTrue
+        @($chunks[0].AppSettings) | Should -Be @('s1')
+    }
+    It 'returns no chunks for an empty plan' { @(Split-PublishPlan).Count | Should -Be 0 }
 }
 
 Describe 'Get-ControlWebResourcePrefix' {
@@ -126,9 +183,52 @@ Describe 'application ribbon (type 50 without an entity)' {
 
 Describe 'component type knowledge' {
     It 'knows the SpaarkeMaster types (70, 10075, 10139, 10141, 10314) and the mapped ones' {
-        foreach ($t in 1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80, 70, 10075, 10139, 10141, 10314, 153, 154) { Test-ComponentTypeKnown $t | Should -BeTrue }
+        foreach ($t in 1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80, 10075, 20, 46, 70, 71, 380, 10139, 10141, 10314) { Test-ComponentTypeKnown $t | Should -BeTrue }
     }
     It 'does not know an arbitrary type' { Test-ComponentTypeKnown 99999 | Should -BeFalse }
+    It 'keeps types without a 404 proof unmapped (workflows/flows, SLA family, connectors)' {
+        foreach ($t in 29, 150, 151, 152, 153, 154, 371, 372) { Test-ComponentTypeKnown $t | Should -BeFalse }
+    }
+}
+
+Describe 'allow-list' {
+    It 'contains exactly the three skill paths (change this test deliberately to add or remove one)' {
+        $lines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'publish-lint-allowlist.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' } | ForEach-Object { ($_ -split "`t")[0].Trim() })
+        $lines | Sort-Object | Should -Be @('.claude/skills/dataverse-deploy/SKILL.md', '.claude/skills/pcf-deploy/SKILL.md', '.claude/skills/ribbon-edit/SKILL.md')
+    }
+}
+
+Describe 'Get-ZipSolutionInfo (customizations.xml and folders)' {
+    BeforeAll {
+        function New-TestZip([string]$Customizations, [string[]]$Folders) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zp = Join-Path ([IO.Path]::GetTempPath()) ("pscz-" + [guid]::NewGuid() + ".zip")
+            $z = [IO.Compression.ZipFile]::Open($zp, 'Create')
+            try {
+                $w = New-Object IO.StreamWriter($z.CreateEntry('solution.xml').Open()); $w.Write('<ImportExportXml><SolutionManifest><UniqueName>S</UniqueName><Managed>0</Managed><RootComponents><RootComponent type="1" schemaName="x" /></RootComponents></SolutionManifest></ImportExportXml>'); $w.Dispose()
+                $w = New-Object IO.StreamWriter($z.CreateEntry('customizations.xml').Open()); $w.Write($Customizations); $w.Dispose()
+                foreach ($f in $Folders) { $w = New-Object IO.StreamWriter($z.CreateEntry("$f/a.xml").Open()); $w.Write('<a/>'); $w.Dispose() }
+            } finally { $z.Dispose() }
+            return $zp
+        }
+    }
+    It 'adds subcomponent types from customizations.xml elements and top-level folders' {
+        $zp = New-TestZip '<ImportExportXml><Roles><Role /></Roles><Languages><Language>1033</Language></Languages><Workflows /></ImportExportXml>' @('environmentvariabledefinitions', 'appsettings')
+        try {
+            $i = Get-ZipSolutionInfo -ZipPath $zp
+            @($i.AllTypes) | Should -Be @(1, 20, 380, 10075)
+            @($i.UnknownParts).Count | Should -Be 0
+        } finally { Remove-Item $zp -Force }
+    }
+    It 'reports a non-empty element or folder it cannot map, and Invoke-ImportPreflight refuses before importing' {
+        $zp = New-TestZip '<ImportExportXml><Templates><Template /></Templates></ImportExportXml>' @('mysterydata')
+        try {
+            $i = Get-ZipSolutionInfo -ZipPath $zp
+            @($i.UnknownParts) | Should -Be @('customizations.xml/Templates', 'folder/mysterydata')
+            Mock Get-SolutionComponentRows { $null }
+            { Invoke-ImportPreflight -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -ZipPath $zp -SolutionUniqueName S } | Should -Throw '*Nothing was imported*'
+        } finally { Remove-Item $zp -Force }
+    }
 }
 
 Describe 'Get-ZipSolutionInfo' {

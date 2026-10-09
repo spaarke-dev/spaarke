@@ -120,14 +120,10 @@ if ($packed.UniqueName -ne 'SpaarkeMaster' -or $packed.Version -ne $entry.versio
 }
 
 if (-not $managed) {
-    # Before importing anything: every component type the package carries must be publishable or a known no-publish type.
+    # Before importing anything (same pre-flight as Invoke-ScopedSolutionImport): component types of the ZIP and the installed
+    # solution must be publishable, and other people's pending views/forms on the entities to be published are reported.
     . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
-    $publishContext = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
-    $zipInfo = Get-ZipSolutionInfo -ZipPath $zip
-    $knownRows = Get-SolutionComponentRows -Context $publishContext -SolutionUniqueName 'SpaarkeMaster'
-    $types = @($zipInfo.RootTypes) + @($knownRows | Where-Object { $_ } | ForEach-Object { [int]$_.componenttype })
-    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_) })
-    if ($unknown.Count -gt 0) { throw "Refusing to import: component type(s) $($unknown -join ', ') cannot be published by the scoped procedure. Nothing was imported." }
+    Invoke-ImportPreflight -Context (Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl) -ZipPath $zip -SolutionUniqueName 'SpaarkeMaster' | Out-Null
 }
 
 Write-Host "==> pac $($pacArgs -join ' ')" -ForegroundColor Cyan
