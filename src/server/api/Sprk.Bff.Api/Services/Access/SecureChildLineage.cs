@@ -85,6 +85,11 @@ internal static class SecureChildLineage
             ("sprk_communication", "sprk_communication")),
         T("sprk_communicationthread", "sprk_communicationthreads",
             Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, WorkAssignment)),
+        // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
+        // read live, spaarkedev1 2026-10-07. Typed core lookups only: sprk_corerecordtype (a catalog row) and
+        // sprk_corerecordid (a string) are not lookups to a parent; sprk_action and sprk_policyversion are not filing.
+        T("sprk_decisionrecord", "sprk_decisionrecords",
+            ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         // A document's record links come from the ONE declaration of that vocabulary (DocumentLinkFields — a second copy
         // drifts silently; DocumentLinkVocabularyGuardTests), minus the links that are relationships rather than filing
         // (contact, organization, vendor organization, email) and the service request (see the remarks); plus the three
@@ -121,6 +126,15 @@ internal static class SecureChildLineage
                 .Concat(new[] { ("sprk_reportcard", "sprk_reportcard") }).ToArray()),
         T("sprk_reportcard", "sprk_reportcards",
             Regarding(Matter, Project)),
+        // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
+        // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
+        // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and
+        // sprk_corerecordtype (a catalog row) are not filing parents.
+        T("sprk_signal", "sprk_signals",
+            new[] { ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord") }
+                .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
+                    "sprk_todo", WorkAssignment))
+                .ToArray()),
         T("sprk_spendsignal", "sprk_spendsignals",
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_snapshot", "sprk_spendsnapshot")),
         T("sprk_spendsnapshot", "sprk_spendsnapshots",
