@@ -789,6 +789,55 @@ Highest leverage still open (x03 §3 ordering): A2+A3+A4 (the entire U2 column �
 
 ---
 
+### 13a. Live results — batch A (2026-10-09, read-only)
+
+Evidence: `working/x06-live-batch-a.md` (az/gh) and `working/x07-live-batch-a-dataverse.md` (Dataverse). Dev environment only.
+
+**Defects confirmed live on dev**
+- **H-2 confirmed.** The Model 1 test guest (`bc596ecd…`, the account word-add-in-r1 tested with) has `sprk_isexternal = No`, so the BFF treats it as internal. The other two guests are flagged Yes. (T-P1-10 FAIL.)
+- **H-4 confirmed, and wired to buttons users can click:**
+  - the Email ribbon "Archive Email" runs the fixed `sprk_emailactions.js`, which posts to the unmapped `/api/emails/convert-to-document` and gets a 404;
+  - the Matter main form OnLoad loads `matter_insight_onload`, which calls the unmapped `/api/insights/ask`;
+  - the deployed KPI and rollup scripts are the packaged copies and send no bearer token.
+- **H-5 / D-27 confirmed, and wired.** Registration Approve/Reject (form and grid) runs `sprk_/js/registrationribbon.js`, which is byte-identical to the old packaged copy. It signs in as the legacy client `b36e9b91` with `SDAP.Access` and a hard-coded tenant, and calls the retired host `spe-api-dev`. Task 123's fix exists only under a different file name that is not deployed.
+  - Three files *were* updated to the fixed source copies on 2026-10-08: `sprk_DocumentOperations.js`, `sprk_aichatcontextmap_ribbon.js` and `sprk_emailactions.js`.
+  - `sprk_DocumentDelete.js` is deployed but nothing loads it, so it is dead config rather than a live path.
+- **M-17 confirmed.** The "Standing Grant Administrators" field-security profile has no user or team members. On dev the BFF reads `contact.sprk_standinggrant` only because its identity is a System Administrator.
+
+**New findings (live)**
+- **The BFF identities are System Administrators in dev Dataverse:** `mi-bff-api-dev` (the active one), `SDAP-BFF-SPE-API`, and the production app `spaarke-bff-api-prod` (`92ecc702…`).
+  - This means impersonation and secured-field reads succeed on dev through the broadest role, so dev does not exercise the least-privilege setup that H7b gives a stamp.
+  - A production identity holding System Administrator in dev needs an owner decision.
+  - The impersonation privilege (`prvActOnBehalfOfAnotherUser`) is held (T-P1-12 PASS), and both writer field-security profiles contain exactly the two BFF app users.
+- **Four secrets are stored as plain App Service settings instead of Key Vault references** (values not read): `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString` and `Compose__Webhook__ClientState`.
+- **Credentials with no known consumer:**
+  - the dev BFF app's live secret `Dataverse-Checkout-20251218` (valid to 2027-12);
+  - the PCF client's `SPE Dev 2 Functions Secret`;
+  - expired secrets on the GitHub OIDC app (`rbac`) and the demo BFF app.
+
+  `ciam-graph-provisioner-cert` is marked exportable.
+- **Least privilege, permissions:**
+  - the dev BFF app requests `AppRoleAssignment.ReadWrite.All`, `Directory.ReadWrite.All` and `User.ReadWrite.All` (application), and `Sites.FullControl.All` (delegated);
+  - the BFF identity holds **Communication and Email Service Owner** on ACS.
+- **Least privilege, consented scopes:** the PCF client has broad admin-consented delegated Graph scopes (`Files.ReadWrite.All`, `FileStorageContainer.Manage.All`, `FileStorageContainerType.Manage.All`).
+- **Model 1 inputs:**
+  - the production external SPA site exists (`swa-spaarke-external-spa-prod` → `external.spaarke.com`);
+  - the dev add-in is consented for `SDAP.Access user_impersonation` on the dev BFF;
+  - the production add-in has no BFF consent, as designed, because pre-authorization replaces it;
+  - the control-plane API audience belongs to app `70ba7b19…` (roles Reader/Operator, one holder).
+- **Settled:**
+  - `spaarke-bff-dev` has **no deployment slots**;
+  - the webhook signing key on dev references `Communication-WebhookSigningKey`, which differs from the stamp name (H-3);
+  - `Onboarding__EnableDevBypass = true` on dev;
+  - the demo resource group no longer exists.
+- **Insights Function:** its storage account allows shared-key access, and `AzureWebJobsStorage` looks like an account-key connection string.
+
+**Not completed in batch A**
+- Control-plane host settings and stamp app checks (T-P2-09 steps 3–4): the hosts were not found in this subscription, and the stamp query had a syntax error.
+- The App Insights counts (T-P1-12 step 4): the wrong component was matched.
+- Exchange mail scoping, the CIAM tenant, and Teams admin-center state: these need other access.
+- Every guest-account test.
+
 ## 14. Existing documentation disposition
 
 x02 checked **210 documents** and **3,477 claims**; **1,203 claims were wrong**. Verdicts: KEEP 6 · UPDATE 162 · SUPERSEDE 33 · DELETE-CANDIDATE 9 (x02 §1).

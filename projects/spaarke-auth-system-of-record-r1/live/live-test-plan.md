@@ -6,6 +6,25 @@
 >
 > **No secret values appear in this file.** x04 §2 already redacts the one value its script printed in clear (`Compose__Webhook__ClientState`); this plan refers to that setting by name only.
 
+## Run log
+
+| Date | Batch | Tests | Outcome | Evidence |
+|---|---|---|---|---|
+| 2026-10-09 | A (read-only, owner-approved) | T-P1-10 | **FAIL** — Model 1 test guest `bc596ecd…` has `sprk_isexternal = No` | x07 |
+| 2026-10-09 | A | T-P1-12 steps 1–3 | **PASS** — active BFF app user holds `prvActOnBehalfOfAnotherUser` (via System Administrator); writer FLS profiles = exactly the two BFF app users. Findings: all BFF app users are System Administrator; Standing Grant Administrators has no members | x07 |
+| 2026-10-09 | A | T-P1-12 step 4 | **Inconclusive** — wrong App Insights component matched; re-run against the BFF's own component | x06 |
+| 2026-10-09 | A | T-P2-09 steps 1–2 | Answered — control-plane API app `70ba7b19…`, one role holder | x06 |
+| 2026-10-09 | A | T-P2-09 steps 3–4 | **Not run** — hosts not in the current subscription; stamp query error | x06 |
+| 2026-10-09 | A | T-P2-10 (Spaarke tenant parts, prod SWA) | Answered — grants recorded; prod SPA site exists at `external.spaarke.com` | x06 |
+| 2026-10-09 | A | T-P3-01, T-P3-18 | Answered — four secrets stored as plain app settings; **no deployment slots** on `spaarke-bff-dev` | x06 |
+| 2026-10-09 | A | T-P3-04 steps 1–3 | Answered — registration ribbon runs the old packaged copy against a retired host; Archive Email and matter insight call unmapped routes; KPI scripts send no token; `sprk_DocumentDelete.js` unwired | x07 |
+| 2026-10-09 | A | T-P3-05 (FLS part) | Answered — only System Administrator and an empty Standing Grant Administrators profile can read `sprk_standinggrant` | x07 |
+| 2026-10-09 | A | T-P3-07 steps 1, 3, 5, 6 | Answered — broad requested permissions; ACS Owner role on the BFF identity; FIC audiences correct | x06 |
+| 2026-10-09 | A | T-P3-09 | Answered — unconsumed live secret on the dev BFF app; expired secrets on two apps; CIAM cert exportable | x06 |
+| 2026-10-09 | A | T-P3-12, T-P3-16 | Answered | x06 |
+
+Still to run: every guest-account test (T-P1-01…-05, -07, -08), every test flagged LIVE CHANGE (owner approval each), T-P2-09 steps 3–4 (name the control-plane subscription), T-P1-12 step 4 (correct App Insights component), and items needing Exchange PowerShell, the CIAM tenant sign-in, or the Teams admin center.
+
 ---
 
 ## 0. How to read this plan
