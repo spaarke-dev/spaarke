@@ -533,6 +533,13 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
             verdict = root.TryGetProperty("verdict", out var v) && v.ValueKind == JsonValueKind.String ? Sanitize(v.GetString()) : string.Empty;
             findings = new List<string>();
             findingCount = 0;
+            // `isolated` is a claim about an EMPTY findings list: the list must be present and an array.
+            if (status == KeylessProofContract.SecureRecordIsolationCensus.Isolated
+                && !(root.TryGetProperty("findings", out var present) && present.ValueKind == JsonValueKind.Array))
+            {
+                return new SecureIsolationCensusOutcome.Failed(
+                    $"{CheckSecureIsolationCensus}: the BFF reported 'isolated' without a findings array -- not the census shape.");
+            }
             if (root.TryGetProperty("findings", out var list) && list.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in list.EnumerateArray())

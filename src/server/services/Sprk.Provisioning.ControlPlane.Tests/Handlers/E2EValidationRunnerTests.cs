@@ -453,7 +453,9 @@ public sealed class E2EValidationRunnerTests
     [Theory]
     [InlineData("{\"status\":\"clean\",\"findings\":[]}")]                                        // unknown status
     [InlineData("{\"verdict\":\"Isolated\",\"findings\":[]}")]                                    // no status
-    [InlineData("<html>gateway</html>")]                                                          // not JSON
+    [InlineData("{\"status\":\"isolated\"}")]                                                     // isolated, no findings array
+    [InlineData("{\"status\":\"isolated\",\"findings\":\"none\"}")]                               // findings not an array
+    [InlineData("<html>gateway</html>")]                                                         // not JSON
     [InlineData("{\"status\":\"isolated\",\"findings\":[{\"verdict\":\"X\",\"message\":\"y\"}]}")] // isolated WITH findings
     [InlineData("{\"status\":\"ISOLATED\",\"findings\":[]}")]                                     // statuses are exact
     [InlineData("{\"status\":\" isolated\",\"findings\":[]}")]                                    // padded
