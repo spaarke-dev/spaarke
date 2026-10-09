@@ -14,7 +14,7 @@
 | **Consumer dispatch** — `sprk_playbookconsumer` entity contract, `IConsumerRoutingService.ResolveAsync` semantics (5-min IMemoryCache TTL), `IInvokePlaybookAi` facade (**DELETED 2026-07-07** by redesign-r1 task 044), Path A / A.5 / B decision matrix, R4 `/narrate` case study | [`ai-architecture-playbook-consumer-routing.md`](ai-architecture-playbook-consumer-routing.md) |
 | **Deploy procedure** — `Deploy-Playbook.ps1` input file format, 12-step deploy sequence, `sprk_isactive` load-bearing rule, actionCode lint, skip-vs-`-Force` behaviour, failure recovery, verification queries, "Playbook has no nodes — using Legacy mode" troubleshooting | [`../guides/ai-guide-playbook-deploy-recipe.md`](../guides/ai-guide-playbook-deploy-recipe.md) |
 | **JPS schema** — instruction/input/output/scopes sections, `$ref` / `$choices` resolution, override merge, structured output | [`../guides/JPS-AUTHORING-GUIDE.md`](../guides/JPS-AUTHORING-GUIDE.md) (scoped to schema reference + decision trees after R4 trim) |
-| **Maker recipe** — author a `sprk_event` notification playbook in PlaybookBuilder | [`../guides/PLAYBOOK-AUTHOR-GUIDE.md`](../guides/PLAYBOOK-AUTHOR-GUIDE.md) |
+| **Maker recipe** — build a membership-scoped query in PlaybookBuilder (notification playbooks retired, D-100) | [`../guides/PLAYBOOK-AUTHOR-GUIDE.md`](../guides/PLAYBOOK-AUTHOR-GUIDE.md) |
 
 ---
 

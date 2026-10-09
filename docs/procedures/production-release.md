@@ -60,7 +60,7 @@ Phase 1: Export SpaarkeMaster from dev
          │           │                                 │
          │           ▼                                 │
          │  Phase 4: Reference Data + Publish          │
-         │           (playbooks, chat context, publish) │
+         │           (chat context, Copilot, publish)  │
          │           │                                 │
          │           ▼                                 │
          │  Phase 5: Validation                        │
@@ -195,7 +195,7 @@ The SpaarkeMaster solution in dev is built programmatically using the Dataverse 
 - The `email` standard entity (not using sprk_ customizations on email)
 - 12 orphaned PCF controls (registered but not bound to any active form/view)
 - 3 legacy sitemaps (sprk_DocumentManagement, sprk_LawFirmCaseManagement, sprk_CorporateMatterManagement — tech debt from removed MDA apps)
-- Reference data (playbook definitions, chat context mappings — deployed separately via Track 2.5)
+- Reference data (chat context mappings, Copilot agent config — deployed separately via Track 2.5)
 
 ### Pre-Release Assumption
 

@@ -4,8 +4,8 @@
 //   (2) Layer 1 renders `"left": "{{q.output.count}}"` to a JSON number and ConditionExpression.Left was a string;
 //   (3) Layer 1 rendered CreateNotification's `{{item.*}}` templates (empty) before the executor's per-item loop;
 //   (4) `{{item.m_sprk_mattername}}` never resolved — an aliased column is keyed "m.sprk_mattername".
-// These tests run the REPO definitions through the production render path and executors, and each pins the old form
-// failing. No test before this executed a real list condition; the one Dataverse simulator split the commas itself.
+// These tests run the repo definitions (and, since D-100, an inline legacy-shape fixture) through the production render
+// path and executors, and each pins the old form failing. No test before this executed a real list condition; the one Dataverse simulator split the commas itself.
 // D-100 (task 131): the seven notification playbook definitions were retired and deleted. The engine-level checks below
 // (Condition numeric left, CreateNotification per-item templates, old comma form) now run on LegacyNotificationShape, a
 // small inline definition copied from the retired Tasks Due Soon playbook. They guard CreateNotificationNodeExecutor,
@@ -179,15 +179,39 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
 
     [Theory]
     [MemberData(nameof(PlaybooksWithFetchXml))]
-    public void EveryRepoPlaybook_RenderedQuery_IsWellShaped_ForZeroOneAndManyMemberships(string relativePath)
+    public void EveryRepoPlaybook_RenderedQuery_IsWellShaped_ForZeroOneAndManyMemberships(string relativePath) =>
+        CheckRenderedListShape(LoadDefinition(relativePath), relativePath);
+
+    [Fact]
+    public void TheLegacyShape_RendersOneValueChildPerMembershipId_ForZeroOneAndManyMemberships()
     {
-        var definition = LoadDefinition(relativePath);
+        // The only repo playbook with FetchXML left (matter-health-single) has no `in` list condition, so the theory above can
+        // pass without checking one. This runs the full production render chain (Layer 1 + fetchInGuids + variable
+        // resolution) with real ids on the legacy-shape definition and requires that it really checked list conditions.
+        var checked_ = CheckRenderedListShape(JsonNode.Parse(LegacyNotificationShape)!.AsObject(), "LegacyNotificationShape");
+
+        checked_.Should().Be(3, "the legacy query has one matter `in` list and is rendered for 0, 1 and 17 ids");
+    }
+
+    [Fact]
+    public void ListShapeChecks_AcrossAllRepoPlaybooksAndTheLegacyShape_AreNeverVacuous()
+    {
+        var total = FindPlaybooksWithFetchXml().Sum(path => CheckRenderedListShape(LoadDefinition(Path.GetRelativePath(RepoRoot(), path)), path));
+        total += CheckRenderedListShape(JsonNode.Parse(LegacyNotificationShape)!.AsObject(), "LegacyNotificationShape");
+
+        total.Should().BeGreaterThan(0, "a list-shape check that inspected zero `in` conditions proves nothing");
+    }
+
+    /// <summary>Renders every query node for 0, 1 and 17 membership ids; returns how many matter `in` lists it checked.</summary>
+    private static int CheckRenderedListShape(JsonObject definition, string label)
+    {
+        var listsChecked = 0;
         foreach (var ids in new[] { Array.Empty<string>(), [Guid.NewGuid().ToString()], Enumerable.Range(0, 17).Select(_ => Guid.NewGuid().ToString()).ToArray() })
         {
             foreach (var node in QueryNodesOf(definition))
             {
                 var rendered = RenderedFetchXml(node, ids);
-                FetchXmlShapeValidator.Validate(rendered).Should().BeEmpty($"{relativePath} '{node["name"]}' with {ids.Length} id(s)");
+                FetchXmlShapeValidator.Validate(rendered).Should().BeEmpty($"{label} '{node["name"]}' with {ids.Length} id(s)");
 
                 foreach (var list in XDocument.Parse(rendered).Descendants("condition")
                              .Where(c => (string?)c.Attribute("operator") == "in" && c.Attribute("attribute")?.Value is "sprk_regardingmatter" or "sprk_matter"))
@@ -195,9 +219,12 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
                     var expected = ids.Length == 0 ? [ImpossibleMatch] : ids.OrderBy(i => i, StringComparer.Ordinal).ToArray();
                     list.Elements("value").Select(v => v.Value).Should().Equal(expected,
                         "one <value> child per membership id; an empty list selects nothing instead of failing the run");
+                    listsChecked++;
                 }
             }
         }
+
+        return listsChecked;
     }
 
     [Fact]
