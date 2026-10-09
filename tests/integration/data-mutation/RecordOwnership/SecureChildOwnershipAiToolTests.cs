@@ -703,6 +703,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
             // Task 158 r1: the pair's type, and an org-typed lookup (a create's own No Access list).
             ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
+            // Ontology task 136: the agreement sub-domain registry the Create Analysis wizard binds (live entity set).
+            ["sprk_agreementtype"] = "sprk_agreementtypes",
         };
 
         /// <summary>
@@ -710,7 +712,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// 2026-10-07: the ADR-024 record-type catalog and the matter-type / practice-area reference tables. Dataverse
         /// refuses RetrievePrincipalAccess on these (400 0x80040800); appending to one costs the table's AppendTo PRIVILEGE.
         /// </summary>
-        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref" };
+        /// <remarks>Ontology task 136: <c>sprk_agreementtype</c> too (live OwnershipType, spaarkedev1 2026-10-09) — the Create
+        /// Analysis wizard binds one on every Finish.</remarks>
+        private static readonly HashSet<string> OrganizationOwned = new()
+        {
+            "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref", "sprk_agreementtype",
+        };
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -772,6 +779,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Ontology task 136: every lookup the Create Analysis wizard binds (live navigation properties, spaarkedev1
+                // 2026-10-09 — note sprk_documentid's is lower-case).
+                ("sprk_documentid", "sprk_document", "sprk_documentid"),
+                ("sprk_assignedattorney1", "contact", "sprk_AssignedAttorney1"),
+                ("sprk_assignedparalegal1", "contact", "sprk_AssignedParalegal1"),
+                ("sprk_agreementtype", "sprk_agreementtype", "sprk_AgreementType"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -824,6 +838,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
             // The organization-owned reference tables' AppendTo privileges (what a lookup onto one of their rows costs).
             "prvAppendTosprk_recordtype_ref", "prvAppendTosprk_mattertype_ref", "prvAppendTosprk_practicearea_ref",
+            "prvAppendTosprk_agreementtype",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();

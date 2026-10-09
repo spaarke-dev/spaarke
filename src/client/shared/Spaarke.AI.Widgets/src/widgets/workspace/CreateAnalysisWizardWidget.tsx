@@ -460,6 +460,19 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const todoFormRef = useRef(todoForm);
   todoFormRef.current = todoForm;
 
+  // ── Uploaded document, kept across Finish retries (ontology task 136) ──────
+  // Finish uploads the file and creates its sprk_document BEFORE the sprk_analysis (which needs the document id). When
+  // the analysis create then fails, the wizard stays open on the error and Finish can be pressed again with the SAME
+  // uploaded files: re-uploading would leave a second copy of the file, a second sprk_document and a second Document
+  // Profile run per retry. Keyed by the uploaded files' stable ids, so a changed file set uploads afresh.
+  const uploadedDocumentRef = useRef<{
+    fileKey: string;
+    documentId: string;
+    documentName: string;
+    speDriveItemId?: string;
+    speDriveId?: string;
+  } | null>(null);
+
   // ── Completion state ─────────────────────────────────────────────────────
   const [isOpen, setIsOpen] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
@@ -742,6 +755,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // SPE pointer for opening the document in the editable Compose surface (Phase 1).
         let speDriveItemId: string | undefined;
         let speDriveId: string | undefined;
+        const uploadedFileKey = context.uploadedFiles.map(f => f.id).join('|');
+        const retriedUpload =
+          uploadedDocumentRef.current?.fileKey === uploadedFileKey ? uploadedDocumentRef.current : null;
 
         if (context.selectedExistingRecord) {
           documentId = context.selectedExistingRecord.recordId;
@@ -759,6 +775,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           } catch {
             /* pointer unavailable — the compose open falls back to the read-only viewer below */
           }
+        } else if (context.uploadedFiles.length > 0 && retriedUpload) {
+          // A retry after a failed analysis create: the document from the earlier attempt already exists.
+          ({ documentId, documentName, speDriveItemId, speDriveId } = retriedUpload);
         } else if (context.uploadedFiles.length > 0) {
           if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
@@ -807,6 +826,13 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             throw new Error(`Document upload succeeded but ${firstWarn}.`);
           }
           documentName = context.uploadedFiles[0]?.name ?? finishName;
+          uploadedDocumentRef.current = {
+            fileKey: uploadedFileKey,
+            documentId,
+            documentName,
+            speDriveItemId,
+            speDriveId,
+          };
         }
 
         if (!documentId) {
