@@ -235,7 +235,7 @@ Skipping or reordering breaks the FK chain. Specifically, deploying a playbook t
 
 The deploy script is currently **Spaarke-internal tooling** — it uses PAC CLI auth, repo-relative paths, and assumes write access to the Dataverse environment. Customers will eventually need a customer-facing equivalent (likely an MCP-exposed playbook deploy tool or a managed solution import flow). That's not in R4 scope — captured for future work.
 
-For internal teams: the canonical input files live at `projects/spaarke-daily-update-service/notes/playbooks/` (R1 notification set) and `projects/spaarke-daily-update-service-r4/notes/playbooks/` (R4 BRIEF-NARRATE + EntityNameValidator additions).
+For internal teams: the canonical input files live at `projects/spaarke-daily-update-service/notes/playbooks/` (daily-briefing narrate set; the R1 notification set was retired and deleted by D-100) and `projects/spaarke-daily-update-service-r4/notes/playbooks/` (R4 BRIEF-NARRATE + EntityNameValidator additions).
 
 ---
 

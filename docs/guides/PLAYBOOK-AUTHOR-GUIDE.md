@@ -26,7 +26,7 @@ Pre-R7, authoring a playbook meant **picking an Action first**, dragging it onto
 - [Worked Example 2 — Multi-Node Insights Playbook (Mix of Pure + Prompt-Driven)](#worked-example-2--multi-node-insights-playbook-mix-of-pure--prompt-driven)
 - [Worked Example 3 — Condition / Branching Playbook](#worked-example-3--condition--branching-playbook)
 - [What's New in R3 (At a Glance)](#whats-new-in-r3-at-a-glance)
-- [Quick-Start Recipe: Notify Me About New Documents on My Matters](#quick-start-recipe-notify-me-about-new-documents-on-my-matters)
+- [Recipe: A Membership-Scoped Query (notification use retired)](#recipe-a-membership-scoped-query-notification-use-retired)
 - [Node Catalog (R3 Update)](#node-catalog-r3-update)
 - [Handlebars Template Helpers (R3 Update)](#handlebars-template-helpers-r3-update)
 - [Builder UI Safety Affordances (R3)](#builder-ui-safety-affordances-r3)
@@ -37,12 +37,14 @@ Pre-R7, authoring a playbook meant **picking an Action first**, dragging it onto
 
 ---
 
+> **Notification playbooks are retired (2026-10-09, D-100).** The seven scheduled playbooks that wrote model-driven bell notifications (`appnotification`) are inactive and their `notification-*.json` definitions and `Deploy-NotificationPlaybooks.ps1` were deleted. Bell notifications are not a Spaarke feature (the Daily Briefing never reads them). Where this guide uses a notification playbook as a worked example, it teaches the engine pattern (`LookupUserMembership` + `fetchInGuids` + `Condition`); do not deploy a new `CreateNotification` playbook without an owner decision. Old definitions: `git show e9f08b764:projects/spaarke-daily-update-service/notes/playbooks/<file>`.
+
 ## What This Guide Covers
 
 This guide walks you through authoring a multi-node playbook end-to-end, both in PlaybookBuilder (visual canvas) and via a `Deploy-Playbook.ps1` JSON input file. It is the maker-facing companion to [`JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) (which covers JPS at the prompt-template / Action level — what the LLM sees) and to the [actions-nodes-scopes boundary doc](../architecture/ai-architecture-actions-nodes-scopes.md) (which covers "where does this config field belong"). After R7, two flows live in this guide:
 
 1. **Node-first dispatch model (R7, §"Authoring a Playbook in 5 Steps")**: pick the executor per node FIRST, then choose an Action when the executor is prompt-driven, then configure typed config, then wire edges + scope, then deploy. This is the canonical authoring flow for every NEW playbook.
-2. **R3 visual-canvas recipe (§"Quick-Start Recipe")**: a fully worked notification playbook using `LookupUserMembership` + `fetchInGuids` + `Condition` + `CreateNotification` (the FetchXML list form was corrected 2026-10-08, ISS-018 #1452). The R3 recipe is still current — it just operates on top of the R7 dispatch model (every node carries `sprk_executortype` whether you set it explicitly or PlaybookBuilder defaults it from the palette item you dragged).
+2. **R3 visual-canvas recipe (§"Recipe: A Membership-Scoped Query")**: how to build a membership-scoped query with `LookupUserMembership` + `fetchInGuids` + `Condition` (the FetchXML list form was corrected 2026-10-08, ISS-018 #1452). The recipe originally ended in a scheduled notification playbook; **that use was retired on 2026-10-09 (D-100)** and the recipe no longer shows how to create one. The query pattern itself operates on top of the R7 dispatch model (every node carries `sprk_executortype`).
 
 You don't write code. You drag, connect, fill in forms — OR you author JSON and run `Deploy-Playbook.ps1`. PlaybookBuilder validates your work as you go and warns you when something is likely to break.
 
@@ -325,6 +327,8 @@ Nodes 2 and 3 are independent — both only depend on `Start` — so the orchest
 
 ## Worked Example 3 — Condition / Branching Playbook
 
+> **Note (D-100):** this example ends in a `CreateNotification` node. That executor served the retired notification playbooks and is scheduled for removal; read the example for the Condition branching, and use another delivery node for new work.
+
 A control-flow playbook that branches on a deterministic condition. Use case: "scan an inbound email — if it's a high-priority client, notify the assigned attorney; otherwise log silently."
 
 **Shape**: `Start → QueryDataverse → Condition → CreateNotification (true branch) OR ReturnResponse no-op (false branch) → ReturnResponse`.
@@ -412,9 +416,11 @@ A control-flow playbook that branches on a deterministic condition. Use case: "s
 
 ---
 
-## Quick-Start Recipe: Notify Me About New Documents on My Matters
+## Recipe: A Membership-Scoped Query (notification use retired)
 
-This is the canonical R3 recipe. It uses every new building block: `LookupUserMembership` → `QueryDataverse` with `fetchInGuids` → `Condition` → `CreateNotification`. Total time end-to-end: about 10 minutes for a maker who's seen PlaybookBuilder once. The recipe is fully current under R7 — every node carries an `sprk_executortype` value (set automatically by PlaybookBuilder when you drag from the palette).
+> **Retired (D-100, 2026-10-09).** This recipe was written for a scheduled "notify me about new documents on my matters" playbook. Spaarke no longer ships or supports notification playbooks (Playbook Type `Notification`, `CreateNotification` delivery, the notification scheduler); do not create one. What stays valid is the query pattern below: `LookupUserMembership` → `QueryDataverse` with `fetchInGuids` → `Condition`. Feed the result into a prompt-driven or Insights playbook, not into a bell notification. The step titles that mention a notification describe the retired original and are kept only so the node wiring is readable.
+
+This recipe uses the R3 building blocks: `LookupUserMembership` → `QueryDataverse` with `fetchInGuids` → `Condition`. The nodes carry an `sprk_executortype` value (set automatically by PlaybookBuilder when you drag from the palette).
 
 ### Before you start
 
@@ -428,11 +434,8 @@ You need:
 ### Step 1 — Create a new playbook
 
 1. Open PlaybookBuilder (it's a Code Page in your model-driven app — usually a tile labelled "Playbook Builder").
-2. Click **New playbook**. Give it a name like "New Documents on My Matters" and a description.
-3. In the Playbook Properties pane on the right, set:
-   - **Playbook Type**: `Notification` (this tells the scheduler to run it on a per-user cadence)
-   - **Schedule** (in `sprk_configjson` → `schedule`): `{ "frequency": "daily", "time": "06:00" }`
-   - **Category**: `new-documents` (used by notification dedup logic — see Pitfall G4)
+2. Click **New playbook**. Give it a name and a description.
+3. Set the Playbook Type for what the playbook does (for example the on-demand type used by the Insights playbooks). **Do not choose `Notification`**: that type is retired and nothing runs it.
 
 ### Step 2 — Drop a Start node
 
@@ -491,7 +494,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
 
 > **What the `{{default userPreferences.timeWindowHours '24'}}` does**: returns `userPreferences.timeWindowHours` if it resolves to a value, else `'24'`. Replaces the broken `{{userPreferences.timeWindowHours ?? '24'}}` pattern that used to emit raw text.
 
-### Step 5 — Drop a Condition node to short-circuit when there's nothing to notify about
+### Step 5 — Drop a Condition node to short-circuit when the query found nothing
 
 1. From the palette, drag **Condition** to the right of the Query node. PlaybookBuilder sets `sprk_executortype = 30 (Condition)`.
 2. Open Properties. Set:
@@ -501,38 +504,15 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
    - **False branch label**: leave as `False`
 3. Connect Query New Documents → Check Results.
 
-### Step 6 — Drop a CreateNotification node on the True branch
+### Step 6 — Use the result (the notification step is retired)
 
-1. From the palette, drag **Create Notification** to the right of the Condition node, slightly above (to leave room for a potential False branch later). PlaybookBuilder sets `sprk_executortype = 25 (CreateNotification)`.
-2. **Draw the edge from the Condition node's body** to the Create Notification node. At this point, the **Branch Picker dialog** pops up:
-   - Choose **True**.
-   - Click **Wire branch**.
-3. The edge now shows as a green **True** edge. (If you had chosen Both, you'd get TWO edges — one green True + one red False. The picker never invents a "both" edge type.)
-4. Open Create Notification properties. Set:
-   - **Output Variable**: `notification`
-   - **Title**: `{{newDocsQuery.output.count}} new document(s) on your matters`
-   - **Body**: `{{#each newDocsQuery.output.items}}{{sprk_filename}} added to {{matterName}} ({{createdon}}).\n{{/each}}`
-   - **Category**: `new-documents`
-   - **Priority**: `200000000` (Important)
-   - **Recipient ID**: `{{run.userId}}`
-   - **Iterate Items**: on (creates one notification per item rather than one bulky summary)
-   - **Item Notification**: configure the per-item template (see the notification-new-documents.json migrated playbook for the full shape)
+The original recipe added a `CreateNotification` node on the True branch. That step was removed with the notification playbooks (D-100). Wire the True branch to a node that fits your purpose instead (for example an AI analysis node or `ReturnResponse`). If the Condition is false, the downstream nodes on that branch are skipped, and an empty membership list selects nothing (fail-closed: `LookupUserMembership` returns an empty `ids` array and `fetchInGuids` writes the impossible-match `<value>`).
 
 ### Step 7 — Save and deploy
 
 1. Press **Ctrl+S** (or wait 30 seconds for auto-save).
-2. Watch for validation warnings in the bottom-right Notification badge on each node. If the **edge perf hint** fires on any edge ("this edge forces sequential execution but moves no data") — verify the downstream node actually references the upstream node's Output Variable. In our case, every edge moves data (Lookup → fetchInGuids usage → count check → notification creation), so this advisory should NOT fire.
-3. Save complete? Now **schedule it**:
-   - The notification scheduler picks up `sprk_playbooktype = Notification` playbooks automatically once they're saved. No separate deploy step.
-   - The scheduler runs hourly by default; your `schedule: { frequency: "daily", time: "06:00" }` configures the actual cadence.
-
-### What the recipient sees
-
-The next morning (or the next time the scheduler runs after the `time` you configured), every user the playbook applies to will see in-app notifications in their Power Apps notification panel:
-
-> **"3 new document(s) on your matters"** — clicking expands to one notification per document, each clickable to open the document record.
-
-If the user has zero matters they're a member of, OR zero new documents on those matters in the past 24 hours, NOTHING is created — no empty notification, no error. This is the fail-closed behavior built into both `LookupUserMembership` (empty `ids` array) and `fetchInGuids` (empty list → the impossible-match `<value>`).
+2. Watch for validation warnings in the bottom-right badge on each node. If the **edge perf hint** fires on an edge ("this edge forces sequential execution but moves no data"), verify the downstream node references the upstream node's Output Variable.
+3. Deploy repo-defined playbooks with `scripts/Deploy-Playbook.ps1`. There is no scheduler pickup for new playbooks: the notification scheduler only ran `Notification`-type playbooks, and none are active.
 
 ---
 
@@ -610,7 +590,7 @@ Existing helpers (`safe`, simple variable interpolation, `{{#each}}`, nested pro
 
 > **Do NOT** hand-roll a `{{#each ids}}<value>{{this}}</value>{{/each}}` substitute — an empty list leaves an `in` with no values (a query error), and the loop writes caller text into the markup. Use `fetchInGuids`.
 
-**Checks that catch the wrong shape**: one shared check, `FetchXmlShapeValidator`, rejects a list operator that carries a `value` attribute, has the wrong number of `<value>` children, or uses `joinIds` anywhere in FetchXML. It runs (1) in the `QueryDataverse` executor on the rendered query — the node fails loudly with `INVALID_NODE_CONFIGURATION` naming the node, attribute and operator, and the query is never rewritten; (2) as **deploy lint C** in `Deploy-Playbook.ps1` and `Deploy-NotificationPlaybooks.ps1` (which also refuses a Playbook Designer canvas-stub node config holding only `__canvasNodeId` / `__actionType`); and (3) in the repo regression test that renders every repo playbook.
+**Checks that catch the wrong shape**: one shared check, `FetchXmlShapeValidator`, rejects a list operator that carries a `value` attribute, has the wrong number of `<value>` children, or uses `joinIds` anywhere in FetchXML. It runs (1) in the `QueryDataverse` executor on the rendered query — the node fails loudly with `INVALID_NODE_CONFIGURATION` naming the node, attribute and operator, and the query is never rewritten; (2) as **deploy lint C** in `Deploy-Playbook.ps1` (and, before D-100, `Deploy-NotificationPlaybooks.ps1`; it also refused a Playbook Designer canvas-stub node config holding only `__canvasNodeId` / `__actionType`); and (3) in the repo regression test that renders every repo playbook.
 
 ### `joinIds` (R3 — NOT for FetchXML)
 
@@ -817,7 +797,7 @@ These are the recurring mistakes that have broken playbooks in production. Each 
 
 ## Migration: Replacing Broken FetchXML with LookupUserMembership
 
-If you authored playbooks before R3 and they need this update, here's the worked diff. The three migrated R3 reference playbooks live at `projects/spaarke-daily-update-service/notes/playbooks/`.
+If you authored playbooks before R3 and they need this update, here's the worked diff. The three migrated R3 reference playbooks were retired by D-100 (see the banner at the top of this guide).
 
 ### The A1 defect — what we're fixing
 
@@ -905,49 +885,26 @@ Before declaring a new playbook done, run it manually and inspect the result. Th
 
 Press **Ctrl+S** in PlaybookBuilder. Confirm no save-blocking errors fire. (R7 adds executor-type + Action-FK consistency checks to the save-blocking validation set — e.g., a Condition node with an Action FK will fail save.)
 
-### Step 2 — Trigger the scheduler manually
+### Step 2 — Run the playbook on demand
 
-The notification scheduler job is registered as `notification-playbook-scheduler`. Trigger it out-of-band via:
+Run the playbook through its on-demand path (for example the PlaybookBuilder test run, or the endpoint that serves the playbook's consumer) and capture the run. The `notification-playbook-scheduler` job is retired (D-100): it ran only `Notification`-type playbooks, none are active, so triggering it exercises nothing.
 
-```http
-POST /api/admin/jobs/notification-playbook-scheduler/trigger
-Authorization: Bearer <SystemAdmin token>
-```
+### Step 3 — Check the run result
 
-This dispatches the scheduler immediately (independent of its hourly cron). Returns `202 Accepted` with a `runId`.
+Open the run record. Expected: every node `Succeeded`, no `failed` nodes, and a non-empty `output` on the query node if the test user has memberships matching your filter.
 
-### Step 3 — Check the run status
-
-```http
-GET /api/admin/jobs/notification-playbook-scheduler/status
-Authorization: Bearer <SystemAdmin token>
-```
-
-Look at the most recent run. Expected:
-
-- `success`: `true`
-- `errors`: `0`
-- `processedItems > 0` if any user has memberships matching your playbook's criteria
-
-If **every** user's run of a playbook fails, the scheduler logs an Error ("… failed for every user …"), marks that playbook's child run Failed, fails the job run, and does **not** advance the playbook's `sprk_lastrundate` — the next hourly tick retries. If only some users fail, each failure is a per-user Warning trace, the rest proceed, and `sprk_lastrundate` advances. (Added 2026-10-08, ISS-018 #1452.)
-
-If `processedItems = 0`:
+If the query node returns zero items:
 
 - Either no user has memberships matching the playbook's filter (genuine zero state — your filter is too narrow for the test environment), OR
 - The membership service isn't configured for the entity type — call `GET /api/admin/membership/discovered/{entityType}` and confirm `discoveredFields[]` includes the columns you expect
 
-### Step 4 — Check the run history detail
+### Step 4 — Look for unrendered templates
 
-```http
-GET /api/admin/jobs/notification-playbook-scheduler/history?limit=5
-Authorization: Bearer <SystemAdmin token>
-```
-
-Look for `UnrenderedTemplateDetected` events in the per-run log. If you see them, you have a `{{...}}` reference that didn't resolve — fix the reference and re-run.
+Look for `UnrenderedTemplateDetected` events in the run log. If you see them, you have a `{{...}}` reference that didn't resolve — fix the reference and re-run.
 
 ### Step 5 — Verify the membership endpoint returns expected IDs
 
-For one of the users the scheduler processed, impersonate (or grab their token) and call:
+For a test user, impersonate (or grab their token) and call:
 
 ```http
 GET /api/users/me/memberships/sprk_matter
@@ -955,12 +912,6 @@ Authorization: Bearer <user token>
 ```
 
 Confirm the `ids[]` matches what you can verify by hand in the Dataverse model-driven app. If the endpoint returns IDs but your playbook's `LookupUserMembership` node returned empty — you have a config mismatch (different entity type, different role filter). Cross-check.
-
-### Step 6 — Verify a notification was actually created
-
-Open the user's notification panel in Power Apps (the bell icon top-right). Newly-created notifications appear within seconds of the scheduler run.
-
-If notifications were created but the user can't see them: check the `recipientId` template in your `CreateNotification` node — usually `{{run.userId}}`. If the value is wrong, notifications get created against the wrong recipient.
 
 ---
 
@@ -977,7 +928,7 @@ If notifications were created but the user can't see them: check the `recipientI
 - **Playbook vs RAG decision tree**: [`INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md`](INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
 - **BFF Hygiene §10** (binding governance for BFF additions): root [`CLAUDE.md` §10](../../CLAUDE.md#10-bff-hygiene-binding).
 - **BFF extensions constraints §G** (actions / nodes / scopes / configjson boundary, binding): [`.claude/constraints/bff-extensions.md` §G](../../.claude/constraints/bff-extensions.md#g-actions--nodes--scopes--configjson-boundary-binding-per-r4-canonical-truth-loop-2026-06-26).
-- **R3 reference playbooks**: `projects/spaarke-daily-update-service/notes/playbooks/` — `notification-new-documents.json`, `notification-new-emails.json`, `notification-new-events.json`.
+- **R3 reference playbooks**: retired 2026-10-09 (D-100); `notification-new-documents.json`, `notification-new-emails.json` and `notification-new-events.json` are recoverable with `git show e9f08b764:projects/spaarke-daily-update-service/notes/playbooks/<file>`.
 - **ADR-013 BFF AI Architecture**: [`docs/adr/ADR-013-bff-ai-architecture.md`](../adr/ADR-013-bff-ai-architecture.md).
 - **ADR-034 user-record membership** (binding rules for `LookupUserMembership`): [`.claude/adr/ADR-034-user-record-membership.md`](../../.claude/adr/ADR-034-user-record-membership.md).
 

@@ -451,7 +451,7 @@ Write-Host "  Lint A  : ✅ all $($definition.nodes.Count) nodes resolve to a kn
 # LookupUserMembership=52, QueryDataverse=51, etc.) do NOT use Actions — their
 # config lives entirely in sprk_configjson on the node. Requiring actionCode
 # for these would block legitimate notification/control-flow playbooks
-# (observed 2026-06-29 when re-deploying notification-tasks-due-soon.json).
+# (observed 2026-06-29 when re-deploying a retired notification playbook).
 #
 # Exemptions:
 #   - DeliverComposite (ExecutorType 42, ADR-037) — code-registered structural
