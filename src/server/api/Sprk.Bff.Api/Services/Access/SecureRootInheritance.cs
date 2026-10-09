@@ -2496,8 +2496,8 @@ public sealed class SecureRootInheritance
 
         // Task 174 (verifier F1-a): a work assignment or project above the record that is not flagged secure itself but sits
         // below a secure ancestor IS secure (round 84), so its No Access list binds what is filed below it too. Decided over
-        // the decisions already read (no extra query), memoised; only the walls' climb (maxDepth > 1) adds them — the
-        // one-level questions (inheritance, the sharee rule) are unchanged.
+        // the decisions already read (no extra query; a plain reachability walk per question, no memo); only the walls'
+        // climb (maxDepth > 1) adds them — the one-level questions (inheritance, the sharee rule) are unchanged.
         var effective = new EffectiveOverDecisions(decisions);
         foreach (var climb in climbs)
         {

@@ -1311,8 +1311,23 @@ public class ExternalParticipationService
     /// <paramref name="maxRows"/> ids; one more row than that reports <c>Truncated</c>, never a silent prefix.</para>
     /// <para>An entity type with no org-typed lookups covers nothing: a static schema fact, not a fault.</para>
     /// </remarks>
-    public virtual async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindSecureRootsReferencingOrganizationAsync(
+    public virtual Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindSecureRootsReferencingOrganizationAsync(
         string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, "sprk_issecure eq true", ct);
+
+    /// <summary>
+    /// Task 174 (verifier pass 2 F1): the root records of <paramref name="entityType"/> that reference
+    /// <paramref name="organizationId"/> and are NOT flagged secure — the candidates an organization-object No Access entry
+    /// still covers when they are secure through what they are filed under (owner round 84). The enforcer folds them with
+    /// the filing walk; this read decides nothing on its own. Same registry, cap and fault contract as
+    /// <see cref="FindSecureRootsReferencingOrganizationAsync"/>.
+    /// </summary>
+    public virtual Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindUnflaggedRootsReferencingOrganizationAsync(
+        string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, "sprk_issecure ne true", ct);
+
+    private async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindRootsReferencingOrganizationAsync(
+        string entityType, Guid organizationId, int maxRows, string flagFilter, CancellationToken ct)
     {
         if (organizationId == Guid.Empty ||
             !RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source) ||
@@ -1326,7 +1341,7 @@ public class ExternalParticipationService
         var apiUrl = GetDataverseApiUrl();
         var orgFilter = string.Join(" or ", orgAttributes.Select(a => $"_{a}_value eq {organizationId}"));
         var query = $"{apiUrl}/{source.Collection}" +
-                    $"?$filter=sprk_issecure eq true and ({orgFilter})" +
+                    $"?$filter={flagFilter} and ({orgFilter})" +
                     $"&$select={source.IdAttribute}&$top={maxRows + 1}";
 
         var ids = await ReadIdColumnAsync(query, token, source.IdAttribute, ct);

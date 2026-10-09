@@ -443,6 +443,82 @@ public class EffectiveAccessFollowsParentTests
         decision.Outcome.Should().Be(SecureShareWallOutcome.Walled, "the project is secure through the matter (round 84)");
     }
 
+    // ── Verifier pass 2 F2b: two not-yet-flagged middle levels (WA -> P1 -> P2 -> secure M), wall on P2 ─────────────────
+
+    private static readonly Guid UpperProject = Guid.Parse("17417417-0000-0000-0000-0000000000c2");
+
+    /// <summary>A non-secure, Standard project filed under another project by the pair.</summary>
+    private void OpenProjectUnderProject(Guid project, Guid parentProject)
+    {
+        _world.Add(Project, project,
+            ("sprk_issecure", false),
+            ("sprk_projectname", "Lower"),
+            ("sprk_regardingrecordid", parentProject.ToString("D")),
+            ("sprk_regardingrecordtype", new EntityReference("sprk_recordtype_ref", ProjectType)));
+        _participations.Flags[project] = RootRecordFlags.None;
+    }
+
+    /// <summary>WA -> MiddleProject -> UpperProject -> secure ParentMatter, nothing flagged below the matter.</summary>
+    private void TwoUnflaggedMiddleLevels()
+    {
+        MatterRow(ParentMatter, secure: true);
+        OpenProjectUnderMatter(UpperProject, ParentMatter);
+        OpenProjectUnderProject(MiddleProject, UpperProject);
+        OpenWaUnder(ByDirectGrant, Project, MiddleProject);
+    }
+
+    [Fact(DisplayName = "174 F2b: a contact walled on the UPPER of two non-flagged projects under a secure matter is denied the work assignment")]
+    public async Task F2b_ReadPath_WallOnTheUpperOfTwoNonFlaggedProjects_IsDenied()
+    {
+        TwoUnflaggedMiddleLevels();
+        ContactGrants();
+        _denyList.DenyContactOnRecord(Contact, UpperProject);
+
+        var set = await ComposeAsync();
+
+        set.Rights.Should().NotContainKey(ByDirectGrant);
+    }
+
+    [Fact(DisplayName = "174 F2b: a grant to a contact walled on the upper of two non-flagged projects is refused")]
+    public async Task F2b_GrantTime_WallOnTheUpperOfTwoNonFlaggedProjects_IsDenied()
+    {
+        TwoUnflaggedMiddleLevels();
+        _denyList.DenyContactOnRecord(Contact, UpperProject);
+
+        var answer = await Service().CheckGranteeNoAccessAsync(WorkAssignment, ByDirectGrant, Contact, Array.Empty<Guid>(), CancellationToken.None);
+
+        answer.Should().Be(NoAccessCheckAnswer.Denied);
+    }
+
+    [Fact(DisplayName = "174 F2b: the share guard refuses a user walled on the upper of two non-flagged projects")]
+    public async Task F2b_Guard_WallOnTheUpperOfTwoNonFlaggedProjects_IsWalled()
+    {
+        TwoUnflaggedMiddleLevels();
+        _denyList.DenySystemUserOnRecord(InternalUser, UpperProject);
+
+        var decision = await Guard().CheckRecordAndSecureParentsAsync(
+            WorkAssignment, ByDirectGrant, InternalUser, SecureWallRecordScope.AsFlagged, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SecureShareWallOutcome.Walled);
+    }
+
+    // ── Verifier pass 2 F2a: flagged secure itself, Standard, filed under a RESTRICTED matter ──────────────────────────
+
+    [Fact(DisplayName = "174 F2a: a contact grant on a record flagged secure (Standard) under a Restricted matter is refused as Restricted")]
+    public async Task F2a_GrantTime_OwnSecureStandard_UnderARestrictedMatter_IsRestricted()
+    {
+        MatterRow(ParentMatter, secure: true, permission: Restricted);
+        _world.Add(WorkAssignment, ByDirectGrant,
+            ("sprk_issecure", true), ("sprk_regardingmatter", new EntityReference(Matter, ParentMatter)));
+        _participations.Flags[ByDirectGrant] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var decision = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            _participations, ExternalGrantRootType.WorkAssignment, ByDirectGrant, GrantGranteeKind.Contact,
+            NullLogger.Instance, CancellationToken.None);
+
+        decision.Should().Be(GrantPolicyDecision.Restricted, "inheritance set Secure, but nothing writes its Access Permission until task 175");
+    }
+
     // ── Verifier F2: the guard's Q4 own-list change and its own fold ───────────────────────────────────────────────
 
     [Fact(DisplayName = "174 F2: the guard asks a NON-flagged child of a secure matter as the secure record it is (its own list binds)")]

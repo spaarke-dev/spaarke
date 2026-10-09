@@ -230,6 +230,26 @@ internal static class GrantPolicyTestDoubles
                 ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false));
         }
 
+        /// <summary>
+        /// Task 174: the NOT-flagged records of a table that reference the organization — the same derivation as the secure
+        /// read above, with the flag inverted.
+        /// </summary>
+        public override Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindUnflaggedRootsReferencingOrganizationAsync(
+            string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        {
+            if (ReverseReadsThrow)
+                throw new InvalidOperationException("Simulated reverse-read failure.");
+
+            var ids = RecordOrganizations
+                .Where(kv => kv.Value.Contains(organizationId)
+                             && (RecordTables.TryGetValue(kv.Key, out var t) ? t : "sprk_project") == entityType
+                             && !(Flags.TryGetValue(kv.Key, out var f) ? f : _defaultFlags).IsSecure)
+                .Select(kv => kv.Key)
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<Guid>, bool)>(
+                ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false));
+        }
+
         /// <summary>Task 143: an organization's active member contacts.</summary>
         public override Task<(IReadOnlyList<Guid> ContactIds, bool Truncated)> FindWallMemberContactsAsync(
             Guid organizationId, int maxRows, CancellationToken ct = default)

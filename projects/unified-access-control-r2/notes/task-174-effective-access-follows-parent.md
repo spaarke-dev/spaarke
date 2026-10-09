@@ -120,8 +120,8 @@ MDA share, container membership and Office edit unless the record is visited by 
   through M) -> secure M: a contact or user walled on P kept WA at read and grant time, the guard allowed it while the
   enforcer (treating P as secure) removed it — #1419's F2 loop. Fix: in the walls' climb (`maxDepth > 1`), every visited
   work assignment or project that sits below a secure ancestor counts as a secure parent too, decided over the decisions
-  already read (`EffectiveOverDecisions`, memoised; no extra query). The one-level callers (inheritance, the sharee rule) are
-  unchanged. The read veto, the grantee check, the share guard and 064's coverage all read the same answer. Tests: contact
+  already read (`EffectiveOverDecisions`: a plain reachability walk per question, no memo, so a filing cycle cannot cache
+  a partial answer; no extra query). The one-level callers (inheritance, the sharee rule) are unchanged. The read veto, the grantee check, the share guard and 064's coverage all read the same answer. Tests: contact
   plane (secure / non-secure matter), grant time, guard.
 - **F1-b: an own-Limited record under a Restricted parent lost Limited.** `IsLimited = own.IsLimited || (!restricted &&
   inherited Limited)`. Test on the fold.
@@ -170,6 +170,22 @@ in-memory world, real deny-list matching, real grant policy):
 never-less-strict, an older BFF's answer, and the parse/fold helpers. The default 064 body in that suite now says
 `secure: doesNotApply` (its matter is not secure; the modal trusts the signal since this task).
 
+## Verifier pass 2 (main session, 2026-10-08) — fixed in this PR
+
+- **F1: the enforcer's organization-object branch was not folded.** `CoveredRecordsAsync` listed only records FLAGGED
+  secure that reference the organization (`FindSecureRootsReferencingOrganizationAsync`), so a not-yet-flagged work
+  assignment under a secure matter that references the walled organization kept the walled user's share — while 064, the
+  read veto and the guard all said the entry was in force; `EnforceForRecordAsync` ("Update Access") had the same gap,
+  permanent after a Refused or Failed inheritance. Fix: for `sprk_workassignment` and `sprk_project` the enforcer also lists
+  the NOT-flagged records that reference the organization (`FindUnflaggedRootsReferencingOrganizationAsync`, same registry,
+  cap and fault contract), folds them with ONE batched `EffectiveRootFlags.ReadAncestryAsync`, and covers those that are
+  secure through their filing; an undecidable ancestry is `covered-records-unreadable` on that record (nothing removed on a
+  guess). The `MaxCoveredRecords` cap holds. Tests: the probe (share removed) and the fault case.
+- **F2a:** the common real case — flagged secure by inheritance, Access Permission still Standard, filed under a secure,
+  Restricted matter — at grant time (Restricted refusal) and at `/share-user` (422 for an external-flagged user).
+- **F2b:** two not-yet-flagged middle levels (WA -> P1 -> P2 -> secure M, wall on P2): read path, grant time, guard.
+- **F4:** the climb's comment and this note said "memoised"; the walk has no memo (corrected).
+
 ### Seeding proofs (mutation checks, reverted)
 
 - **Read-path cancellation:** the contact plane composed with its OWN flags (no fold) — 3 of the 20 new tests fail (secure
@@ -188,6 +204,15 @@ never-less-strict, an older BFF's answer, and the parse/fold helpers. The defaul
   | Materializer on own flags | the suggest-not-share test |
   | F1-a: non-flagged middle ancestors not counted | 3 (read path, grant time, guard) |
   | F1-c: S5 on the effective flag | the ended-assignment revoke test |
+  | Pass 2 F1 reverted (no not-flagged org-covered records) | both new enforcer tests |
+  | M5: skip the walk whenever the record's own flag is Secure | the F2a grant-time and `/share-user` tests |
+  | M6: F1-a's climb limited to the direct middle parent | the 3 F2b tests |
+
+### Runs after verifier pass 2 (2026-10-08, final code)
+
+- `tests/unit/Sprk.Bff.Api.Tests`: 18,815 passed, 0 failed, 54 skipped. Focused classes: 1,247 passed.
+- `tests/Spaarke.ArchTests`: 811 passed.
+- Publish: fresh master `65177354f` 127,317,868 bytes; this branch 127,359,656 bytes; **delta +41,788 bytes**.
 
 ### Runs after verifier pass 1 (2026-10-08, final code)
 

@@ -771,6 +771,40 @@ public class InternalUserShareTests
         _shares.Writes.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Task 174 (verifier pass 2 F2a): the common real case — the work assignment IS flagged secure (inheritance set it) but
+    /// its Access Permission is still Standard (nothing writes it until task 175), filed under a secure, RESTRICTED matter.
+    /// It is Restricted for this rule: the same 422 for a user flagged external, nothing written.
+    /// </summary>
+    [Fact]
+    public async Task Share_OnAFlaggedSecureStandardWorkAssignmentUnderARestrictedMatter_WithAUserFlaggedExternal_Is422()
+    {
+        var parentMatter = Guid.Parse("17417417-0000-0000-0000-0000000001b2");
+        var world = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+            .Add("sprk_matter", parentMatter, ("sprk_issecure", true),
+                ("sprk_accesspermission", new Microsoft.Xrm.Sdk.OptionSetValue(ExternalParticipationService.AccessPermissionRestricted)))
+            .Add("sprk_workassignment", MatterId, ("sprk_issecure", true),
+                ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", parentMatter)));
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(
+            RootRecordFlags.None,
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => world).Object);
+        flags.Flags[MatterId] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        flags.Flags[parentMatter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true);
+        var guard = new SecureShareNoAccessGuard(flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
+
+        var result = await InternalShareEndpoints.ShareAsync(
+            new ShareRecordWithUserRequest("workassignment", MatterId, UserId, ExternalAccessLevel.ViewOnly),
+            _shares, _users.Client, flags, _cache.Object, new StubCallerRightsProbe(FullWorkingRights),
+            _children.Synchronizer(_shares), guard,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess,
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
     /// <summary>The null case, decided (round 67 item 3): a BLANK flag is not external, so it is shared even on a Restricted record.</summary>
     [Theory]
     [InlineData(null)]
