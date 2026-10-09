@@ -3,13 +3,13 @@
 > **Last Updated**: 2026-10-09, checkpoint 5 + master merge (main session). State only — history is in git log, task
 > `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md) (§3 no-parking
 > rule D-81; §6 gotchas incl. "never save a system playbook in the Designer"). Decisions: [`notes/decisions.md`](notes/decisions.md) +
-> spec §9 (D-1..D-103). Sub-agents never edit this file.
+> spec §9 (D-1..D-104). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 114 tasks, **55 ✅** (board synced). |
+| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 115 tasks, **56 ✅** (board synced). |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. synced with origin/master 2026-10-09 (`217b8f3c6`; Signal-ownership invariant now **I-17** — uac-r2 took I-16). |
 | **Critical context** | D-100 done in dev 2026-10-09 04:15Z: all 7 notification playbooks inactive, 05:00Z tick ran none (deploy-log "D-100 retire"); `C:\wt120d` can be removed. |
 | **Context** | Every PR gets an independent review + a re-check of each fix round before the owner's merge; the owner pre-approves "merge when green" per PR (I build / merge-tree against current master first). No tenant-wide publish (D-83). Dev deploys/data changes need an owner decision. Never park an issue (D-81). **Notification playbooks are RETIRED (D-100)** — bell-only; the Briefing never reads `appnotification`. AI playbooks: Matter Health only (D-101). |
@@ -19,13 +19,13 @@
 
 | ID | What | Then |
 |---|---|---|
-| `a05ace738dcb47fe5` | **131** retire notification playbooks (`C:\wts-131`): deploy path, docs, alert, code-deletion inventory | PR → review → owner: approve Azure alert deletion + any code deletion → merge |
-| `acfdd3ea462a111e9` | **132** invalid appnotification option values in the non-playbook writers (held-email alert, grant reminder, toast type) (`C:\wts-132`) | PR → review → owner merge |
-| `ada91107a9efd8931` | **133** system playbooks read-only in the Designer (`C:\wts-133`) | PR → review → owner merge |
-| `aaa74682a6e89bfc8` | **135** Matter Health fix + deactivate demo/junk playbooks (full GUIDs; dev data approved D-96/D-99/D-101) (`C:\wts-135`) | PR → review → owner merge |
-| `afa95b62d109541c3` | **130** author: #1467 rounds 5-7 done and re-checked (head `9c8d314fa`, 62/62). **Round 8 = D-103** (stop unless flagged on pending entity/app collateral) | Light re-check by `afead9298bddac72a` → CI green → merge-tree vs master → **merge (D-102, approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → ask owner for the 4 live proofs |
-| `a9cc345014f28b750` | **136** Create Analysis from hub 404 at Finish (owner checklist r1) — investigate → fix (`C:\wts-136`) | PR → review → owner merge → deploy (owner) → owner re-runs card r1 |
-| `a6aba9e72ed9b1343` + bg `bcpu6whdj` | **113** #1480 at `83b8a19ce`, approved; bg job merges when CI green (**D-93**) | Mark 113 ✅ → Console auto-deploys to dev → task 114 = live checklist |
+| `afa95b62d109541c3` (author) / `afead9298bddac72a` (reviewer) | **130** #1467 round 8 = D-103 stop-unless-flagged (`577355f72`, 68/68) in re-check | CI green → merge-tree vs master → **merge (D-102 approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → ask owner for the 4 live proofs |
+| `a05ace738dcb47fe5` | **131** #1493 round 2 (review: vacuous Issue1452 theory, PLAYBOOK-AUTHOR-GUIDE still teaches notification playbooks, stale docs/comments) + **second PR deleting verified-unused notification code (D-104b)** | On round-2 push: main session applies `.claude` edits on #1493's branch (dataverse-create-schema SKILL.md:671; ADR-036:21; ADR-034:23/94 "(retired, D-100)") → re-check → owner merge |
+| `abccbf6d014a1218e` | Independent review of **#1494** (132, appnotification option constants; CI green `c0937c5ab`) | Fix rounds → owner merge (conflicts with #1493 on 4 daily-update playbook JSONs: take delete) |
+| `a45f465c6ce16e9e3` | Independent review of **#1497** (133, Designer read-only; CI green `38e5d9b52`) | Fix rounds → owner merge + dev BFF deploy approval; keep the CLAUDE.md "never save a system playbook" gotcha until shipped everywhere; then task **137** (#1498 per-node endpoints) |
+| `aaa74682a6e89bfc8` | **135** #1496 Matter Health: author fixing reviewer items 1,2,3,5,6,9,11,12,14,15,16,17; #4 recorded under D-101 | Push → independent re-check → owner: live proof needs AgentService (disabled in dev) |
+| `a9cc345014f28b750` (author) / `a594f6e15e836ba8f` (reviewer) | **136** #1501 (root cause: org-owned lookup tables 400 on RetrievePrincipalAccess → 404; fix = uac-r2 #1391, stacked) in review | #1391 merge (uac-r2, asked on #1355 comment 6080141491) → owner merge → dev BFF + Console deploy (owner) → owner re-runs card r1. Open: orphan `sprk_document` 2cf67ed0-207b-4c58-a43d-11d8a7c9a424 (dev data, owner); Basic User lacks `prvAppendTosprk_RecordType_Ref` (asked uac-r2) |
+| `aca557cdbb835f49c` | **111** #1415: merge master (conflicts after #1480), keep named sizes + in-app hosting | CI → re-check → owner merge → owner fills checklist r2-r8 |
 
 ## Waiting on others
 
@@ -44,5 +44,5 @@
 
 ## Queued (not started)
 
-- **123** (ISS-010 triage enabled filter + ISS-002 counters; on this branch), **125** (ISS-001 AI action mirror drift; live writes need approval), **134** (blocked on uac-r2), **114** (after #1480), **126** (blocked on uac-r2).
+- **123** (ISS-010 triage enabled filter + ISS-002 counters; on this branch), **125** (ISS-001 AI action mirror drift; live writes need approval), **134** (blocked on uac-r2), **114** (#1480 merged 05:32Z, Console auto-deployed — live checklist now startable), **126** (blocked on uac-r2).
 - **Critical path:** 039 live gate → 037 → 031 (098 ✅, 106 ✅).
