@@ -19,9 +19,8 @@
 |---|---|---|
 | `a3550ab443978aa5b` | **D-92 full playbook-engine sweep** (Opus, read-only) → `notes/playbook-engine-defect-sweep.md` | Owner reviews findings → ONE follow-up PR (task 120 author `aae6c79edd0f863de`, worktree `C:\wt120d`) → review → owner merge → redeploy BFF, re-sync, re-run zz-120 proof, un-pause (D-91) |
 | `aae6c79edd0f863de` | Task 120 author — **D-91 pause DONE** 02:42Z (statecode 1/2 on Overdue, Matter Activity, Documents, Emails, Events; scheduler honours statecode only; 03:00Z tick skipped them). Resume = statecode 0 / statuscode 1. Due Soon + Work Assignments stay on (daily, next run ~02:34Z 10-10) | Idle; waits for the sweep |
-| `afead9298bddac72a` | Re-check of **#1467** (task 130, repo-wide scoped publish) round 3 @ `10bca61ea` (flows now refused; app settings via parent app; chunked publish) | If clean → owner merge + live-proof approval; main session applies `notes/task-130-skill-amendments.md` to the 3 skills and removes the 3 allow-list lines in the same commit |
+| `afa95b62d109541c3` | Task 130 author: round-3 re-check APPROVED pending CI; fixing the last items on **#1467** (per-chunk read-back for entities/forms/views/charts + site maps; chunk order option sets/web resources first, app modules last; resume command; app-setting parent-app pre-flight; workflow activation step documented; 0x80060888 probe rationale) | Light re-check by `afead9298bddac72a` → owner merge + live proofs (4 listed by reviewer: NoAccessEntryRibbon -Apply, FieldMappingAdminSolution scoped import, small app module + sitemap + app setting, first unmanaged SpaarkeMaster import) → main session applies `notes/task-130-skill-amendments.md` to the 3 skills, removing the 3 allow-list lines in the same commit |
 | `a6aba9e72ed9b1343` | Task 113 author: last 3 small fixes on **#1480** (busy-warning text, name-read failure test, lock churn) | bg `bcpu6whdj` merges #1480 when green (**D-93 pre-approved**) → Console auto-deploys to dev → mark 113 ✅ → task 114 = live checklist only |
-| `afa95b62d109541c3` | Task 130 author (idle until re-check) | Fix re-check findings |
 
 ## Task 120 (ISS-018 notifications) — state
 
