@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="259" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Customer business-unit topology: H10 creates the customer's unit (sibling of Secure Record) with the BFF app users in it; H11 puts guests in it; H13 requires the isolation census (ISS-010 / #1486)</title>
+    <phase>Model 1 dedicated-stamp remediation — T186 blocker (ISS-010)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security topology of every customer environment; a wrong placement exposes every secure record (F1).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>tenant-isolation; Dataverse BU/role depth semantics.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, dataverse, tenant-isolation, security, testing</tags>
+    <deps>256</deps>
+  </metadata>
+
+  <prompt>Implement ISS-010 (notes/defer-issues.md, GitHub #1486) per the owner's decision of 2026-10-09.</prompt>
+
+  <goal>On a provisioned environment no human reaches a Secure Record unit record by role depth: users (guests and the BFF application users) sit in the customer's own unit directly under the Dataverse root, the Secure Record unit is its sibling with no users in it, and access to a secure record comes only from an explicit grant. A run cannot reach Ready unless the isolation census says `isolated`.</goal>
+
+  <context>
+    <background>
+      Owner decision 2026-10-09 (binding): "for secure records, only users (systemusers, guest systemusers or contact users)
+      explicitly granted access should have access; guest users are added to the root customer business unit NOT added to
+      the secure business unit (no users are added to the secure business unit)." Interpretation recorded with the owner:
+      the "root customer business unit" is the customer's own unit created directly under the Dataverse root (INCOMING-145
+      §6 T1). It cannot be the Dataverse root itself: `Spaarke Basic User` holds Deep read on sprk_project / sprk_matter /
+      sprk_workassignment, and Deep at the root reaches the Secure Record unit (a child of the root), which would violate
+      the first sentence. As siblings, Deep in the customer unit does not reach the Secure Record unit.
+      ISS-010's recommended fix is accepted: intake `customerDisplayName`; H10 (T1+T3); H11 (T5); H7b checks T1/T3; H13
+      census.
+    </background>
+    <relevant-files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/defer-issues.md (ISS-010)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers (H10 DataverseWebApiAppUserCreator, H11 user provisioning + H11UserProvisioningOptions, H7b SecureRecordSetup*, H13)</file>
+      <file>IntakeParameterCatalog + the POST /api/runs validation + intake.schema.json</file>
+      <file>InterStepState ([ProducedBy] contract)</file>
+      <file>Sprk.Bff.Api secure-record-isolation-census (INCOMING-145 §3) — read-only endpoint H13 calls</file>
+      <file>.claude/skills/provision-environment/SKILL.md (intake; main session applies)</file>
+      <file>.claude/constraints/provisioning.md "Secure Record setup — H7b" (main session applies)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">No user of any kind is placed in the Secure Record unit. H7b refuses (quarantined) when it finds one.</constraint>
+    <constraint source="ISS-010">H10's application users keep System Administrator; they are CREATED in the customer unit (never moved — a BU change strips roles).</constraint>
+    <constraint source="provisioning.md">The L2 Worker runs no shell tool; Dataverse via Web API; idempotent read-then-write; no Dataverse plugin.</constraint>
+    <constraint source="live">No live action in this task. Unit/integration tests only.</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/**: return proposed .claude edits verbatim in the final report.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Intake `customerDisplayName` (required, validated at POST /api/runs: non-empty, ≤ 160 chars, no control characters); carried to H10.</step>
+    <step order="2">H10 creates (or finds by name under the root) the customer unit, records `InterStepState.CustomerBusinessUnitId` ([ProducedBy(H10)]), and creates both application users IN it with System Administrator. Existing users found in another unit: quarantine with a clear code (no move).</step>
+    <step order="3">H11 creates each guest in the customer unit (not the root, never Secure Record).</step>
+    <step order="4">H7b additionally checks: the customer unit exists under the root; both application users' businessunitid = customer unit; the Secure Record unit holds no enabled user (refuse, quarantined).</step>
+    <step order="5">H13 calls the BFF's read-only secure-record-isolation-census and requires `isolated`; anything else fails H13 with the census findings.</step>
+    <step order="6">Tests: unit tests per handler incl. negative cases (user in root, user in Secure Record, census not isolated); DAG/ProducedBy tests; ArchTests; docs (deployment guide, provisioning.md proposal, skill intake proposal). Close ISS-010 in defer-issues.md.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/runs without customerDisplayName → 400 with the intake error code.</criterion>
+    <criterion testable="true">H10 creates the unit under the root and both app users with businessunitid = that unit (unit test on the Web API calls).</criterion>
+    <criterion testable="true">H11 creates guests with businessunitid = customer unit; never the root or Secure Record unit.</criterion>
+    <criterion testable="true">H7b quarantines when an enabled user is in the Secure Record unit, or an app user is outside the customer unit.</criterion>
+    <criterion testable="true">H13 fails when the census returns anything but `isolated`.</criterion>
+    <criterion testable="true">Solution build 0 errors / 0 warnings; ControlPlane tests and ArchTests pass.</criterion>
+  </acceptance-criteria>
+</task>
