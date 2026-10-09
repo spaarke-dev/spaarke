@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="177" project="unified-access-control-r2">
+  <metadata>
+    <title>Indexing recovers a document's parent record when the request has none, so documents moved by secure transitions (and Office/Compose saves) stay findable in record-scoped search and RAG (closes #1510)</title>
+    <phase>Session 28 — UAC defect remediation (owner decision 2026-10-09: "fix now in uac-r2")</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code change in the BFF indexing job; modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A shared job handler used by several producers; the parent derivation must match Send-to-Index exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits RagIndexingJobHandler and a shared parent-derivation helper; no file overlap with 175, 176 or 178.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ai, job, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <origin>#1510, confirmed by a probe test on master c8a87d818 (2026-10-09). uac-r2's own secure transitions (tasks 148/150/158/171) trigger it today: DocumentContainerRelocator calls RelocatedFileIndexing, which sends ParentEntity: null.</origin>
+  </metadata>
+
+  <prompt>Close #1510 (gh issue view 1510 has the evidence). When RagIndexingJobHandler receives a payload with no ParentEntity but a DocumentId, it derives the parent from the document row before indexing, so the new chunks carry parentEntityType and parentEntityId.</prompt>
+
+  <goal>(1) Move RagEndpoints' Send-to-Index parent derivation (around :1255-1285; matter, project, invoice) into ONE shared helper. Extend it to the document's core-ancestor and regarding columns, so a document under a work assignment or event gets the right parent, named the way semantic search's scope=entity names parents.
+(2) RagIndexingJobHandler uses the helper when payload.ParentEntity is null and DocumentId is set; it already injects IDocumentDataverseService. If the row cannot be read, index without a parent and log a warning, as today. Never fail the job over this, and never invent a parent.
+(3) Send-to-Index uses the same helper, and its behaviour does not change.
+(4) The producers this fixes are the relocator, UploadFinalizationWorker (Office new item), ComposeService create-on-save and AnalysisResultPersistence. Confirm each one passes DocumentId; where one doesn't but already has the id, make it pass it.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RelocatedFileIndexing.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (Send-to-Index derivation)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10/§11">Reuse before adding: one helper, justified in the notes. Measure the publish-size delta.</constraint>
+    <constraint source="scope">No index schema change and no backfill job. Send-to-Index fixes existing chunks that have no parent; if a backfill is needed, propose it in the notes for the owner to decide.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-confirm the defect with the issue's Suspect 2 probe tests and keep them as regression tests.</step>
+    <step>Add the shared helper, wire the job handler and Send-to-Index, and check each producer's DocumentId.</step>
+    <step>Add the tests, write the notes and open the PR. If it is cheap, count read-only how many dev documents currently have no parent in the index, and report the number.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>The two #1510 probe tests pass, and the relocator test asserts that the job handler (not the enqueue) indexes the document with its parent.</criterion>
+    <criterion>Parent derivation is tested for a matter, a project, a work assignment, an invoice, an unreadable row (no parent, and the job still succeeds) and a document with no parent link (no parent).</criterion>
+    <criterion>Send-to-Index behaves exactly as before: its existing tests pass.</criterion>
+    <criterion>Test scope: the cases named above. Anything beyond that needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+</task>

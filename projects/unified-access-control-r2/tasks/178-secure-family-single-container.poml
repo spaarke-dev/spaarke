@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="178" project="unified-access-control-r2">
+  <metadata>
+    <title>One SPE container per secure family: inherited-secure records use the family root's container (adopting an existing secure container where one exists); un-securing moves the files to the business-unit container (owner round 88; closes #1506)</title>
+    <phase>Session 28 — UAC (owner round 88, 2026-10-09)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes container provisioning, upload routing and file relocation for secure records (security, data movement).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting across provisioning, the container resolver, the relocator and the secure transitions; file moves are hard to reverse.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on task 175's inherited/own marker and edits SecureRootInheritance and UnsecureProjectEndpoint, which 175 also edits. Start after 175 merges. Run after 177 too, so moved files keep their index parent.</parallel-reason>
+    <deps>175, 177</deps>
+    <tags>bff-api, auth, security, spe, dataverse, job, testing, deploy</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner round 88 (notes/session27-owner-decisions-and-research.md) and #1506. Today every secure record, inherited or not, gets its own container (task 158). As a result, uploads under a secure work assignment filed under a secure matter are refused with container_ancestor_ambiguous, and un-secured files are likely unreadable.</origin>
+  </metadata>
+
+  <prompt>Implement owner round 88. Read round 88, round 87, #1506 and task 158's notes first. Then write the design into notes/task-178-secure-family-container.md and STOP for main-session review BEFORE you write code. Coding starts only once the main session confirms the design, which may include owner questions.</prompt>
+
+  <goal>(1) FAMILY ROOT. A secure family is a top secure record plus everything secure because of it (round 87's inherited values): work assignments and projects filed under it, and their To Do / Event / Communication / Document records. The family has ONE container, owned by the top secure record. A record secured on its own with no secure ancestor starts a new family.
+(2) NO NEW CONTAINER FOR INHERITED-SECURE RECORDS. Task 158's ProvisionInheritedAsync stops creating a container. Uploads anywhere in the family resolve to the family container, and the resolver no longer reports container_ancestor_ambiguous inside one family.
+(3) ADOPTION (owner preference). When a family forms or grows, an existing secure container in the family becomes the family's container instead of creating a new one, wherever that is unambiguous. Example: a hand-secured work assignment already has container C, and its matter is then secured. Design the rule for adoption, and for the case where several members already have containers. New files always go to the family container. Existing files may stay where they are (round 88 item 2) and must stay readable through the BFF.
+(4) UN-SECURE MOVES FILES. When a family, or an inherited member, is un-secured (round 87's inherited values follow the parent down), its files MOVE to the business-unit container through the existing relocator (tasks 148/171), with the same ordering and rollback guarantees as the secure transitions. A member that stays secure on its own (round 87 "own" value) keeps its files.
+(5) READABILITY. No document becomes unreadable at any point: before, during or after a move, adoption or un-secure. This fixes the "likely" #1506 item 3.
+(6) EXISTING DATA. Write a migration plan for dev's existing inherited-secure records that have their own containers: adopt, merge or leave them. The plan goes in the design note for an owner decision. Do not run any migration.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance*.cs (ProvisionInheritedAsync, 175's marker)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (Steps 6-7 container create and write; FilesFollowAsync), UnsecureProjectEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/.../RecordContainerResolver*.cs, SecureContainerDecision.cs, DocumentContainerRelocator.cs</file>
+      <file>tests: ChildRecordContainerResolutionTests.cs (around :1556-1589 pins today's ambiguous refusal; it changes with this task)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §17">Do not create container TYPES (they are permanent and capped at 25). Containers are created only through the existing provisioning path.</constraint>
+    <constraint source="project">File moves go only through the existing relocator and broker paths (tasks 148/171). No app-setting, Entra or Key Vault changes. Live runs are main-session gates.</constraint>
+    <constraint source="safety">Fail closed: if a move or adoption step cannot complete, the record stays at the more restrictive state with its files readable, and the problem is reported.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Design note (goals 1-6, plus the existing-data plan, adoption rule, failure handling and the test list), then STOP for review.</step>
+    <step>After the main session confirms: implement, test, write the notes, open the PR.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any case where round 87/88 do not determine which container a record's files belong in: STOP and list it in the design note.</trigger>
+    <trigger>If adoption would require moving another family's files, or would leave a container claimed by two families: STOP.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>An upload to a To Do under a secure work assignment filed under a secure matter succeeds into the matter's (family) container. The pinned ambiguous test is replaced.</criterion>
+    <criterion>Securing a work assignment under a secure matter creates no new container.</criterion>
+    <criterion>The adoption rule works as designed, with one test per rule branch.</criterion>
+    <criterion>Un-securing a family moves its inherited members' files to the business-unit container. A member that stays secure on its own keeps its files. Every file stays readable throughout (tests at each step, including a mid-move fault).</criterion>
+    <criterion>Test scope: the contract and edge cases in the design note. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+</task>

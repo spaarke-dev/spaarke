@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="176" project="unified-access-control-r2">
+  <metadata>
+    <title>AI chat and playbook document retrieval returns only documents the caller can read: one shared access trim after every retrieval, caller identity carried in, never widened to the whole tenant (closes #1511, security)</title>
+    <phase>Session 28 — UAC defect remediation (owner decision 2026-10-09: "fix now in uac-r2")</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: closes a confirmed leak of secure/Restricted/No Access document content through AI chat; touches auth checks and Services/Ai.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive, cross-cutting across the chat tool pipeline, playbook nodes and RagService callers; must fail closed without breaking retrieval for permitted documents.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches Services/Ai and the chat tool pipeline only; no file overlap with 175 (access cascade), 177 (indexing job handler) or 178 (containers).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ai, auth, security, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>#1511, confirmed by a probe test on master c8a87d818 (2026-10-09). The A-21 finding (privilege_group_ids never populated) is why the RAG privilege filter does nothing.</origin>
+  </metadata>
+
+  <prompt>Close #1511. Read the issue first (gh issue view 1511): it gives the exact path, file:line evidence and the table of entry points. An internal user must never receive, through any AI retrieval path (model context, citations, excerpts, previews, widget data), content or metadata of a document whose record they cannot read.</prompt>
+
+  <goal>(1) ONE TRIM SEAM. A single service, reached through the Services/Ai PublicContracts facade per BFF hygiene, trims a RagSearchResponse to rows whose document the caller can Read. It reuses the same authorization call as the task-163 trim in RagEndpoints (IAiAuthorizationService.AuthorizeAsync, paged, or the existing equivalent). It fails closed: drop rows with no document id, drop everything if the check cannot run, and over-fetch so trimming does not starve results (copy SemanticSearchEndpoints' approach).
+(2) EVERY ENTRY POINT calls the seam after IRagService.SearchAsync, before anything reaches the model or the user:
+- DocumentSearchHandler: SearchDocuments, SearchDiscovery, and its playbook path;
+- KnowledgeRetrievalHandler: SearchKnowledgeBase and GetKnowledgeSource;
+- AiAnalysisNodeExecutor L2 document context;
+- SemanticSearchToolHandler;
+- any other IRagService or semantic-search caller reachable from chat or playbooks. Grep every caller and list each one, with its disposition, in the notes.
+(3) CALLER IDENTITY. The chat path uses ChatInvocationContext.UserId, plus whatever principal the authorization call needs. The playbook path carries the run principal. With no caller identity, return no rows (fail closed) and say so in the result.
+(4) SCOPE. When a chat has a host record, SearchDocuments is bound to the host parent, as SearchDiscovery already is. When task 164 drops the host, retrieval NEVER widens to the whole tenant: it either returns nothing or stays limited to what the user can read after the trim. Choose whichever keeps the trim authoritative, and record the choice.
+(5) Results the caller is allowed to see are unchanged: a readable document is still returned with the same content and citations.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (DocumentSearchHandler, KnowledgeRetrievalHandler, SemanticSearchToolHandler, AiAnalysisNodeExecutor, RagService, PrivilegeFilterBuilder, AgentToolCatalogProjector, PlaybookChatContextProvider, PublicContracts/)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (the task-163 trim: the reference implementation to reuse) and Api/Ai/SemanticSearchEndpoints.cs (per-row check plus over-fetch)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (around :1418, where the host is dropped)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 / bff-extensions.md">The new service goes through the AI PublicContracts facade. Justify it in the notes (§11's three questions) and measure the publish-size delta.</constraint>
+    <constraint source="security">Fail closed everywhere. Cache authorization results no more than the reused check already does. No new endpoint.</constraint>
+    <constraint source="scope">Do not populate privilege_group_ids: that is A-21 indexer work, owned by another team. Do not change the index schema.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-confirm #1511 on current master using the issue's Suspect 1 probe test, and keep that test as the regression test.</step>
+    <step>Build the trim seam, reusing the task-163 code path. If that code is private to the endpoint, extract it.</step>
+    <step>Wire every entry point (goal 2), carry the caller in (goal 3), and stop the scope widening (goal 4).</step>
+    <step>Add the tests, write the notes with the caller inventory, and open the PR.</step>
+  </steps>
+
+  <escalation>
+    <trigger>STOP and report the measurements and options if the reused authorization call cannot check a row without a Dataverse round trip per row that makes chat unusably slow (more than about 2 s added for 20 rows).</trigger>
+    <trigger>STOP and report if a retrieval caller serves a legitimate tenant-wide corpus (for example a reference knowledge base that is not customer documents) that the trim would wrongly empty. Do not exempt it silently.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>The #1511 probe test passes for SearchDocuments and SearchDiscovery: for a document on a secure matter the caller cannot read, the secret text appears in neither result.Data nor result.Metadata.</criterion>
+    <criterion>The same holds for KnowledgeRetrievalHandler, node L2 retrieval and SemanticSearchToolHandler, with one test each.</criterion>
+    <criterion>A document the caller can read is still returned unchanged (one test).</criterion>
+    <criterion>No caller identity returns no rows, and so does an authorization failure (one test each).</criterion>
+    <criterion>When the host is dropped, retrieval does not widen to the whole tenant (one test).</criterion>
+    <criterion>The notes list every IRagService and semantic-search caller with its disposition.</criterion>
+    <criterion>Test scope: cover the stated contract plus the edge cases named above, and add one seeding proof on the trim (disable it and a named test fails). Anything beyond that needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+</task>
