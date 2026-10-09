@@ -24,6 +24,9 @@
 > app, no bot) and `PRQ-T-06` (Power BI service principal — BI is out of scope for r1) **retired**. The skill now RUNS
 > the `once_per_customer` recipes: Step 1e-ter, after the intake names the customer and before Step 1f writes anything,
 > with the same HARD STOP as Step 0.5 (previously no step ran them).
+> **Same version, T255 — INCOMING-141 (2026-10-09):** `PRQ-C-13` **added** — the customer's workforce tenant id(s),
+> intake `customerWorkforceTenantIds` (required for every run). H4b writes them as `WorkforceIdentity__CustomerTenantIds__N`
+> on both BFF slots; without them the stamp denies every first sign-in of a customer employee.
 > **Same version, T253 — G38 (2026-10-08):** `PRQ-C-07` **retired** — the CI-built
 > SpaarkeMaster needs no Power BI Extensions and H6 installs no application. `PRQ-C-06`: H6 applies the org-settings
 > contract through the Dataverse Web API (the L2 Worker host has no pac).
@@ -110,14 +113,14 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 40 prereqs across 3 scopes (36 active)
+## Summary — 41 prereqs across 3 scopes (37 active)
 
 | Scope | Count | IDs |
 |---|---|---|
 | `once_per_tenant` | 1 active (+1 retired) | `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
 | `once_per_env` | 17 active (+1 retired) | `PRQ-T-01` … `PRQ-T-05` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 18 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-12` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **40** (36 active) | Authoritative count: `validate.ps1` over the YAML |
+| `once_per_customer` | 19 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-13` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232; C-13 T255), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
+| **Total** | **41** (37 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -213,6 +216,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-10 | The environment's security group `sprk-{customerId}-users` (Entra security group, assigned membership) exists and is set on the Dataverse environment; its object id is the intake value `environmentSecurityGroupId` (T232) | Spaarke admin (Entra + Power Platform admin) | POST /api/runs 400 `userprov-missing-security-group-id`; H11 `userprov-security-group-rejected`; **not set on the environment → every user of Spaarke's tenant (other customers' guests included) is admitted** |
 | PRQ-C-11 | The environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Spaarke pays guest access; no per-user licences — owner 2026-10-07, T232) | Spaarke admin (Power Platform admin) | Guests are refused at sign-in; L2 cannot detect it (billing is not visible to Dataverse) |
 | PRQ-C-12 | Guest access allowed in the environment (`organization.restrictguestuseraccess = false`; new environments default to restricted) (T232) | Spaarke admin (System Administrator of the environment) | H11 `userprov-guest-access-restricted` before any invitation |
+| PRQ-C-13 | The customer's workforce tenant id(s) — the tenant(s) its staff sign in from (Model 1: their HOME tenant, never Spaarke's) — intake `customerWorkforceTenantIds`, every run (T255, INCOMING-141) | Spaarke admin, with the customer's IT | POST /api/runs 400 `workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`; a wrong but valid tenant → the stamp denies every customer employee's first sign-in (`workforce_tenant_not_customer`) |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
 | PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |

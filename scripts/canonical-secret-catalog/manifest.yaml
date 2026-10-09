@@ -543,6 +543,13 @@ secrets:
 #                          (per-env-literal drives the F20/F20a fail-fast chain).
 #   - required           — bool; defaults true if absent. Required-and-missing
 #                          in envelope → Resumable Failure BEFORE any script call.
+#   - indexed?           — bool (task 255); true = the key is a .NET
+#                          configuration LIST fed by a list source
+#                          (PerEnvSourceCatalog). H4b and the generated script
+#                          write {key}__0 … {key}__{n-1} and REMOVE every other
+#                          {key}__* setting on both slots, so a dropped value
+#                          cannot linger. Must be required; only a list source
+#                          may feed it, and a list source feeds only it.
 #   - notes?             — free-form.
 #
 # BINDING guard: entries whose `key` matches a never_delete secret name from
@@ -597,6 +604,25 @@ per_env_settings:
       trap T7 fails the run unless both slots carry it. Defence in depth and an
       observability handle — not the customer boundary (that is the dedicated
       per-customer resource).
+
+  - key: 'WorkforceIdentity__CustomerTenantIds'
+    per_env_source: 'from-intake-parameter:customer_workforce_tenant_ids'
+    indexed: true
+    iOptionsModule: 'ExternalAccessModule (WorkforceIdentityOptions)'
+    required: true
+    notes: >-
+      T255 (INCOMING-141 from unified-access-control-r2 task 141). The CUSTOMER's
+      Entra tenant id(s) whose employees use this stamp, written as
+      WorkforceIdentity__CustomerTenantIds__0, __1, … on BOTH slots. The BFF's
+      member test admits a first-sign-in email bind or contact creation only for
+      a member (acct = 0) of a listed tenant; empty or absent DENIES everyone
+      (workforce_tenant_list_empty), so every stamp needs it. Model 1: the
+      customer's home tenant — never Spaarke's tenant or the run's tenantId
+      (AzureAd__TenantId), which would bind Spaarke's staff into the customer's
+      environment. Never a CIAM tenant (the BFF's ValidateOnStart refuses it).
+      Intake customerWorkforceTenantIds, checked by CustomerWorkforceTenantsRule
+      at POST /api/runs and again by H4b; H13 T7 fails a stamp whose slots do
+      not carry exactly this list. Indices the list no longer has are removed.
 
   - key: 'Dataverse__EnvironmentUrl'
     per_env_source: 'from-h5-output:dataverse_env_url'

@@ -82,7 +82,7 @@ public sealed class ArmAppServiceSettingsWriter : IAppServiceSettingsWriter
         {
             // (1) Production first — the order the generated script used.
             var productionSettings = await site.GetApplicationSettingsAsync(cancellationToken).ConfigureAwait(false);
-            var production = MergeAppSettings(productionSettings.Value.Properties, request.Settings);
+            var production = MergeAppSettings(productionSettings.Value.Properties, request.Settings, request.ExclusiveListKeys);
             if (production.ChangedNames.Count > 0)
             {
                 await site.UpdateApplicationSettingsAsync(ToDictionary(production.Settings), cancellationToken)
@@ -95,7 +95,7 @@ public sealed class ArmAppServiceSettingsWriter : IAppServiceSettingsWriter
             slot = StagingSlotName;
             var stagingSlot = (await site.GetWebSiteSlotAsync(StagingSlotName, cancellationToken).ConfigureAwait(false)).Value;
             var stagingSettings = await stagingSlot.GetApplicationSettingsSlotAsync(cancellationToken).ConfigureAwait(false);
-            var staging = MergeAppSettings(stagingSettings.Value.Properties, request.Settings);
+            var staging = MergeAppSettings(stagingSettings.Value.Properties, request.Settings, request.ExclusiveListKeys);
             if (staging.ChangedNames.Count > 0)
             {
                 await stagingSlot.UpdateApplicationSettingsSlotAsync(ToDictionary(staging.Settings), cancellationToken)
@@ -123,10 +123,14 @@ public sealed class ArmAppServiceSettingsWriter : IAppServiceSettingsWriter
     /// Pure merge of a slot's app settings with the requested ones: every existing setting is kept; each requested
     /// setting takes its requested value. <c>ChangedNames</c> lists the requested settings that were absent or held
     /// another value (ordinal) — empty means the slot already matches and nothing needs writing.
+    /// Task 255: an existing setting under one of <paramref name="exclusiveListKeys"/> (see
+    /// <see cref="IsUnderListKey"/>) that <paramref name="requested"/> does not name is removed, and listed in
+    /// <c>ChangedNames</c>.
     /// </summary>
     internal static (IReadOnlyDictionary<string, string> Settings, IReadOnlyList<string> ChangedNames) MergeAppSettings(
         IEnumerable<KeyValuePair<string, string>>? currentSettings,
-        IReadOnlyDictionary<string, string> requested)
+        IReadOnlyDictionary<string, string> requested,
+        IReadOnlyList<string>? exclusiveListKeys = null)
     {
         ArgumentNullException.ThrowIfNull(requested);
 
@@ -140,6 +144,19 @@ public sealed class ArmAppServiceSettingsWriter : IAppServiceSettingsWriter
         }
 
         var changed = new List<string>();
+        foreach (var listKey in exclusiveListKeys ?? [])
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(listKey);
+            foreach (var stale in settings.Keys
+                         .Where(k => IsUnderListKey(k, listKey) && !requested.ContainsKey(k))
+                         .OrderBy(k => k, StringComparer.Ordinal)
+                         .ToList())
+            {
+                settings.Remove(stale);
+                changed.Add(stale);
+            }
+        }
+
         foreach (var (key, value) in requested.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -153,6 +170,20 @@ public sealed class ArmAppServiceSettingsWriter : IAppServiceSettingsWriter
         }
 
         return (settings, changed);
+    }
+
+    /// <summary>
+    /// Task 255: true when <paramref name="settingName"/> binds into the .NET configuration list
+    /// <paramref name="listKey"/> — the bare key or any child of it (<c>{listKey}__*</c>). Case-insensitive and with
+    /// <c>:</c> read as <c>__</c>, because that is how .NET configuration (the BFF) binds an app setting; the list
+    /// binder adds EVERY child, numeric or not.
+    /// </summary>
+    internal static bool IsUnderListKey(string settingName, string listKey)
+    {
+        var name = settingName.Replace(":", "__", StringComparison.Ordinal);
+        var key = listKey.Replace(":", "__", StringComparison.Ordinal);
+        return string.Equals(name, key, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith(key + "__", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AppServiceConfigurationDictionary ToDictionary(IReadOnlyDictionary<string, string> settings)

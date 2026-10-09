@@ -214,6 +214,9 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // principal (the identity H4 grants Secrets Officer on customer vaults and H2a sends to
         // customer.bicep); syntactically-valid placeholder, nothing is invoked here.
         builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
+        // T255: ReservedTenantsOptions is ValidateOnStart on both hosts (Spaarke's tenant + the CIAM tenant[s]).
+        builder.UseSetting("ReservedTenants:SpaarkeTenantId", "5a5a5a5a-0000-4000-8000-000000000001");
+        builder.UseSetting("ReservedTenants:CiamTenantIds:0", "c1a0c1a0-0000-4000-8000-000000000002");
 
         // Task 142 — EnvVarValuesOptions.Validate() (H7) fails fast at boot on
         // a missing ClientSecret (NFR-05), same convention as the other

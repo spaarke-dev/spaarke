@@ -71,6 +71,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Api;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
@@ -88,6 +89,15 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Api;
 public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
 {
     private const string TestCustomerId = "testcust"; // T237: customerId standard ^[a-z][a-z0-9]{2,7}$
+
+    /// <summary>T255: the test host's ReservedTenants:SpaarkeTenantId.</summary>
+    internal const string TestSpaarkeTenantId = "5a5a5a5a-0000-4000-8000-000000000001";
+
+    /// <summary>T255: the test host's ReservedTenants:CiamTenantIds:0.</summary>
+    internal const string TestCiamTenantId = "c1a0c1a0-0000-4000-8000-000000000002";
+
+    /// <summary>T255: the customer's workforce tenant every valid test payload carries (≠ the run's tenantId 1111…).</summary>
+    internal const string TestWorkforceTenantId = "d0e0c0a0-0000-4000-8000-000000000003";
     private const string TestTenantId = "11111111-1111-1111-1111-111111111111";
     private const string TestObjectId = "22222222-2222-2222-2222-222222222222";
 
@@ -994,6 +1004,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["communicationGraphResource"] = "users/comms@contoso.com/messages",
             ["emailGraphResource"] = null!,   // Step 4.0 always sends the key; null when the intake omits it
             ["communicationDefaultMailbox"] = "comms@contoso.com",
+            // T255: Step 4.0 sends the intake array as a JSON string (as usersJson).
+            ["customerWorkforceTenantIds"] = $"[\"{TestWorkforceTenantId}\"]",
         };
 
         var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
@@ -1164,7 +1176,80 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         // T229: H0's cost tier + estimate, required for every model.
         nonSecret.TryAdd("tier", "smb");
         nonSecret.TryAdd("estimatedMonthlyUsd", "450");
+        // T255: the customer's workforce tenant list, required for every model.
+        nonSecret.TryAdd("customerWorkforceTenantIds", $"[\"{TestWorkforceTenantId}\"]");
         return nonSecret;
+    }
+
+    // -------------------------------------------------------------------------
+    // Task 255 (INCOMING-141): customerWorkforceTenantIds — required for every model, refused when it names the CIAM
+    // tenant, Spaarke's own tenant or (Model 1) the run's tenantId, the all-zero GUID, a duplicate or an unparseable
+    // value; stored canonical. The rule is CustomerWorkforceTenantsRule — the one H4b and H13 apply.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(null, "workforce-tenants-required")]
+    [InlineData("  ", "workforce-tenants-required")]
+    [InlineData("[]", "workforce-tenants-invalid")]
+    [InlineData("d0e0c0a0-0000-4000-8000-000000000003", "workforce-tenants-invalid")]   // a bare GUID, not a JSON array
+    [InlineData("[\"not-a-guid\"]", "workforce-tenants-invalid")]
+    [InlineData("[\"00000000-0000-0000-0000-000000000000\"]", "workforce-tenants-invalid")]
+    [InlineData("[\"d0e0c0a0-0000-4000-8000-000000000003\",\"D0E0C0A0-0000-4000-8000-000000000003\"]", "workforce-tenants-invalid")]   // a duplicate in any case
+    [InlineData("[12345]", "workforce-tenants-invalid")]
+    [InlineData("[\"c1a0c1a0-0000-4000-8000-000000000002\"]", "workforce-tenants-ciam-tenant")]   // the CIAM tenant
+    [InlineData("[\"5a5a5a5a-0000-4000-8000-000000000001\"]", "workforce-tenants-spaarke-tenant")]   // Spaarke's own tenant
+    [InlineData("[\"11111111-1111-1111-1111-111111111111\"]", "workforce-tenants-spaarke-tenant")]   // a Model 1 run's tenantId
+    [InlineData("[\"d0e0c0a0-0000-4000-8000-000000000003\",\"c1a0c1a0-0000-4000-8000-000000000002\"]", "workforce-tenants-ciam-tenant")]   // one bad entry refuses the list
+    public async Task PostRuns_WorkforceTenantsBreakTheRule_Returns400_BeforeGuardRegistryCosmosOrEnqueue(
+        string? value, string expectedErrorCode)
+    {
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        if (value is null) nonSecret.Remove("customerWorkforceTenantIds"); else nonSecret["customerWorkforceTenantIds"] = value;
+
+        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, expectedErrorCode);
+    }
+
+    [Fact]
+    public async Task PostRuns_WorkforceTenantsAboveTheCap_Returns400()
+    {
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret["customerWorkforceTenantIds"] = "[" + string.Join(",", Enumerable.Range(1, CustomerWorkforceTenantsRule.MaxTenants + 1)
+            .Select(i => $"\"{new Guid(i, 0, 0, new byte[8]):D}\"")) + "]";
+
+        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, "workforce-tenants-invalid");
+    }
+
+    [Fact]
+    public async Task PostRuns_WorkforceTenants_AreStoredCanonical()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret["customerWorkforceTenantIds"] =
+            " [ \"{D0E0C0A0-0000-4000-8000-000000000003}\" , \"e1e1e1e1-0000-4000-8000-000000000004\" ] ";
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret["customerWorkforceTenantIds"].Should().Be(
+            "[\"d0e0c0a0-0000-4000-8000-000000000003\",\"e1e1e1e1-0000-4000-8000-000000000004\"]",
+            "H4b writes and H13 expects the canonical lowercase form, in the operator's order");
+    }
+
+    [Fact]
+    public async Task PostRuns_Model2_WorkforceTenantMayEqualTheRunTenant_Returns202()
+    {
+        // Model 2: the registration lives in the customer's tenant, so the two coincide — written anyway (hand-off §3).
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret["identityPreset"] = "NativeAccount";
+        nonSecret["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]";
+        nonSecret["customerWorkforceTenantIds"] = "[\"11111111-1111-1111-1111-111111111111\"]";
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret, "Model2"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
     }
 
     // ProblemDetails JSON escapes ' as ', so assert on the parsed detail, not the raw body.
@@ -1785,6 +1870,11 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
         // that rely on strict registry checks would need a fake registered
         // via ConfigureServices below.
         builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com");
+
+        // T255: ReservedTenantsOptions is ValidateOnStart on the Api — Spaarke's tenant and the CIAM tenant the
+        // workforce-tenant rule refuses (RunsEndpointsTests.TestSpaarkeTenantId / TestCiamTenantId).
+        builder.UseSetting("ReservedTenants:SpaarkeTenantId", RunsEndpointsTests.TestSpaarkeTenantId);
+        builder.UseSetting("ReservedTenants:CiamTenantIds:0", RunsEndpointsTests.TestCiamTenantId);
 
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs.

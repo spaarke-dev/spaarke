@@ -543,7 +543,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
 | **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
-| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — delegated permissions per `EntraAppRegPermissionCatalog` (H10 grants the application roles in `GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). **Client access (T240a):** sets the SPA redirect to exactly the customer's Dataverse origin (from intake `dataverseEnvUrl`; the code pages sign in through this registration) and pre-authorizes exactly the platform's shared clients on `user_impersonation` (Worker setting `EntraAppRegOptions__PreAuthorizedClientAppIds__N`; today the Office add-in `c1258e2d…`). The FIC issuer for Model 1 is `EntraAppRegOptions__SpaarkeTenantId` (set by the Worker Bicep). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — delegated permissions per `EntraAppRegPermissionCatalog` (H10 grants the application roles in `GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). **Client access (T240a):** sets the SPA redirect to exactly the customer's Dataverse origin (from intake `dataverseEnvUrl`; the code pages sign in through this registration) and pre-authorizes exactly the platform's shared clients on `user_impersonation` (Worker setting `EntraAppRegOptions__PreAuthorizedClientAppIds__N`; today the production Office add-in `1958aec2…` — never the dev client `c1258e2d…`, §7.3). The FIC issuer for Model 1 is `EntraAppRegOptions__SpaarkeTenantId` (set by the Worker Bicep). **`acct` optional claim (T255):** on the access tokens of every new and existing registration, read back (`appreg-acct-claim-failed`) — the BFF's workforce member test fails closed without it. ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
 | **H4b** | BFF app settings | Writes every BFF app setting from the canonical secret-catalog manifest — each secret's `app_settings` as a Key Vault reference to the stamp vault, plus the `per_env_settings` values (intake values and H2a/H3/H5/H8 outputs) — to the **production site and the `staging` slot** through the ARM SDK (T253: no pwsh — the Worker host has none). **Merge, never replace**: settings already on a slot that H4b does not set stay (an optional `required: false` entry the run does not carry, e.g. `AiSpendLimit__MonthlyLimitUsd`, is not written — T254); one write per slot, none when a slot already matches. Exactly the settings `Configure-AppServiceSettings.generated.ps1` writes (parity test). Then polls `/healthz` (~8 min budget) and, on timeout, names the failing IOptions module from the container log | `/healthz` = 200; a timeout is QuarantineRequired `h4b-healthz-timeout` | `appsettings-{environmentName}-{secretsVer}` |
 | **H5** | Dataverse env **adoption** | Adopts the environment the **operator created** (intake `dataverseEnvUrl`; PRQ-C-09) — never creates one (T228). Checks the URL is this customer's (`spaarke-{customerId}[-{environmentName}]`, the rule POST /api/runs applies) and that `GET /WhoAmI` answers for the L2 Worker identity | `InterStepState.DataverseEnvUrl` = the canonical URL; `env-url-invalid` / `worker-not-app-user` / `env-health-check-failed` are Resumable | `dvenv-{customerId}` |
@@ -755,7 +755,21 @@ names those tenants.
 | **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; a Type-2 first sign-in gets `sdap.access.deny.workforce_tenant_list_empty`. Existing oid bindings still resolve. |
 | **Never** | a fallback to `AzureAd:TenantId`, or `TenantRouting:Tenants[]` |
 | **Startup check** | a non-GUID, the all-zero GUID, or the CIAM tenant id **fails startup** (`ValidateOnStart`) |
-| **Written by** | provisioning (`customer-provisioning-orchestration-r1`) — handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+| **Written by** | provisioning — **H4b**, from intake `customerWorkforceTenantIds`, on both slots (T255; hand-off `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md`) |
+| **Verified by** | **H13 trap T7** — both slots carry exactly the run's list (no missing, extra or stale index; on Model 1 none equal to `AzureAd__TenantId`) |
+
+**How provisioning writes it (T255).** The operator gives the CUSTOMER's tenant id(s) at intake as the array
+`customerWorkforceTenantIds` (required for every run; prerequisite `PRQ-C-13`). `POST /api/runs` applies one rule
+(`CustomerWorkforceTenantsRule`) and refuses, before anything is created: a missing value (`workforce-tenants-required`);
+not a JSON array of 1–10 distinct non-zero GUIDs (`workforce-tenants-invalid`); the CIAM tenant (`workforce-tenants-ciam-tenant`
+— the BFF would not start); Spaarke's own tenant, or on Model 1 the run's `tenantId` (`workforce-tenants-spaarke-tenant`
+— it would bind Spaarke's staff into the customer's environment). The control plane knows those tenants from its own
+settings `ReservedTenants__SpaarkeTenantId` (the deployment tenant) and `ReservedTenants__CiamTenantIds__N`
+(`platform-controlplane.bicep` `ciamTenantIds`; both hosts refuse to start without them). H4b re-applies the rule, writes
+`WorkforceIdentity__CustomerTenantIds__0 … __{n-1}` on the production site and the `staging` slot, and **removes any other
+`WorkforceIdentity__CustomerTenantIds__*` setting** there (a tenant dropped from the list must not linger). To change
+the list of a running stamp, start a new run (upgrade) with the new list — never `az webapp config appsettings set` by
+hand (H13 T7 fails a stamp whose slots differ from its run). Never `AzureAd__TenantId`, never `TenantRouting:Tenants[]`.
 
 🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
 lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
@@ -764,8 +778,12 @@ Type-2 employee **and** auto-bind Spaarke's own staff into the customer's enviro
 here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
 nothing is inferred.
 
+Outside a provisioning run (Spaarke's own environments — dev), the same setting by hand, on BOTH slots:
+
 ```bash
 az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings WorkforceIdentity__CustomerTenantIds__0=<customer-tenant-guid>
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> --slot staging \
   --settings WorkforceIdentity__CustomerTenantIds__0=<customer-tenant-guid>
 ```
 
@@ -778,6 +796,12 @@ a `#EXT#` UPN.
 user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,
 empty or unparseable writes nothing. Review one report-only run (App Insights `[ID-LINK-RECON] before-state`
 lines and the run's ResultJson) before enabling writes on a new stamp.
+
+**Provisioning does not set this switch (T255 decision).** A new stamp starts report-only by design, and H4b MERGES
+its settings — a run that wrote `false` would silently turn writes off again on a stamp the operator had already
+switched on. After H13 passes: wait for one report-only cycle, review it, then set
+`IdentityLink__Reconciliation__WritesEnabled=true` on **both** slots (the same two `az webapp config appsettings set`
+commands as above). Record the date in the run's handoff report.
 
 The same switch gates the **inline link** a licensed user would otherwise get at their first Teams/SPA sign-in,
 so between the BFF deploy and the switch nothing links a licensed user to a contact and the report-only run is a
@@ -808,6 +832,15 @@ Fine at dev scale; on a large stamp, enable writes after the review rather than 
 **Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141**, in the BFF's own environment and
 in every provisioning target above. The BFF selects the new columns, so without them every binding read fails
 closed (`sdap.access.deny.binding_column_missing`) and CIAM and Type-2 sign-ins are denied.
+
+**A new stamp gets it from the package (T255).** The columns, the two global choices, the field security on the
+binding and on `systemuser.sprk_primarycontact`, both identity-link profiles with their permissions and the collisions
+view ship in SpaarkeMaster, which H6 imports before H9 deploys the BFF (no shell tool). The package rule includes the
+alternate key on the mirror (`sprk_ExternalObjectIdUniqueKey`, an OOB-table key) since T255; until the next release
+export brings it into git, the committed package lacks it (`ContactIdentityBindingSchemaPackagedTests` pins the gap).
+The profile MEMBERSHIPS (readers = every business unit's default team, writers = the BFF's application users) are per
+environment — no package carries them. The script below remains the tool for an EXISTING environment (it also copies
+existing bindings into the mirror and backfills the plane, which a new environment does not need).
 
 ```powershell
 .\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
@@ -993,15 +1026,17 @@ CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/Offi
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
-"member" is read from the `acct` claim (`0` member, `1` guest). Step 1 of the script adds it to a NEW
-registration; an EXISTING one needs it added once:
+"member" is read from the `acct` claim (`0` member, `1` guest). **H3 sets it (T255)**: a new registration is created
+with it, an existing one gets it added (every other optional claim preserved), and H3 reads it back
+(`appreg-acct-claim-failed`, Resumable, if it cannot). A registration outside provisioning (Spaarke's own dev BFF) gets
+it once by hand:
 
 ```powershell
 .\scripts\Register-EntraAppRegistrations.ps1 -TenantId <tenant-of-the-registration> `
   -AcctClaimOnly -AcctClaimAppId <bff-app-registration-appid>
 ```
 
-It is idempotent and keeps every other optional claim. Optional claims on the resource registration apply to
+Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
 every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
@@ -1310,7 +1345,7 @@ Seven known-issue guardrails baked into handler post-conditions. Each has been d
 | **T4** | Stamp identity missing its group-scoped Exchange mailbox roles (Mail.* calls 403), or holding one outside the group (reaches other customers' mailboxes) | H14(a) | H13 reads the identity's assignments via the sidecar: every `Application Mail.*` role in scope, none outside |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
 | **T6** | SPE container work uses a delegated token → 403 "public client not allowed" | H8 | H13 lists `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}` app-only as the owning app (through the Worker UAMI's federated credential) and passes only if the run's container (H8 output) is in the list. Container absent or a delegated-token refusal → Failed; other refusals / 404 / errors → InfraFault |
-| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1) | H4b (writes both slots) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238) |
+| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1); **and (T255)** the workforce tenant list missing, stale or different on either slot → every customer employee's first sign-in is denied, or the wrong organisation is admitted (§6.5.2) | H4b (writes both slots, removes stale indices) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238); `WorkforceIdentity__CustomerTenantIds__*` == the run's `customerWorkforceTenantIds` as a set, none equal to `AzureAd__TenantId` on Model 1 (T255) |
 
 H13 acceptance gate verifies all 7 traps cleared with 0-failure status.
 
@@ -1524,6 +1559,11 @@ az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource
     --query "[?name=='Customer__Id'].value" -o tsv
 az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
     --slot staging --query "[?name=='Customer__Id'].value" -o tsv
+# T7 (T255) — the workforce tenant list on BOTH slots == the run's customerWorkforceTenantIds (§6.5.2)
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --query "[?starts_with(name, 'WorkforceIdentity__CustomerTenantIds')].[name,value]" -o tsv
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --slot staging --query "[?starts_with(name, 'WorkforceIdentity__CustomerTenantIds')].[name,value]" -o tsv
 ```
 
 ### 12.4 Handoff report

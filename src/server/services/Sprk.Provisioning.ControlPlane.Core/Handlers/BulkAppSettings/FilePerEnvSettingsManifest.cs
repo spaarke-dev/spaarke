@@ -13,6 +13,7 @@
 //   literal_value      -> LiteralValue
 //   iOptionsModule     -> IOptionsModule
 //   required           -> Required
+//   indexed            -> Indexed (task 255: a .NET configuration list fed by a list source)
 //   notes              -> ignored (documentation-only)
 //   secrets[].canonical_name / app_settings -> KeyVaultReferences (task 253)
 //
@@ -173,13 +174,34 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
                     $"manifest.yaml per_env_settings entry '{raw.Key}' has empty iOptionsModule (documentation field).");
             }
 
+            // Task 255: an indexed entry (a .NET configuration list) is fed by a LIST source, and only an indexed
+            // entry is — a scalar written as a list, or a list written as one scalar, is a manifest error. An indexed
+            // entry is required (H4b removes stale indices only when it owns the whole list).
+            var listSource = kind != PerEnvSettingSource.Literal
+                && PerEnvSourceCatalog.TryGet(raw.PerEnvSource!, out var resolvedSource) && resolvedSource.IsList;
+            if (raw.Indexed != listSource)
+            {
+                return new PerEnvSettingsManifestReadResult.Failure(raw.Indexed
+                    ? $"manifest.yaml per_env_settings entry '{raw.Key}' is indexed but its per_env_source " +
+                      $"'{raw.PerEnvSource}' is not a list source (PerEnvSourceCatalog)."
+                    : $"manifest.yaml per_env_settings entry '{raw.Key}' reads the list source '{raw.PerEnvSource}' " +
+                      "but is not `indexed: true` — a list is written as {key}__0, {key}__1, ….");
+            }
+            if (raw.Indexed && !raw.Required)
+            {
+                return new PerEnvSettingsManifestReadResult.Failure(
+                    $"manifest.yaml per_env_settings entry '{raw.Key}' is indexed and `required: false`; an indexed " +
+                    "entry must be required (H4b owns the whole list and removes indices it does not write).");
+            }
+
             entries.Add(new PerEnvSettingEntry(
                 Key: raw.Key,
                 PerEnvSource: kind,
                 LiteralValue: kind == PerEnvSettingSource.Literal ? raw.LiteralValue : null,
                 ParameterKey: kind == PerEnvSettingSource.Literal ? null : parameterKey,
                 Required: raw.Required,
-                IOptionsModuleName: raw.IOptionsModule));
+                IOptionsModuleName: raw.IOptionsModule,
+                Indexed: raw.Indexed));
         }
 
         // Alphabetical sort by Key (parity with generator emit order).
@@ -328,6 +350,10 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         public string? IOptionsModule { get; set; }
 
         public bool Required { get; set; } = true;
+
+        /// <summary>Task 255: <c>indexed: true</c> — a .NET configuration list ({key}__0, {key}__1, …).</summary>
+        public bool Indexed { get; set; }
+
         public string? Notes { get; set; }
     }
 }

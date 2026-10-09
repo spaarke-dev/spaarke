@@ -158,6 +158,13 @@
       "shape": "Email address or object id of a mail-enabled security group",
       "populatedBy": "intake.schema.json exchangePolicyScopeGroupId property (skill Step 1e-bis); the group is created by the stamp tenant's Exchange admin (PRQ-C-08)",
       "note": "PRQ-C-08 is once_per_customer — run by the skill's customer pass (Step 1e-ter)."
+    },
+    "customerWorkforceTenantIds": {
+      "availability": "customer",
+      "source": "intake",
+      "shape": "Space-separated Entra tenant ids (GUIDs) — the intake array customerWorkforceTenantIds joined with spaces",
+      "populatedBy": "intake.schema.json customerWorkforceTenantIds property (skill Step 1e-bis); the customer's IT gives the tenant id(s) (PRQ-C-13)",
+      "note": "PRQ-C-13 is once_per_customer — run by the skill's customer pass (Step 1e-ter). Required for every run (T255, INCOMING-141)."
     }
   }
 }
