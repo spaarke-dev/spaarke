@@ -387,12 +387,12 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         // existence/count check below AND H13's independent re-verification
         // count check — only the app-only Dataverse call's oid-claim match
         // fails at first real use, 401ing every call for this customer. See
-        // DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+        // DataverseAppUserCreationRequest.SystemUserAzureActiveDirectoryObjectId's
         // remarks + mi-proof-dataverse-side.md for the full trap shape.
         var uamiOutcome = await _appUserCreator.EnsureAppUserAsync(
             new DataverseAppUserCreationRequest(
                 dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName, customerUnitId,
-                AzureActiveDirectoryObjectId: uamiObjectId),
+                SystemUserAzureActiveDirectoryObjectId: uamiObjectId),
             cancellationToken).ConfigureAwait(false);
         if (uamiOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit uamiElsewhere)
         {

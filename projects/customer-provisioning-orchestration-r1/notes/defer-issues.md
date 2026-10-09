@@ -135,39 +135,6 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
-### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
-
-| Field | Value |
-|---|---|
-| **Status** | Open — needs an owner decision (a BFF route + its authorization) |
-| **Urgency** | before T186 Ready (the census is run by hand until then) |
-| **Filed** | 2026-10-09 (T259) |
-| **Source** | T259 step 5 (ISS-010's H13 half) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1527 |
-
-**Description**
-
-The census exists only as a BFF scheduled job: `SecureRecordIsolationCensusJob` (`secure-record-isolation-census`, every
-15 min, read-only; its run's `ResultJson.status` is `isolated` | `findings` | `inert` | `error`). It is reachable only
-through the generic admin routes `POST /api/admin/jobs/{jobId}/trigger` (202, async) and `GET /api/admin/jobs/{jobId}/status`
-(`recentRuns[].resultJson`), both behind `RequireAuthorization("SystemAdmin")` — an `Admin` or `SystemAdmin` app role
-(`AuthorizationModule`). A stamp's BFF app registration (H3) defines exactly one app role, `Provisioning.KeylessProof`,
-assigned to the L2 Worker identity only; it defines no `Admin`/`SystemAdmin` role. So H13, signing in as the L2 Worker,
-gets 403, and no run can prove isolation before Ready — the owner's 2026-10-09 goal ("a run cannot reach Ready unless the
-census says isolated") is unmet. Granting L2 an `Admin` role would be far wider than needed: the same policy guards job
-enable/disable and trigger of every job, RAG index writes/deletes, membership admin and record-matching admin.
-
-**Suggested fix (one recommendation)**
-
-A read-only, synchronous BFF route beside the keyless proof: `POST /api/platform/secure-record-isolation-census`, behind
-the existing `KeylessProofAuthorizationFilter` (app-only token of this tenant for this API holding the L2-only
-`Provisioning.KeylessProof` role — no new role, no H3 change), returning `{status, verdict, findings}` from the SAME code
-the job runs (move the job's census read + `SecureBuRoleDepthAssertion.Evaluate` into one shared method; the job keeps its
-schedule). L2: H13 calls it with the keyless proof's token acquisition and fails unless `status == "isolated"` (new code,
-e.g. `h13-secure-isolation-not-isolated`, carrying the findings). §11: existing = the job + admin routes (async, admin-only;
-widening them to L2 grants every job's controls); cost of doing nothing = H13 cannot gate Ready on isolation. Needs the
-owner's OK (BFF surface + authorization, CLAUDE.md §6/§10) and a BFF publish-size check.
-
 ---
 
 ### ISS-008 — L2 CustomerRunGuard (I5 / FR-32) is off in every environment
@@ -373,6 +340,72 @@ the BFF's owning project.
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
 
+### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — task 260 (owner approved the recommended fix 2026-10-09): H13 requires the stamp BFF's census to answer `isolated` |
+| **Urgency** | before T186 Ready (the census is run by hand until then) |
+| **Filed** | 2026-10-09 (T259) |
+| **Source** | T259 step 5 (ISS-010's H13 half) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1527 |
+
+**Description**
+
+The census exists only as a BFF scheduled job: `SecureRecordIsolationCensusJob` (`secure-record-isolation-census`, every
+15 min, read-only; its run's `ResultJson.status` is `isolated` | `findings` | `inert` | `error`). It is reachable only
+through the generic admin routes `POST /api/admin/jobs/{jobId}/trigger` (202, async) and `GET /api/admin/jobs/{jobId}/status`
+(`recentRuns[].resultJson`), both behind `RequireAuthorization("SystemAdmin")` — an `Admin` or `SystemAdmin` app role
+(`AuthorizationModule`). A stamp's BFF app registration (H3) defines exactly one app role, `Provisioning.KeylessProof`,
+assigned to the L2 Worker identity only; it defines no `Admin`/`SystemAdmin` role. So H13, signing in as the L2 Worker,
+gets 403, and no run can prove isolation before Ready — the owner's 2026-10-09 goal ("a run cannot reach Ready unless the
+census says isolated") is unmet. Granting L2 an `Admin` role would be far wider than needed: the same policy guards job
+enable/disable and trigger of every job, RAG index writes/deletes, membership admin and record-matching admin.
+
+**Suggested fix (one recommendation)**
+
+A read-only, synchronous BFF route beside the keyless proof: `POST /api/platform/secure-record-isolation-census`, behind
+the existing `KeylessProofAuthorizationFilter` (app-only token of this tenant for this API holding the L2-only
+`Provisioning.KeylessProof` role — no new role, no H3 change), returning `{status, verdict, findings}` from the SAME code
+the job runs (move the job's census read + `SecureBuRoleDepthAssertion.Evaluate` into one shared method; the job keeps its
+schedule). L2: H13 calls it with the keyless proof's token acquisition and fails unless `status == "isolated"` (new code,
+e.g. `h13-secure-isolation-not-isolated`, carrying the findings). §11: existing = the job + admin routes (async, admin-only;
+widening them to L2 grants every job's controls); cost of doing nothing = H13 cannot gate Ready on isolation. Needs the
+owner's OK (BFF surface + authorization, CLAUDE.md §6/§10) and a BFF publish-size check.
+
+**Resolution (task 260, 2026-10-09)**
+
+Built as recommended — no new app role, no H3 change, no new package.
+- BFF: `POST /api/platform/secure-record-isolation-census` in `Api/Platform/KeylessProofEndpoints.cs`, behind
+  `RequireAuthorization` + the existing `AddKeylessProofAuthorizationFilter` (app-only token of this tenant, this API's
+  audience, `Provisioning.KeylessProof`) + the `job-submission` rate limit. Synchronous, read-only, bounded at 60 s; a read
+  failure or timeout answers 200 `status=error` (no exception text). Body = the job's result: `{status, verdict,
+  findings[{verdict, message}]}`.
+- One census: the job's read + grading moved into `Services/ExternalAccess/SecureRecordIsolationCensus.cs` (static —
+  no DI registration); the job calls it and keeps its schedule, CRITICAL lines, heartbeat, throw-on-read-failure and
+  `ResultJson`. A test pins that the job and the route agree (status, verdict, findings) on isolated / findings / inert.
+- Contract: route + the four statuses in `KeylessProofContract.SecureRecordIsolationCensus` (source-linked into both).
+- L2: `IE2EValidationRunner.RunSecureIsolationCensusAsync` — the keyless proof's call path extracted into
+  `PostAsL2IdentityAsync` and shared (same credential, `api://{BffAppRegId}/.default`, https only, role-less-token
+  diagnostic, one transient retry, 401/403/500 fail, 404 inconclusive). H13 step 7b calls it after the existing checks:
+  `isolated` → gate `h13-secure-isolation` Verified; `findings` → QuarantineRequired `h13-secure-isolation-not-isolated`
+  (findings in the diagnostic, ≤ 20, sanitised); `inert` → QuarantineRequired `h13-secure-isolation-inert`; a failed
+  call or an answer this build cannot read → QuarantineRequired `h13-secure-isolation-census-failed`; `error` /
+  transport / timeout / 404 / a throw → Resumable `h13-secure-isolation-inconclusive`.
+- `inert` on a fresh stamp: the census grades the security TOPOLOGY (role depth into the Secure Record unit, users in it,
+  the owner team and role), not records, so a new environment with no secure record yet is graded in full and can be
+  `isolated`. `inert` means the BFF finds no Secure Record unit at all; H7b creates it before H13 (H13 ← H7b), so inert
+  proves nothing and is a broken stamp (or a BFF `SecureRecord:BusinessUnitName` that differs from H7b's) — it fails.
+- Tests: BFF route contract (401 / 403 ×3 / 200 shape / error without exception text / reads only), job↔route parity;
+  L2 runner (13 census cases) and H13 (AC-28..35). The deployment guide's "run the census by hand" interim text is
+  replaced by the H13 rule (§7.10, §7.11).
+
+**Rollout:** deploy the BFF build carrying task 260 before (or with) the Worker build: a Worker that calls an older BFF
+gets 404 → Resumable `h13-secure-isolation-inconclusive` (redeploy the BFF via H9, then resume). Live proof owed at T186
+(the first H13 run against a real stamp).
+
+---
+
 ### ISS-015 — H6, H7 and H7b cannot sign in as the customer BFF app registration under either Worker credential chain
 
 | Field | Value |
@@ -505,7 +538,8 @@ customer's own unit directly under the Dataverse root (not the root itself — D
 - H7 (found in review): links the customer unit to H8's container beside the root — records are owned in the customer
   unit and the BFF resolves a non-secure record's container from its owning unit only.
 - H11 also refuses (Quarantine) a guest holding a role of another unit (`userprov-guest-holds-role-outside-customer-unit`).
-- Not done here: H13 requiring the census → ISS-014. Until it lands, T186's runbook runs the census by hand after H11.
+- Not done here: H13 requiring the census → ISS-014, resolved by task 260 (H13 now refuses Ready unless the census is
+  `isolated`; no hand-run census).
 
 ---
 

@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — ADR-027 management groups implemented (T262)
+
+`customer-provisioning-orchestration-r1` T262 (G36).
+
+- **ADR-027 concise**: implementation note on "MUST use Azure Management Groups" (`spaarke-environments` →
+  `spaarke-customers`, Audit/DoNotEnforce built-in policy, PRQ-S-06).
+- **`/provision-environment`** Step 0.5b: new `{customerManagementGroupId}` token (must resolve); Step 1e-ter notes
+  PRQ-S-06's read on the management group.
+
 ###### 2026-10-09 — provisioning: H3 keeps an L2 Worker FIC on each customer BFF registration (ISS-015)
 
 `customer-provisioning-orchestration-r1` ISS-015 (#1524).

@@ -1,10 +1,17 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 8 · **Last Updated**: 2026-10-08
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 10)
+> **Version**: 9 · **Last Updated**: 2026-10-09
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 11)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
 >
+>
+> **v11 (2026-10-09, `customer-provisioning-orchestration-r1` T262 — G36, owner approval 2026-10-09)**: `PRQ-S-06`
+> **added** — the customer's subscription is a direct member of the `spaarke-customers` management group, where the
+> common customer policy (`infrastructure/bicep/customer-policy.bicep`, ADR-027) is assigned. New recipe token
+> `{customerManagementGroupId}` (`spaarke-constants.yaml` `management_groups.customers.id`). `PRQ-S-00`'s remediation
+> names the group. `validate.ps1`'s `grep -i -F` lint (listed under v10) was inert until this version — its code sat on
+> a comment line — and now runs.
 >
 > **v10 (2026-10-08, `customer-provisioning-orchestration-r1` T206 + T207 re-measured)**: every check recipe now decides by
 > exit code and asserts the condition its `expect` field describes (before: 33 of 36 active recipes had no `exit 1`, so a
@@ -113,14 +120,14 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 41 prereqs across 3 scopes (37 active)
+## Summary — 42 prereqs across 3 scopes (35 active)
 
 | Scope | Count | IDs |
 |---|---|---|
-| `once_per_tenant` | 1 active (+1 retired) | `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
-| `once_per_env` | 17 active (+1 retired) | `PRQ-T-01` … `PRQ-T-05` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 19 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-13` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232; C-13 T255), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **41** (37 active) | Authoritative count: `validate.ps1` over the YAML |
+| `once_per_tenant` | 0 active (+2 retired) | ~~`PRQ-T-06`~~ **retired 2026-10-09** (BI out of scope for r1); ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
+| `once_per_env` | 16 active (+2 retired) | `PRQ-T-01` … `PRQ-T-04` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-T-05`~~ **retired 2026-10-09** (T257: no bot), ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_customer` | 19 active (+3 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-S-06` (T262: the subscription is in the `spaarke-customers` management group), `PRQ-C-01` … `PRQ-C-13` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~, ~~`PRQ-C-07`~~ retired; C-10 … C-12 T232; C-13 T255), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
+| **Total** | **42** (35 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -144,7 +151,7 @@ Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-
 
 Grouped by scope. Programmatic check recipes in the YAML.
 
-### Once-per-tenant (1 active, 1 retired) — plus PRQ-T-01 … PRQ-T-05, which are `once_per_env` since 2026-10-08 and listed here for continuity
+### Once-per-tenant (0 active, 2 retired) — plus PRQ-T-01 … PRQ-T-05, which are `once_per_env` since 2026-10-08 and listed here for continuity
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -152,8 +159,8 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-T-02 | SPE container-type application permissions granted | Customer tenant admin (M2) / Spaarke (M1) | H8 succeeds but subsequent 403 |
 | PRQ-T-03 | Office Outlook add-in Entra app-reg | Spaarke platform admin | Outlook add-in deploy fails; email intake broken |
 | PRQ-T-04 | Office Word add-in Entra app-reg | Spaarke platform admin | Word add-in deploy fails |
-| PRQ-T-05 | Copilot bot Entra app-reg (optional per profile) | Spaarke platform admin | M365 Copilot surface non-functional |
-| PRQ-T-06 | Power BI service principal (if Power BI Embedded used) | Power BI tenant admin | Power BI Embedded reports unauthorized |
+| ~~PRQ-T-05~~ | **RETIRED 2026-10-09** — was *Copilot bot Entra app-reg* (superseded by T257: one shared OAuth client app, no bot) | — | None |
+| ~~PRQ-T-06~~ | **RETIRED 2026-10-09** — was *Power BI service principal* (BI is out of scope for r1) | — | None |
 | ~~PRQ-T-07~~ | 🔴 **RETIRED 2026-09-28 (D-12 + D-13)** — was *"Multitenant BFF app-reg (Model 1 tier only)"*, `never_delete: true` | — | **None.** See the retirement note below. |
 
 > **PRQ-T-07 retirement note (2026-09-28, `unified-access-control-r2`)**
@@ -172,7 +179,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 > Machine-readable source updated in the same change: `scripts/provisioning-prereqs/prereqs.yaml`
 > (manifest_version 2).
 
-### The customer's subscription (6 — `once_per_customer` since T228)
+### The customer's subscription (7 — `once_per_customer` since T228)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -182,6 +189,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-S-03 | Resource-provider registration (H1 also registers them) | Spaarke admin | F6 — `az deployment sub create` fails on unregistered provider |
 | PRQ-S-04 | L2 UAMI **Owner** on the customer's subscription (`modules/controlplane-subscription-rbac.bicep`; owner decision 2026-10-06) | Spaarke admin | H1 `subready-subscription-listing-failed`; H2a cannot write customer.bicep's role assignments |
 | PRQ-S-05 | Operator has Owner OR Contributor+UAA on the customer's subscription | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
+| PRQ-S-06 | The customer's subscription is a direct member of the `spaarke-customers` management group (ADR-027 common customer policy; T262). Place it with `az account management-group subscription add --name spaarke-customers --subscription <id>` (the group itself comes from the one-time `scripts/provisioning/Deploy-ManagementGroups.ps1 -Apply`) | Spaarke admin (management-group write on `spaarke-customers` + Owner on the subscription) | Nothing in the run fails; the stamp does not inherit `customer-policy.bicep` (regions, resource-group tags, storage HTTPS + TLS 1.2, Key Vault RBAC + purge protection), so its drift is never reported |
 
 ### Once-per-env (11 active + 1 retired)
 

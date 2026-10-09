@@ -79,7 +79,7 @@ public abstract record CustomerBusinessUnitOutcome
 /// T259: the customer's business unit (<see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/>). A new App
 /// User is CREATED in it; an existing one elsewhere is <see cref="DataverseAppUserCreationOutcome.InForeignBusinessUnit"/>.
 /// </param>
-/// <param name="AzureActiveDirectoryObjectId">
+/// <param name="SystemUserAzureActiveDirectoryObjectId">
 /// OPTIONAL explicit value for the App User row's <c>azureactivedirectoryobjectid</c> field.
 /// Null (default) leaves Dataverse to auto-resolve the field from <paramref name="ApplicationId"/> —
 /// the correct behavior for a standard Entra app registration (BFF app-reg OBO row), whose Dataverse
@@ -102,15 +102,7 @@ public sealed record DataverseAppUserCreationRequest(
     string ApplicationId,
     string SecurityRoleName,
     Guid BusinessUnitId,
-    string? AzureActiveDirectoryObjectId = null)
-{
-    /// <summary>
-    /// The Dataverse table this request writes: a <c>systemuser</c> (application user) — never a contact. Named in code so
-    /// <c>ContactAadObjectIdColumnGuardTests</c> attributes <see cref="AzureActiveDirectoryObjectId"/> to systemuser (its
-    /// nearest marker had drifted past the guard's window when T259 grew this file).
-    /// </summary>
-    public const string EntityLogicalName = "systemuser";
-}
+    string? SystemUserAzureActiveDirectoryObjectId = null);
 
 /// <summary>
 /// Ensures a Dataverse Application User exists (upsert semantics — creates if

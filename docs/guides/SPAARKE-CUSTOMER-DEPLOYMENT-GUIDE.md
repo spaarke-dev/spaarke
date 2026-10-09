@@ -146,7 +146,7 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 |---|---|---|
 | Customer ID | `acme` — the customerId standard: 3-8 lowercase letters and digits, starting with a letter ([naming convention](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)) | Assigned once at customer intake; abbreviate longer names (`northwind` → `nwind`) |
 | Customer display name | "Acme Legal Services" | Customer intake |
-| The customer's own subscription ID | `2ff9ee48-...` | **The operator creates it** (prereqs.yaml PRQ-S-00) and grants the L2 identity **Owner** on it (PRQ-S-04, `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Required at intake for every model; nothing defaults it (T228) |
+| The customer's own subscription ID | `2ff9ee48-...` | **The operator creates it** (prereqs.yaml PRQ-S-00), places it in the `spaarke-customers` management group (PRQ-S-06 — the common customer policy, ADR-027; `scripts/provisioning/Deploy-ManagementGroups.ps1`) and grants the L2 identity **Owner** on it (PRQ-S-04, `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Required at intake for every model; nothing defaults it (T228) |
 | The customer's Dataverse environment URL | `https://spaarke-acme.crm.dynamics.com/` | **The operator creates it** (PRQ-C-09) with domain `spaarke-{customerId}` (or `spaarke-{customerId}-{environmentName}`) and adds the L2 Worker identity as a System Administrator application user. Required at intake (`dataverseEnvUrl`); H5 adopts it (T228) |
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
@@ -163,6 +163,14 @@ Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline t
 - **Azure subscription vCPU quota** — verify per SKU per region
 - **The customer's subscription and Dataverse environment** — created by the operator before the run (PRQ-S-00, PRQ-S-04,
   PRQ-C-09; T228). L2 creates neither — the former environment-creation rate limit no longer applies
+- **Management groups + common customer policy** — one-time per tenant (ADR-027, T262): `spaarke-environments` →
+  `spaarke-customers` (`infrastructure/bicep/management-groups.bicep`) with `infrastructure/bicep/customer-policy.bicep`
+  assigned at `spaarke-customers` (built-in definitions, Audit / DoNotEnforce — it reports, never blocks a deployment).
+  `pwsh scripts/provisioning/Deploy-ManagementGroups.ps1` prints the plan; `-Apply` creates, assigns and moves
+  (needs Owner — or Contributor + User Access Administrator — at `/`; see the script's REQUIRED ACCESS). Each new
+  customer subscription then joins `spaarke-customers` before its first run (PRQ-S-06):
+  `az account management-group subscription add --name spaarke-customers --subscription <id>` (management-group write on
+  `spaarke-customers` + Owner on the subscription — no tenant-level right)
 - **SPE container type + owning app** — one-time per container type, not per customer: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) (owning app with a federated credential trusting the L2 Worker UAMI — no certificate, no secret; `Spaarke Model 1` exists since 2026-10-03). H0's `SpeOwnerCredential` check refuses the run until it is in place; there is no 24 h wait
 - **Exchange admin app** — one-time per tenant, not per customer: §4.2.1 (`Spaarke Exchange Admin`, a federated credential trusting the L2 Worker UAMI — no certificate, no secret — plus a narrowed Exchange role). H14a and H13 T4 report "not configured" until it is in place
 - **Customer admin consent (Model 2)** — one-time customer action captured by H0.5
@@ -564,7 +572,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
-| **H13** | E2E acceptance gate | Pure C# in the Worker (ARM, Graph, Dataverse, AI Search, Cost Management calls — no script) — verifies `/health`, `/ping`, the Dataverse CORS origin, **the keyless proof** (one managed-identity call per stamp service, made by the BFF — any refusal fails; T230b) and **ARM keyless** (key auth off, no key setting on any slot), **all 7 T1–T7 traps cleared**, **I2–I5 invariants sample-verified on the stamp** (I1 + naming are CI gates — T230a), cost envelope (one $400/month envelope for both models, §3.2) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
+| **H13** | E2E acceptance gate | Pure C# in the Worker (ARM, Graph, Dataverse, AI Search, Cost Management calls — no script) — verifies `/health`, `/ping`, the Dataverse CORS origin, **the keyless proof** (one managed-identity call per stamp service, made by the BFF — any refusal fails; T230b) and **ARM keyless** (key auth off, no key setting on any slot), **all 7 T1–T7 traps cleared**, **I2–I5 invariants sample-verified on the stamp** (I1 + naming are CI gates — T230a), cost envelope (one $400/month envelope for both models, §3.2), **the BFF's secure-record isolation census answers `isolated`** (T260) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
 | **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
@@ -1356,6 +1364,20 @@ Three DAG-parallel sub-steps:
 - (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run
   H13 check: it lints the repository's own files, T230a.)
 - Cost envelope: the subscription's month-to-date cost, extrapolated, within 20 % of $400/month (one envelope for both models — §3.2, T229)
+- **Secure-record isolation (T260, ISS-014)**: H13 calls the stamp BFF's `POST /api/platform/secure-record-isolation-census`
+  as the L2 Worker identity — the keyless proof's token (`api://{BFF app id}`) and application role
+  (`Provisioning.KeylessProof`); no other role opens it. The BFF runs, read-only, the census its 15-minute
+  `secure-record-isolation-census` job runs (spec NFR-05: no role reaches the `Secure Record` unit by depth, the unit
+  holds no users, its owner team is memberless and alone holds the owner role, the role covers the codified tables) and
+  answers `isolated` | `findings` | `inert` | `error` with the job's findings. Only `isolated` passes:
+  - `findings` → QuarantineRequired `h13-secure-isolation-not-isolated` (each finding, naming the principal or table, is
+    in the run's error detail);
+  - `inert` (the BFF finds no `Secure Record` unit) → QuarantineRequired `h13-secure-isolation-inert`. H7b creates the
+    unit before H13, so inert is a broken stamp, not a fresh one. The census grades the security topology, not records,
+    so a new environment with no secure record yet is graded in full;
+  - a refused or failed call (401/403, 500, an unknown answer) → QuarantineRequired `h13-secure-isolation-census-failed`;
+  - `error` (the BFF could not read the directory), a timeout, a transport fault or a BFF build without the route (404)
+    → Resumable `h13-secure-isolation-inconclusive`.
 
 **`sprk_dataverseenvironment.Setup Status` transitions to `Ready` only if H13 exits 0.**
 
@@ -1382,10 +1404,10 @@ when the record is made secure (task 227g).
 
 **Customer business unit (T259).** H10 creates the customer's own unit (intake `displayName`) directly under the root,
 a sibling of `Secure Record`, with both BFF application users in it; H11 moves every guest into it before any role.
-No user of any kind is placed in `Secure Record`. Until ISS-014 lands, H13 cannot run the BFF's read-only isolation
-census, so run it by hand after H11 (`POST /api/admin/jobs/secure-record-isolation-census/trigger`, then `GET …/status`:
-the newest run's `resultJson.status` must be `isolated`). Any human who reaches the `Secure Record` unit is a stop: do
-not report the environment as secure-record ready.
+No user of any kind is placed in `Secure Record`. **H13 proves it on every run (T260, ISS-014)**: it asks the stamp
+BFF to run its read-only isolation census — the same code as the BFF's 15-minute `secure-record-isolation-census` job —
+and refuses `Ready` unless the answer is `isolated` (§7.10). Any human who reaches the `Secure Record` unit quarantines
+the run with the census findings in its error detail; fix each finding, never by moving a user into `Secure Record`.
 
 ### 7.12 Phase 12 — Per-customer Copilot agent (operator, then the customer's IT; after Ready)
 
@@ -1402,8 +1424,9 @@ That catalog holds only the agents for Spaarke's own environments (`scripts/Depl
 **How it reaches only that customer's BFF:**
 - The agent signs the user in to **Spaarke's** tenant. This is the same guest identity the add-ins use (`tid` =
   Spaarke, `acct` = 1).
-- Sign-in uses OAuth 2.0 + PKCE through one shared client app, "Spaarke Copilot Agent". It is a public client with no
-  secret.
+- Sign-in uses OAuth 2.0 + PKCE through one shared client app per control-plane environment, "Spaarke Copilot Agent -
+  {Env}" (naming: `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` §Entra ID App Registrations). It is a public
+  client with no secret. Dev: "Spaarke Copilot Agent - Dev", `3a36eac4-10c5-4b90-9a83-913138a466af` (created 2026-10-09).
 - The client gets a token for `api://{customerBffAppId}/user_impersonation`. H3 pre-authorizes the client on every
   customer BFF app, so no user sees a consent prompt.
 - Each customer has its own **auth config**, which binds that scope and the BFF's base URL. A package can't reach
@@ -1417,7 +1440,9 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
 
 **One-time platform setup (operator, Spaarke's tenant).** Each step is a live action and needs the owner's OK.
 
-1. **Create the client app "Spaarke Copilot Agent"** in the Entra admin center:
+1. **Create the client app "Spaarke Copilot Agent - {Env}"** (e.g. `Spaarke Copilot Agent - Dev`) in the Entra admin center
+   or through Graph (`POST /applications`, then `POST /oauth2PermissionGrants` with `consentType: AllPrincipals` for the
+   admin consent — this works where `az ad app permission admin-consent` does not):
    - single tenant (Spaarke);
    - platform **Single-page application**, redirect URI `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`;
    - **no client secret and no certificate** (ADR-028 A4; the project's no-secret rule);

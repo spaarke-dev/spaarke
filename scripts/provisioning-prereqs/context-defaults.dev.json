@@ -82,6 +82,13 @@
       "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId",
       "note": "Invariant across all Entra tenants — hardcoded as 00000003-0000-0000-c000-000000000000."
     },
+    "customerManagementGroupId": {
+      "availability": "always",
+      "source": "constants",
+      "shape": "Management-group id (name), lowercase-hyphenated: spaarke-customers",
+      "populatedBy": "spaarke-constants.yaml management_groups.customers.id",
+      "note": "Tenant-wide, not per env (T262, G36). PRQ-S-06 checks the customer subscription's parent is this group; infrastructure/bicep/management-groups.bicep creates it (its default mirrors the constant)."
+    },
     "sbNamespace": {
       "availability": "env",
       "source": "constants-template",

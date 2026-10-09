@@ -67,7 +67,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 **ADR tensions approved here** (root §6.5; detail in `spec.md` "ADR Tensions", `design.md` §17):
 - ADR-004 A — L2 orchestration is a custom state machine over Cosmos.
 - ADR-027/028 A — one L2 identity holds Owner on every customer subscription (T228, owner 2026-10-06).
-- ADR-027 management groups — A, deferred (G36, awaiting the owner).
+- ADR-027 management groups — built by T262 (G36, owner approval 2026-10-09): `spaarke-customers` + Audit-only built-in policy + PRQ-S-06; becomes C (comply) once `scripts/provisioning/Deploy-ManagementGroups.ps1 -Apply` has run.
 - ADR-020 A — the `POST /api/runs` intake map rejects or requires keys (T245a/b/c, T225b).
 - ADR-020 A — the stamp deployment `gpt-4o-mini` runs gpt-4.1-mini (T247).
 - ADR-007 A — L2 calls Graph SPE APIs directly (T248).
