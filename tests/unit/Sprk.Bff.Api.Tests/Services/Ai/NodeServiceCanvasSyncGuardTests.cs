@@ -33,6 +33,9 @@ public class NodeServiceCanvasSyncGuardTests
         public HttpStatusCode PlaybookStatus = HttpStatusCode.OK;
         public HttpStatusCode NodesStatus = HttpStatusCode.OK;
         public bool ThrowTimeout;
+        public int PlaybookReads;
+        public int NodeReads;
+        public HttpStatusCode? PlaybookStatusFromSecondRead;
         public List<(string? ConfigJson, Guid Id)> Nodes = [];
         public List<string> Writes { get; } = [];
 
@@ -47,10 +50,15 @@ public class NodeServiceCanvasSyncGuardTests
             }
 
             if (url.Contains("sprk_analysisplaybooks("))
-                return Task.FromResult(Json(PlaybookStatus, PlaybookJson));
+            {
+                PlaybookReads++;
+                var status = PlaybookReads > 1 && PlaybookStatusFromSecondRead is { } later ? later : PlaybookStatus;
+                return Task.FromResult(Json(status, PlaybookJson));
+            }
 
             if (url.Contains("sprk_playbooknodes"))
             {
+                if (Uri.UnescapeDataString(url).Contains("_sprk_playbookid_value")) NodeReads++;
                 var rows = string.Join(",", Nodes.Select(n =>
                     "{\"sprk_playbooknodeid\":\"" + n.Id + "\",\"sprk_name\":\"n\",\"sprk_configjson\":"
                     + (n.ConfigJson is null ? "null" : System.Text.Json.JsonSerializer.Serialize(n.ConfigJson)) + "}"));
@@ -75,6 +83,8 @@ public class NodeServiceCanvasSyncGuardTests
             .Returns(new ValueTask<AccessToken>(new AccessToken("t", DateTimeOffset.UtcNow.AddHours(1))));
         return new NodeService(new HttpClient(handler), config, credential.Object, NullLogger<NodeService>.Instance);
     }
+
+    private static HttpContext Ctx() => new DefaultHttpContext { TraceIdentifier = "trace-133" };
 
     private static CanvasLayoutDto Canvas() => new()
     {
@@ -201,6 +211,7 @@ public class NodeServiceCanvasSyncGuardTests
         var result = await PlaybookEndpoints.SaveCanvasLayout(
             PlaybookId,
             new SaveCanvasLayoutRequest { Layout = Canvas() },
+            Ctx(),
             playbookService.Object,
             CreateService(h),
             NullLoggerFactory.Instance,
@@ -209,6 +220,7 @@ public class NodeServiceCanvasSyncGuardTests
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
         problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_read_only");
+        problem.ProblemDetails.Extensions["correlationId"].Should().Be("trace-133");
         problem.ProblemDetails.Detail.Should().Contain(name).And.Contain("read-only");
         h.Writes.Should().BeEmpty("no node may be deleted, created or updated");
         playbookService.VerifyNoOtherCalls(); // canvas JSON not persisted either
@@ -226,6 +238,7 @@ public class NodeServiceCanvasSyncGuardTests
         var result = await PlaybookEndpoints.SaveCanvasLayout(
             PlaybookId,
             new SaveCanvasLayoutRequest { Layout = Canvas() },
+            Ctx(),
             playbookService.Object,
             CreateService(h),
             NullLoggerFactory.Instance,
@@ -244,11 +257,13 @@ public class NodeServiceCanvasSyncGuardTests
 
         var result = await PlaybookEndpoints.SaveCanvasLayout(
             PlaybookId, new SaveCanvasLayoutRequest { Layout = Canvas() },
+            Ctx(),
             playbookService.Object, CreateService(h), NullLoggerFactory.Instance, CancellationToken.None);
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
         problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_canvas_unverifiable");
+        problem.ProblemDetails.Extensions["correlationId"].Should().Be("trace-133");
         h.Writes.Should().BeEmpty();
     }
 
@@ -261,5 +276,82 @@ public class NodeServiceCanvasSyncGuardTests
 
         (await act.Should().ThrowAsync<ProtectedPlaybookCanvasSyncException>())
             .Which.Reason.Should().Be(ProtectedPlaybookReason.Unverifiable);
+    }
+
+    // ---- Check once: permit + snapshot semantics (round 2) ----
+
+    [Fact]
+    public async Task SaveCanvasLayout_ChecksOnce_NoSecondPlaybookOrNodeRead()
+    {
+        // Old code re-ran the guard and re-read nodes inside the sync (2 playbook reads, 2 node reads).
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, Guid.NewGuid())] };
+        var playbookService = new Mock<IPlaybookService>();
+        playbookService
+            .Setup(p => p.SaveCanvasLayoutAsync(PlaybookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CanvasLayoutResponse { PlaybookId = PlaybookId });
+
+        await PlaybookEndpoints.SaveCanvasLayout(PlaybookId, new SaveCanvasLayoutRequest { Layout = Canvas() }, Ctx(),
+            playbookService.Object, CreateService(h), NullLoggerFactory.Instance, CancellationToken.None);
+
+        h.PlaybookReads.Should().Be(1);
+        h.NodeReads.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SaveCanvasLayout_WhenOnlyASecondGuardReadWouldFail_StillSaves_NoFalseRefusal()
+    {
+        // Old code: the second check's playbook GET failing gave a 503 "save was refused" AFTER the canvas JSON
+        // had been persisted. With one check, a later throttle cannot produce that false refusal.
+        var h = new FakeDataverse
+        {
+            Nodes = [(DesignerConfig, Guid.NewGuid())],
+            PlaybookStatusFromSecondRead = HttpStatusCode.TooManyRequests
+        };
+        var playbookService = new Mock<IPlaybookService>();
+        playbookService
+            .Setup(p => p.SaveCanvasLayoutAsync(PlaybookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CanvasLayoutResponse { PlaybookId = PlaybookId });
+
+        var result = await PlaybookEndpoints.SaveCanvasLayout(PlaybookId, new SaveCanvasLayoutRequest { Layout = Canvas() }, Ctx(),
+            playbookService.Object, CreateService(h), NullLoggerFactory.Instance, CancellationToken.None);
+
+        result.Should().BeOfType<Ok<CanvasLayoutResponse>>();
+    }
+
+    [Fact]
+    public async Task SyncWithPermit_WorksOnTheGuardSnapshot_NodeWrittenAfterGuardRead_IsNotDeleted()
+    {
+        // Semantics: the sync sees exactly the nodes the guard read. A node a deploy writes after that read is not
+        // in the snapshot, so the orphan pass cannot delete it (old code re-read and would have deleted it).
+        var designerNode = Guid.NewGuid();
+        var lateDeployedNode = Guid.NewGuid();
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, designerNode)] };
+        var svc = CreateService(h);
+
+        var permit = await svc.EnsureCanvasSyncAllowedAsync(PlaybookId);
+        h.Nodes.Add((DeployedConfig, lateDeployedNode));
+        await svc.SyncCanvasToNodesAsync(permit, Canvas());
+
+        h.NodeReads.Should().Be(1, "the permit overload must not re-read nodes");
+        h.Writes.Should().NotContain(w => w.Contains(lateDeployedNode.ToString()));
+        h.Writes.Should().Contain(w => w.StartsWith("PATCH") && w.Contains(designerNode.ToString()));
+    }
+
+    // ---- Flag-only system playbook (shape of summarize-document-for-chat@v1): all nodes marked ----
+
+    [Fact]
+    public async Task Sync_FlagOnlySystemPlaybookWithAllCanvasIds_IsRefusedByTheFlag()
+    {
+        var h = new FakeDataverse
+        {
+            PlaybookJson = "{\"sprk_name\":\"summarize-document-for-chat@v1\",\"sprk_issystemplaybook\":true,\"sprk_playbooktype\":0}",
+            Nodes = [(DesignerConfig, Guid.NewGuid())]
+        };
+
+        var act = () => CreateService(h).SyncCanvasToNodesAsync(PlaybookId, Canvas());
+
+        (await act.Should().ThrowAsync<ProtectedPlaybookCanvasSyncException>())
+            .Which.Reason.Should().Be(ProtectedPlaybookReason.SystemFlag);
+        h.Writes.Should().BeEmpty();
     }
 }

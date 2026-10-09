@@ -110,5 +110,17 @@ public interface INodeService
     /// be read, it throws. Callers that persist the canvas JSON must call this first.
     /// </summary>
     /// <exception cref="ProtectedPlaybookCanvasSyncException">The playbook is protected or cannot be verified.</exception>
-    Task EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default);
+    /// <returns>A permit carrying the node snapshot the guard read, for the permit overload of
+    /// <see cref="SyncCanvasToNodesAsync(CanvasSyncPermit, CanvasLayoutDto, CancellationToken)"/>.</returns>
+    Task<CanvasSyncPermit> EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sync using a permit from <see cref="EnsureCanvasSyncAllowedAsync"/>: no second check and no second node
+    /// read; the sync works on the permit's snapshot. Callers that persist other state first (the canvas save
+    /// endpoint) check once, persist, then sync with the permit.
+    /// </summary>
+    Task SyncCanvasToNodesAsync(
+        CanvasSyncPermit permit,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default);
 }

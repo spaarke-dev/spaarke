@@ -381,7 +381,7 @@ public class NodeService : INodeService
     }
 
     /// <inheritdoc />
-    public async Task EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default)
+    public async Task<CanvasSyncPermit> EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default)
     {
         string? name = null;
         try
@@ -408,6 +408,8 @@ public class NodeService : INodeService
             var nodes = await GetNodesRawAsync(playbookId, cancellationToken);
             if (nodes.Any(e => ExtractCanvasNodeId(e.ConfigJson) == null))
                 Refuse(playbookId, name, ProtectedPlaybookReason.RepoDeployedNodes);
+
+            return new CanvasSyncPermit(playbookId, nodes);
         }
         catch (ProtectedPlaybookCanvasSyncException)
         {
@@ -440,7 +442,18 @@ public class NodeService : INodeService
         CancellationToken cancellationToken = default)
     {
         // D-97 / PB-08: refuse before any delete/create/update for repo-deployed system playbooks.
-        await EnsureCanvasSyncAllowedAsync(playbookId, cancellationToken);
+        var permit = await EnsureCanvasSyncAllowedAsync(playbookId, cancellationToken);
+        await SyncCanvasToNodesAsync(permit, canvasLayout, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task SyncCanvasToNodesAsync(
+        CanvasSyncPermit permit,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default)
+    {
+        var playbookId = permit.PlaybookId;
+        var existingEntities = (NodeEntity[])permit.NodeSnapshot;
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
@@ -451,8 +464,7 @@ public class NodeService : INodeService
             "Syncing canvas to nodes for playbook {PlaybookId}: {NodeCount} canvas nodes, {EdgeCount} edges",
             playbookId, nodes.Length, edges.Length);
 
-        // Step 1: Load existing Dataverse node records for this playbook
-        var existingEntities = await GetNodesRawAsync(playbookId, cancellationToken);
+        // Step 1: Existing Dataverse node records = the snapshot the guard read (no second read).
         var existingByCanvasId = BuildCanvasIdMap(existingEntities);
 
         _logger.LogDebug("Found {ExistingCount} existing nodes, {MappedCount} with canvas IDs",

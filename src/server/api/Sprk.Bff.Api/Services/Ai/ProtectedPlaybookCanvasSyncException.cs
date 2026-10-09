@@ -51,3 +51,21 @@ public sealed class ProtectedPlaybookCanvasSyncException : InvalidOperationExcep
         };
     }
 }
+
+/// <summary>
+/// Proof that <see cref="INodeService.EnsureCanvasSyncAllowedAsync"/> passed for a playbook, carrying the node
+/// snapshot the guard read. The permit overload of <c>SyncCanvasToNodesAsync</c> syncs against exactly that
+/// snapshot (no second check, no second read): nodes written after the guard read are neither seen nor deleted.
+/// </summary>
+public sealed class CanvasSyncPermit
+{
+    internal CanvasSyncPermit(Guid playbookId, object nodeSnapshot)
+    {
+        PlaybookId = playbookId;
+        NodeSnapshot = nodeSnapshot;
+    }
+
+    public Guid PlaybookId { get; }
+
+    internal object NodeSnapshot { get; }
+}
