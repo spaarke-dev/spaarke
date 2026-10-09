@@ -1091,6 +1091,7 @@ public static class RagEndpoints
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        DocumentIndexParentResolver parentResolver,
         Spaarke.Core.Auth.AuthorizationService authorizationService,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
@@ -1258,32 +1259,10 @@ public static class RagEndpoints
                     continue;
                 }
 
-                // Step 3: Build parent entity context from document lookups
-                ParentEntityContext? parentEntity = null;
-                if (!string.IsNullOrEmpty(document.MatterId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "matter",
-                        EntityId: document.MatterId,
-                        EntityName: document.MatterName ?? "Unknown Matter"
-                    );
-                }
-                else if (!string.IsNullOrEmpty(document.ProjectId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "project",
-                        EntityId: document.ProjectId,
-                        EntityName: document.ProjectName ?? "Unknown Project"
-                    );
-                }
-                else if (!string.IsNullOrEmpty(document.InvoiceId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "invoice",
-                        EntityId: document.InvoiceId,
-                        EntityName: document.InvoiceName ?? "Unknown Invoice"
-                    );
-                }
+                // Step 3: the parent the chunks are filed under, from the document row — the ONE derivation
+                // (DocumentIndexParentResolver, #1510 / task 177): its matter, else project, else invoice, exactly as
+                // this step always did; only a row with none of those reads its work assignment / related event.
+                var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
 
                 // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE
                 // building the index request. Previously this handler called ONLY
