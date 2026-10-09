@@ -943,6 +943,30 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Enqueuer.Enqueued.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("TRUE")]   // exact case
+    [InlineData("yes")]
+    [InlineData("")]
+    public async Task PostRuns_SecureRecordSetupDryRunNotBoolean_Returns400_WithH7bsCode_BeforeCosmosOrEnqueue(string value)
+    {
+        // T256: the handler's own rule (SecureRecordSetupIntake) and rejection code, before the run guard / Cosmos / enqueue
+        // — a near-miss such as "yes" must never silently mean "apply".
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [IntakeParameterCatalog.SecureRecordSetupDryRun] = value,
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ReadProblemErrorCode(await response.Content.ReadAsStringAsync()).Should().Be("secure_setup.dry_run_invalid");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task PostRuns_ProvisionEnvironmentSkillStep40Payload_Returns202()
     {

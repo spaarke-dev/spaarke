@@ -62,6 +62,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -118,6 +119,9 @@ public static class HandlerDispatchRegistrationModule
             HandlerIds.H6, (sp, _) => sp.GetRequiredService<H6SolutionImportHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H7, (sp, _) => sp.GetRequiredService<H7DataverseEnvVarValuesHandler>());
+        // T256: H7b — the per-environment Secure Record setup (SecureRecordSetupModule registers the concrete type).
+        services.AddKeyedScoped<IProvisioningHandler>(
+            HandlerIds.H7b, (sp, _) => sp.GetRequiredService<H7bSecureRecordSetupHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

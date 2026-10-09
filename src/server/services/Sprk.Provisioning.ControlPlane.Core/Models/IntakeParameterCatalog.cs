@@ -90,6 +90,13 @@ public static class IntakeParameterCatalog
     public static readonly IReadOnlySet<string> AllowedSolutionPackageTypes =
         new HashSet<string>(StringComparer.Ordinal) { ManagedSolutionPackage, UnmanagedSolutionPackage };
 
+    /// <summary>
+    /// T256 — H7b dry run: <c>true</c> makes H7b (Secure Record setup) read everything, record its plan in the gate
+    /// evidence and write nothing; the run then stops at H7b. <c>false</c> or absent applies. Exact lower case; validated at
+    /// POST /api/runs by <c>SecureRecordSetupIntake</c>, the rule H7b applies.
+    /// </summary>
+    public const string SecureRecordSetupDryRun = "secureRecordSetupDryRun";
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -192,6 +199,9 @@ public static class IntakeParameterCatalog
 
         // --- H0 probe tuning ---------------------------------------------------------
         new("openaiPinFreshnessMinDays", "H0 OpenAI model-pin freshness threshold."),
+
+        // --- Secure Record setup (H7b) -------------------------------------------------
+        new(SecureRecordSetupDryRun, "H7b (T256): 'true' = dry run — H7b reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). 'false' or absent = apply. Validated at POST /api/runs (SecureRecordSetupIntake)."),
 
         // --- Dataverse environment-variable values (H7) -------------------------------
         new("msalClientId", "H7 env-var value: MSAL client id for code pages."),

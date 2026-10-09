@@ -101,6 +101,11 @@
       "enum": ["managed", "unmanaged"],
       "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
     },
+    "secureRecordSetupDryRun": {
+      "type": "boolean",
+      "default": false,
+      "description": "OPTIONAL (T256). true = H7b (Secure Record setup) reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). false or absent = apply. Sent to POST /api/runs as nonSecretParameters.secureRecordSetupDryRun = 'true' | 'false' (exact, lower case; anything else is refused with secure_setup.dry_run_invalid)."
+    },
     "skipExternalPrereqs": {
       "type": "boolean",
       "default": false,

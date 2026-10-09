@@ -183,6 +183,18 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
             ],
+            [HandlerIds.H7b] =
+            [
+                Tenant,
+                // T256: dry run (validated at POST /api/runs by SecureRecordSetupIntake). Absent = apply.
+                RunInput.Intake(IntakeParameterCatalog.SecureRecordSetupDryRun, required: false),
+                // The environment H5 adopted, signed in to as the BFF app registration (H3) — the identity H6/H7 use.
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // S12: the BFF's two Dataverse application users (H10) — the only members of the BFF writer profile.
+                RunInput.Output(nameof(InterStepState.BffAppRegSystemUserId)),
+                RunInput.Output(nameof(InterStepState.SystemUserId)),
+            ],
             [HandlerIds.H8] =
             [
                 Tenant,

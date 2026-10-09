@@ -303,6 +303,14 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
     </EmbeddedResource>
 
+    <!-- T256 (H7b, unified-access-control-r2 INCOMING-145 §2.1): config/secure-record-owner-role.json is the ONE list of
+         tables the "Secure Record Owner" role reads at Basic depth. Linked from the repository root (never copied), the way
+         Sprk.Bff.Api.csproj links the same file for its NFR-05 census — so H7b grants exactly what the census checks. -->
+    <EmbeddedResource Include="..\..\..\..\config\secure-record-owner-role.json"
+                       Link="Handlers\SecureRecordSetup\secure-record-owner-role.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordOwnerRole.json</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 150 (Wave G-5 Batch G-5A) — H12a YamlDotNet manifest engine +
          DV-REST seed writes. task-069's manifest.yaml (single source of
          truth per its own header) + the 4 flat-JSON content files

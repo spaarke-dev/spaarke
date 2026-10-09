@@ -116,6 +116,7 @@ using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -484,6 +485,14 @@ public static class RunsEndpoints
                     $"nonSecretParameters['{IntakeParameterCatalog.SolutionPackageType}'] is '{packageTypeValue}'; " +
                     $"allowed values are {IntakeParameterCatalog.ManagedSolutionPackage} | {IntakeParameterCatalog.UnmanagedSolutionPackage} " +
                     $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
+            }
+
+            // T256: H7b's dry-run flag — the handler's own rule (SecureRecordSetupIntake) and its own rejection code.
+            if (!SecureRecordSetupIntake.TryReadDryRun(request.NonSecretParameters, out _))
+            {
+                return BadRequest(httpContext, SecureRecordSetupRejectionCodes.DryRunInvalid,
+                    $"nonSecretParameters['{IntakeParameterCatalog.SecureRecordSetupDryRun}'] must be 'true' or 'false' " +
+                    "(exact, lower case). Omit it to apply the Secure Record setup (H7b).");
             }
         }
 
