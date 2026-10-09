@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="138" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Retire the legacy canvas Playbook Designer: demo still runs the 2026-05-19 PlaybookBuilder bundle that saves canvas JSON and deletes nodes straight from the browser (bypasses the task 133 guard); the unused PlaybookBuilderHost PCF remains in dev</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>owner approval for the demo deploy</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploy to a non-dev environment; protects live system playbooks; removes a web resource.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No code overlap with 133/137; deploy-only plus a removal.</parallel-reason>
+    <deps>none</deps>
+    <tags>deploy,code-page,pcf,ai,bug</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make sure no environment still runs a Playbook Designer that can rewrite or wipe a system playbook from the browser.</prompt>
+  <role>SPAARKE deployment engineer.</role>
+  <goal>Every environment serves the current PlaybookBuilder (catalog editor, no canvas save); the legacy PlaybookBuilderHost PCF is removed or proven harmless everywhere; evidence recorded before and after.</goal>
+
+  <context>
+    <background>Found by the independent review of PR #1497 (task 133), 2026-10-09:
+- demo: web resource `sprk_playbookbuilder` was last modified 2026-05-19 (1.7 MB). Its bundle contains `sprk_canvaslayoutjson`, `sprk_playbooknodes`, `__canvasNodeId` and `method:"DELETE"`: it saves canvas JSON and syncs nodes directly through the Dataverse Web API, deleting every node without `__canvasNodeId` (old source `playbookNodeSync.ts` Step 5, before commit df874a910). This never reaches the BFF, so task 133's guard cannot stop it.
+- dev: the playbook main form hosts the current catalog editor (2026-10-09, no canvas code). The legacy `PlaybookBuilderHost` PCF (Jan 2026) still exists as a web resource / control and writes canvas JSON via `context.webAPI.updateRecord`, but is on no playbook form.
+Check every other environment the repo deploys to (the environment list in the deploy guides / provisioning-runs) the same way.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Deploys outside spaarkedev1 need the owner's explicit approval per environment. No tenant-wide publish (D-83): import without publish and publish only the imported components (task 130's scoped path once #1467 merges; until then publish by component).</constraint>
+    <constraint source="project">Read-only inventory first: for each environment, the PlaybookBuilder web resource's modifiedon, size and whether its bundle contains canvas-save code; whether PlaybookBuilderHost is on any form. Record in notes/deploy-log.md. Removing PlaybookBuilderHost: only if no form, view or app references it (dependency check), and from source too if nothing uses it. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every environment's PlaybookBuilder bundle contains no canvas-save or node-delete code (before and after recorded).</criterion>
+    <criterion testable="true">PlaybookBuilderHost removed (dependency check recorded) or every remaining copy proven unreachable.</criterion>
+    <criterion testable="true">The project CLAUDE.md gotcha "never save a system playbook in the Designer" is updated once 133 and 138 are live everywhere.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 by the main session from the #1497 review (F2; no-parking rule).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 115 tasks, **56 ✅** (board synced). |
+| **Task** | No single main-session task — orchestrating parallel lanes (owner choice). 116 tasks, **56 ✅** (board synced). |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, clean. synced with origin/master 2026-10-09 (`217b8f3c6`; Signal-ownership invariant now **I-17** — uac-r2 took I-16). |
 | **Critical context** | D-100 done in dev 2026-10-09 04:15Z: all 7 notification playbooks inactive, 05:00Z tick ran none (deploy-log "D-100 retire"); `C:\wt120d` can be removed. |
 | **Context** | Every PR gets an independent review + a re-check of each fix round before the owner's merge; the owner pre-approves "merge when green" per PR (I build / merge-tree against current master first). No tenant-wide publish (D-83). Dev deploys/data changes need an owner decision. Never park an issue (D-81). **Notification playbooks are RETIRED (D-100)** — bell-only; the Briefing never reads `appnotification`. AI playbooks: Matter Health only (D-101). |
@@ -22,7 +22,7 @@
 | `afa95b62d109541c3` (author) / `afead9298bddac72a` (reviewer) | **130** #1467 round 8 = D-103 stop-unless-flagged (`577355f72`, 68/68) in re-check | CI green → merge-tree vs master → **merge (D-102 approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → ask owner for the 4 live proofs |
 | `a05ace738dcb47fe5` | **131** #1493 round 2 (review: vacuous Issue1452 theory, PLAYBOOK-AUTHOR-GUIDE still teaches notification playbooks, stale docs/comments) + **second PR deleting verified-unused notification code (D-104b)** | On round-2 push: main session applies `.claude` edits on #1493's branch (dataverse-create-schema SKILL.md:671; ADR-036:21; ADR-034:23/94 "(retired, D-100)") → re-check → owner merge |
 | `acfdd3ea462a111e9` (author) | **132** #1494 round 2 `c86ff04dd` re-checked by main session (JSON edits reverted, constants, IsTransient, seam validation) — APPROVABLE | **Merge order: #1493 first** (its deletion of the 4 notification JSONs clears #1494's 4 expected Issue1452 failures) → re-run #1494 CI → owner merge |
-| `a45f465c6ce16e9e3` | Independent review of **#1497** (133, Designer read-only; CI green `38e5d9b52`) | Fix rounds → owner merge + dev BFF deploy approval; keep the CLAUDE.md "never save a system playbook" gotcha until shipped everywhere; then task **137** (#1498 per-node endpoints) |
+| `ada91107a9efd8931` (author) / `a45f465c6ce16e9e3` (reviewer) | **133** #1497 round 2: F3 single check (permit + node snapshot; nothing persisted on guard failure), F4 correlationId + ProducesProblem, K2 flag-only test, PR wording (server paths only) | Re-check → owner merge + dev BFF deploy approval → task **137** (#1498 + K3 marker) |
 | `aaa74682a6e89bfc8` | **135** #1496 Matter Health: author fixing reviewer items 1,2,3,5,6,9,11,12,14,15,16,17; #4 recorded under D-101 | Push → independent re-check → owner: live proof needs AgentService (disabled in dev) |
 | `a9cc345014f28b750` (author) / `a594f6e15e836ba8f` (reviewer) | **136** #1501 (root cause: org-owned lookup tables 400 on RetrievePrincipalAccess → 404; fix = uac-r2 #1391, stacked) in review | #1391 merge (uac-r2, asked on #1355 comment 6080141491) → owner merge → dev BFF + Console deploy (owner) → owner re-runs card r1. Open: orphan `sprk_document` 2cf67ed0-207b-4c58-a43d-11d8a7c9a424 (dev data, owner); Basic User lacks `prvAppendTosprk_RecordType_Ref` (asked uac-r2) |
 | `aca557cdbb835f49c` | **111** #1415: merge master (conflicts after #1480), keep named sizes + in-app hosting | CI → re-check → owner merge → owner fills checklist r2-r8 |
@@ -36,6 +36,8 @@
 | uac-r2 on **#1355** | 6074035905: PB-07 membership role-credit bug + AI-EX7 AiAnalysis write tools (→ task 134); D-65 WA create path (046); D-66 write-core move (048) | 134, 046, 048 |
 
 ## Open owner questions / owner actions
+
+- **Task 138 demo deploy** (to ask): demo still runs the 2026-05-19 canvas PlaybookBuilder (saves canvas + deletes unmarked nodes from the browser, bypasses the 133 guard). Redeploy current PlaybookBuilder to demo (scoped publish) + remove legacy PlaybookBuilderHost PCF after a dependency check.
 
 - **Task 130 live proofs** after its re-check: NoAccessEntryRibbon -Apply, FieldMappingAdminSolution scoped import, small app module + sitemap + app setting, first unmanaged SpaarkeMaster import; plus VisualHost `customcontrols.version` (still 1.4.38).
 - **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV (db `results/r1..r8`, `status/final`): r1-r5 wizards (111; **r1 FAILED at Finish → task 136**, r2-r5 not yet filled), r6 To Do dates (106 + LW badge → 121), r7 external app (122, closes #1428), r8 due-date cards/calendar/counts + VisualHost version (129). Read back with ArtifactData `list results`, then close 111, 121, 122, 129.

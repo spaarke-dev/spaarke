@@ -22,7 +22,9 @@
   <goal>No API path can create, update or delete a node of a protected playbook (the task 133 predicate), unless it is the sanctioned deploy path, and the deploy tooling still works.</goal>
 
   <context>
-    <background>Found by task 133 (PR #1497) and filed as #1498. Task 133 guards the Designer canvas save and the JIT sync through NodeService.EnsureCanvasSyncAllowedAsync. The per-node create/update/delete endpoints in NodeEndpoints.cs are not guarded. First establish (evidence, grep plus the deploy recipe) whether any deploy script (Deploy-Playbook*.ps1, the JPS deploy recipe, scripts/) uses these endpoints or writes Dataverse directly. That decides the design: guard them outright, or allow a deploy-only caller.</background>
+    <background>Found by task 133 (PR #1497) and filed as #1498. Task 133 guards the Designer canvas save and the JIT sync through NodeService.EnsureCanvasSyncAllowedAsync. The per-node create/update/delete endpoints in NodeEndpoints.cs are not guarded. First establish (evidence, grep plus the deploy recipe) whether any deploy script (Deploy-Playbook*.ps1, the JPS deploy recipe, scripts/) uses these endpoints or writes Dataverse directly. That decides the design: guard them outright, or allow a deploy-only caller.
+Evidence from the #1497 review (2026-10-09): every deploy and patch script (Deploy-Playbook.ps1, Create-DefaultPlaybook.ps1, Fix-SummarizeForChatPlaybookFK.ps1, Patch-PlaybookQueryFetchXml.ps1 and the retired notification scripts) writes the Dataverse Web API directly; nothing in scripts/ or the clients calls /api/ai/playbooks/{id}/nodes. So guarding them outright breaks no deploy path (re-verify on current master).
+Also in scope (review K3): CreateNodeAsync / UpdateNodeAsync write request.ConfigJson verbatim, so a node created or updated through these endpoints has no `__canvasNodeId`, and task 133's node rule would then lock that user-authored playbook. Make these endpoints keep or stamp the marker for user playbooks, with a test.</background>
   </context>
 
   <constraints>
