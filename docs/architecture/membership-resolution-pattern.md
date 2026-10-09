@@ -361,6 +361,8 @@ This section enumerates every BFF surface that currently consumes the membership
 
 ### Migrated playbooks (consume `IMembershipResolverService` indirectly via the `LookupUserMembership` node)
 
+> **Retired 2026-10-09 (D-100, task 131).** The seven notification playbooks below were deactivated and their definitions deleted. This section is history: it records how the `LookupUserMembership` + `fetchInGuids` pattern was proved. The pattern itself still applies to any playbook (the Insights playbooks use the engine). Recover a definition with `git show e9f08b764:projects/spaarke-daily-update-service/notes/playbooks/<file>`.
+
 All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) from the broken `sprk_matterteammember` FetchXML pattern (A1 / D5 root cause) to the new `LookupUserMembership` node + a Handlebars id-list helper in the downstream FetchXML.
 
 > **Corrected 2026-10-08, ISS-018 #1452.** The R3 migration used `operator="in" value="{{joinIds myMatters.ids}}"`.
@@ -378,23 +380,22 @@ All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) 
 | `notification-new-emails.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json` | Task 051 | Same pattern |
 | `notification-new-events.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json` | Task 052 | Same pattern |
 
-**Task 152:** every notification playbook's LookupUserMembership node now carries `"targeting": "people"` (and no
+**Task 152 (historical, retired playbooks):** every notification playbook's LookupUserMembership node now carries `"targeting": "people"` (and no
 `roles` filter, which would have dropped Created By) in its source JSON — all seven
-`projects/spaarke-daily-update-service/notes/playbooks/notification-*.json`. The four that are live in dev (Matter/Project
-Activity Summary, Tasks Due Soon, Tasks Overdue, New Work Assignments) are redeployed through
+`projects/spaarke-daily-update-service/notes/playbooks/notification-*.json` (deleted by D-100). They had been redeployed through
 `scripts/Deploy-Playbook.ps1` as a recorded manual gate (`projects/unified-access-control-r2/notes/task-152-people-targeting.md`).
 
 Coverage (corrected 2026-10-08, ISS-018 #1452 — the earlier citation of `MigratedPlaybookTests.cs` + `MigratedPlaybookFixture.cs`
 was wrong: the tests file never existed, and the fixture was an orphan whose Dataverse simulator split the comma list
 itself, so it could not catch the defect):
 
-- `tests/integration/regression/Ai/Issue1452_NotificationPlaybookFetchXmlShapeTests.cs` — renders every repo playbook and
-  runs `FetchXmlShapeValidator` on the authored template and the rendered query.
+- `tests/integration/regression/Ai/Issue1452_NotificationPlaybookFetchXmlShapeTests.cs` — renders every repo playbook that
+  carries FetchXML (today the Insights playbook) and runs `FetchXmlShapeValidator` on the authored template and the rendered
+  query; the engine-level checks run on an inline legacy-shape definition.
 - `tests/unit/domain/Ai/FetchXmlShapeValidatorTests.cs` — the shared shape check.
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs` — the `fetchInGuids` cases (distinct/sorted ids,
   empty / unresolved / non-GUID → impossible match).
-- `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/NotificationPlaybookFetchXmlLiveTests.cs` — opt-in live test
-  that executes the rendered queries against a real Dataverse environment.
+- ~~`NotificationPlaybookFetchXmlLiveTests.cs`~~ (opt-in live test of the seven notification queries) was deleted with the playbooks (D-100).
 
 ### Consumers of `IMembershipEventPublisher` (Phase 2 publish path)
 

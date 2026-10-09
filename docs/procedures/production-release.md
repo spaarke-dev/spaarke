@@ -33,7 +33,7 @@ A production release deploys across three tracks:
 |-------|------|-------------|------|
 | **Track 1: Dataverse** | SpaarkeMaster solution (schema, web resources, PCFs, security roles, env vars, MDA app) | `pac solution export` → `pac solution import` | Every release |
 | **Track 2: Azure** | BFF API (.NET 10), Office Add-ins | `Deploy-BffApi.ps1`, `Deploy-OfficeAddins.ps1` | Every release (BFF); if changed (Add-ins) |
-| **Track 2.5: Reference Data** | Playbook definitions, chat context mappings, Copilot agent config | `Deploy-NotificationPlaybooks.ps1`, `Deploy-ChatContextMappings.ps1`, `Deploy-CopilotAgent.ps1` | Every release (idempotent upserts) |
+| **Track 2.5: Reference Data** | Chat context mappings, Copilot agent config | `Deploy-ChatContextMappings.ps1`, `Deploy-CopilotAgent.ps1` | Every release (idempotent upserts) |
 | **Track 3: Infrastructure** | Azure resources (App Service, OpenAI, AI Search, Key Vault, Power BI) | `Deploy-Platform.ps1`, Bicep templates, `Deploy-ReportingReports.ps1` | Only when infra changes |
 
 **Track 1 assumption**: SpaarkeMaster in dev is production-ready — all web resources and PCF controls contain the latest built code artifacts. No code is built or uploaded during the release itself.
@@ -488,13 +488,8 @@ With SpaarkeMaster imported, all schema, web resources, and PCF controls are in 
 Reference data scripts are idempotent (safe to re-run every release):
 
 ```powershell
-# Playbook definitions (7 notification playbooks with nodes and relationships)
-# Creates an absent playbook; SYNCS an existing one's nodes in place by node name (never delete-and-recreate),
-# then reads every node back and fails on any difference. -DryRun previews; -RecordPath <dir> saves before/after JSON.
-# Run only AFTER the BFF containing the ISS-018 fix (#1452) is deployed (Phase 2): the playbooks' FetchXML now needs the
-# fetchInGuids helper (corrected 2026-10-08, ISS-018 #1452).
-.\scripts\Deploy-NotificationPlaybooks.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+# Playbook definitions: none. The seven notification playbooks and their Deploy-NotificationPlaybooks.ps1 were retired
+# (D-100, 2026-10-09); do not recreate them in a customer environment.
 
 # Chat context mappings (AI chat configuration seed data)
 .\scripts\Deploy-ChatContextMappings.ps1 `

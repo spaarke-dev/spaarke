@@ -37,6 +37,8 @@ Pre-R7, authoring a playbook meant **picking an Action first**, dragging it onto
 
 ---
 
+> **Notification playbooks are retired (2026-10-09, D-100).** The seven scheduled playbooks that wrote model-driven bell notifications (`appnotification`) are inactive and their `notification-*.json` definitions and `Deploy-NotificationPlaybooks.ps1` were deleted. Bell notifications are not a Spaarke feature (the Daily Briefing never reads them). Where this guide uses a notification playbook as a worked example, it teaches the engine pattern (`LookupUserMembership` + `fetchInGuids` + `Condition`); do not deploy a new `CreateNotification` playbook without an owner decision. Old definitions: `git show e9f08b764:projects/spaarke-daily-update-service/notes/playbooks/<file>`.
+
 ## What This Guide Covers
 
 This guide walks you through authoring a multi-node playbook end-to-end, both in PlaybookBuilder (visual canvas) and via a `Deploy-Playbook.ps1` JSON input file. It is the maker-facing companion to [`JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) (which covers JPS at the prompt-template / Action level — what the LLM sees) and to the [actions-nodes-scopes boundary doc](../architecture/ai-architecture-actions-nodes-scopes.md) (which covers "where does this config field belong"). After R7, two flows live in this guide:
@@ -516,7 +518,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
    - **Priority**: `200000000` (Important)
    - **Recipient ID**: `{{run.userId}}`
    - **Iterate Items**: on (creates one notification per item rather than one bulky summary)
-   - **Item Notification**: configure the per-item template (see the notification-new-documents.json migrated playbook for the full shape)
+   - **Item Notification**: configure the per-item template (the retired `notification-new-documents.json` playbook showed the full shape; see the banner at the top of this guide)
 
 ### Step 7 — Save and deploy
 
@@ -610,7 +612,7 @@ Existing helpers (`safe`, simple variable interpolation, `{{#each}}`, nested pro
 
 > **Do NOT** hand-roll a `{{#each ids}}<value>{{this}}</value>{{/each}}` substitute — an empty list leaves an `in` with no values (a query error), and the loop writes caller text into the markup. Use `fetchInGuids`.
 
-**Checks that catch the wrong shape**: one shared check, `FetchXmlShapeValidator`, rejects a list operator that carries a `value` attribute, has the wrong number of `<value>` children, or uses `joinIds` anywhere in FetchXML. It runs (1) in the `QueryDataverse` executor on the rendered query — the node fails loudly with `INVALID_NODE_CONFIGURATION` naming the node, attribute and operator, and the query is never rewritten; (2) as **deploy lint C** in `Deploy-Playbook.ps1` and `Deploy-NotificationPlaybooks.ps1` (which also refuses a Playbook Designer canvas-stub node config holding only `__canvasNodeId` / `__actionType`); and (3) in the repo regression test that renders every repo playbook.
+**Checks that catch the wrong shape**: one shared check, `FetchXmlShapeValidator`, rejects a list operator that carries a `value` attribute, has the wrong number of `<value>` children, or uses `joinIds` anywhere in FetchXML. It runs (1) in the `QueryDataverse` executor on the rendered query — the node fails loudly with `INVALID_NODE_CONFIGURATION` naming the node, attribute and operator, and the query is never rewritten; (2) as **deploy lint C** in `Deploy-Playbook.ps1` (and, before D-100, `Deploy-NotificationPlaybooks.ps1`; it also refused a Playbook Designer canvas-stub node config holding only `__canvasNodeId` / `__actionType`); and (3) in the repo regression test that renders every repo playbook.
 
 ### `joinIds` (R3 — NOT for FetchXML)
 
@@ -817,7 +819,7 @@ These are the recurring mistakes that have broken playbooks in production. Each 
 
 ## Migration: Replacing Broken FetchXML with LookupUserMembership
 
-If you authored playbooks before R3 and they need this update, here's the worked diff. The three migrated R3 reference playbooks live at `projects/spaarke-daily-update-service/notes/playbooks/`.
+If you authored playbooks before R3 and they need this update, here's the worked diff. The three migrated R3 reference playbooks were retired by D-100 (see the banner at the top of this guide).
 
 ### The A1 defect — what we're fixing
 
@@ -977,7 +979,7 @@ If notifications were created but the user can't see them: check the `recipientI
 - **Playbook vs RAG decision tree**: [`INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md`](INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
 - **BFF Hygiene §10** (binding governance for BFF additions): root [`CLAUDE.md` §10](../../CLAUDE.md#10-bff-hygiene-binding).
 - **BFF extensions constraints §G** (actions / nodes / scopes / configjson boundary, binding): [`.claude/constraints/bff-extensions.md` §G](../../.claude/constraints/bff-extensions.md#g-actions--nodes--scopes--configjson-boundary-binding-per-r4-canonical-truth-loop-2026-06-26).
-- **R3 reference playbooks**: `projects/spaarke-daily-update-service/notes/playbooks/` — `notification-new-documents.json`, `notification-new-emails.json`, `notification-new-events.json`.
+- **R3 reference playbooks**: retired 2026-10-09 (D-100); `notification-new-documents.json`, `notification-new-emails.json` and `notification-new-events.json` are recoverable with `git show e9f08b764:projects/spaarke-daily-update-service/notes/playbooks/<file>`.
 - **ADR-013 BFF AI Architecture**: [`docs/adr/ADR-013-bff-ai-architecture.md`](../adr/ADR-013-bff-ai-architecture.md).
 - **ADR-034 user-record membership** (binding rules for `LookupUserMembership`): [`.claude/adr/ADR-034-user-record-membership.md`](../../.claude/adr/ADR-034-user-record-membership.md).
 

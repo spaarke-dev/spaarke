@@ -6,6 +6,11 @@
 //   (4) `{{item.m_sprk_mattername}}` never resolved — an aliased column is keyed "m.sprk_mattername".
 // These tests run the REPO definitions through the production render path and executors, and each pins the old form
 // failing. No test before this executed a real list condition; the one Dataverse simulator split the commas itself.
+// D-100 (task 131): the seven notification playbook definitions were retired and deleted. The engine-level checks below
+// (Condition numeric left, CreateNotification per-item templates, old comma form) now run on LegacyNotificationShape, a
+// small inline definition copied from the retired Tasks Due Soon playbook. They guard CreateNotificationNodeExecutor,
+// ConditionNodeExecutor and FetchXmlShapeValidator, and go with the CreateNotification executor if the owner approves
+// its deletion (task 131 PR inventory).
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -33,6 +38,111 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
     private static readonly string[] SearchRoots = ["projects", "src", "scripts", "infra", "infrastructure"];
     private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git", "dist", "out"];
 
+    /// <summary>
+    /// Inline stand-in for the retired Tasks Due Soon definition (D-100): Start, Lookup My Matters, Query, Check Results
+    /// (Condition), Create Notification, with the node shapes the retired playbooks used.
+    /// </summary>
+    private const string LegacyNotificationShape = """
+{
+  "nodes": [
+    {
+      "name": "Start",
+      "executorType": 33,
+      "outputVariable": "start",
+      "dependsOn": [],
+      "configJson": {
+        "__actionType": 33,
+        "scope": "user-matters",
+        "resolveUserId": true
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "executorType": 52,
+      "outputVariable": "myMatters",
+      "dependsOn": [
+        "Start"
+      ],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "targeting": "people",
+        "includeRelated": false
+      }
+    },
+    {
+      "name": "Query Tasks Due Soon",
+      "executorType": 51,
+      "outputVariable": "dueSoonQuery",
+      "dependsOn": [
+        "Lookup My Matters"
+      ],
+      "configJson": {
+        "__actionType": 51,
+        "queryMode": true,
+        "entityLogicalName": "sprk_event",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_eventtype_ref\" operator=\"eq\" value=\"124f5fc9-98ff-f011-8406-7c1e525abd8b\"/><condition attribute=\"statuscode\" operator=\"eq\" value=\"659490001\"/><filter type=\"and\"><condition attribute=\"sprk_duedate\" operator=\"ge\" value=\"{{todayUtc}}\"/><condition attribute=\"sprk_duedate\" operator=\"le\" value=\"{{dueSoonWindowUtc}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_duedate\" descending=\"false\"/></entity></fetch>"
+      }
+    },
+    {
+      "name": "Check Results",
+      "executorType": 30,
+      "outputVariable": "hasDueSoon",
+      "dependsOn": [
+        "Query Tasks Due Soon"
+      ],
+      "configJson": {
+        "__actionType": 30,
+        "condition": {
+          "operator": "gt",
+          "left": "{{dueSoonQuery.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification"
+      }
+    },
+    {
+      "name": "Create Notification",
+      "executorType": 50,
+      "outputVariable": "notification",
+      "dependsOn": [
+        "Check Results"
+      ],
+      "configJson": {
+        "__actionType": 50,
+        "title": "{{dueSoonQuery.output.count}} task(s) due in the next {{dueWithinDays}} day(s)",
+        "body": "{{#each dueSoonQuery.output.items}}{{sprk_eventname}} is due on {{sprk_duedate}}.\n{{/each}}",
+        "category": "tasks-due-soon",
+        "priority": 200000000,
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039",
+        "recipientId": "{{run.userId}}",
+        "regardingType": "sprk_event",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "Due soon: {{item.sprk_eventname}}",
+          "body": "{{item.sprk_eventname}} is due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})",
+          "category": "tasks-due-soon",
+          "priority": 200000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.sprk_eventid}}",
+          "regardingType": "sprk_event",
+          "dueDate": "{{item.sprk_duedate}}",
+          "regardingName": "{{item.sprk_eventname}}",
+          "sourceEntityType": "sprk_event",
+          "sourceId": "{{item.sprk_eventid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
+          "viaMatterMembershipsVariable": "myMatters"
+        }
+      }
+    }
+  ]
+}
+""";
+
     // ── Discovery: every repo playbook definition that carries a FetchXML query ─────────────
 
     public static TheoryData<string> PlaybooksWithFetchXml()
@@ -46,23 +156,11 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
         return data;
     }
 
-    public static TheoryData<string> NotificationPlaybooks()
-    {
-        var data = new TheoryData<string>();
-        foreach (var path in Directory.GetFiles(
-                     Path.Combine(RepoRoot(), "projects", "spaarke-daily-update-service", "notes", "playbooks"), "notification-*.json"))
-        {
-            data.Add(Path.GetFileName(path));
-        }
-
-        return data;
-    }
-
     [Fact]
-    public void Discovery_FindsAllSevenNotificationPlaybooks_AndTheInsightsPlaybook()
+    public void Discovery_FindsTheInsightsPlaybook_AndNoRetiredNotificationPlaybook()
     {
         var found = FindPlaybooksWithFetchXml().Select(Path.GetFileName).ToList();
-        found.Count(f => f!.StartsWith("notification-", StringComparison.Ordinal)).Should().Be(7);
+        found.Should().NotContain(f => f!.StartsWith("notification-", StringComparison.Ordinal), "D-100 retired the seven notification playbooks; their definitions must not return");
         found.Should().Contain("matter-health-single.playbook.json");
     }
 
@@ -102,15 +200,15 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
         }
     }
 
-    [Theory]
-    [MemberData(nameof(NotificationPlaybooks))]
-    public void TheOldCommaForm_FailsTheSameChecks(string file)
+    [Fact]
+    public void TheOldCommaForm_FailsTheSameChecks()
     {
-        // Put today's master shape back into the current definition: both the authored and the rendered check must fail.
-        var text = File.ReadAllText(NotificationPath(file)).Replace(
+        // Put the old comma shape back into the legacy-shape definition: both the authored and the rendered check must fail.
+        var text = LegacyNotificationShape.Replace(
             "operator=\\\"in\\\">{{fetchInGuids myMatters.ids}}</condition>",
             "operator=\\\"in\\\" value=\\\"{{joinIds myMatters.ids}}\\\"/>",
             StringComparison.Ordinal);
+        text.Should().NotBe(LegacyNotificationShape, "the replacement must actually apply");
         var definition = JsonNode.Parse(text)!.AsObject();
 
         foreach (var (_, fetchXml) in QueriesOf(definition))
@@ -160,11 +258,10 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
 
     // ── (2) Condition node: Layer 1 renders `left` to a JSON number ─────────────────────────
 
-    [Theory]
-    [MemberData(nameof(NotificationPlaybooks))]
-    public async Task TheConditionNode_EvaluatesALayer1RenderedNumericLeft(string file)
+    [Fact]
+    public async Task TheConditionNode_EvaluatesALayer1RenderedNumericLeft()
     {
-        var definition = LoadDefinition(NotificationRelative(file));
+        var definition = JsonNode.Parse(LegacyNotificationShape)!.AsObject();
         var condition = NodesOf(definition).Single(n => (int?)n["executorType"] == 30);
         var query = QueryNodesOf(definition).Single();
         var executor = new ConditionNodeExecutor(Engine, NullLogger<ConditionNodeExecutor>.Instance);
@@ -188,11 +285,10 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
 
     // ── (3)+(4) CreateNotification: item templates survive Layer 1 and render per item ───────
 
-    [Theory]
-    [MemberData(nameof(NotificationPlaybooks))]
-    public async Task CreateNotification_RendersEachItemsTitleRegardingAndMatterName_AfterLayer1(string file)
+    [Fact]
+    public async Task CreateNotification_RendersEachItemsTitleRegardingAndMatterName_AfterLayer1()
     {
-        var definition = LoadDefinition(NotificationRelative(file));
+        var definition = JsonNode.Parse(LegacyNotificationShape)!.AsObject();
         var create = NodesOf(definition).Single(n => (int?)n["executorType"] == 50);
         var query = QueryNodesOf(definition).Single();
         var queryVar = (string)query["outputVariable"]!;
@@ -439,10 +535,6 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
 
     private static JsonObject LoadDefinition(string relativePath) =>
         JsonNode.Parse(File.ReadAllText(Path.Combine(RepoRoot(), relativePath)))!.AsObject();
-
-    private static string NotificationRelative(string file) => "projects/spaarke-daily-update-service/notes/playbooks/" + file;
-
-    private static string NotificationPath(string file) => Path.Combine(RepoRoot(), NotificationRelative(file));
 
     private static string RepoRoot()
     {
