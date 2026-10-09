@@ -48,6 +48,9 @@ param(
     [string]$BffAppClientId,
 
     [Parameter(Mandatory = $true)]
+    [string]$BffUrl,
+
+    [Parameter(Mandatory = $true)]
     [string]$ContainerTypeId,
 
     [Parameter(Mandatory = $true)]
@@ -142,13 +145,18 @@ $settings = @(
     "Graph__Credentials__RequireSecretFreeIdentity=true",
     "Graph__ManagedIdentity__ClientId=$UamiClientId",
     "Graph__ManagedIdentity__Enabled=true",
+    "Graph__Scopes__0=https://graph.microsoft.com/.default",
     "Graph__TenantId=$(Format-KvRef 'TenantId')",
     "ManagedIdentity__ClientId=$UamiClientId",
     "Membership__EventPublisher__ServiceBusNamespace=$ServiceBusFqns",
     "Membership__JunctionUpdater__ServiceBusNamespace=$ServiceBusFqns",
+    "PublicConfig__BffUrl=$BffUrl",
+    "PublicConfig__MsalClientId=$BffAppClientId",
+    "PublicConfig__TenantId=$TenantId",
     "Redis__Endpoint=$RedisEndpoint",
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
+    "ServiceBus__QueueName=sdap-jobs",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"

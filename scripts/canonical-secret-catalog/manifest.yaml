@@ -651,6 +651,39 @@ per_env_settings:
       Public identifier; H3 Entra-app-reg populates when it creates the BFF
       client app-registration for this customer stamp.
 
+  # Task 258 (204e-F6): PublicConfigOptionsValidator refuses to start the BFF
+  # outside Development/Testing unless all three PublicConfig values are set
+  # (GET /api/config, read anonymously by the browser clients). Public values
+  # only: never a Key Vault reference, a key or a connection string.
+  - key: 'PublicConfig__BffUrl'
+    per_env_source: 'from-h2a-output:bff_url'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The stamp BFF's own public URL, https://{appServiceName}.azurewebsites.net
+      from H2a's App Service name, derived by StampBffUrl.Production, which is
+      also the URL H9 probes and records as BffApiUrl (H7 writes it to Dataverse
+      as sprk_BffApiBaseUrl). Both slots carry the production URL, so a
+      staging-to-production swap keeps it right.
+
+  - key: 'PublicConfig__MsalClientId'
+    per_env_source: 'from-h3-output:bff_app_client_id'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The customer BFF app registration H3 creates, the same value as
+      AzureAd__ClientId and as H7's default sprk_MsalClientId: on a stamp that
+      registration is the browser clients' MSAL client (H3 sets its SPA redirect
+      to the customer's Dataverse origin).
+
+  - key: 'PublicConfig__TenantId'
+    per_env_source: 'from-intake-parameter:tenant_id'
+    iOptionsModule: 'PublicConfigOptions'
+    required: true
+    notes: >-
+      Task 258. The intake tenantId, the same value as AzureAd__TenantId (the
+      tenant holding the BFF app registration).
+
   - key: 'SharePointEmbedded__ContainerTypeId'
     per_env_source: 'from-intake-parameter:container_type_id'
     iOptionsModule: 'SpeOptions'
@@ -679,6 +712,17 @@ per_env_settings:
       UAMI client-id H2a Bicep emits. Consumed by GraphClientFactory to pin
       DefaultAzureCredential to the L2/BFF UAMI (rather than any other MI
       the App Service may have).
+
+  - key: 'Graph__Scopes__0'
+    per_env_source: 'literal'
+    literal_value: 'https://graph.microsoft.com/.default'
+    iOptionsModule: 'GraphOptions'
+    required: true
+    notes: >-
+      Task 258 (204e-F7). GraphOptions.Scopes is [Required] with MinLength 1 and
+      an empty default, so the BFF does not start without it in any environment.
+      The app-only Graph default scope; the value Configure-ProductionAppSettings.ps1
+      writes. Global literal.
 
   - key: 'ManagedIdentity__ClientId'
     per_env_source: 'from-h2a-output:uami_client_id'
@@ -791,6 +835,19 @@ per_env_settings:
       a Key Vault reference. Enables BFF to authenticate to Service Bus via
       its runtime UAMI (A36 RBAC: Data Sender + Data Receiver) instead of the
       SAS connection string H4 previously wrote to KV.
+
+  - key: 'ServiceBus__QueueName'
+    per_env_source: 'literal'
+    literal_value: 'sdap-jobs'
+    iOptionsModule: 'ServiceBusOptions'
+    required: true
+    notes: >-
+      Task 258 (204e-F8). ServiceBusOptions.QueueName is [Required] with an empty
+      default, so the BFF does not start without it in any environment. The BFF
+      job queue (ServiceBusJobProcessor receives from it, JobSubmissionService
+      sends to it, H13's keyless proof reads it). customer.bicep creates it: the
+      serviceBusQueues default, which H2a does not override
+      (H4bBulkAppSettingsHandlerTests pins the two together). Global literal.
 
   - key: 'Membership__EventPublisher__ServiceBusNamespace'
     per_env_source: 'from-h2a-output:service_bus_fqns'

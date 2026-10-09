@@ -56,7 +56,7 @@ namespace Spaarke.ArchTests;
 ///   weaken the validator to make this pass.</item>
 ///   <item><c>NO CENSUS ENTRY</c> — add the type to <see cref="Census"/> with the keys its validator demands, each marked
 ///   <see cref="Disposition.Supplied"/> (a channel writes it), <see cref="Disposition.Exempt"/> (a gate that is off for every stamp —
-///   say which) or <see cref="Disposition.KnownDrift"/> (demanded, not written, filed).</item>
+///   name it in <see cref="Guard.Gate"/>; the test fails if a stamp channel writes that gate) or <see cref="Disposition.KnownDrift"/> (demanded, not written, filed).</item>
 ///   <item><c>NOW SUPPLIED</c> — a channel now writes a key you had ledgered; change it to <see cref="Disposition.Supplied"/>.</item>
 /// </list>
 /// </summary>
@@ -74,10 +74,9 @@ public class IOptionsDriftTests
         KnownDrift,
     }
 
-    internal sealed record Guard(string Key, Disposition Disposition, string Reason);
-
-    private const string DriftFiledPrefix = "Filed as task-202 punch-list row ";
-    private const string DriftFiledSuffix = " by task 204e on 2026-10-09; the fix is a manifest per_env_settings / secret entry plus its H4b source (owner decides the source).";
+    /// <param name="Gate">For <see cref="Disposition.Exempt"/> (required there): the boolean setting that turns the demand on. The
+    /// check fails if a stamp channel writes it — an Exempt key whose gate a stamp sets is a demanded key nobody supplies.</param>
+    internal sealed record Guard(string Key, Disposition Disposition, string Reason, string? Gate = null);
 
     /// <summary>
     /// The options types whose startup validation is CUSTOM (an <see cref="IValidateOptions{T}"/> or a <c>.Validate(…)</c> lambda)
@@ -88,17 +87,20 @@ public class IOptionsDriftTests
     {
         ["OnboardingOptions"] = new[]
         {
-            new Guard("Onboarding:HmacSigningKey", Disposition.KnownDrift,
-                "Lambda in OnboardingModule: required outside Development/Testing unless Onboarding:EnableDevBypass. Nothing in manifest.yaml, customer.bicep or scripts/ writes it. ADR-028 / .claude/constraints/provisioning.md 'Progressive fail-fast recovery'. " + DriftFiledPrefix + "204e-F5" + DriftFiledSuffix),
+            new Guard("Onboarding:HmacSigningKey", Disposition.Exempt,
+                "Lambda in OnboardingModule: required outside Development/Testing unless Onboarding:EnableDevBypass — and only when Onboarding:Enabled=true (task 258; default false, no stamp channel sets it). "
+                + "The H0.5 consent callback is the Model 2 entry (a DAG root; Model 2 is out of scope, plan D3) and enqueues to L2's queue through the host's own Service Bus — a stamp's namespace has no such queue and L2 does not drain it — so no customer stamp can serve it. "
+                + "A host that enables it supplies the key as a Key Vault reference. Gate: OnboardingModule.IsEnabled (registrations and route mapping).",
+                Gate: "Onboarding:Enabled"),
         },
         ["PublicConfigOptions"] = new[]
         {
-            new Guard("PublicConfig:BffUrl", Disposition.KnownDrift,
-                "PublicConfigOptionsValidator (task 087 FR-36): required in Production/Staging/Demo/QA. No channel writes it; source would be the stamp site hostname (customer.bicep output). " + DriftFiledPrefix + "204e-F6" + DriftFiledSuffix),
-            new Guard("PublicConfig:MsalClientId", Disposition.KnownDrift,
-                "As above; equals AzureAd__ClientId (per_env_settings, from-h3-output:bff_app_client_id). " + DriftFiledPrefix + "204e-F6" + DriftFiledSuffix),
-            new Guard("PublicConfig:TenantId", Disposition.KnownDrift,
-                "As above; equals AzureAd__TenantId (per_env_settings, from-intake-parameter:tenant_id). " + DriftFiledPrefix + "204e-F6" + DriftFiledSuffix),
+            new Guard("PublicConfig:BffUrl", Disposition.Supplied,
+                "PublicConfigOptionsValidator (task 087 FR-36): required outside Development/Testing. Manifest per_env_settings PublicConfig__BffUrl (from-h2a-output:bff_url — StampBffUrl, the URL H9 records), task 258."),
+            new Guard("PublicConfig:MsalClientId", Disposition.Supplied,
+                "As above. Manifest per_env_settings PublicConfig__MsalClientId (from-h3-output:bff_app_client_id, = AzureAd__ClientId), task 258."),
+            new Guard("PublicConfig:TenantId", Disposition.Supplied,
+                "As above. Manifest per_env_settings PublicConfig__TenantId (from-intake-parameter:tenant_id, = AzureAd__TenantId), task 258."),
         },
         ["CredentialSelectionOptions"] = new[]
         {
@@ -108,25 +110,26 @@ public class IOptionsDriftTests
         ["GraphOptions"] = new[]
         {
             new Guard("Graph:ManagedIdentity:ClientId", Disposition.Supplied, "GraphOptionsValidator: required when Graph:ManagedIdentity:Enabled. Manifest per_env_settings (Graph__ManagedIdentity__ClientId)."),
-            new Guard("Graph:Scopes", Disposition.KnownDrift,
-                "[Required] + MinLength on string[]: empty by default, so startup fails without Graph__Scopes__0. Only scripts/Configure-ProductionAppSettings.ps1 (the pre-provisioning path) writes it; no manifest/Bicep entry for a stamp. " + DriftFiledPrefix + "204e-F7" + DriftFiledSuffix),
+            new Guard("Graph:Scopes", Disposition.Supplied,
+                "[Required] + MinLength on string[]: empty by default, so startup fails without Graph__Scopes__0. Manifest per_env_settings literal Graph__Scopes__0 = https://graph.microsoft.com/.default, task 258."),
         },
         ["ServiceBusOptions"] = new[]
         {
-            new Guard("ServiceBus:QueueName", Disposition.KnownDrift,
-                "[Required] with an empty default. The stamp's queues are created by customer.bicep (serviceBusQueues) but no setting tells the BFF which one; only the L2 control-plane app sets ServiceBus__QueueName. " + DriftFiledPrefix + "204e-F8" + DriftFiledSuffix),
+            new Guard("ServiceBus:QueueName", Disposition.Supplied,
+                "[Required] with an empty default. Manifest per_env_settings literal ServiceBus__QueueName = sdap-jobs, a queue customer.bicep creates (serviceBusQueues default; H4bBulkAppSettingsHandlerTests pins it), task 258."),
         },
         ["DocumentIntelligenceOptions"] = new[]
         {
             new Guard("DocumentIntelligence:OpenAiEndpoint", Disposition.Supplied, "DocumentIntelligenceOptionsValidator: required when DocumentIntelligence:Enabled. Manifest secret AzureOpenAI-Endpoint app_settings."),
             new Guard("DocumentIntelligence:AiSearchEndpoint", Disposition.Supplied, "DocumentIntelligenceOptionsValidator: required when RecordMatchingEnabled. Manifest secret AiSearch-Endpoint app_settings."),
             new Guard("DocumentIntelligence:AiSearchIndexName", Disposition.Exempt,
-                "DocumentIntelligenceOptionsValidator: required only when DocumentIntelligence:RecordMatchingEnabled=true, which no stamp channel sets (default false). Whoever enables record matching for a stamp must add the key; the validator then names it at boot."),
+                "DocumentIntelligenceOptionsValidator: required only when DocumentIntelligence:RecordMatchingEnabled=true, which no stamp channel sets (default false). Whoever enables record matching for a stamp must add the key; the validator then names it at boot.",
+                Gate: "DocumentIntelligence:RecordMatchingEnabled"),
         },
         ["AgentServiceOptions"] = new[]
         {
-            new Guard("AgentService:Endpoint", Disposition.Exempt, "AgentServiceOptionsValidator: required only when AgentService:Enabled=true; the default is false and no stamp channel enables it (ADR-032: gated Foundry agent)."),
-            new Guard("AgentService:AgentId", Disposition.Exempt, "As AgentService:Endpoint."),
+            new Guard("AgentService:Endpoint", Disposition.Exempt, "AgentServiceOptionsValidator: required only when AgentService:Enabled=true; the default is false and no stamp channel enables it (ADR-032: gated Foundry agent).", Gate: "AgentService:Enabled"),
+            new Guard("AgentService:AgentId", Disposition.Exempt, "As AgentService:Endpoint (AgentServiceOptionsValidator, ADR-032).", Gate: "AgentService:Enabled"),
         },
         ["CustomerOptions"] = new[]
         {
@@ -224,8 +227,9 @@ public class IOptionsDriftTests
         public List<string> StaleCensus { get; } = new();
         public List<string> UnknownSection { get; } = new();
         public List<string> BadReason { get; } = new();
+        public List<string> GateOn { get; } = new();
         public int TypesInventoried { get; set; }
-        public bool Any => NoCensusEntry.Count + NoChannel.Count + NowSupplied.Count + StaleCensus.Count + UnknownSection.Count + BadReason.Count > 0;
+        public bool Any => NoCensusEntry.Count + NoChannel.Count + NowSupplied.Count + StaleCensus.Count + UnknownSection.Count + BadReason.Count + GateOn.Count > 0;
     }
 
     internal static Findings Check(
@@ -271,6 +275,8 @@ public class IOptionsDriftTests
                 demanded[g.Key] = g;
                 if (string.IsNullOrWhiteSpace(g.Reason) || g.Reason.Length < 25)
                     f.BadReason.Add($"{simple} / {g.Key}: census entries need a written reason (and an ADR / source citation)");
+                if (g.Disposition == Disposition.Exempt && string.IsNullOrWhiteSpace(g.Gate))
+                    f.BadReason.Add($"{simple} / {g.Key}: an Exempt entry names its Gate (the setting that turns the demand on)");
             }
 
             foreach (var (key, guard) in demanded)
@@ -283,6 +289,9 @@ public class IOptionsDriftTests
                         break;
                     case Disposition.KnownDrift when written:
                         f.NowSupplied.Add($"{simple} / '{key}' is ledgered KnownDrift but a channel now writes it — change the census entry to Supplied");
+                        break;
+                    case Disposition.Exempt when !written && guard!.Gate is { Length: > 0 } gate && channels.Writes(gate):
+                        f.GateOn.Add($"{simple} / '{key}' is Exempt behind '{gate}', but a stamp channel writes '{gate}' — supply '{key}' (a secret: a Key Vault reference) or stop writing the gate");
                         break;
                 }
             }
@@ -370,7 +379,8 @@ public class IOptionsDriftTests
         Section("NOW SUPPLIED (remove the KnownDrift ledger line)", f.NowSupplied);
         Section("STALE CENSUS ENTRY", f.StaleCensus);
         Section("UNRESOLVED", f.UnknownSection);
-        Section("MISSING REASON", f.BadReason);
+        Section("MISSING REASON / GATE", f.BadReason);
+        Section("EXEMPT BUT GATE ON", f.GateOn);
         return sb.ToString();
     }
 
@@ -501,6 +511,28 @@ public class IOptionsDriftTests
 
         Assert.Contains(f.NowSupplied, m => m.Contains("FxSection:Endpoint"));
         Assert.Contains(f.StaleCensus, m => m.Contains("FxGoneOptions"));
+    }
+
+    [Fact(DisplayName = "control (negative): an Exempt key whose gate a stamp channel writes is reported; an Exempt entry without a gate too")]
+    public void Control_Negative_ReportsExemptKeyWhoseGateIsOn()
+    {
+        var gated = new Dictionary<string, Guard[]>
+        {
+            ["FxCustomOptions"] = new[] { new Guard("FxCustom:Token", Disposition.Exempt, "Fixture: demanded only when FxCustom:Enabled; no stamp sets it.", Gate: "FxCustom:Enabled") },
+        };
+        var clean = Check(FixtureChains(), ResolveFixture, ParseChannels("per_env_settings:\n  - key: 'FxSection__Endpoint'\n", ""), gated);
+        Assert.False(clean.Any, Report(clean));
+
+        var gateOn = Check(FixtureChains(), ResolveFixture,
+            ParseChannels("per_env_settings:\n  - key: 'FxSection__Endpoint'\n  - key: 'FxCustom__Enabled'\n", ""), gated);
+        Assert.Contains(gateOn.GateOn, m => m.Contains("FxCustom:Token") && m.Contains("FxCustom:Enabled"));
+
+        var noGate = new Dictionary<string, Guard[]>
+        {
+            ["FxCustomOptions"] = new[] { new Guard("FxCustom:Token", Disposition.Exempt, "Fixture: an Exempt entry that does not say which gate.") },
+        };
+        var missing = Check(FixtureChains(), ResolveFixture, ParseChannels("per_env_settings:\n  - key: 'FxSection__Endpoint'\n", ""), noGate);
+        Assert.Contains(missing.BadReason, m => m.Contains("FxCustom:Token") && m.Contains("Gate"));
     }
 
     [Fact(DisplayName = "control (negative): a census entry without a written reason is reported")]

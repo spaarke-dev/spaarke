@@ -1050,6 +1050,14 @@ carries the shared client sites as literals on every stamp: `Cors__AllowedOrigin
 (Office add-ins) and `__1` = `https://external.spaarke.com` (External Access SPA and Teams tab). The customer's Dataverse
 origins need no entry — `CorsModule` admits `*.dynamics.com` and `*.powerapps.com` by suffix.
 
+**H4b startup keys (T258).** The BFF also refuses to start without these, so H4b writes them on both slots:
+`PublicConfig__BffUrl` = `https://{appServiceName}.azurewebsites.net` (the URL H9 probes and records),
+`PublicConfig__MsalClientId` = the customer BFF app registration (= `AzureAd__ClientId`), `PublicConfig__TenantId` = the
+intake `tenantId` (= `AzureAd__TenantId`), `Graph__Scopes__0` = `https://graph.microsoft.com/.default` and
+`ServiceBus__QueueName` = `sdap-jobs` (a queue `customer.bicep` creates). The H0.5 consent callback
+(`POST /api/onboarding/consent-callback`, Model 2) is **off** on a stamp — it is mapped only with `Onboarding__Enabled=true`,
+which no stamp sets — so a stamp carries no `Onboarding__*` setting and no HMAC signing key.
+
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
 **H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;

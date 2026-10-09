@@ -144,7 +144,7 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
-                RunInput.Output(nameof(InterStepState.AppServiceName)),
+                RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
                 // PerEnvSourceCatalog sources:
                 RunInput.Output(nameof(InterStepState.KeyVaultUri)),
                 RunInput.Output(nameof(InterStepState.CosmosEndpoint)),

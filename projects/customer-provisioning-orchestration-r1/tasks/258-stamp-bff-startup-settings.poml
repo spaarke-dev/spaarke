@@ -3,7 +3,7 @@
   <metadata>
     <title>Stamp BFF startup settings: the four keys a stamp's BFF demands at start but no channel writes (204e F5–F8)</title>
     <phase>Model 1 dedicated-stamp remediation — T186 blocker found by task 204e</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what H4b writes to every customer stamp's BFF; a wrong value stops the BFF from starting.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -49,4 +49,17 @@
     <criterion testable="true">H4b's generated settings for a stamp include each demanded key with a stamp-correct value (unit test on the generated set).</criterion>
     <criterion testable="true">Solution build 0 errors; ControlPlane tests and ArchTests pass.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-09">Executed (sub-agent, FULL). No live action. F6: manifest per_env_settings PublicConfig__BffUrl (new
+    PerEnvSourceCatalog source from-h2a-output:bff_url = StampBffUrl.Production(AppServiceName), the derivation H9 now shares),
+    PublicConfig__MsalClientId (from-h3-output:bff_app_client_id), PublicConfig__TenantId (from-intake-parameter:tenant_id).
+    F7: literal Graph__Scopes__0=https://graph.microsoft.com/.default. F8: literal ServiceBus__QueueName=sdap-jobs (pinned to
+    customer.json serviceBusQueues by a test). F5: the H0.5 consent callback is Model 2 only and cannot run on a stamp, so
+    OnboardingModule registers and EndpointMappingExtensions maps it only with Onboarding:Enabled=true (default false; validator
+    unchanged when on); census row Exempt with Gate "Onboarding:Enabled", and IOptionsDriftTests now fails when a stamp channel
+    writes an Exempt row's gate. All four KnownDrift rows removed. Filed ISS-012 (Graph:Scopes read by nothing) and ISS-013
+    (consent callback cannot work as built). Live checks owed at T186: the stamp BFF starts as Production; GET /api/config returns
+    the stamp URL / BFF app id / tenant; /api/onboarding/consent-callback is 404 on the stamp.</note>
+  </notes>
 </task>

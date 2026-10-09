@@ -570,7 +570,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         //      reused unchanged — no new health-check code, per DS-4 §5
         //      item 3 / POML step 4).
         var stagingUrl = $"https://{appServiceName}-{stagingSlotName}.azurewebsites.net";
-        var productionUrl = $"https://{appServiceName}.azurewebsites.net";
+        var productionUrl = StampBffUrl.Production(appServiceName);   // T258: the same URL H4b writes as PublicConfig__BffUrl
         var stagingHealthUrl = CombineUrl(stagingUrl, healthCheckPath);
 
         HealthProbeResult stagingProbeResult;
