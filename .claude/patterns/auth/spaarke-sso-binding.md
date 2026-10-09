@@ -58,7 +58,7 @@ Future strategies: `OfficeNaaStrategy` (Office Add-ins NAA flow — Phase B4).
 
 See [ADR-028 §"Key Patterns"](../../adr/ADR-028-spaarke-auth-architecture.md) for the function-based contract that consumers use.
 
-**Errors are thrown, never returned.** `authenticatedFetch` throws `ApiError` (`.status`, `.problemDetails`) for every non-OK response and `AuthError` once the 401 retries are spent; it never hands back a non-OK `Response`. So `if (!res.ok)` / `res.status === 404` after it never runs — that dead-branch shape was found in ~30 files in 2026-10 (silent email-send failures, false "created with warnings", a broken access-grant dialog). Handle failures in the `catch` with `isApiError(err, 404)`, `problemOf(err)` and `isAuthFailure(err)` from `@spaarke/auth`.
+**Errors are thrown, never returned.** `authenticatedFetch` throws `ApiError` (`.status`, `.problemDetails`) for every non-OK response and `AuthError` once the 401 retries are spent; it never hands back a non-OK `Response`. So `if (!res.ok)` / `res.status === 404` after it never runs — that dead-branch shape was found in ~30 files in 2026-10 (silent email-send failures, false "created with warnings", a broken access-grant dialog). Handle failures in the `catch` with `isApiError(err, 404)`, `problemOf(err)` and `isAuthFailure(err)` from `@spaarke/auth`. The types say which fetch a function takes: `AuthenticatedFetchFn` (throwing; returns `OkResponse`, so a status check after it is a compile error) or `ResponseFetchFn` (may return failures — external SPA `createAuthenticatedFetch`, Outlook pane `authenticatedJsonFetch`; keep the `!res.ok` branch). Accept `ResponseFetchFn` only where such a host can actually reach the code.
 
 ## When to NOT use @spaarke/auth
 
