@@ -367,9 +367,12 @@ export const App: React.FC<AppProps> = ({
   // --- Document Actions ---
   // Hook lives in @spaarke/document-operations (moved by task 031, consumed
   // directly here by task 032 — local shim deleted, no behavior change).
-  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex } = useDocumentActions({
-    bffBaseUrl: getBffBaseUrl(),
-  });
+  // `actionError` ("Couldn't delete the document: <reason>") is shown in the main area's error bar below —
+  // without it a failed open / download / delete / email-link / send-to-index showed the user nothing.
+  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex, actionError } =
+    useDocumentActions({
+      bffBaseUrl: getBffBaseUrl(),
+    });
 
   // --- Active Domain Derivation ---
   const isDocDomain = activeDomain === 'documents';
@@ -876,6 +879,16 @@ export const App: React.FC<AppProps> = ({
 
         {/* Main area: grid or graph results */}
         <div className={styles.mainArea}>
+          {/* Document-action failure (open / download / delete / email link / send to index). Clears when
+              the next action starts. */}
+          {actionError && (
+            <div className={styles.errorBar}>
+              <MessageBar intent="error" data-testid="document-action-error">
+                <MessageBarBody>{actionError}</MessageBarBody>
+              </MessageBar>
+            </div>
+          )}
+
           {/* Error / info message bar */}
           {activeErrorMessage && (
             <div className={styles.errorBar}>
