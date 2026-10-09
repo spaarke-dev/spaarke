@@ -56,18 +56,36 @@ export interface SaveModeResolution {
   effectiveChoice: SaveModeChoice | null;
   /** The resolved document's display name, for the `version` view. */
   documentLabel: string | null;
+  /**
+   * Task 120: `false` when the item already in Spaarke has NO version path — an email (no document bytes; an `.eml`
+   * is immutable). Then the `version` view's default is "already saved, nothing to send" (`target: null`) and the only
+   * save is the explicit "a new document" choice. Absent = `true`.
+   */
+  versionable?: boolean;
 }
 
 const CREATE: SaveTarget = { mode: 'create' };
 
+/** Task 120: options for {@link resolveSaveMode}. */
+export interface ResolveSaveModeOptions {
+  /** Whether the pane can save a new VERSION of an item already in Spaarke (it has document bytes). Default `true`. */
+  versionable?: boolean;
+}
+
 /**
  * Pure derivation of the save mode from the identity state and the user's explicit choice. The single
  * source of truth for what Save sends — `SaveFlow` hands `target` straight to `useSaveFlow`.
+ *
+ * Task 120: with `versionable: false` (an email already saved — Outlook has no document bytes), a resolved identity
+ * keeps the `version` view (the item IS in Spaarke: the green box, the "Filed to" card or the filing picker) but sends
+ * nothing by default; the explicit `'new'` choice ("Save again as a new document") is the only save. Never a version.
  */
 export function resolveSaveMode(
   identity: DocumentIdentityState | undefined,
-  choice: SaveModeChoice | null
+  choice: SaveModeChoice | null,
+  options: ResolveSaveModeOptions = {}
 ): SaveModeResolution {
+  const versionable = options.versionable ?? true;
   if (identity === undefined) {
     return { view: 'none', target: CREATE, effectiveChoice: null, documentLabel: null };
   }
@@ -79,11 +97,13 @@ export function resolveSaveMode(
     case 'resolved': {
       // The ONLY outcome that may default to a version save.
       const effective: SaveModeChoice = choice ?? 'version';
+      const keep: SaveTarget | null = versionable ? { mode: 'version', existingDocumentId: identity.documentId } : null;
       return {
         view: 'version',
-        target: effective === 'version' ? { mode: 'version', existingDocumentId: identity.documentId } : CREATE,
+        target: effective === 'version' ? keep : CREATE,
         effectiveChoice: effective,
         documentLabel: identity.documentName || identity.fileName || null,
+        ...(versionable ? {} : { versionable: false }),
       };
     }
     case 'new':
@@ -140,6 +160,8 @@ export interface SaveModeSectionProps {
   onRetryIdentity?: () => void;
   /** True while a save is in flight. */
   disabled?: boolean;
+  /** Task 120: what the pane's item is called in the copy. Default `'document'`. */
+  itemNoun?: 'document' | 'email';
 }
 
 export function SaveModeSection({
@@ -148,6 +170,7 @@ export function SaveModeSection({
   onChoiceChange,
   onRetryIdentity,
   disabled = false,
+  itemNoun = 'document',
 }: SaveModeSectionProps): React.ReactElement | null {
   const styles = useStyles();
 
@@ -158,7 +181,11 @@ export function SaveModeSection({
     case 'checking':
       return (
         <div className={styles.section}>
-          <Spinner size="tiny" labelPosition="after" label="Checking whether this document is already in Spaarke…" />
+          <Spinner
+            size="tiny"
+            labelPosition="after"
+            label={`Checking whether this ${itemNoun} is already in Spaarke…`}
+          />
         </div>
       );
 
@@ -169,19 +196,23 @@ export function SaveModeSection({
       // renderDocumentDetails('locked')). Only after the user chose create mode does this section render,
       // to offer the way back: a "Keep as version" link.
       if (resolution.effectiveChoice !== 'new') return null;
+      // Task 120: an item with no version path (an email) — the way back is "don't save again", not "keep as version".
+      const versionable = resolution.versionable !== false;
       return (
         <div className={styles.section}>
           <Text size={200} className={styles.hint}>
-            Save will create a separate Spaarke document. The existing document is not changed.
+            {versionable
+              ? 'Save will create a separate Spaarke document. The existing document is not changed.'
+              : `Save will store this ${itemNoun} in Spaarke again, as a separate document. The saved copy is not changed.`}
           </Text>
           <Button
             appearance="transparent"
             size="small"
             className={styles.linkBtn}
-            onClick={() => onChoiceChange('version')}
+            onClick={() => onChoiceChange(versionable ? 'version' : null)}
             disabled={disabled}
           >
-            Keep as version
+            {versionable ? 'Keep as version' : 'Don’t save again'}
           </Button>
         </div>
       );

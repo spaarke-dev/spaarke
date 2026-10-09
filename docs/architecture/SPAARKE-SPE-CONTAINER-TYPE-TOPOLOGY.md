@@ -204,8 +204,12 @@ shared token audience: a token minted for Customer A's BFF is structurally valid
 | 1 | `Spaarke SPE Trial 1 Owner` | Owns container type `Spaarke Trial 1` | 1 — fixed by R1 |
 | 2 | `Spaarke SPE Model 1 Owner` | Owns `Spaarke Model 1` | 1 — fixed by R1 |
 | 3 | `Spaarke SPE Model 2 Owner` | Owns `Spaarke Model 2`. **Multi-tenant** — customers consent to this | 1 — fixed by R1 |
-| 4 | `Spaarke BFF — Trial 1` | BFF identity, trial environment | 1 |
-| 5…n | `Spaarke BFF — {Customer}` | BFF identity **per customer, in BOTH models** | **1 per customer** |
+| 4…n | `spaarke-bff-api-{customerId}` | BFF identity **per customer** — created by **H3** during the customer's run; **H8** grants it (and the stamp UAMI) on the container-type registration | **1 per customer** |
+
+> 🟡 **Corrected 2026-10-06 (T227a).** Row 4 `Spaarke BFF — Trial 1` is removed: the shared trial tier is retired
+> (D-12) and the script path that created it (`Register-EntraAppRegistrations.ps1 -CreateBffApp`) is deleted. The
+> per-customer row now carries the name H3 actually creates (`spaarke-bff-api-{customerId}`, not
+> `Spaarke BFF — {Customer}`). Rows 1 and 3 describe container types no stamp uses today (Model 2 is out of scope).
 
 > 🟡 **Corrected 2026-09-28 (D-12).** This table previously carried a singleton row
 > `Spaarke BFF — Model 1` — *"BFF identity, shared Model 1 environment"* — and scoped per-customer BFF
@@ -243,9 +247,31 @@ this does **and does not** say: Model 1 customers share a *container-type regist
 settings baseline. They do **not** share a container, a BFF, or any Azure resource — those are dedicated
 per customer in both models (D-12).
 
+> 🔴 **App-only access is NOT isolated by the platform (owner D28, 2026-10-06).** Each Model 1 stamp's UAMI holds
+> application `full` on the shared registration (H8, T227b), and Microsoft documents that an app-only token reaches
+> **every container of the type** — there is no per-container app scoping (Learn, *Configure authentication and
+> authorization*, 2026-08-24). Delegated (OBO) access is isolated by container membership. The owner chose one container
+> type per model and one root container per customer (per Dataverse environment; the BFF adds one per secure record at
+> runtime — T227g), with app-only isolation **enforced in the
+> BFF's code and tests (T227d)**: an app-only SPE call may only target the stamp's own container(s).
+>
+> **How it is enforced (T227d).** Every app-only SPE call in the BFF gets its Graph client from
+> `SpeContainerOwnershipGuard`, which refuses (404 `spe_container_not_owned` — the same answer as "does not exist" —
+> before Graph) any container the stamp
+> does not own. Own = an id in the stamp's container settings (`EmailProcessing__DefaultContainerId`,
+> `Communication__ArchiveContainerId`, and — for environments older than the marker — `SharePointEmbedded__OwnedContainerIds`)
+> **or** a container whose custom property `spaarkeCustomerId` equals the BFF's `Customer__Id`. The BFF writes that
+> marker on every container it creates. SPE Admin on a stamp is confined the same way (owner D29): lists and searches
+> show only the stamp's containers. Container-TYPE operations (settings, permissions, create a type) touch no customer's container data and are not filtered: Graph refuses them app-only, because a stamp's identity holds only `FileStorageContainer.Selected` (no `FileStorageContainerType.*`). The marker stops a misrouted or forged container id; it does not stop another
+> stamp's code, since every stamp identity can rewrite markers. ArchTest `SpeAppOnlyContainerGuardTests` fails the
+> build on an app-only SPE path that bypasses the guard.
+
 Grant the BFF app what it needs on the relevant registration; **do not make it an owner.** The per-app
 grant API is v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}`
-(`PATCH` to update, `DELETE` to remove), called as the owning app; per-customer BFF grants are T227 (G9).
+(`PATCH` to update, `DELETE` to remove), called as the owning app. **H8 owns the per-customer grants (T227b):**
+before creating the customer's container it ensures two — the **stamp UAMI** with application `full` (the BFF's
+app-only Graph calls run as the UAMI, `Graph__ManagedIdentity__ClientId`) and the **BFF app registration** with
+delegated `full` (its OBO calls). A grant naming the app registration does not cover the UAMI, and vice versa.
 
 ### Owning-app credential — managed-identity federated credential (task 248, 2026-10-03)
 
@@ -279,7 +305,7 @@ certificate and no client secret**; nothing is stored in any Key Vault.
 | Federated credential | `sprk-controlplane-dev-uami-assertion` → dev Worker UAMI `sprk-controlplane-dev-uami` (principal `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044`) |
 | Billing | `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod` — the binding is permanent; never delete that resource group or account |
 | Registration in Spaarke's tenant | registered at creation (2026-10-03T22:54:58Z); `owningAppId` = the owning app; `billingStatus` `valid` |
-| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grant**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep** |
+| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grants**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep**; the **dev BFF identity** `mi-bff-api-dev` (appId `5967251e…`, application `full` / delegated `none`) — owner option A 2026-10-06: dev reaches every Model 1 customer's containers, confined only by T227d's `SpeContainerOwnershipGuard` + `SharePointEmbedded__OwnedContainerIds`. Each provisioned stamp's UAMI (application) and BFF app registration (delegated) are added by H8. |
 | Containers | none yet (list returned empty) |
 
 The admin-center creation flow prompts for a client secret on the owning app; none was added, and none
@@ -393,8 +419,8 @@ POST https://graph.microsoft.com/beta/storage/fileStorage/containers
 POST /beta/storage/fileStorage/containers/{id}/activate
 ```
 
-A container is **not usable until activated**. One container per customer (trials, Model 1) or per
-customer tenant (Model 2).
+A container is **not usable until activated**. One root container per customer (trials, Model 1) or per
+customer tenant (Model 2), plus one per secure project / matter / work assignment, which the BFF creates at runtime.
 
 **Deleting** is two steps — soft-delete then purge from the deleted collection:
 
@@ -628,7 +654,7 @@ flow inherits this defect and should be treated as unproven.
 
 | # | Question | Why it matters | Status |
 |---|---|---|---|
-| 1 | **How many containers can one *standard* container type hold?** | If Model 1 holds one container per customer, this is the ceiling on Model 1 customers. Only the trial cap of 5 is published | ⚠️ **UNDOCUMENTED** — confirm with Microsoft before it becomes load-bearing |
+| 1 | **How many containers can one *standard* container type hold?** | Model 1 holds one root container per customer plus one per secure record, so this caps the sum over all Model 1 customers of (1 + secure records). Only the trial cap of 5 is published | ⚠️ **UNDOCUMENTED** — confirm with Microsoft before it becomes load-bearing |
 | 2 | Does the create-role documentation conflict still stand? | Learn's Graph reference and its conceptual doc disagree on whether an admin role is needed to create | Open — see [`knowledge/sharepoint-embedded/docs/learn-containertypes.md`](../../knowledge/sharepoint-embedded/docs/learn-containertypes.md) |
 | 3 | Is `scripts/Create-NewContainerType.ps1` used anywhere that currently succeeds? | If H8 has ever worked, our understanding of R5 is incomplete | Open — §7 |
 | 4 | ~~Are `applicationPermissions` scoped per consuming tenant, or global to the container type?~~ | Decides whether Model 2 customers' BFF apps are isolated from each other | ✅ **RESOLVED 2026-08-30** — per consuming tenant. Grants hang off `fileStorageContainerTypeRegistration`, not the container type (§3A) |

@@ -10,9 +10,9 @@ import { PreviewGridBody, type PreviewModalMetadataItem } from './PreviewModal';
  *
  * This preset does NOT nest `RecordNavigationModalShell`'s `Dialog`/header
  * envelope inside `SprkModal` — that would double the chrome (two counters,
- * two titles). Instead it exposes an optional `onBeforeNavigate` guard hook:
- * the internal navigate handler calls it first and only invokes the
- * consumer's `nav.onNavigate(dir)` when it resolves truthy. A consumer wires
+ * two titles). Instead it exposes an optional `onBeforeNavigate` guard hook,
+ * forwarded to the shell's `nav.onBeforeNavigate`: the shell calls it first and
+ * only invokes the consumer's `nav.onNavigate(dir)` when it resolves truthy. A consumer wires
  * `RecordNavigationModalShell`'s cross-frame dirty-check / discard-confirm
  * protocol through this seam (e.g. running the shell's `queryDirtyState` +
  * discard-confirm UI from `onBeforeNavigate`) without rendering the shell's
@@ -59,20 +59,11 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
   nav,
   onBeforeNavigate,
 }) => {
-  const handleNavigate = React.useCallback(
-    (dir: 'prev' | 'next') => {
-      void (async () => {
-        const allowed = onBeforeNavigate ? await onBeforeNavigate(dir) : true;
-        if (allowed) nav.onNavigate(dir);
-      })();
-    },
-    [nav, onBeforeNavigate]
-  );
-
+  // The guard runs in the shell (`SprkModalNav.onBeforeNavigate`, lifted there by ontology task 056). This
+  // preset's own `onBeforeNavigate` prop stays for back-compat and wins over one set on `nav`.
   const effectiveNav: SprkModalNav = {
-    index: nav.index,
-    total: nav.total,
-    onNavigate: handleNavigate,
+    ...nav,
+    onBeforeNavigate: onBeforeNavigate ?? nav.onBeforeNavigate,
   };
 
   return (

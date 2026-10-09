@@ -150,6 +150,17 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
+    /// Task 173 (owner round 81): after a create or re-file through a writer that did not stamp through
+    /// <see cref="CoreAncestorResolver.StampAsync(Microsoft.Xrm.Sdk.Entity, string, Guid, CancellationToken)"/>, set the row's
+    /// inherited Access Permission (<see cref="CoreAncestorResolver.RefreshInheritedAccessPermissionAsync"/>, the ONE
+    /// implementation). Not part of <see cref="AfterWriteAsync"/>: that cascade is also the AI update tool's narrow
+    /// app-only step (<see cref="CoreAncestorAfterWriteRestamp"/>, owner round 8 item 1), which writes stamp columns only.
+    /// Never throws (cancellation aside).
+    /// </summary>
+    public Task<int?> RefreshInheritedAccessPermissionAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
+        _coreAncestors.RefreshInheritedAccessPermissionAsync(entityLogicalName, recordId, ct);
+
+    /// <summary>
     /// Whether a write of <paramref name="writtenColumns"/> to <paramref name="entityLogicalName"/> can move a stamp — it
     /// changes what the record is filed under (a stamped child's source or pair) or its root (an intermediate with
     /// children). A caller that constructs its dependencies inline asks this first, so a write that cannot move a stamp

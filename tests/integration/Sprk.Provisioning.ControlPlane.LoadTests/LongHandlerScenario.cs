@@ -250,7 +250,7 @@ public sealed class LongHandlerScenario
                 customerId,
                 environmentId = "env-longhandler",
                 // T224 renamed the tenancy values (Model2Dedicated → Model2); CreateRun requires
-                // tenantId, and subscriptionId for Model 2.
+                // tenantId and subscriptionId (every model since T228).
                 tenancyModel = "Model2",
                 profile = "customer-owned-model2", // T225b pairing: Model2 ↔ customer-owned-model2
                 nonSecretParameters = new Dictionary<string, string>
@@ -263,6 +263,14 @@ public sealed class LongHandlerScenario
                     ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
                     ["communicationGraphResource"] = "users/load@contoso.example/messages",
                     ["communicationDefaultMailbox"] = "load@contoso.example",
+                    // T255: the customer's workforce tenant(s) — required for every model.
+                    ["customerWorkforceTenantIds"] = "[\"d0e0c0a0-0000-4000-8000-000000000003\"]",
+                    // T228: the customer's container type and the Dataverse environment the operator created
+                    // (named for the customer); T229: the cost tier + estimate H0 compares (every model).
+                    ["containerTypeId"] = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+                    ["dataverseEnvUrl"] = $"https://spaarke-{customerId}.crm.dynamics.com/",
+                    ["tier"] = "smb",
+                    ["estimatedMonthlyUsd"] = "450",
                 },
             }),
         };

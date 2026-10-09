@@ -22,6 +22,7 @@ import {
   UNNAMED_PERSON,
   type IProvisionProjectResponse,
 } from '../provisioningService';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const BFF = 'https://bff.example.test';
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
@@ -39,8 +40,18 @@ const successBody: IProvisionProjectResponse = {
 
 const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
 
+/**
+ * A non-2xx answer as a fetch that RETURNS failures delivers it (the Outlook pane / external SPA shape).
+ */
 const problemResponse = (status: number, problem: Record<string, unknown>) =>
   ({ ok: false, status, json: async () => problem }) as unknown as Response;
+
+/**
+ * The same answer as production delivers it: `@spaarke/auth`'s authenticatedFetch THROWS an `ApiError`
+ * carrying the parsed ProblemDetails (the BFF always sends `status`; `title` is added the same way).
+ */
+const problemThrown = (status: number, problem: Record<string, unknown>) =>
+  apiErrorFor(status, { title: 'Provisioning failed', status, ...problem });
 
 /** The operator-facing prose the endpoint actually returns for a missing BU. Must never be shown. */
 const SERVER_DETAIL =
@@ -133,8 +144,8 @@ describe('provisionSecureProject — failure classification', () => {
   afterEach(() => consoleError.mockRestore());
 
   it('classifies a missing Secure Record business unit as an unconfigured environment — despite the 500', async () => {
-    const authFetch = jest.fn().mockResolvedValue(
-      problemResponse(500, {
+    const authFetch = jest.fn().mockRejectedValue(
+      problemThrown(500, {
         title: 'Internal Server Error',
         detail: SERVER_DETAIL,
         reasonCode: 'sdap.provision.secure_bu_not_found',
@@ -152,8 +163,8 @@ describe('provisionSecureProject — failure classification', () => {
   it('carries `retryable` through for a state the same caller can finish (task 133)', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.container_creation_failed' })
+      .mockRejectedValue(
+        problemThrown(500, { detail: 'operator text', reasonCode: 'sdap.provision.container_creation_failed' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -172,8 +183,8 @@ describe('provisionSecureProject — failure classification', () => {
   ])(
     'reads creatorShareConfirmed=%s from the problem body for owner_assignment_unverified',
     async (confirmed, says, neverSays) => {
-      const authFetch = jest.fn().mockResolvedValue(
-        problemResponse(500, {
+      const authFetch = jest.fn().mockRejectedValue(
+        problemThrown(500, {
           detail: 'operator text',
           reasonCode: 'sdap.provision.owner_assignment_unverified',
           ...(confirmed === undefined ? {} : { creatorShareConfirmed: confirmed }),
@@ -211,8 +222,8 @@ describe('provisionSecureProject — failure classification', () => {
   ])(
     'reads creatorState=%s from the problem body for resume_creator_unavailable',
     async (creatorState, kind, retryable, says) => {
-      const authFetch = jest.fn().mockResolvedValue(
-        problemResponse(['unreadable', 'column-missing', 'refused'].includes(creatorState ?? '') ? 500 : 409, {
+      const authFetch = jest.fn().mockRejectedValue(
+        problemThrown(['unreadable', 'column-missing', 'refused'].includes(creatorState ?? '') ? 500 : 409, {
           detail: 'operator text',
           reasonCode: 'sdap.provision.resume_creator_unavailable',
           ...(creatorState === undefined ? {} : { creatorState }),
@@ -253,7 +264,7 @@ describe('provisionSecureProject — failure classification', () => {
     async (reasonCode, extensions, kind, retryable, namesManageAccess) => {
       const authFetch = jest
         .fn()
-        .mockResolvedValue(problemResponse(500, { detail: 'operator text', reasonCode, ...extensions }));
+        .mockRejectedValue(problemThrown(500, { detail: 'operator text', reasonCode, ...extensions }));
 
       const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
 
@@ -280,8 +291,8 @@ describe('provisionSecureProject — failure classification', () => {
     [undefined, true],
     ['refused', false],
   ])('reads cascadeChildState=%s from the problem body for cascade_children_unreadable', async (state, retryable) => {
-    const authFetch = jest.fn().mockResolvedValue(
-      problemResponse(500, {
+    const authFetch = jest.fn().mockRejectedValue(
+      problemThrown(500, {
         detail: 'operator text',
         reasonCode: 'sdap.provision.cascade_children_unreadable',
         childTable: 'sharepointdocumentlocation',
@@ -314,8 +325,8 @@ describe('provisionSecureProject — failure classification', () => {
   ])(
     'reads containerOwnershipState=%s from the problem body for container_ownership_unreadable',
     async (state, retryable) => {
-      const authFetch = jest.fn().mockResolvedValue(
-        problemResponse(500, {
+      const authFetch = jest.fn().mockRejectedValue(
+        problemThrown(500, {
           detail: 'operator text',
           reasonCode: 'sdap.provision.container_ownership_unreadable',
           speContainerId: 'b!its-own-container',
@@ -347,8 +358,8 @@ describe('provisionSecureProject — failure classification', () => {
   });
 
   it('does not leak the server ProblemDetails detail or status into what the user is shown', async () => {
-    const authFetch = jest.fn().mockResolvedValue(
-      problemResponse(500, {
+    const authFetch = jest.fn().mockRejectedValue(
+      problemThrown(500, {
         title: 'Internal Server Error',
         detail: SERVER_DETAIL,
         reasonCode: 'sdap.provision.secure_bu_not_found',
@@ -453,6 +464,8 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.principal_no_access_unverifiable', 'per-person-warning', false],
     // Task 150 (round 33 items 1 and 5): a named colleague whose share itself failed — named, never silent.
     ['sdap.provision.principal_share_failed', 'per-person-warning', false],
+    // Task 114 (owner round 67): a person flagged external on a Restricted record — named, never silent.
+    ['sdap.provision.principal_external_on_restricted', 'per-person-warning', false],
   ];
 
   const FAILURE_CODES = EMITTED.filter(([, kind]) => kind !== 'per-person-warning');
@@ -546,8 +559,8 @@ describe('provisionSecureProject — failure classification', () => {
   // record_creator_unverifiable, 403, creatorState column-missing) — deterministic, so no retry and the administrator named,
   // with the same message the resume's column-missing refusal shows (one environment fact, one message).
   it('reads creatorState=column-missing on record_creator_unverifiable as setup for an administrator, not a retry', async () => {
-    const authFetch = jest.fn().mockResolvedValue(
-      problemResponse(403, {
+    const authFetch = jest.fn().mockRejectedValue(
+      problemThrown(403, {
         detail: 'operator text',
         reasonCode: 'sdap.provision.record_creator_unverifiable',
         creatorState: 'column-missing',
@@ -579,7 +592,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of WARNING_CODES) {
       expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
     }
-    expect(EMITTED).toHaveLength(40);
+    expect(EMITTED).toHaveLength(41);
   });
 
   // Task 150 round 53 item 1: provisioning's own code for an unreadable floor (codes are namespaced by endpoint — F3's
@@ -588,8 +601,8 @@ describe('provisionSecureProject — failure classification', () => {
   it('says which access the caller holds could not be read, and that nothing changed — retryable (caller_rights_unverifiable, round 53)', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.caller_rights_unverifiable' })
+      .mockRejectedValue(
+        problemThrown(500, { detail: 'operator text', reasonCode: 'sdap.provision.caller_rights_unverifiable' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -608,8 +621,8 @@ describe('provisionSecureProject — failure classification', () => {
   it('says the caller is on the No Access list and nothing changed — not retryable (creator_no_access, round 29)', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(403, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access' })
+      .mockRejectedValue(
+        problemThrown(403, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -623,8 +636,8 @@ describe('provisionSecureProject — failure classification', () => {
   it('says whether the caller may access the project could not be checked — retryable (creator_no_access_unverifiable, round 29)', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access_unverifiable' })
+      .mockRejectedValue(
+        problemThrown(500, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access_unverifiable' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -638,8 +651,8 @@ describe('provisionSecureProject — failure classification', () => {
   it('reads resume_creator_no_access by its status: 409 — the creator is on the No Access list, an administrator reviews (round 29)', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(409, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
+      .mockRejectedValue(
+        problemThrown(409, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -654,8 +667,8 @@ describe('provisionSecureProject — failure classification', () => {
   it("reads resume_creator_no_access by its status: 500 — the creator's access could not be checked, retryable (round 29)", async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValue(
-        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
+      .mockRejectedValue(
+        problemThrown(500, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
       );
 
     const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
@@ -757,6 +770,32 @@ describe('provisionSecureProject — failure classification', () => {
     );
   });
 
+  // Task 114 (owner round 67: Restricted wins over the last-reader rule): the person not shared to on a Restricted record
+  // is named in the owner's wording, and the server's "nobody internal can open it" sentence is shown last, verbatim.
+  it('names a person flagged external on a Restricted record, and shows the server sentence when nobody internal can open it', async () => {
+    const systemUserId = '77777777-7777-7777-7777-777777777777';
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [
+          { systemUserId, reasonCode: 'sdap.provision.principal_external_on_restricted', message: 'x' },
+        ],
+        noInternalReader: true,
+        noInternalReaderMessage: 'Nobody internal can open this project now. An administrator must share it with an internal user.',
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF, {
+      [systemUserId]: 'Ext Erin',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      "Ext Erin is flagged as an external user and can't be given access to a Restricted record.",
+      'Nobody internal can open this project now. An administrator must share it with an internal user.',
+    ]);
+  });
+
   it('returns no warnings when no colleague was skipped', async () => {
     const authFetch = jest.fn().mockResolvedValue(okResponse({ ...successBody, skippedPrincipals: [] }));
 
@@ -853,6 +892,23 @@ describe('provisionSecureProject — failure classification', () => {
     expect(result.failureKind).toBe('error');
     expect(result.reasonCode).toBeUndefined();
     expect(result.errorMessage).not.toContain('ECONNREFUSED');
+  });
+
+  it('classifies a RETURNED non-2xx (non-throwing fetch) exactly as the thrown ApiError', async () => {
+    const problem = { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' };
+    const returned = await provisionSecureProject(
+      { projectId: PROJECT_ID },
+      jest.fn().mockResolvedValue(problemResponse(409, problem)) as never,
+      BFF
+    );
+    const thrown = await provisionSecureProject(
+      { projectId: PROJECT_ID },
+      jest.fn().mockRejectedValue(problemThrown(409, problem)) as never,
+      BFF
+    );
+
+    expect(returned).toEqual(thrown);
+    expect(thrown.reasonCode).toBe('sdap.provision.resume_creator_no_access');
   });
 
   it('survives a non-JSON error body', async () => {

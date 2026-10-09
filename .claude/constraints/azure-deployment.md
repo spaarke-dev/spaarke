@@ -1,7 +1,7 @@
 # Azure Deployment Constraints
 
 > **Domain**: Azure App Service Configuration, Deployment Safety
-> **Last Updated**: 2026-02-18
+> **Last Updated**: 2026-10-06 (customer-provisioning-orchestration-r1 T244 — Service Bus row: namespace + managed identity, not a KV connection string)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified
@@ -154,11 +154,16 @@ Cors__AllowedOrigins__0 = https://spaarkedev1.crm.dynamics.com
 Cors__AllowedOrigins__1 = https://spaarkedev1.api.crm.dynamics.com
 ```
 
-### Connection Strings (Key Vault References)
+### Service endpoints (managed identity — no connection strings)
+
+> Corrected 2026-10-06 (customer-provisioning-orchestration-r1 T244): this table listed a Key Vault-referenced
+> `ConnectionStrings__ServiceBus`. The BFF's supported path is the namespace + managed identity
+> (`ServiceBusClientFactory`); a SAS connection string is only a legacy fallback, and customer stamps have SAS
+> disabled on the namespace (T244), so it cannot work there.
 
 | Setting | Format |
 |---------|--------|
-| `ConnectionStrings__ServiceBus` | `@Microsoft.KeyVault(SecretUri=https://{vault}.vault.azure.net/secrets/ServiceBus-ConnectionString)` |
+| `ServiceBus__FullyQualifiedNamespace` | Plain `{namespace}.servicebus.windows.net` — the app authenticates with its managed identity (Azure Service Bus Data Sender + Data Receiver at namespace scope). Legacy fallback only: `ServiceBus__ConnectionString` / `ConnectionStrings__ServiceBus` (SAS) — not available on customer stamps |
 | `Redis__Endpoint` | Plain `host:10000` of the Azure Managed Redis — **not** a Key Vault reference; the app authenticates with `ManagedIdentity__ClientId` (task 242; no Redis connection string exists for a deployed environment) |
 
 ### AI Services (Optional)
@@ -176,7 +181,7 @@ Cors__AllowedOrigins__1 = https://spaarkedev1.api.crm.dynamics.com
 The app will fail to start (HTTP 500.30) if:
 
 1. **CORS missing in Production**: `Cors:AllowedOrigins` empty when `ASPNETCORE_ENVIRONMENT != Development`
-2. **ServiceBus missing**: `ConnectionStrings:ServiceBus` is null or empty
+2. **ServiceBus missing**: neither `ServiceBus:FullyQualifiedNamespace` nor a (legacy) Service Bus connection string is set — `ServiceBusClientFactory.Create` throws
 3. **Wildcard CORS**: `Cors:AllowedOrigins` contains `*`
 4. **GET endpoint with body parameter**: A Minimal API GET handler accepts a complex type that gets inferred as a body parameter. Compiles but crashes at startup during endpoint metadata build. Fix: use MapPost, or restructure as query parameters.
 5. **BackgroundService with eager singleton**: `AddHostedService<T>` resolves constructor deps at `IHost.StartAsync()`. If a dep (e.g., `DataverseServiceClientImpl`) connects eagerly and fails, the host crashes. Fix: inject `IServiceProvider` and resolve lazily in `ExecuteAsync()`.
@@ -189,7 +194,7 @@ Before deploying:
 
 - [ ] Azure App Settings include all required CORS origins
 - [ ] `ASPNETCORE_ENVIRONMENT` matches target environment
-- [ ] Connection strings reference Key Vault (not plain text)
+- [ ] No secret in a plain app setting — Key Vault references only; services that support Entra (Service Bus, Storage, AI Search, OpenAI, Document Intelligence, Redis) are reached with the managed identity, not a key
 - [ ] Publish output does NOT contain appsettings.json files
 
 After deploying:

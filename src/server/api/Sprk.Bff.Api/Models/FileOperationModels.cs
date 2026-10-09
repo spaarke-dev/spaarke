@@ -64,6 +64,21 @@ public record ResolveDocumentIdentityRequest(
 );
 
 /// <summary>
+/// Request body for POST /api/documents/resolve-email-identity (spaarkeai-word-add-in-r1 task 120, UAT round 12 O6):
+/// the open Outlook email's keys. A body, not a route segment: both keys identify a message in the caller's mailbox,
+/// and request URLs are what telemetry records.
+/// </summary>
+public record ResolveEmailIdentityRequest(
+    /// <summary>The RFC 5322 Message-ID — <c>Office.context.mailbox.item.internetMessageId</c>. Required.</summary>
+    string? InternetMessageId,
+    /// <summary>
+    /// Optional: the Exchange item id of the same message — <c>Office.context.mailbox.item.itemId</c>. The task pane's
+    /// save stores this value in <c>sprk_emailmessageid</c>, so without it a pane-saved email is never found.
+    /// </summary>
+    string? ExchangeItemId = null
+);
+
+/// <summary>
 /// Response for POST /api/documents/resolve-identity. <see cref="Resolved"/> = <c>false</c> is a SUCCESSFUL
 /// answer, not an error. For every <see cref="Reason"/> except <c>identity_conflict</c> the open document is not a
 /// Spaarke document and the pane treats it as new. A 503 means "could not determine" — never treat it as new.
@@ -84,7 +99,9 @@ public record DocumentIdentityResponse(
     /// <c>not_resolvable</c> (Graph will not resolve the URL for this caller — no such item, or not visible to them;
     /// SharePoint does not distinguish the two), <c>not_spaarke_document</c> (the file exists but no
     /// <c>sprk_document</c> tracks it), or <c>identity_conflict</c> (a row holds this file's item id under a different
-    /// drive — NOT a new document; do not offer save-as-new). Null when resolved.
+    /// drive — NOT a new document; do not offer save-as-new). Null when resolved. Task 120: the email route
+    /// (<c>resolve-email-identity</c>, same response) answers <c>not_saved</c> when no saved <c>.eml</c> carries
+    /// the email's keys.
     /// </summary>
     string? Reason
 )

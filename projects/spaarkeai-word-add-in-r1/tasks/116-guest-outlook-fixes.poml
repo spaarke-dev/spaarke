@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="116" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>B2B guest in Outlook on the web: email body + attachments captured in the add-in; copy fallback; Outlook identity retry gated</title>
+    <phase>6 — guest sign-in test (2026-10-08)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the email save path (`useSaveFlow`, adapter, Quick Save), SaveFlow/App/Diagnostics, and tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Save-path change affecting every Model 1 customer.</model-tier-reason>
+    <effort>high</effort>
+    <deps>113, 115</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+  </metadata>
+  <prompt>Owner UAT 2026-10-08 as B2B guest ralph@deweycheatham.onmicrosoft.com in Outlook on the web (package 1.1.2): the add-in loads and works, but (1) Copy Link said "Couldn't copy" (Clipboard API blocked by permissions policy); (2) the .eml had only the header, no body; (3) the email's attachment Document was not created; (4) Find showed "Document identity resolution failed" (CAPABILITY_NOT_SUPPORTED from getDocumentUrl in Outlook).</prompt>
+  <goal>Guests and members save complete emails (body + attachments) from Outlook; copy works or falls back to a copy-by-hand field; Outlook never runs the Word-only identity lookup.</goal>
+  <acceptance-criteria>
+    <criterion testable="true">Email saves send the body and every readable attachment from Office.js; only ticked attachments become Documents; oversize/cloud/unreadable attachments are named, the rest saves.</criterion>
+    <criterion testable="true">Copy falls back to a selection copy, then to a copy-by-hand field.</criterion>
+    <criterion testable="true">"Try again" in Outlook does not call getDocumentUrl.</criterion>
+    <criterion testable="true">Gates: full add-in jest green; lint 0; typecheck 0 production; test debt not increased; server office scope green.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>The server already accepts client-sent body/attachments (SaveRequest.Body / Attachments[].ContentBase64) and only fetches via Graph without a body; OutlookAdapter already had body/attachment readers.</existing>
+    <extension>Yes — the client now sends what the server already accepts; one small copy helper.</extension>
+    <cost-of-doing-nothing>Every Model 1 customer (B2B guests) saves header-only emails with no attachments.</cost-of-doing-nothing>
+  </justification>
+</task>

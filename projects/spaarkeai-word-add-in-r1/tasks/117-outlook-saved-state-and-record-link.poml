@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 12 (O3/O6/W1) — Copy Link copies the Spaarke record link in both hosts; Outlook shows the green "Saved to Spaarke" box when the open email is already in Spaarke</title>
+    <phase>6 UAT round 12 (2026-10-08)</phase>
+    <status>completed</status>
+    <status-note>O3/W1 completed here (client). O6 is DELIVERED BY TASK 120 (2026-10-08, owner-approved BFF addition `POST /api/documents/resolve-email-identity` + the Outlook client wiring) — see tasks/120-outlook-email-identity-and-web-open.poml and notes/120-outlook-email-identity-and-web-open.md. Original stop record (why the communication lookup could not serve O6): notes/117-outlook-saved-state-and-record-link.md §2.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` in the Save flow and its tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Client-only change, but it needs a BFF data-path investigation and a stop/report decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT12</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 118 (Outlook Quick Save) and 119 (Find links / To Do). 117 MUST NOT edit `outlook/commands/**`, `word/commands/**`, `quickSaveHelpers.ts`, `notify.html`, FindView/FindResultsList/FindSplitPane, `src/server/**`, `ci-gated-suites.txt`, TASK-INDEX or current-task.</parallel-reason>
+    <deps>111, 116</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 12, items O3, O6 and W1. Record: `projects/spaarkeai-word-add-in-r1/notes/042-uat-round12-2026-10-08.md`.</prompt>
+
+  <goal>(1) When the Outlook pane opens on an email already in Spaarke, the Save tab shows the same green "Saved to Spaarke" box as Word (task 111), with the record card or the filing picker. (2) Copy Link copies the Spaarke record link (sprk_document) in both hosts, never the SPE webUrl.</goal>
+
+  <context>
+    <background>
+      - The green box: `components/SaveFlow.tsx` `SavedBarModel` / `renderSavedBar`, built by `savedBarOf` (after a save) and `resolvedBarOf` (resolved identity, task 111).
+      - Before this task, Copy Link after a save copied `useSaveFlow.savedDocumentUrl`, the job result's SPE `webUrl`. For a saved .eml that is `https://aka.ms/spe-openfilelocation` (O3).
+      - The lookup is `services/communicationLookupService.ts` → `GET /api/office/communications/by-message-id/{internetMessageId}` (`Api/Office/CommunicationsEndpoints.cs` `FindByMessageIdAsync`). It returns 200 `{ communicationId, subject }` or 404.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner O6">An email already in Spaarke shows the green "Saved to Spaarke" box with "Filed to {record}" / "Not filed to a record yet", View Document, Copy Link, plus the record card or the picker, exactly as task 111 does for a resolved document. The source of truth is the existing by-message-id lookup. If its response lacks the .eml's sprk_document id or its related record, STOP and report exactly what is missing — do not add BFF code.</constraint>
+    <constraint source="NFR-10">Gate on a capability, never on hostType. A 404 means not saved: today's form, unchanged. A lookup failure also leaves the form unchanged, with no false "saved".</constraint>
+    <constraint source="owner O3/W1; task 098 decision 2026-10-05">Copy Link copies the sprk_document record link, built with `openRecordLauncher.buildOpenRecordUrl` (ORG_URL + app name), in both hosts. If ORG_URL is unset, hide Copy Link; never copy a file URL instead. Keep task 116's `copyText` fallback. Update the comment that cites task 088.</constraint>
+    <constraint source="ADR-038">Tests:
+      - Outlook reopen: filed → box names the record; unfiled → picker; 404 → form unchanged; lookup failure → form unchanged.
+      - Copy Link copies the record link in both hosts.
+      - No ORG_URL → no Copy Link.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true" status="met">Copy Link (post-save and resolved box) copies `{ORG_URL}/main.aspx?…etn=sprk_document&amp;id={id}…` in Word and Outlook; never the SPE webUrl.</criterion>
+    <criterion testable="true" status="met">Without ORG_URL, Copy Link is not rendered in either box variant.</criterion>
+    <criterion testable="true" status="met-by-120">Outlook reopen on a saved email shows the green box with its record or the picker. Was BLOCKED here (the lookup returns no .eml sprk_document id, note §2); delivered by task 120.</criterion>
+    <criterion testable="true" status="met">Gates: full add-in jest green (98/1309); lint 0; typecheck 0 production, test-file errors 68 (not above 68); prettier clean.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step status="done">Read the lookup service, the BFF handler and DTO, the email capture path and the .eml document persistence, to find what identifies the saved .eml.</step>
+    <step status="stopped">O6: the response lacks the document id. Stopped and reported (note §2), with the data source and the owner decisions it needs.</step>
+    <step status="done">O3/W1: added `documentRecordLinkOf` in SaveFlow; both bars copy the record link; Copy Link hidden without ORG_URL; comment updated.</step>
+    <step status="done">Tests, gates, and `notes/117-outlook-saved-state-and-record-link.md`.</step>
+  </steps>
+
+  <justification>
+    <existing>renderSavedBar, SavedBarModel, openRecordLauncher.buildOpenRecordUrl, copyText.</existing>
+    <extension>Yes. Only existing code was modified; there is no new component, service or endpoint.</extension>
+    <cost-of-doing-nothing>Owner UAT round 12 O3: Copy Link in Outlook copies `aka.ms/spe-openfilelocation`, a link that does not lead to the email.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.buttonFeedback.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.savedState.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.alreadySaved.test.tsx</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.copyRecordLink.test.tsx</file>
+    <file role="note">projects/spaarkeai-word-add-in-r1/notes/117-outlook-saved-state-and-record-link.md</file>
+  </relevant-files>
+</task>

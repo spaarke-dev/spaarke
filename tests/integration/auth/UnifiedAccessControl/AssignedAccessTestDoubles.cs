@@ -382,6 +382,21 @@ internal static class AssignedAccessTestDoubles
                 roots.Count > ceiling ? (roots.Take(ceiling).ToList(), true) : (roots, false));
         }
 
+        /// <summary>Task 114: the roots whose Access Permission is Restricted (what the production scan's filter selects).</summary>
+        public ConcurrentDictionary<(ExternalGrantRootType Type, Guid Id), bool> RestrictedRoots { get; } = new();
+
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
+            ExternalGrantRootType rootType, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            var roots = RestrictedRoots.Keys
+                .Where(k => k.Type == rootType)
+                .Select(k => new AssignedRootRef(rootType, k.Id, Modified.TryGetValue(k.Id, out var m) ? m : null))
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
+        }
+
         internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
         {
             if (FailScan)
@@ -491,6 +506,15 @@ internal static class AssignedAccessTestDoubles
         {
         }
 
+        /// <summary>
+        /// Task 114: the OWNING user of a project / matter / work assignment, answered to a root read by id
+        /// (<c>_owninguser_value</c>) — the Restricted remover's external-owner check. A root not listed comes back team-owned.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> RootOwners { get; } = new();
+
+        /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
+        public bool FailRootOwnerQueries { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -571,6 +595,9 @@ internal static class AssignedAccessTestDoubles
             if (entitySetName == GrantSet)
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
 
+            if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
+                throw new HttpRequestException("Simulated root-owner read failure.");
+
             object rows = entitySetName switch
             {
                 GrantSet => MatchGrants(filter),
@@ -578,6 +605,10 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
+                "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners
+                    .Where(kv => filter is not null && filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => new Dictionary<string, object?> { ["_owninguser_value"] = kv.Value })
+                    .ToList<object>(),
                 _ => throw new InvalidOperationException($"Unexpected query of {entitySetName} through the grant table."),
             };
 
@@ -753,7 +784,9 @@ internal static class AssignedAccessTestDoubles
 
         public FakeAssignedAccessStore Store { get; }
         public GrantTable Grants { get; } = new();
-        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } = new(RootRecordFlags.None);
+        /// <summary>The flag reads. Settable (task 174) so a test can give it a filing world to walk; by default nothing is
+        /// filed under anything.</summary>
+        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; set; } = new(RootRecordFlags.None);
         /// <summary>The deny list; replace it to model an entry being deactivated (the wall lifted).</summary>
         public GrantPolicyTestDoubles.SeamNoAccessListReader DenyList { get; set; } = new();
         public InMemoryContactIdentityStore Identities { get; } = new();
@@ -814,6 +847,36 @@ internal static class AssignedAccessTestDoubles
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
             Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
+
+        /// <summary>
+        /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
+        /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
+        /// </summary>
+        public RestrictedExternalShareRemover RestrictedRemover => new(
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease,
+            NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>Task 114: the per-record removal lease the remover shares with task 143's enforcer and /unshare-user.</summary>
+        public Spaarke.Scheduling.IScheduledJobLease Lease { get; set; } = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
+
+        /// <summary>
+        /// Task 114: a system user the share routes and the Restricted remover read (an enabled person; the flag as given —
+        /// <c>null</c> is a blank <c>sprk_isexternal</c>).
+        /// </summary>
+        public Guid SystemUser(bool? isExternal, bool disabled = false, Guid? id = null)
+        {
+            var userId = id ?? Guid.NewGuid();
+            Grants.SystemUsers[userId] = new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow
+            {
+                Id = userId,
+                FullName = $"User {userId:N}",
+                IsDisabled = disabled,
+                AccessMode = 0,
+                ApplicationId = null,
+                IsExternal = isExternal,
+            };
+            return userId;
+        }
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)

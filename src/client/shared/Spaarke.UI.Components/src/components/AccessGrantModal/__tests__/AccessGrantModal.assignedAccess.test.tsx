@@ -14,13 +14,15 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal, buildRevokeNotice, describeResidualAccess } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAssignedAccessEntry } from '../AccessGrantModal';
 import type { IAccessGrantModalProps, IAccessGrantRecord } from '../types';
 
 const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 
 function json(body: unknown, ok = true, status = ok ? 200 : 500): Response {
-  return { ok, status, json: async () => body } as unknown as Response;
+  // A BFF ProblemDetails always carries `status`.
+  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
 }
 
 const PENDING_CONTACT: IAssignedAccessEntry = {
@@ -142,6 +144,59 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
       })
     );
     expect(bodyOf(fetchMock, '/api/v1/external-access/grant')).toBeUndefined();
+  });
+
+  it('Grant on a user suggestion refused as external names the person (task 114 owner test, 2026-10-07)', async () => {
+    const base = fetchWith([PENDING_LINKED_USER]);
+    const fetchMock = throwingAuthenticatedFetch((url: string, init?: RequestInit) =>
+      String(url).endsWith('/share-user')
+        ? json(
+            {
+              title: 'Not shared',
+              detail:
+                'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.',
+              reasonCode: 'sdap.access.user_share.user_not_internal',
+            },
+            false,
+            422
+          )
+        : base(url, init)
+    );
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Ines Internal' }));
+
+    expect(
+      await screen.findByText(
+        'System user Ines Internal is an external user. Restricted records cannot be shared with external users.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('Grant on a user suggestion whose related records are still updating reports the grant, not a failure', async () => {
+    const base = fetchWith([PENDING_LINKED_USER]);
+    const fetchMock = throwingAuthenticatedFetch((url: string, init?: RequestInit) =>
+      String(url).endsWith('/share-user')
+        ? json(
+            {
+              title: 'Shared',
+              detail: '2 related records are not updated yet; they complete automatically.',
+              reasonCode: 'sdap.access.user_share.children_incomplete',
+            },
+            false,
+            500
+          )
+        : base(url, init)
+    );
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Ines Internal' }));
+
+    expect(
+      await screen.findByText(
+        /Granted Ines Internal access \(suggested from Assigned To \(Internal\)\)\. 2 related records are not updated yet/
+      )
+    ).toBeInTheDocument();
   });
 
   it('Dismiss declines the suggestion through /assigned-access/dismiss', async () => {

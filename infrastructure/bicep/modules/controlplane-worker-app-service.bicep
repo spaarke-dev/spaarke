@@ -193,8 +193,26 @@ param controlPlanePrincipalId string
 @description('SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker\'s UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0\'s SpeOwnerCredential probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice.')
 param speContainerTypeOwners array = []
 
+@description('Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c).')
+param preAuthorizedClientAppIds array = [
+  '1958aec2-0218-495e-8e3c-37133e9b8357'
+]
+
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 255: the tenants that are never a customer's workforce tenant — Spaarke's own (the control plane is deployed in
+// it; the same value as EntraAppRegOptions__SpaarkeTenantId) and the CIAM tenant(s).
+var reservedTenantSettings = concat([
+  { name: 'ReservedTenants__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(ciamTenantIds)), i => {
+  name: 'ReservedTenants__CiamTenantIds__${i}'
+  value: ciamTenantIds[i]
+}))
 
 // Task 245b: flatten speContainerTypeOwners into indexed app settings (the .NET
 // configuration binder's list syntax: SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId ...).
@@ -202,6 +220,16 @@ var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerType
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__ContainerTypeId', value: speContainerTypeOwners[i].containerTypeId }
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
 ]))
+
+// T240a: H3's platform settings. SpaarkeTenantId is the federated-credential issuer for Model 1 stamps
+// (profile spaarke-hosted-model2): without it every Model 1 run fails at H3's FIC step. The control plane
+// is deployed in Spaarke's own tenant, so the deployment's tenant is that value.
+var entraAppRegSettings = concat([
+  { name: 'EntraAppRegOptions__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(preAuthorizedClientAppIds)), i => {
+  name: 'EntraAppRegOptions__PreAuthorizedClientAppIds__${i}'
+  value: preAuthorizedClientAppIds[i]
+}))
 
 // ============================================================================
 // APP SERVICE (WORKER -- slotless per DS-3 Section 3; UAMI-only per ADR-028)
@@ -439,7 +467,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
           name: 'ExchangeSidecar__SharedSecret'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
         }
-      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings, entraAppRegSettings, reservedTenantSettings)
     }
   }
 }

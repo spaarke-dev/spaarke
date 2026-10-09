@@ -69,10 +69,10 @@ function isHighPriority(event: IEvent): boolean {
  * time), so the badge count, the client filter and the card accent agree
  * (task 081 round 4; this parsed a DateOnly due date as UTC midnight).
  *
- * It does NOT mirror the server OData filter `buildEventCategoryFilter(Overdue)`
- * in `services/queryHelpers.ts` (`sprk_duedate lt <UTC midnight today> and
- * statuscode eq 1`): that one compares against UTC midnight and also requires
- * an open status. This client rule counts every loaded event by due date only.
+ * It does NOT fully mirror the server OData filter `buildEventCategoryFilter(Overdue)`
+ * in `services/queryHelpers.ts` (`sprk_duedate lt <local today yyyy-MM-dd> and
+ * statuscode eq 1`): that one uses the same local-day boundary (task 106) but also
+ * requires an open status. This client rule counts every loaded event by due date only.
  */
 function isOverdue(event: IEvent): boolean {
   return isFeedEventOverdue(event.sprk_duedate);

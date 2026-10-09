@@ -80,6 +80,9 @@ async function bootstrap(): Promise<void> {
     clientId: runtimeConfig.msalClientId,
     bffApiScope: runtimeConfig.bffOAuthScope,
     bffBaseUrl: runtimeConfig.bffBaseUrl,
+    // The environment's tenant (sprk_TenantId) — a tenant-specific authority is required for B2B guests (#1453).
+    // The library validates it and ignores an invalid value.
+    tenantId: runtimeConfig.tenantId,
   });
 
   // 3. Resolve tenantId from auth if not in URL params

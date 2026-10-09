@@ -28,6 +28,11 @@ interface UseChatPlaybooksOptions {
   authenticatedFetch: AuthenticatedFetchFn;
   /** Optional name filter for playbook search */
   nameFilter?: string;
+  /**
+   * When false, the hook does NOT fetch on mount and returns an empty list (`refresh`
+   * still fetches on demand). Default true — preserves behavior for direct hook consumers.
+   */
+  enabled?: boolean;
 }
 
 export interface IUseChatPlaybooksResult {
@@ -56,7 +61,7 @@ export interface IUseChatPlaybooksResult {
  * ```
  */
 export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlaybooksResult {
-  const { apiBaseUrl, authenticatedFetch, nameFilter } = options;
+  const { apiBaseUrl, authenticatedFetch, nameFilter, enabled = true } = options;
 
   const [playbooks, setPlaybooks] = useState<IPlaybookOption[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -100,10 +105,14 @@ export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlay
     }
   }, [baseUrl, authenticatedFetch, nameFilter]);
 
-  // Fetch on mount and when dependencies change
+  // Fetch on mount and when dependencies change (only when enabled)
   useEffect(() => {
+    if (!enabled) {
+      setPlaybooks([]);
+      return;
+    }
     fetchPlaybooks();
-  }, [fetchPlaybooks]);
+  }, [fetchPlaybooks, enabled]);
 
   return {
     playbooks,

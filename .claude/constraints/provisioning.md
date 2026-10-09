@@ -1,6 +1,6 @@
 # Provisioning Constraints
 
-> **Last Reviewed**: 2026-08-25
+> **Last Reviewed**: 2026-10-08 (T235 — keyless section cites ADR-028 A6); 2026-10-07 (T232 — Model 1 guest access rule added; 2026-10-06 T244 keyless stamp resources; T246 Content Safety)
 > **Reviewed By**: customer-provisioning-orchestration-r1 task 203a per punch list row A08
 > **Load when**: task tags include `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning`
 > **Wired into**: `.claude/skills/task-execute/SKILL.md` Step 4a tag map
@@ -18,11 +18,11 @@ Any code path in the L2 control-plane, handlers, BFF-provisioning surface, or op
 
 - **I1 — Explicit tenantId** (FR-28): the operator's `tenantId` is passed explicitly on every operation. **NEVER** hardcode a "default tenant" in provisioning scripts. Handlers reject requests missing `tenantId`. Operator's own AAD identity per NFR-11 — bootstrap under a service principal is a HARD violation.
 - **I2 — AI Search unconditional `tenantId` filter** (FR-29): every AI Search query MUST include `tenantId eq '{tenantId}'` in the filter clause. The `spaarke-session-files` index uses tenantId + sessionId dual-filter (ADR-014 strengthens). A query missing this filter is a silent cross-tenant leak.
-- **I3 — Cosmos partition-key predicate** (FR-30): every Cosmos read/write MUST include the partition-key `/customerId` predicate. Cross-partition queries are audit-flagged and treated as bugs.
-- **I4 — SPE container ID resolution** (FR-31): SPE container IDs derived from tenant context via `ITenantContainerResolver`. NEVER hardcode a container ID or resolve via lookup that isn't tenant-scoped.
+- **I3 — Cosmos partition-key predicate** (FR-30): every Cosmos read/write MUST include the container's partition-key predicate — `/tenantId` on the stamp's tenant-scoped containers (or the key `cosmos-db.bicep` declares: `/partitionKey`, `/subjectId`), `/customerId` on L2's ProvisioningRun container. Cross-partition queries are audit-flagged and treated as bugs. H13's I3 probe checks the stamp's account holds exactly the template's containers with their declared keys (T230a).
+- **I4 — SPE container ID resolution** (FR-31): SPE container IDs come from the record being served or the stamp's own settings, and every app-only SPE call passes `SpeContainerOwnershipGuard` — the BFF's one definition of this stamp's containers (T227d; the unused `ITenantContainerResolver` was retired by T227f). NEVER hardcode a container ID.
 - **I5 — Graph token per-tenant** (FR-32): every Graph token acquisition uses tenant `{tenantId}` — never the operator's home tenant, never a shared "app-tenant" for cross-tenant ops. `ITokenAcquisition.GetAccessTokenForAppAsync(tenant)` is the discipline.
 
-Violations of I1-I5 surface via ArchTests (planned in task 204e) + are Critical findings in code-review Step 6.
+Violations of I1-I5 surface via ArchTests + are Critical findings in code-review Step 6. H13 samples I2–I5 on the deployed stamp; I1 (no hardcoded tenant in scripts) is a build-time property — the I1 ArchTest is its one enforcement point, since the L2 Worker ships and runs no script (T230a / T253).
 
 ## KV credential lifecycle — BINDING per ADR-028 Amendment A4 + E-3 closure (§6.5 resolution 2026-08-25; supersedes the r3-handoff never-delete list)
 
@@ -88,7 +88,7 @@ Report absolute + delta in task notes / PR description. See `.claude/constraints
 ## Handler registration completeness — BINDING per ADR-032 + `.claude/patterns/provisioning/handler-registration-completeness.md`
 
 - Every new `IProvisioningHandler` touches five places: `HandlerIds.cs` (const + `Dispatchable`), the handler class, its concrete + dependency registrations, the keyed forwarder in `HandlerDispatchRegistrationModule.cs`, and `DagAdvancer.HandlerDependencies`. Missing the forwarder → the Worker dead-letters the message as `NoHandler`; a missing dependency → `HandlerResolutionFailed`; a missing DAG entry → the reconciler never dispatches it.
-- `HandlerRegistrationCompletenessTests` and the HANDLER-12 parity test in `DagAdvancerTests` MUST pass on every PR (currently 20 dispatchable ids — T226 retired H4-shared on 2026-09-30; adding a handler → 21).
+- `HandlerRegistrationCompletenessTests` and the HANDLER-12 parity test in `DagAdvancerTests` MUST pass on every PR (currently 21 dispatchable ids — T226 retired H4-shared on 2026-09-30; T256 added H7b on 2026-10-08; adding a handler → 22).
 - Handler contract: `IProvisioningHandler.HandleAsync(HandlerEnvelope, CancellationToken)` returns `HandlerResult` — closed: `Success(IdempotencyKey)` or `Failure(FailureClass, RejectionCode, Diagnostic)`; `FailureClass` = Resumable | RetryableWithCleanup | QuarantineRequired | SuccessfulButDrifted (design §4C).
 - Feature-gated handlers follow ADR-032 P1/P2/P3 — null-impl UNCONDITIONAL outside the gate; real-impl CONDITIONAL inside. Last-write-wins for the same key resolves correctly at runtime.
 
@@ -123,12 +123,19 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
 - A value L2 owns (its own principal, the SPE owning app per container type) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
-- H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
+- H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`. A LIST source (T255) feeds only an `indexed: true` entry, which is always required and owned whole (stale indices removed).
 - **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.
 - Every H4 manifest secret needs a source H4 can reach before H3 runs — a `from-bicep-output` label is only true if `customer.bicep`'s `kvSecretValues` writes it.
 - `RunContextContractTests` enforces all of this with a Roslyn source scan (declared inputs = reads, both ways), a DAG check and the manifest check. A failure means the data flow is wrong — fix the flow, never add a Gap to pass. Handler unit tests seeding a value by hand prove nothing about who writes it (that is how ~20 inputs shipped with no producer).
 
 Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence: `projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md`.
+
+## The L2 Worker runs no shell tool (BINDING, task 253 / G38)
+
+- The L2 Worker host is App Service `DOTNETCORE|10.0`: no pwsh, pac or az, and its publish carries no `scripts/` or `infrastructure/` folder. **MUST NOT** start a process (`Process.Start`, `ProcessStartInfo`) in any `Sprk.Provisioning.ControlPlane.*` assembly — `tests/Spaarke.ArchTests/ControlPlaneNoProcessStartGuardTests.cs` fails the build. Port to an SDK / REST client (ARM SDK, Dataverse Web API, Graph, Key Vault SDK); a PowerShell-only Exchange operation belongs in the H14a sidecar.
+- **MUST NOT** read a repo file at run time (`AppContext.BaseDirectory/scripts/...`): ship it as an `<EmbeddedResource>` (as the secret-catalog manifest, the seed manifest and the index schemas are).
+- H4b writes the BFF app settings through `IAppServiceSettingsWriter` (ARM SDK, production + `staging`, merge never replace). They equal `Configure-AppServiceSettings.generated.ps1`'s (parity test in `H4bBulkAppSettingsHandlerTests`) — regenerate the script with every manifest change.
+- H6 installs no Power Platform application: SpaarkeMaster may depend only on platform applications (`SpaarkeMasterApplicationDependencyTests`). Remove a new dependency at source; never add an installer.
 
 ## SPE owning app — MI-FIC, nothing stored (BINDING, task 248 / owner D16)
 
@@ -155,6 +162,108 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - The BFF (`CacheModule`) and the L2 Worker (`DispatchModule`) authenticate with their user-assigned identity (`ManagedIdentity__ClientId`) over RESP3 whenever `Redis__Endpoint` is set, and **refuse to start** on a connection string without it outside Development/Testing — so a deployed BFF/Worker MUST carry `Redis__Endpoint` before it runs a T242+ build (per-env cut-over: task 242b, endpoint added first, connection string removed only after master carries T242).
 - H1 registers `Microsoft.Cache` by default. Managed Redis has no scale-down and HA is fixed at create — size up only on a measured memory metric.
 
+## Subscription + Dataverse environment are operator prerequisites (BINDING — owner D4 / Q1; T228)
+
+- The operator creates the customer's **own Azure subscription** and **Dataverse environment** before the run; L2 creates **neither** and **MUST NOT default** either — no shared subscription, no `az account show`, for any tenancy model (ADR-027). POST /api/runs requires `subscriptionId` (GUID), `containerTypeId` (GUID, G19) and `dataverseEnvUrl` for every model.
+- **The environment must be named for the customer**: domain `spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}` — `DataverseEnvironmentUrlRule`, applied at POST /api/runs and again by H5. It is the guard against adopting another customer's environment (all Model 1 environments share Spaarke's tenant). Reject, never repair.
+- **H1 refuses a subscription that is not the customer's alone**: outside the run's tenant, or holding another `rg-spaarke-{otherId}-*` group (`SubscriptionDedication`) — before it writes anything.
+- **H5 adopts, never creates**: URL rule → `GET /WhoAmI` as the L2 Worker identity (401/403 → Resumable `worker-not-app-user`; the operator adds that identity as a System Administrator application user, PRQ-C-09).
+- **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7/H7b sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7. H7b ← H6; H9 ← H3, H4b, H6, H7b; H13 ← H14, H7b (T256).
+- **The L2 identity holds Owner on each customer subscription** (owner decision 2026-10-06 — customer.bicep writes role assignments): granted by the operator with `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04). It is never deployed on the platform subscription, and L2 never grants itself access to a subscription.
+
+## Model 1 users — B2B guests, environment security group, pay-as-you-go (BINDING — owner D2 + 2026-10-07; T232)
+
+- A Model 1 run takes only `B2BGuest` (`UserProvisioningIntake`). Every B2BGuest run names the environment's security
+  group `sprk-{customerId}-users` (`environmentSecurityGroupId`, PRQ-C-10). **The group is the isolation boundary between
+  Model 1 environments** (all in Spaarke's tenant): H11 refuses a group with another name or not security-enabled before
+  inviting anyone, and adds guests to that group only. That the group is the one **set on the environment** is visible
+  only to a Power Platform admin — the skill checks it (Step 1e-bis); L2 checks the name. **MUST NOT** add a guest to any
+  other group or make it a user of another environment.
+- Guests get **no licence**: Spaarke pays pay-as-you-go on the customer's stamp subscription (PRQ-C-11 — an operator
+  check; L2 cannot see billing). **MUST NOT** add per-user licence assignment for B2BGuest. NativeAccount refuses a run
+  with no SKU configured.
+- A guest's Dataverse user is made through the `azureactivedirectoryobjectid` alternate key (on-demand add of a group
+  member) as the L2 Worker identity. **MUST NOT** grant L2 a Power Platform admin role or register it as a management
+  app for this (force sync) — ask the owner first if a live run shows the alternate key is not enough.
+- An existing guest is reused — **never re-invite** (it re-sends the email). `restrictguestuseraccess` must be off
+  (PRQ-C-12); H11 checks it before inviting. Decisions + known limits: `projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md`.
+
+## Stamp BFF clients — CORS + app-registration client access (BINDING, task 240a)
+
+- **CORS:** a stamp BFF does not start outside Development with an empty `Cors:AllowedOrigins`. The manifest's literal
+  `Cors__AllowedOrigins__0/1` are the shared client sites `https://addins.spaarke.com` and `https://external.spaarke.com`
+  (exact https origins, same on every stamp). Never add a customer's Dataverse origin (`CorsModule` admits
+  `*.dynamics.com` / `*.powerapps.com` by suffix), never a wildcard, never a `*.azurestaticapps.net` host.
+- **H3 sets exactly** the customer BFF registration's `spa.redirectUris` (the customer's Dataverse origin from intake
+  `dataverseEnvUrl`, via `DataverseEnvironmentUrlRule`) and `api.preAuthorizedApplications` (Worker setting
+  `EntraAppRegOptions__PreAuthorizedClientAppIds__N` on `user_impersonation`). It PATCHes only that registration — never a
+  shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
+- **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
+  it every Model 1 run fails at H3.
+- **H3 adopts an existing `spaarke-bff-api-{customerId}` only if nobody but the control plane can act as it** (one match,
+  no secret or certificate, no foreign FIC, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
+  written. Never relax this to "adopt by name".
+- **One environment per customer (D6).** The registration is per customer (D-13) while H3 sets its redirect, FIC and
+  pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
+  staging/dev needs a per-stamp registration first (`notes/defer-issues.md`).
+
+## Customer workforce tenants + `acct` (BINDING, T255 / unified-access-control-r2 INCOMING-141)
+
+- Intake `customerWorkforceTenantIds` (JSON array, **required for every model**) is the CUSTOMER's Entra tenant(s) — Model 1: the customer's HOME tenant, never Spaarke's and never the run's `tenantId`. ONE rule, `Core/Models/CustomerWorkforceTenantsRule`, at POST /api/runs, in H4b and in H13; it refuses the CIAM tenant and Spaarke's tenant from the L2-owned `ReservedTenantsOptions` (`ReservedTenants__SpaarkeTenantId` / `__CiamTenantIds__N`, both hosts, ValidateOnStart). **NEVER** fall back to `AzureAd__TenantId` or `TenantRouting:Tenants[]`.
+- H4b writes `WorkforceIdentity__CustomerTenantIds__N` on both slots from the manifest's `indexed: true` entry and REMOVES every other `WorkforceIdentity__CustomerTenantIds__*` there; H13 T7 fails a stamp whose slots differ from the run's list. Change a stamp's list with a new run, never by hand.
+- H3 puts the `acct` optional claim on every per-customer BFF registration's access tokens (create + reconcile, read back).
+- Provisioning does **not** write `IdentityLink__Reconciliation__WritesEnabled` (H4b merges — a written `false` would undo an operator's `true`).
+- The contact identity-binding schema ships in SpaarkeMaster; OOB-table alternate keys are in the package rule (T255). Its field-security profile memberships are per environment — H7b maintains them (see Secure Record setup — H7b).
+
+## Dataverse package — one SpaarkeMaster, managed by default (BINDING, ADR-027 §3–§4 amended 2026-10-07; T218)
+
+- **One solution, `SpaarkeMaster`**, is the whole Dataverse package (`SolutionImport/SpaarkePackage.cs`); no per-feature
+  solution list exists. Its scope is a rule (every `sprk` component in spaarkedev1 + OOB-table columns − committed
+  exclusions) — runbook `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`.
+- **Managed by default; unmanaged only on explicit instruction** — intake `solutionPackageType` (`managed` | `unmanaged`,
+  exact case; absent → `managed` stored at CreateRun). Never add an environment- or server-level default that flips it.
+- H6 **refuses** (Resumable, nothing imported) a managed↔unmanaged switch (`package-type-mismatch`) and a downgrade
+  (`downgrade-refused`); a failed read of the installed solution is a failure, never "assume a fresh install". It never
+  falls back to the other package type's blob.
+- The manifest H6 reads: `{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}`.
+- H9 waits for H6 (the BFF never starts against an older schema). H13 records `sprk_solutionversion` =
+  `SpaarkeMaster {version} ({managed|unmanaged})` — the package type on the registry row.
+- Environment-variable **values** never ship in the package (H7 writes them).
+
+## Secure Record setup — H7b (BINDING, T256 / unified-access-control-r2 INCOMING-145)
+
+- H7b creates per environment what no package can carry: the `Secure Record` unit (direct child of the root, no users), the memberless Owner team `Secure Record Owners`, and the `Secure Record Owner` role IN that unit with exactly `config/secure-record-owner-role.json` (Read at Basic; linked into L2, never copied). Never put the role in SpaarkeMaster or the root unit (`secure_setup.role_is_replica`).
+- Read-then-write: every refusal precedes the first write; the §5.4 strip follows every grant; a second run writes nothing. QuarantineRequired only for owner decisions (users in the unit, team members, wrong parent, root default team at Deep/Global, a stray field writer or sprk_issecure writer).
+- Field-security profiles, the `sprk_issecure` lock, the contact identity-binding lock (`contact.sprk_externalobjectid`, `systemuser.sprk_primarycontact`) and `sprk_noaccessentry` ship in SpaarkeMaster; H7b verifies them and adds only memberships: every business unit's default team → `Spaarke BFF-Managed Field Readers` and `Spaarke Identity Link Readers`; H10's two BFF application users → `Spaarke BFF-Managed Field Writers` and `Spaarke Identity Link Writers`, nobody else (any other member or team → QuarantineRequired `secure_setup.field_writer_has_other_member` / `secure_setup.identity_link_writer_has_other_member`; another profile — the reader profiles included — that may write a locked column → `…_lock_other_writer`). Never remove a member. H9 waits for H7b: no BFF reaches an environment without `sprk_noaccessentry`.
+- Names: unit and role from the file, team = the BFF's compiled `SecureRecord:OwnerTeamName` default. A `SecureRecord__` manifest key needs ONE run parameter feeding H4b and H7b (`SecureRecordOwnerRoleSetParityTests` fails until then).
+- Dry run: intake `secureRecordSetupDryRun` = `true` | `false` (exact); it stops the run at H7b with `secure_setup.dry_run` and the plan in gate `h7b-secure-setup-plan`.
+- Open (ISS-010 / #1486, before T186): guests created by H11 in the ROOT unit with Spaarke Basic User (Deep read) can read every secure record until the customer business unit (INCOMING-145 §6 T1/T3/T5) is built.
+
+## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
+
+- Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke, Model 2 by the customer. No cost concept may assume a shared platform: no `shared-trial` tier, no "marginal" or "shared floor" envelope, no per-model cost branch.
+- `tier` (smb | enterprise | dedicated = the keys of `H0Options.DefaultCeilingsUsd`) and `estimatedMonthlyUsd` are **required for every model**, validated by ONE rule set (`Handlers/Preflight/CostEnvelopeIntake`) at POST /api/runs and again by H0; the intake schema's `tier` enum equals that table (parity test).
+- H0 refuses an estimate above the tier ceiling (`quota-cost-overrun`, Resumable) with **no waiver** — `costEnvelopePolicy` / `warnAndProceed` are retired and refused as unknown keys. `H0Options.CostEnvelopeAbortsPreflight=false` is the only switch.
+- H13 compares the subscription's cost with ONE `H13AcceptanceOptions.DedicatedStampEnvelopeUsd` ($400; $337.04 fixed at 2026-10-06 list prices). Re-derive it (and the guide §3.2 breakdown) whenever `customer.bicep`'s SKUs change.
+
+## SPE: container type per model, container per customer — app-only isolation is in code (BINDING, owner D28 / T227b)
+
+- One container type per model (`Spaarke Model 1`), one ROOT container per customer (per Dataverse environment) — H8's; secure-record containers (one per secure project / matter / work assignment — `ProvisionProjectEndpoint`) and any further business-unit container (SPE admin plane) are created by the BFF at runtime, bound to their business unit and marked — never by provisioning (T227g). H8 grants each stamp's UAMI application `full` and its BFF app registration delegated `full` on the registration, as the owning app.
+- An app-only token reaches **every** container of the type (Microsoft, no per-container app scoping). So the BFF **MUST** target only its own stamp's container(s) on app-only SPE calls — enforced by code and tests (T227d). **MUST NOT** add an app-only SPE call whose container or drive id comes from a caller-supplied value without that check.
+- **How (T227d)**: app-only SPE clients come only from `SpeContainerOwnershipGuard` (`ForOwnedContainerAsync(id)`; `ForTypeWideOperation()` only in the SPE facade, whose list/search results are filtered with `IsOwnedAsync` and whose creates are marked with `MarkOwnedAsync`). Own = an id in `EmailProcessing__DefaultContainerId` / `Communication__ArchiveContainerId` / `SharePointEmbedded__OwnedContainerIds` (operator-only, pre-marker environments) **or** custom property `spaarkeCustomerId` = `Customer__Id`. **MUST NOT** call `IGraphClientFactory.ForApp()` for SPE work anywhere else — `tests/Spaarke.ArchTests/TenantIsolation/SpeAppOnlyContainerGuardTests.cs` fails the build. Refusal = 404 `spe_container_not_owned` (indistinguishable from a missing container). SPE Admin on a stamp is confined the same way (owner D29): container lists/searches are filtered; Container-TYPE operations (settings, permissions, create a type) touch no customer's container data and are not filtered: Graph refuses them app-only, because a stamp's identity holds only `FileStorageContainer.Selected` (no `FileStorageContainerType.*`). The marker stops a misrouted/forged id, not another stamp's code.
+- **One root container per customer, ever (T227e, on unified-access-control-r2 task 165)**: a re-entry of the run resumes with the container in its typed creation record (`InterStepState.SpeContainerCreation`); a LATER run reuses the container the environment records (`sprk_SharePointEmbeddedContainerId`, written by H7 on the first run) as `adopted`. The record and the environment naming different containers → Resumable `spe-duplicate-customer-containers` naming both; an unreadable value → Resumable, nothing created. **Never pick one, never create without an answer, never list the shared type to adopt a container.** A reused container is **never removed** by a failed bind (`SpeContainerBindRequest.RemoveIfNotBound = false`; adoption is kept on the record — `AdoptedRootContainerId`), and is **read before anything is written to it**: missing, another container type, another customer's marker or another business unit's stamp → Resumable, nothing written. All checks run before the container-type grants. **Operator rule:** resume a run that stopped after H8 and before H7 — never start a new one (it would create a second container). H8 writes the `spaarkeCustomerId` marker after the bind; its name is ONE source-linked constant (`src/server/shared/Contracts/SpeContainerCustomerMarker.cs`, pinned by ArchTest `SpeContainerMarkerParityTests`).
+- **The root business unit names the root container (T227g)**: H7 sets `businessunit.sprk_containerid` on the environment's root unit to H8's container — unified-access-control-r2 task 076 resolves a record that is not secure to its owning business unit's `sprk_containerid`, so without it a fresh stamp stores no non-secure file. Equal → no write; empty → PATCH + read back; **another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten** (it would move where the customer's files go). **Every container a script creates** is stamped AND marked (`Invoke-SpeContainerBindOrRemove -CustomerId <the BFF's Customer__Id>`; ArchTest `SpeContainerMarkerParityTests`). The `Secure Record` business unit has **no** container (each secure record has its own).
+- Do **not** propose a container type per customer as the fix: the owner rejected it (25-per-tenant cap, 5 used, standard types undeletable).
+
+## Stamp resources are keyless (BINDING, task 244 / owner D13 — ADR-028 Amendment A6, 2026-10-08)
+
+- **MUST** keep local/key auth disabled on the stamp's AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB and SignalR (`disableLocalAuth: true`; AI Search with no `authOptions`), Storage (`allowSharedKeyAccess: false` — the module default since T244) and Redis (rule above). A new keyed resource ships the same way (Content Safety did, T246: its endpoint is a plain app setting, `AiSafety__ContentSafety__Endpoint`, and the BFF refuses to start outside Development/Testing without it — never a fallback to a shared or dev account). Documented exclusions (in the test file): App Insights ingestion, and ACS (setting unverified on its pinned API).
+- **MUST NOT** add `listKeys()` / `listAdminKeys()` / `listQueryKeys()`, a SAS authorization rule, an `AccountKey=` connection string, or a key / connection-string output to any stamp module or to `customer.bicep`. A caller that needs data-plane access gets a **role** (BFF UAMI: `bff-runtime-rbac.bicep` + module grants; L2 UAMI: `customer-l2-bff-rbac.bicep` — Website Contributor, Search Service Contributor, Search Index Data Reader — L2 writes no documents).
+- Event Grid dead-letters to stamp Storage with `deadLetterWithResourceIdentity` (system-topic identity, Storage Blob Data Contributor on the container) — plain `deadLetterDestination` has no identity.
+- Forcing function: `tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs` reads the compiled `customer.json` — recompile it (`az bicep build --file customer.bicep --outfile customer.json`) after any module change.
+- **Proved per run (T230b)**: H13 calls the stamp BFF's `POST /api/platform/keyless-proof` as the L2 Worker identity (token for `api://{BffAppRegId}`; H3 assigns that identity the application role `Provisioning.KeylessProof` — one source-linked contract, `src/server/shared/Contracts/KeylessProofContract.cs`). The BFF makes one read-only managed-identity call per stamp service; anything but `proved` fails H13 (`unreachable` is Resumable; `not-in-use` passes only for the services in `KeylessProofContract.Services.MayBeUnused` — Blob, while the session-file store is off by design) — **an auth failure is never a skip**. `ArmStampKeylessVerifier` checks key auth off on every keyed resource and no key setting on any slot (`StampKeySettingCatalog`). The `openai-chat` result is the ADR-028 E-2 measurement on the stamp's `kind: OpenAI` account.
+- **MUST NOT** add a key credential (`AzureKeyCredential`, `ApiKeyCredential`, a key header, a key-bearing connection string) to server code without its entry in `tests/Spaarke.ArchTests/KeyCredentialCensusTests.cs` — and for a stamp resource, its setting in L2's `StampKeySettingCatalog` and in the BFF keyless-proof probe (the census asserts both). No key fallback is added for stamps.
+
 ## Handler idempotency + drift-detection
 
 - Every handler MUST be idempotent. Second run of the same handler against the same customer resources produces the same end state (assuming no external drift).
@@ -165,9 +274,10 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 
 - New BFF `AddOptions<T>().ValidateOnStart()` module → MUST add corresponding entry to `per_env_settings` list in `scripts/canonical-secret-catalog/manifest.yaml`.
 - Deploy discipline: H4b bulk-set applies ALL settings in ONE batch → ONE App Service restart cycle. NO manual `az webapp config appsettings set` single-setting fixes in production.
-- Nightly `IOptions-inventory-drift` ArchTest (planned task 203-followup) catches drift between BFF DI + manifest.
+- `tests/Spaarke.ArchTests/IOptionsDriftTests.cs` (task 204e) fails the PR when a `ValidateOnStart` options type demands a key no stamp channel writes. Per-PR, not nightly. Checklist: `bff-extensions.md` §F.5.
 
 Full mechanic: `.claude/patterns/provisioning/progressive-fail-fast-recovery.md`.
+- An `Exempt` census row names its `Gate`; `IOptionsDriftTests` fails when a stamp channel writes that gate without the demanded key (T258). The BFF's H0.5 consent callback is such a gate (`Onboarding:Enabled`, off on every stamp).
 
 ## Reserved-suffix registry for global-namespace resources
 

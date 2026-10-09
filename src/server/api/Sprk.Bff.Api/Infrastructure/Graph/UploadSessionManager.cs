@@ -14,12 +14,22 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 public class UploadSessionManager
 {
     private readonly IGraphClientFactory _factory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<UploadSessionManager> _logger;
 
-    public UploadSessionManager(IGraphClientFactory factory, IHttpClientFactory httpClientFactory, ILogger<UploadSessionManager> logger)
+    /// <remarks>
+    /// The app-only upload gets its Graph client from <see cref="SpeContainerOwnershipGuard"/>, which refuses a
+    /// drive this stamp does not own before Graph is called (task 227d). OBO uploads are isolated by Graph.
+    /// </remarks>
+    public UploadSessionManager(
+        IGraphClientFactory factory,
+        SpeContainerOwnershipGuard ownership,
+        IHttpClientFactory httpClientFactory,
+        ILogger<UploadSessionManager> logger)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -134,7 +144,11 @@ public class UploadSessionManager
         _logger.LogInformation("Uploading small file to drive {DriveId} at path {Path} (app-only)",
             driveId, path);
 
-        return await UploadSmallCoreAsync(_factory.ForApp(), driveId, path, content, conflictBehavior, ct)
+        // Ownership before the core's try: a refusal is a 404 spe_container_not_owned, never swallowed into a null
+        // result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
+        return await UploadSmallCoreAsync(graphClient, driveId, path, content, conflictBehavior, ct)
             .ConfigureAwait(false);
     }
 
@@ -161,7 +175,8 @@ public class UploadSessionManager
 
     /// <summary>
     /// Small upload as the CALLER (OBO), keeping the historical <see cref="ConflictBehavior.Replace"/>. ONLY for the
-    /// STAGING writes (chat persist, chat Word export, workspace pre-fill): their container comes from configuration
+    /// STAGING writes (chat persist, chat Word export; workspace pre-fill extracts in memory since
+    /// customer-provisioning-orchestration-r1 task 227f): their container comes from configuration
     /// and their filters only check identity, so the user's own SPE write right on the staging container is the only
     /// population check. Converting them to app-only would let every signed-in user write there — task 171
     /// escalation trigger 2, reported to the owner, not converted. Every record-backed upload is app-only above.
@@ -405,7 +420,10 @@ public class UploadSessionManager
         if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
         if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
 
-        return await ReplaceFileContentCoreAsync(_factory.ForApp(), driveId, itemId, content, ifMatch, ct)
+        // Ownership before the core's try (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
+        return await ReplaceFileContentCoreAsync(graphClient, driveId, itemId, content, ifMatch, ct)
             .ConfigureAwait(false);
     }
 
@@ -600,10 +618,11 @@ public class UploadSessionManager
         ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never swallowed (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             // Create upload session request
             var uploadSessionRequest = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody
             {

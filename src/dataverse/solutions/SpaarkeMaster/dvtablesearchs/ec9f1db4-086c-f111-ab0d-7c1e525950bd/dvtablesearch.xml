@@ -1,0 +1,11 @@
+<dvtablesearch dvtablesearchid="ec9f1db4-086c-f111-ab0d-7c1e525950bd">
+  <appmoduleuniquename>sprk_SpaarkeAISetup</appmoduleuniquename>
+  <iscustomizable>1</iscustomizable>
+  <m365appmoduleid>
+    <uniquename>sprk_SpaarkeAISetup</uniquename>
+  </m365appmoduleid>
+  <name>M365_Primary_model_sprk_SpaarkeAISetup</name>
+  <searchtype>0</searchtype>
+  <statecode>1</statecode>
+  <statuscode>2</statuscode>
+</dvtablesearch>

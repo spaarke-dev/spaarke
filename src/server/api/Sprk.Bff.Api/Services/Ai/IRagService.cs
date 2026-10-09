@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// 4. Return ranked results with context
 ///
 /// Integrates with IKnowledgeDeploymentService for multi-tenant index routing.
-/// Supports 3 deployment models: Shared, Dedicated, CustomerOwned.
+/// Supports 2 deployment models: Shared and Dedicated.
 /// </remarks>
 public interface IRagService
 {

@@ -18,13 +18,13 @@ public static class BulkAppSettingsRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing.</summary>
     public const string MissingSubscriptionId = "h4b-missing-subscription-id";
 
-    /// <summary><c>InterStepState.KeyVaultName</c> (H2a output) missing — needed for the generated script's -VaultName arg.</summary>
+    /// <summary><c>InterStepState.KeyVaultName</c> (H2a output) missing — the vault H4b's Key Vault references name.</summary>
     public const string MissingKeyVaultName = "h4b-missing-kv-name";
 
-    /// <summary><c>InterStepState.ResourceGroupName</c> (H2a output) missing — needed for the generated script's -ResourceGroupName arg.</summary>
+    /// <summary><c>InterStepState.ResourceGroupName</c> (H2a output) missing — the BFF App Service's resource group.</summary>
     public const string MissingResourceGroupName = "h4b-missing-resource-group";
 
-    /// <summary><c>InterStepState.AppServiceName</c> (H2a output) missing — needed for the generated script's -AppServiceName arg + /healthz probe URL.</summary>
+    /// <summary><c>InterStepState.AppServiceName</c> (H2a output) missing — the App Service H4b writes + its /healthz probe URL.</summary>
     public const string MissingAppServiceName = "h4b-missing-app-service-name";
 
 
@@ -47,10 +47,11 @@ public static class BulkAppSettingsRejectionCodes
     public const string PerEnvInputMissing = "h4b-per-env-input-missing";
 
     /// <summary>
-    /// The generated Configure-AppServiceSettings.generated.ps1 shelled call
-    /// returned a non-zero exit code. Resumable — writes are transactional per
-    /// batched call; operator resolves the underlying cause + resumes. Diagnostic
-    /// carries redacted stdout/stderr tail.
+    /// ARM refused (or could not be reached for) the app-settings merge on the
+    /// production site or the staging slot (task 253 — formerly a non-zero exit
+    /// of the generated Configure script). Resumable — the merge is idempotent,
+    /// so a re-run converges once the cause is fixed. Diagnostic names the slot
+    /// and the ARM error, never a setting value.
     /// </summary>
     public const string AppSettingsWriteFailed = "h4b-appsettings-write-failed";
 

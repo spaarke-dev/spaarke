@@ -59,6 +59,10 @@ public static class DocumentsModule
         // given the UNCACHED DataverseAccessDataSource (registered by AddSpaarkeCore), never the 60-second
         // CachedAccessDataSource that IAccessDataSource resolves to: a Write answer cached just before Make Secure must not
         // make a non-writer's edit current. (The relocator also refuses any answer older than its question.)
+        // Task 171 attach fix: who an app-only upload was made for (the record-keyed / record-less upload routes record it,
+        // the pointer attach consumes it). Singleton over the singleton ITenantCache; UNCONDITIONAL like its callers.
+        services.AddSingleton<Sprk.Bff.Api.Services.Documents.UploadAttribution>();
+
         services.AddScoped(sp => ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(
             sp, sp.GetRequiredService<Spaarke.Dataverse.DataverseAccessDataSource>()));
 

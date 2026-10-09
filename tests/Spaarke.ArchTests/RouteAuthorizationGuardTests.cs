@@ -2477,8 +2477,7 @@ public partial class RouteAuthorizationGuardTests
                      "PATCH /api/ai/chat/sessions/{sessionId}/tabs",
                      "GET /healthz",                                              // MapHealthChecks
                      "GET /healthz/catalog",
-                     "GET /api/diagnostics/tenant-container-resolver",            // const path
-                     "POST /api/onboarding/consent-callback",
+                     "POST /api/onboarding/consent-callback",                     // const path
                      "GET /api/spe/configs/{configId:guid}",                      // aggregator, extension form + nested group
                      "GET /api/spe/containers/{containerId}",                     // aggregator, static form
                      "POST /api/compose/upload",
@@ -6325,11 +6324,14 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(UnusedEntryViolations(used, CreditedForms.Select(c => c.Form)));
     }
 
-    [Fact(DisplayName = "Task 167 controls: admin credit is exactly four mechanisms, and the admin pin fires both ways")]
-    public void Admin_NegativeControl_PinFiresAndOnlyFourMechanismsCount()
+    [Fact(DisplayName = "Task 167 controls: admin credit is exactly five mechanisms, and the admin pin fires both ways")]
+    public void Admin_NegativeControl_PinFiresAndOnlyFiveMechanismsCount()
     {
+        // Five since customer-provisioning task 230b added AddKeylessProofAuthorizationFilter (an application role on
+        // an app-only token, held only by the L2 Worker identity). A sixth needs the same review.
         Assert.Equal(new[]
         {
+            "AddKeylessProofAuthorizationFilter",
             "AddRegistrationAuthorizationFilter", "AddSpeAdminAuthorizationFilter",
             "RequireAuthorization(\"SystemAdmin\")", "RequireAuthorization(AuthPolicies.RagApiKey)",
         }, AdminMechanisms.Select(a => a.Form).OrderBy(f => f, StringComparer.Ordinal));

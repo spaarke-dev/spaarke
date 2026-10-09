@@ -51,7 +51,7 @@ Azure SignalR **Serverless** mode, hosted in the BFF (FR-01 spike: +0.30 MB, 0 n
 |---|---|
 | `Services/Notifications/SignalRDeliveryService.cs` | `PingUserAsync(outboxRowId, recipientSystemUserId, kind)` (virtual; outbox-before-ping structural) · `PingGroupAsync`. Signal-only. ADR-032 null-object when SignalR disabled. |
 | `Api/Notifications/NotificationsEndpoints.cs` | `POST /api/notifications/negotiate` (oid-scoped token from JWT) · `GET /api/notifications/pending[?kind=]` (oid-scoped, expiry-filtered; the poll fallback AND the re-fetch surface) · `POST /api/notifications/{outboxRowId:guid}/dismiss` (owner-scoped; stamps `sprk_dismissed` on ONE of the caller's own pending rows; 404 on not-owned/already-dismissed — ADR-028 no cross-user writes). |
-| `Services/Identity/SystemUserIdentityResolver.cs` (`ISystemUserIdentityResolver`) | systemuserid ↔ oid (cached, fail-open) + `IsExternalAsync` (authoritative `sprk_isexternal`, fail-closed). Producers key by systemuserid; SignalR resolves oid internally. |
+| `Services/Identity/SystemUserIdentityResolver.cs` (`ISystemUserIdentityResolver`) | systemuserid ↔ oid (cached, fail-open) + `IsExternalAsync` (authoritative `sprk_isexternal`: only a stored true is external, a blank flag is internal — task 114, owner round 67; an unknown user is external, fail-closed). Producers key by systemuserid; SignalR resolves oid internally. |
 | `@spaarke/notifications` (`src/client/shared/Spaarke.Notifications/`) | `NotificationsClient` (negotiate → connect → kind-route → poll fallback) · `types.ts` (wire mirrors) · `negotiate.ts` · `kindRouter.ts` · `pollFallback.ts`. The ONE client, host-agnostic. |
 
 ### Layer D — per-source producers (grounding + gating; NEVER in the spine)
@@ -64,7 +64,7 @@ Each producer owns its judgment and writes to Layer B. Fan-out targeting derives
 | `Services/Communication/CommunicationRuleGate.cs` (041) | — (policy) | Reads `sprk_communicationrule`; authorize ⇔ confidence ≥ threshold; privilege FLAGGED never auto-decided (ADR-015); fail-closed DENY. |
 | `Services/Communication/CommunicationRiActionService.cs` (042) | `communication-assessed` action | On authorize: Layer-A `CreateTaskAsync` → outbox → ping → appnotification mirror. Non-fatal. |
 | `Services/Ai/Narrators/DailyBriefingSuggestionProducer.cs` (050) | `suggestion` | Sibling of the narrator (Null peer). Grounding (ADR-039) + proactive gate (ADR-041, `SuggestionGateOptions`, deny-by-default). |
-| `Services/Communication/CommunicationFanOutTargetingService.cs` (023) | — (targeting) | Recipients from `sprk_communication`/thread + `sprk_communicationparticipant` + access filter; **fail-closes to zero** without the authoritative `sprk_isexternal` flag. |
+| `Services/Communication/CommunicationFanOutTargetingService.cs` (023) | — (targeting) | Recipients from `sprk_communication`/thread + `sprk_communicationparticipant` + access filter; internal-only content excludes a user whose authoritative `sprk_isexternal` is true (blank = internal since task 114) or who cannot be resolved (fail-closed). |
 
 ### Consumers (current reality — corrected 2026-08-20)
 

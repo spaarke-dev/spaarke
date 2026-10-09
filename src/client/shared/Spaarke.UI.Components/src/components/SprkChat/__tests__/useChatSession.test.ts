@@ -12,6 +12,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useChatSession } from '../hooks/useChatSession';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -32,15 +33,17 @@ function createFetchResponse(body: unknown, status = 200): Response {
 
 // Test-only authenticatedFetch impl — wraps the mocked global fetch and
 // attaches a fixed Bearer header, the same surface real authenticatedFetch
-// presents to caller hooks.
-const mockAuthenticatedFetch = (url: string, init?: RequestInit) =>
+// presents to caller hooks: like it, a non-2xx is THROWN (AuthError for 401,
+// ApiError otherwise), never returned.
+const mockAuthenticatedFetch = throwingAuthenticatedFetch((url: string, init?: RequestInit) =>
   mockFetch(url, {
     ...init,
     headers: {
       ...(init?.headers ?? {}),
       Authorization: 'Bearer test-token',
     },
-  });
+  })
+);
 
 const DEFAULT_OPTIONS = {
   apiBaseUrl: 'https://api.example.com',
@@ -211,6 +214,36 @@ describe('useChatSession', () => {
       });
 
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('reports staleSession when the server no longer has the session (404 thrown as ApiError)', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('expired-session'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({ title: 'Not Found', status: 404 }, 404));
+
+      let outcome: { ok: boolean; staleSession?: boolean } | undefined;
+      await act(async () => {
+        outcome = await result.current.loadHistory();
+      });
+
+      expect(outcome).toEqual({ ok: false, staleSession: true });
+      // A stale session is a signal for the host, not an error to show.
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it('reports a non-404 failure as an error, not a stale session', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({ title: 'Server error', status: 500 }, 500));
+
+      let outcome: { ok: boolean; staleSession?: boolean } | undefined;
+      await act(async () => {
+        outcome = await result.current.loadHistory();
+      });
+
+      expect(outcome).toEqual({ ok: false });
+      expect(result.current.error).not.toBeNull();
     });
   });
 

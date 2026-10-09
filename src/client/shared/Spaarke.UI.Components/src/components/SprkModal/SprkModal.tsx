@@ -4,6 +4,7 @@ import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-ico
 import { ModalWindowControls } from '../ModalWindowControls/ModalWindowControls';
 import { ModalScrollArea } from './ModalScrollArea';
 import { getSurfaceStyle, SIZE_SPEC, type SprkModalSize, type SprkModalLayout } from './sizes';
+import { useSidePaneLayering } from './sidePaneLayering';
 import type { SprkModalProps } from './SprkModal.types';
 
 export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProps } from './SprkModal.types';
@@ -31,6 +32,26 @@ export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProp
 // Monotonic id source for the title's `aria-labelledby` wiring. NOT `React.useId`
 // — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
 let sprkModalTitleIdCounter = 0;
+
+// Room left at the right edge for the platform's lookup side pane while
+// `yieldToSidePane` is on: at least the pane's width, more on wide windows.
+const SIDE_PANE_CLEARANCE = 'max(440px, 34vw)';
+// Dimmed and click-through while yielding, wherever the modal sits.
+const SIDE_PANE_DIM_STYLE: React.CSSProperties = {
+  // `filter`, not `opacity`: newer Fluent animates the surface's opacity with a persisted Web Animation, which
+  // overrides an inline opacity. Brightness, not opacity: the surface stays solid (owner test 2026-10-07 — a
+  // see-through modal let the form's text show through it). Works in light and dark themes. Pointer input is
+  // blocked here; keyboard focus is blocked by `inert` (see below).
+  filter: 'brightness(0.75)',
+  pointerEvents: 'none',
+};
+// The fallback when the lookup pane cannot be placed above the modal: dock left of it.
+const SIDE_PANE_DOCK_STYLE: React.CSSProperties = {
+  ...SIDE_PANE_DIM_STYLE,
+  marginLeft: 'auto',
+  marginRight: SIDE_PANE_CLEARANCE,
+  maxWidth: `calc(100vw - ${SIDE_PANE_CLEARANCE} - 16px)`,
+};
 
 const useStyles = makeStyles({
   surface: {
@@ -129,6 +150,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   dismiss = 'light',
   nonBlocking = false,
   hidden = false,
+  yieldToSidePane = false,
   uiScale = 1,
   maximizable = true,
   nav,
@@ -145,19 +167,59 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
   // so the auto-wiring DialogTitle provides must be supplied here explicitly.
   const [titleId] = React.useState(() => `sprk-modal-title-${++sprkModalTitleIdCounter}`);
+  const surfaceRef = React.useRef<HTMLDivElement>(null);
+
+  // While yielding to a side pane the surface is `inert`: Tab and Enter cannot reach Save / Cancel / × behind the
+  // lookup (pointer-events alone blocks only the mouse). Set as a DOM attribute — React 16/17 do not know `inert`.
+  const surfaceInert = yieldToSidePane && !hidden;
+  React.useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    if (surfaceInert) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [surfaceInert, open]);
+  // Owner test 2026-10-07: the lookup pane opens ON TOP of the modal when it can be layered above it; else dock left.
+  const layering = useSidePaneLayering(surfaceInert && open, surfaceRef);
 
   React.useEffect(() => {
     if (!open) setMaximized(false);
   }, [open]);
 
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
-  const surfaceStyle = getSurfaceStyle(effectiveSize, uiScale);
+  const surfaceStyle: React.CSSProperties = getSurfaceStyle(effectiveSize, uiScale);
   const effectiveLayout: SprkModalLayout = layout ?? SIZE_SPEC[size].layout;
   // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
   // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened
   // over the modal stays interactive (see `nonBlocking` prop doc).
   const modalType = dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
   const hasFooter = Boolean(footer || footerStart);
+
+  // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
+  // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
+  // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
+  const handleNavigate = (dir: 'prev' | 'next') => {
+    if (!nav) return;
+    const guard = nav.onBeforeNavigate;
+    if (!guard) {
+      nav.onNavigate(dir);
+      return;
+    }
+    const reportGuardFailure = (err: unknown) =>
+      console.warn(`[SprkModal] nav.onBeforeNavigate failed for '${dir}'; navigation blocked.`, err);
+    let verdict: boolean | Promise<boolean>;
+    try {
+      verdict = guard(dir);
+    } catch (err) {
+      reportGuardFailure(err);
+      return;
+    }
+    void Promise.resolve(verdict).then(
+      allowed => {
+        if (allowed) nav.onNavigate(dir);
+      },
+      reportGuardFailure
+    );
+  };
 
   return (
     <Dialog
@@ -170,10 +232,18 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       }}
     >
       <DialogSurface
+        ref={surfaceRef}
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
         // `hidden` keeps the surface mounted (state preserved) but out of the way
-        // of a page-level native lookup pane — see the `hidden` prop doc.
-        style={hidden ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' } : surfaceStyle}
+        // of a page-level native lookup pane; `yieldToSidePane` keeps it visible
+        // and dimmed, under the pane or docked left of it — see the two prop docs.
+        style={
+          hidden
+            ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' }
+            : yieldToSidePane
+              ? { ...surfaceStyle, ...(layering === 'dock' ? SIDE_PANE_DOCK_STYLE : SIDE_PANE_DIM_STYLE) }
+              : surfaceStyle
+        }
         aria-labelledby={titleId}
       >
         <div className={styles.header}>
@@ -186,7 +256,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     size="small"
                     icon={<ChevronLeft20Regular />}
                     disabled={nav.index <= 0}
-                    onClick={() => nav.onNavigate('prev')}
+                    onClick={() => handleNavigate('prev')}
                     aria-label="Previous record"
                   />
                 </Tooltip>
@@ -199,7 +269,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     size="small"
                     icon={<ChevronRight20Regular />}
                     disabled={nav.index >= nav.total - 1}
-                    onClick={() => nav.onNavigate('next')}
+                    onClick={() => handleNavigate('next')}
                     aria-label="Next record"
                   />
                 </Tooltip>

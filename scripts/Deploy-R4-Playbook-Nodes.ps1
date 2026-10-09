@@ -41,6 +41,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# RETIRED (ISS-018, #1452). This script can no longer run correctly: it writes sprk_nodetype, a column dropped
+# before R7 (every POST fails), and it only CREATES node rows, so a re-run against a playbook that already has nodes
+# would duplicate them. Use scripts/Deploy-NotificationPlaybooks.ps1, which updates existing node rows in place by
+# name, lints the FetchXML (lint C) and reads every node back. Kept, not deleted, pending the owner's decision.
+throw 'Deploy-R4-Playbook-Nodes.ps1 is retired (ISS-018): use scripts/Deploy-NotificationPlaybooks.ps1 -DataverseUrl <url> [-DryRun].'
+
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 
 # Action codes (resolved 2026-06-26 via MCP audit)

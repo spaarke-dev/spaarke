@@ -580,7 +580,9 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run-markdown != 'false' }}
     continue-on-error: true
-    timeout-minutes: 2
+    # 5, not 2 (2026-10-09): checkout of the ~23.6k-file tree + the 604-file scan takes ~2m15s, so a 2-minute budget
+    # killed the job during its report step and the check read CANCELLED on many PRs (e.g. #1502, #1495, #1496).
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:

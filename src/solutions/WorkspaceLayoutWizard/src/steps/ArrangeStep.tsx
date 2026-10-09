@@ -354,7 +354,7 @@ const useStyles = makeStyles({
     flexDirection: "column",
     gap: "6px",
   },
-  // FR-02 (task 011) — per-row settings header (row-height dropdown + tooltip).
+  // FR-02 (task 011) — per-row settings header ("Row N" + Advanced gears; row-height dropdown is in the popover).
   // 2026-07-03 (R2-followup-1 §2.1): added light-grey background + padding for
   // visual separation between rows during authoring per UAT feedback.
   rowSettingsHeader: {
@@ -827,7 +827,9 @@ const UnassignedSectionCard: React.FC<{
 // ---------------------------------------------------------------------------
 // RowHeightControl — per-row settings header (FR-02 / task 011)
 //
-// Fluent v9 Dropdown with 5 presets + "Custom…" + tooltip. When "Custom…" is
+// Fluent v9 Dropdown with 5 presets + "Custom…" (the help tooltip was removed in
+// the R2 UAT rework, 803c77ace1; the control now lives in the Advanced popover as
+// RowHeightPopoverField). When "Custom…" is
 // selected, a Fluent v9 Input for arbitrary CSS length is revealed. All
 // colors use semantic tokens (ADR-021) for dark-mode compliance.
 // ---------------------------------------------------------------------------
@@ -1905,8 +1907,9 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
           return (
           <div key={row.id} className={classes.rowGroup}>
             {/*
-              FR-02 (task 011) — Per-row settings header. Fluent v9 Dropdown
-              for `rowHeight` (Auto/40vh/60vh/80vh/100vh/Custom…) + tooltip.
+              FR-02 (task 011) — Per-row settings header ("Row N" + Advanced gears).
+              The Fluent v9 `rowHeight` Dropdown (Auto/40vh/60vh/80vh/100vh/Custom…)
+              lives inside each gear's popover (RowHeightPopoverField).
               Selected value wires through to `LayoutJsonRow.rowHeight` in the
               wizard's JSON output via App.tsx.
             */}
@@ -1914,9 +1917,10 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
               rowIndex={rowIdx}
               // R2 UAT §2.2 round 4 (2026-07-03): row header shows only "Row N"
               // on the left + right-aligned Advanced gears (one per filled
-              // section). The row-height dropdown and the help tooltip are
-              // moved INTO the Advanced popover so operators find every row +
-              // section setting in one compact surface.
+              // section). The row-height dropdown is moved INTO the Advanced
+              // popover so operators find every row + section setting in one
+              // compact surface. (The row-height help tooltip was removed in
+              // 803c77ace1 and is not rendered anywhere.)
               rightSlot={
                 <>
                   {Array.from({ length: row.slotCount }, (_, colIdx) => {

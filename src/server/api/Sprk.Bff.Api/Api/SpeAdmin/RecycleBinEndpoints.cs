@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -238,7 +239,7 @@ public static class RecycleBinEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -360,7 +361,7 @@ public static class RecycleBinEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -484,7 +485,7 @@ public static class RecycleBinEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -552,7 +553,7 @@ public static class RecycleBinEndpoints
             return LogAndMapStorageException(
                 ex, logger, context, "ListRecycleBinItems", containerId, configGuid);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -663,7 +664,7 @@ public static class RecycleBinEndpoints
             return LogAndMapStorageException(
                 ex, logger, context, "RestoreRecycleBinItems", containerId, configGuid);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -753,7 +754,7 @@ public static class RecycleBinEndpoints
             return LogAndMapStorageException(
                 ex, logger, context, "PermanentDeleteRecycleBinItems", containerId, configGuid);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,

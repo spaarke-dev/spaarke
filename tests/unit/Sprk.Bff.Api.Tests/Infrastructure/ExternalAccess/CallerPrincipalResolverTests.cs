@@ -335,6 +335,8 @@ public class CallerPrincipalResolverTests
             new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
             NeverDeniesReader(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             Mock.Of<ILogger<AccessibleRecordSetService>>());
 
         var strategy = new CiamContactPrincipalStrategy(
@@ -531,7 +533,8 @@ public class CallerPrincipalResolverTests
             new ConfigurationBuilder().Build(),
             Mock.Of<Azure.Core.TokenCredential>(),
             Mock.Of<IHttpContextAccessor>(),
-            Mock.Of<ILogger<ExternalParticipationService>>());
+            Mock.Of<ILogger<ExternalParticipationService>>(),
+            AccessibleRecordSetTestFactory.NoFilingEntities());
 
     /// <summary>A strategy stub that records whether it was invoked (for plane-routing tests).</summary>
     private sealed class StubStrategy : ICallerPrincipalStrategy

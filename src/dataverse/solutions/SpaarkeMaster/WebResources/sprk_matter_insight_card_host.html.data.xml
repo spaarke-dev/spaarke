@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{d51b8b27-8b65-f111-ab0c-70a8a590c51c}</WebResourceId>
+  <Name>sprk_matter_insight_card_host.html</Name>
+  <DisplayName>Matter Insight - Card Host (iframe)</DisplayName>
+  <Description>Task 043. Iframe-scope mount target + Phase 4 staging placeholder. Hosts React bundle when shipped.</Description>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_matter_insight_card_hosthtmlD51B8B27-8B65-F111-AB0C-70A8A590C51C</FileName>
+</WebResource>

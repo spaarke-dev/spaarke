@@ -5,19 +5,27 @@
  */
 import { renderHook, act } from '@testing-library/react-hooks';
 import { useFilters } from '../../hooks/useFilters';
+import type { SearchFilters } from '../../types';
+
+/**
+ * Initial state per useFilters.ts: associatedOnly + a 50% similarity floor are the
+ * DEFAULTS (they match what a record-form subgrid shows), not "active filters".
+ */
+const DEFAULT_FILTERS: SearchFilters = {
+  documentTypes: [],
+  matterTypes: [],
+  dateRange: null,
+  fileTypes: [],
+  threshold: 50,
+  searchMode: 'hybrid',
+  associatedOnly: true,
+};
 
 describe('useFilters', () => {
-  it('should initialize with empty filters', () => {
+  it('should initialize with the default filters (associatedOnly, 50% threshold)', () => {
     const { result } = renderHook(() => useFilters());
 
-    expect(result.current.filters).toEqual({
-      documentTypes: [],
-      matterTypes: [],
-      dateRange: null,
-      fileTypes: [],
-      threshold: 0,
-      searchMode: 'hybrid',
-    });
+    expect(result.current.filters).toEqual(DEFAULT_FILTERS);
     expect(result.current.hasActiveFilters).toBe(false);
   });
 
@@ -92,24 +100,18 @@ describe('useFilters', () => {
         fileTypes: ['pdf'],
         threshold: 0,
         searchMode: 'hybrid',
+        associatedOnly: false,
       });
     });
 
     expect(result.current.hasActiveFilters).toBe(true);
 
-    // Clear filters
+    // Clear filters -> back to the defaults (NOT to threshold 0 / associatedOnly off)
     act(() => {
       result.current.clearFilters();
     });
 
-    expect(result.current.filters).toEqual({
-      documentTypes: [],
-      matterTypes: [],
-      dateRange: null,
-      fileTypes: [],
-      threshold: 0,
-      searchMode: 'hybrid',
-    });
+    expect(result.current.filters).toEqual(DEFAULT_FILTERS);
     expect(result.current.hasActiveFilters).toBe(false);
   });
 
@@ -119,16 +121,9 @@ describe('useFilters', () => {
     // Empty filters - not active
     expect(result.current.hasActiveFilters).toBe(false);
 
-    // With empty arrays - still not active
+    // With empty arrays and default threshold/associatedOnly - still not active
     act(() => {
-      result.current.setFilters({
-        documentTypes: [],
-        matterTypes: [],
-        dateRange: null,
-        fileTypes: [],
-        threshold: 0,
-        searchMode: 'hybrid',
-      });
+      result.current.setFilters({ ...DEFAULT_FILTERS });
     });
     expect(result.current.hasActiveFilters).toBe(false);
 
@@ -139,6 +134,26 @@ describe('useFilters', () => {
         documentTypes: ['contract'],
       });
     });
+    expect(result.current.hasActiveFilters).toBe(true);
+  });
+
+  it('should treat a non-default threshold as an active filter', () => {
+    const { result } = renderHook(() => useFilters());
+
+    act(() => {
+      result.current.setFilters({ ...result.current.filters, threshold: 0 });
+    });
+
+    expect(result.current.hasActiveFilters).toBe(true);
+  });
+
+  it('should treat turning associatedOnly off as an active filter', () => {
+    const { result } = renderHook(() => useFilters());
+
+    act(() => {
+      result.current.setFilters({ ...result.current.filters, associatedOnly: false });
+    });
+
     expect(result.current.hasActiveFilters).toBe(true);
   });
 });

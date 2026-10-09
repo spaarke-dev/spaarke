@@ -54,7 +54,8 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAi } from "../utils/launch-resolver";
-import { cleanGuid } from "@spaarke/ui-components";
+// Leaf deep import, not the barrel (ISS-014 / #1412): see scripts/build-ribbon.mjs.
+import { cleanGuid } from "@spaarke/ui-components/utils/guid";
 
 /**
  * Opens the SpaarkeAi modal directly into the "Create new analysis" hub, pre-seeded

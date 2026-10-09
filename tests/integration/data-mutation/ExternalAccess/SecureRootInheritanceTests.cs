@@ -445,7 +445,8 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", matter, Colleague, ExternalAccessLevel.Collaborate),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), users.Client,
+            scope.ServiceProvider.GetRequiredService<ExternalParticipationService>(), new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),

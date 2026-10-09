@@ -190,6 +190,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public Dictionary<Guid, (bool? IsDisabled, bool IsApplicationUser)> SystemUsers { get; } = new();
 
+    /// <summary>Task 114: users whose <c>sprk_isexternal</c> reads true (every other listed user reads blank).</summary>
+    public HashSet<Guid> ExternalUsers { get; } = new();
+
+    /// <summary>Task 114: records whose <c>sprk_accesspermission</c> reads Restricted (100000002).</summary>
+    public HashSet<Guid> RestrictedRecords { get; } = new();
+
     /// <summary>When false, a systemuser read by id throws (task 133: an unreadable createdby).</summary>
     public bool SystemUserByIdReadSucceeds { get; set; } = true;
 
@@ -691,6 +697,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         OwnerReadBackFails = false;
         SystemUsers.Clear();
         SystemUsers[CallerSystemUserId] = (false, false);
+        ExternalUsers.Clear();
+        RestrictedRecords.Clear();
         SystemUserByIdReadSucceeds = true;
         SystemUserReadFailsFor = null;
         SystemUserReadFailsWith = null;
@@ -1289,6 +1297,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                         ["sprk_issecure"] = SecureFlagReadsEmpty ? null : seeded.IsSecure
                     };
 
+                    if (RestrictedRecords.Contains(seeded.Id))
+                        row["sprk_accesspermission"] = 100000002;
+
                     if (seeded.LegacySecurityBuId is { } legacy)
                         row["_sprk_securitybu_value"] = legacy;
 
@@ -1474,7 +1485,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     {
                         ["systemuserid"] = userId,
                         ["isdisabled"] = isDisabled,
-                        ["applicationid"] = isApplicationUser ? Guid.Parse("a0000000-0000-0000-0000-0000000000a9") : null
+                        ["applicationid"] = isApplicationUser ? Guid.Parse("a0000000-0000-0000-0000-0000000000a9") : null,
+                        ["sprk_isexternal"] = ExternalUsers.Contains(userId) ? true : null
                     });
                 }
                 break;

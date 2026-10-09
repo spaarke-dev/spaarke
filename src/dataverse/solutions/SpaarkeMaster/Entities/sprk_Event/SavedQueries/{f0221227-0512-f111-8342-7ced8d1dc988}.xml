@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{f0221227-0512-f111-8342-7ced8d1dc988}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_eventname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_eventid">
+          <cell name="sprk_eventname" width="150" />
+          <cell name="sprk_eventtype_ref" width="104" />
+          <cell name="sprk_description" width="106" />
+          <cell name="sprk_eventstatus" width="111" />
+          <cell name="createdon" width="125" />
+          <cell name="ownerid" width="100" />
+          <cell name="sprk_regardingrecordname" width="150" />
+          <cell name="sprk_regardingrecordtype" width="174" />
+          <cell name="sprk_regardingrecordurl" width="100" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_event">
+          <attribute name="sprk_eventid" />
+          <attribute name="sprk_eventname" />
+          <attribute name="createdon" />
+          <attribute name="sprk_regardingrecordname" />
+          <attribute name="sprk_regardingrecordurl" />
+          <attribute name="sprk_eventtype_ref" />
+          <attribute name="ownerid" />
+          <attribute name="sprk_description" />
+          <attribute name="sprk_eventstatus" />
+          <order attribute="createdon" descending="true" />
+          <attribute name="sprk_regardingrecordtype" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Matter All Events" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

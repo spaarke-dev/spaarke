@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{c9e6956d-6974-f011-b4cb-6045bdd6a665}</WebResourceId>
+  <Name>sprk_SPRK_Matter_FolderOpen</Name>
+  <DisplayName>SPRK Matter FolderOpen</DisplayName>
+  <Description>Icon used for Matter entity</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_SPRK_Matter_FolderOpenC9E6956D-6974-F011-B4CB-6045BDD6A665</FileName>
+</WebResource>
