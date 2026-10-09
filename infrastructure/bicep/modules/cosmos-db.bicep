@@ -51,8 +51,10 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     ]
     // SecuredByPerimeter in production; Enabled for dev (App Service needs public endpoint)
     publicNetworkAccess: 'Enabled'
-    // RBAC-only data plane access (no master keys used by application code)
-    disableLocalAuth: false
+    // Keyless (owner D13, task 244 — Cosmos added by the owner 2026-10-06): data-plane RBAC only. Master keys are
+    // rejected; the BFF connects with its UAMI (CosmosClientBuilder(endpoint, credential), AiPersistenceModule) and
+    // holds Cosmos DB Built-in Data Contributor via sqlRoleAssignments below.
+    disableLocalAuth: true
     // TLS 1.2+ enforced
     minimalTlsVersion: 'Tls12'
     backupPolicy: {
@@ -348,7 +350,7 @@ resource cosmosRbac 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@20
 
 // Canonical Phase-C grant per task 030 + ADR-028: UAMI is granted Cosmos DB Built-in Data
 // Contributor via `sqlRoleAssignments` (data-plane RBAC — the ONLY way Cosmos accepts
-// DefaultAzureCredential-backed reads/writes on a NoSQL account with `disableLocalAuth: false`).
+// DefaultAzureCredential-backed reads/writes; since task 244 the account sets `disableLocalAuth: true`, so it is the only way in).
 // Idempotent guid() name. This grant does NOT show up in `az role assignment list` — verify
 // with `az cosmosdb sql role assignment list --account-name <name> --resource-group <rg>`.
 // NOTE (per POML escalation trigger): Cosmos data-plane RBAC has a 5-15 min propagation

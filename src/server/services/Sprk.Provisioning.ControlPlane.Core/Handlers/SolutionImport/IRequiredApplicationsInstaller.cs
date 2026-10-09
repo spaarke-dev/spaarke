@@ -8,7 +8,7 @@
 // import fails 5 min in with 1 unresolved MissingDependency. This seam
 // gates H6 on a pre-install of required Power Platform applications
 // (canonical list: msft_PowerBI_Anchor for R1) BEFORE
-// CanonicalSolutionCatalog resolves.
+// package import starts.
 //
 // PRODUCTION IMPL:
 //   <see cref="PacRequiredApplicationsInstaller"/> shells out to

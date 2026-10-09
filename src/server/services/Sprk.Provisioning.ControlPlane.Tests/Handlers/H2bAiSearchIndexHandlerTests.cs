@@ -27,6 +27,8 @@
 //   T8  Retired index (spaarke-knowledge-index-v2 lineage) — same.
 //   T9  Provisioner returns Failure: Failure(QuarantineRequired,
 //       index-provisioning-failed).
+//   T9b Provisioner returns Failure with AccessDenied (HTTP 401/403 — Search roles
+//       not yet applied, task 244): Failure(Resumable, search-access-denied).
 //   T10 Verifier reports InvariantViolation: Failure(QuarantineRequired,
 //       index-invariant-violation) + diagnostic cites failing index.field.
 //   T11 Verifier reports Missing (post-provisioner drift):
@@ -270,6 +272,24 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    [Fact]
+    public async Task ProvisionerAccessDenied_FailsResumable_NotQuarantined()
+    {
+        var run = BuildRun(tenancyModel: "Model2");
+        var repo = new FakeRepository(run, etag: "etag-9b");
+        var provisioner = FakeAiSearchIndexProvisioner.AccessDenied(
+            "PUT index 'spaarke-files-index' returned HTTP 403: Forbidden");
+        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(), provisioner, FakeAiSearchIndexVerifier.Ok());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.SearchAccessDenied);
+        failure.Diagnostic.Should().Contain("403").And.Contain("resume");
+        repo.LastWrittenRun!.Status.Should().NotBe(RunStatus.Quarantined);
+    }
+
     // ---------- T10 verifier reports InvariantViolation ----------
 
     [Fact]
@@ -494,6 +514,9 @@ public sealed class H2bAiSearchIndexHandlerTests
 
         public static FakeAiSearchIndexProvisioner Failure(string diagnostic)
             => new(new AiSearchIndexProvisionOutcome.Failure(diagnostic));
+
+        public static FakeAiSearchIndexProvisioner AccessDenied(string diagnostic)
+            => new(new AiSearchIndexProvisionOutcome.Failure(diagnostic, AccessDenied: true));
 
         public Task<AiSearchIndexProvisionOutcome> ProvisionAsync(
             AiSearchIndexProvisionRequest request, CancellationToken ct)

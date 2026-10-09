@@ -161,7 +161,7 @@ public sealed class ProvisioningRunProductionSerializerTests
             RunId = "11111111-1111-1111-1111-111111111111",
             CustomerId = "acme",
             EnvironmentId = "22222222-2222-2222-2222-222222222222",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model1",   // pairs with spaarke-hosted-model2 (T225b)
             Status = RunStatus.WaitingOnGate,
             CurrentPhase = "H8",
             Profile = "spaarke-hosted-model2",
@@ -222,7 +222,7 @@ public sealed class ProvisioningRunProductionSerializerTests
         s.SystemUserId = "su";
         s.BffAppRegSystemUserId = "bsu";
         s.SpeConsentCorrelationId = "corr";
-        s.ImportedSolutions = new List<ImportedSolutionRecord> { new("Spaarke.Core", "1.0.0.0", "sol-id", 1) };
+        s.ImportedSolutions = new List<ImportedSolutionRecord> { new("SpaarkeMaster", "1.0.0.0", "sol-id", true) };
         s.ResourceGroupName = "rg-acme";
         s.AppServiceName = "app-acme";
         s.AppServiceStagingSlotName = "staging";

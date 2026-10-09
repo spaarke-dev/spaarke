@@ -340,6 +340,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (IsReservedOutputVariable(node.OutputVariable))
+                {
+                    errors.Add($"Node '{node.Name}' uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification)");
+                }
+
                 // Check output variable is unique
                 var duplicateOutputs = nodes
                     .Where(n => n.Id != node.Id && n.OutputVariable == node.OutputVariable)
@@ -1078,6 +1083,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
 
                 EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
+                return errorOutput;
+            }
+
+            // ISS-018 (#1452): `item` is reserved for the executor-scoped root CreateNotification binds per item. A node
+            // whose output were named `item` would put `item` into every later Layer 1 context, so Layer 1 would render
+            // CreateNotification's per-item templates early again (blank titles, null regardingId). Refuse the name.
+            if (IsReservedOutputVariable(node.OutputVariable))
+            {
+                var errorMsg = $"Node '{node.Name}' (id={node.Id}) uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification); rename it.";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed");
 
                 return errorOutput;
             }
@@ -2441,8 +2463,20 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     return;
                 }
 
+                // ISS-018 (#1452, D-77): a template over an EXECUTOR-SCOPED root (`item`, bound only inside
+                // CreateNotification's own per-item loop over itemNotification) cannot render here: the root is not in
+                // the Layer 1 context, so it rendered empty or null BEFORE the loop ran (blank titles, a null
+                // regardingId that defeats dedup). Such a LEAF string is left verbatim for the executor, which renders
+                // it per item with the full context. Checked per leaf string (a nested-JSON wrapper string is rendered
+                // structurally below, so its other leaves still render), and only for the executor that binds the root.
                 if (IsPureTemplate(raw))
                 {
+                    if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                    {
+                        writer.WriteStringValue(raw);
+                        return;
+                    }
+
                     // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
                     // (`{{tldrResult}}`, `{{start.channels}}`, `{{distinct (concat …)}}`).
                     // The engine wraps with the `json` helper so the rendered output is
@@ -2492,6 +2526,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
                 var renderedString = templateEngine.Render(raw, context);
                 writer.WriteStringValue(renderedString);
                 return;
@@ -2505,6 +2545,66 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 element.WriteTo(writer);
                 return;
         }
+    }
+
+    /// <summary>
+    /// Template roots that only one executor binds, inside its own per-item loop (ISS-018, #1452): CreateNotification
+    /// binds <c>item</c> while iterating the upstream query's items (<c>itemNotification</c>). For that executor Layer 1
+    /// leaves a leaf string that uses the root verbatim, unless the render context binds it (a fan-out overlay whose
+    /// alias is <c>item</c>) or the string binds it itself (<c>{{#each xs as |item|}}</c>). Other executors render as before.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<ExecutorType, string[]> ExecutorScopedTemplateRoots =
+        new Dictionary<ExecutorType, string[]> { [ExecutorType.CreateNotification] = ["item"] };
+
+    /// <summary>
+    /// True when <paramref name="outputVariable"/> is an executor-scoped template root (<c>item</c>) — reserved, because a
+    /// node output with that name would bind the root in every later Layer 1 context (ISS-018).
+    /// </summary>
+    internal static bool IsReservedOutputVariable(string? outputVariable) =>
+        outputVariable is not null
+        && ExecutorScopedTemplateRoots.Values.Any(roots => roots.Contains(outputVariable.Trim(), StringComparer.Ordinal));
+
+    private static readonly System.Text.RegularExpressions.Regex MustacheExpression = new(
+        @"\{\{(.*?)\}\}",
+        System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// True when <paramref name="executorType"/> has executor-scoped roots and a Handlebars expression in
+    /// <paramref name="raw"/> uses one of them as a path root — <c>{{item.x}}</c>, <c>{{lookup item 'm.x'}}</c>,
+    /// <c>{{#if item.y}}</c>; not text inside quotes, not a later path segment like <c>{{q.item}}</c> — that neither
+    /// <paramref name="context"/> nor a block parameter in <paramref name="raw"/> binds.
+    /// </summary>
+    internal static bool ReferencesUnboundExecutorScope(
+        string raw, IReadOnlyDictionary<string, object?> context, ExecutorType? executorType)
+    {
+        if (executorType is not { } type || !ExecutorScopedTemplateRoots.TryGetValue(type, out var roots))
+        {
+            return false;
+        }
+
+        foreach (var root in roots)
+        {
+            // Static Regex.IsMatch uses the framework's pattern cache; the root list is tiny and fixed.
+            if (context.ContainsKey(root)
+                || System.Text.RegularExpressions.Regex.IsMatch(raw, @"\bas\s*\|[^|]*\b" + root + @"\b[^|]*\|"))
+            {
+                continue;
+            }
+
+            var rootPattern = @"(?<![\w.'""@/|])" + root + @"(?![\w'""|])";
+            foreach (System.Text.RegularExpressions.Match expression in MustacheExpression.Matches(raw))
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(StripQuoted(expression.Groups[1].Value), rootPattern))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+
+        static string StripQuoted(string expression) =>
+            System.Text.RegularExpressions.Regex.Replace(expression, @"'[^']*'|""[^""]*""", "''");
     }
 
     /// <summary>

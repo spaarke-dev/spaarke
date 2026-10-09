@@ -65,12 +65,11 @@
 //                       defects #4+#10) -- hosts the task 114/115 Exchange
 //                       sidecar image; AcrPull to the shared UAMI, AcrPush
 //                       to the CI OIDC principal.
-//   11. Subscription RBAC: Contributor for the shared UAMI at the deploying
-//                       subscription's scope (Wave G-8 Batch 2 / audit
-//                       defect #2) -- H2a's ArmDeploymentRunner needs it for
-//                       customer RG-ensure + subscription-scope ARM deploys
-//                       (via modules/controlplane-subscription-rbac.bicep;
-//                       BCP120 forces the module split -- see its header).
+//   11. (Removed by T228) Subscription RBAC on THIS subscription: stamps never
+//                       deploy here (D-12, ADR-027). The L2 UAMI's Owner grant
+//                       on each CUSTOMER subscription is an operator prerequisite
+//                       (PRQ-S-04: modules/controlplane-subscription-rbac.bicep,
+//                       deployed at that subscription).
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -184,6 +183,11 @@ param redisEndpoint string
 
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
+
+@description('Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c).')
+param preAuthorizedClientAppIds array = [
+  '1958aec2-0218-495e-8e3c-37133e9b8357'
+]
 
 
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
@@ -487,6 +491,7 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
     controlPlanePrincipalId: uami.outputs.principalId
     speContainerTypeOwners: speContainerTypeOwners
+    preAuthorizedClientAppIds: preAuthorizedClientAppIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
     // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
@@ -678,29 +683,6 @@ module acr 'modules/controlplane-acr.bicep' = {
 }
 
 // ============================================================================
-// 11. SUBSCRIPTION-SCOPE RBAC -- Contributor for the shared control-plane
-//     UAMI (Wave G-8 Batch 2 / audit defect #2)
-//
-//    H2a's ArmDeploymentRunner requires Contributor at subscription scope
-//    for customer RG-ensure + subscription-scope ARM deployments (its own
-//    error guidance, ArmDeploymentRunner.cs:162, says to verify exactly this
-//    grant -- but nothing ever made it). Declared via a dedicated
-//    subscription-scope module rather than inline because the role
-//    assignment's guid() NAME must be calculable at deployment start and the
-//    UAMI principalId is a runtime module output here (BCP120) -- inside the
-//    module it is a param, which is legal. Covers the DEPLOYING subscription;
-//    Model 2 stamps in foreign customer subscriptions need their own grant
-//    (see module header).
-// ============================================================================
-
-module subscriptionRbac 'modules/controlplane-subscription-rbac.bicep' = {
-  name: 'controlplane-subscription-rbac'
-  params: {
-    principalId: uami.outputs.principalId
-  }
-}
-
-// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -788,8 +770,3 @@ output artifactsBlobUri string = artifactsStorage.outputs.blobUri
 output acrName string = acr.outputs.acrName
 output acrId string = acr.outputs.resourceId
 output acrLoginServer string = acr.outputs.loginServer
-
-// Subscription-scope Contributor for the control-plane UAMI (Wave G-8
-// Batch 2 / audit defect #2) -- consumed by deploy-script post-deploy
-// `az role assignment list` verification.
-output subscriptionContributorRoleAssignmentName string = subscriptionRbac.outputs.contributorRoleAssignmentName

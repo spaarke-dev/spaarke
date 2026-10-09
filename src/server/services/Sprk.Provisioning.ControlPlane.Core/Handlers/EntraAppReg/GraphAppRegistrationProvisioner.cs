@@ -2,8 +2,7 @@
 // GraphAppRegistrationProvisioner.cs
 //
 // Task 130 (Wave G-3, xhigh) — production IEntraAppRegProvisioner. Ports the
-// retired PS script's (see RegisterEntraAppRegScriptProvisioner.cs's
-// retirement banner for the exact filename) 5-step app-registration
+// retired PS script's (scripts/Register-EntraAppRegistrations.ps1) 5-step app-registration
 // reconciler (create-or-get / signInAudience / identifierUri / exposed scope /
 // requiredResourceAccess / client secret) to Microsoft.Graph 6.5.0
 // (Applications / ServicePrincipals), and ADDS the Model 2 federated-
@@ -46,10 +45,9 @@
 //
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with the established project precedent for every other live-Graph/live-KV
-// collaborator (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator,
-// CreateNewContainerTypeScriptProvisioner, the retired
-// RegisterEntraAppRegScriptProvisioner — each documents this same posture in
-// its own file header). Handler unit tests (H3EntraAppRegHandlerTests)
+// collaborator (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator — each
+// documents this same posture in its own file header). The pure planners here
+// (PlanKeylessProofAppRoles, PlanClientAccess) ARE unit-tested. Handler unit tests (H3EntraAppRegHandlerTests)
 // substitute a fake IEntraAppRegProvisioner — that is the real coverage
 // surface for H3's orchestration logic. Live-Graph coverage belongs in
 // env-guarded smoke tests when a dedicated dev tenant is available.
@@ -78,6 +76,23 @@
 // spaarke-hosted-model2 + Model 1 (UAMI lives in Spaarke's subscription for
 // both — intra-Spaarke-tenant) OR the customer's own tenant for
 // customer-owned-model2 (UAMI lives in the customer's subscription).
+//
+// CLIENT ACCESS (T240a, 2026-10-07): H3 sets the app's spa.redirectUris to exactly the customer's Dataverse origin
+// (its code pages sign in through this app with redirectUri = window.location.origin) and its
+// api.preAuthorizedApplications to exactly the platform's shared clients on user_impersonation (Office add-in; the
+// Teams client later), so they get this BFF's token without a consent prompt. It only ever PATCHes this customer's own
+// app object; the client apps themselves are never touched. A second run with the same inputs sends no PATCH.
+//
+// KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
+// KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
+// the L2 Worker identity (ControlPlaneIdentityOptions.PrincipalObjectId) — the only caller of the
+// stamp BFF's POST /api/platform/keyless-proof, which H13 calls. Create, reconcile and assignment are
+// idempotent (the role is matched by value, the assignment by principal + role). L2 already holds the
+// Graph permissions this needs: it owns the app it created (Application.ReadWrite.OwnedBy is enough to
+// PATCH appRoles) and H10 already assigns app roles with AppRoleAssignment.ReadWrite.All. MODEL 2 GAP
+// (out of scope, owner 2026-09-30): a customer-owned-model2 app-reg lives in the customer's tenant,
+// where the Spaarke-tenant L2 identity has no service principal — the role is defined but not
+// assigned, and H13's keyless proof cannot authenticate there (recorded in task 230b's notes).
 // -----------------------------------------------------------------------------
 
 using Azure.Core;
@@ -87,6 +102,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
+using Spaarke.Contracts.Provisioning;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 
@@ -107,19 +123,27 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     /// <summary>Shared UAMI-pinned credential — used for KV writes only (see file-header KV WRITES note). Graph calls build a FRESH per-tenant credential (GOTCHA 1).</summary>
     private readonly TokenCredential _sharedCredential;
     private readonly EntraAppRegOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<GraphAppRegistrationProvisioner> _logger;
 
-    /// <summary>Constructs the production provisioner. <paramref name="sharedCredential"/> is L2's own platform UAMI-pinned credential (KV writes only).</summary>
+    /// <summary>
+    /// Constructs the production provisioner. <paramref name="sharedCredential"/> is L2's own platform UAMI-pinned
+    /// credential (KV writes only); <paramref name="identity"/> names that identity, which H3 assigns the keyless-proof
+    /// app role (task 230b).
+    /// </summary>
     public GraphAppRegistrationProvisioner(
         TokenCredential sharedCredential,
         IOptions<EntraAppRegOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<GraphAppRegistrationProvisioner> logger)
     {
         ArgumentNullException.ThrowIfNull(sharedCredential);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
         _sharedCredential = sharedCredential;
         _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -151,13 +175,36 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
 
         try
         {
-            // (1) Get-or-create the app-reg.
-            var app = await FindByDisplayNameAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
+            // (1) Get-or-create the app-reg. An existing one is adopted only when it is provably ours (T240a review):
+            //     the name is predictable, and an adopted registration gets the stamp's FIC and, via H10, Dataverse admin.
+            var matches = await FindByDisplayNameAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
+            if (matches.Count > 1)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"{matches.Count} application registrations are named '{displayName}' " +
+                    $"({string.Join(", ", matches.Select(m => m.AppId))}); H3 adopts none of them. Remove the ones that " +
+                    $"are not this customer's BFF registration, then resume. [{EntraAppRegRejectionCodes.AdoptionRefused}]");
+            }
+            var app = matches.SingleOrDefault();
             var created = false;
             if (app is null)
             {
                 app = await CreateAppAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
                 created = true;
+            }
+            else
+            {
+                var refusal = await CheckAdoptionAsync(graph, app, request, cancellationToken).ConfigureAwait(false);
+                if (refusal is not null)
+                {
+                    _logger.LogError(
+                        "H3 refused to adopt the existing registration {DisplayName} ({AppId}): {Reason} customerId={CustomerId}",
+                        displayName, app.AppId, refusal, request.CustomerId);
+                    return new EntraAppRegOutcome.Failure(
+                        $"The existing application registration '{displayName}' ({app.AppId}) is not safe to adopt: " +
+                        $"{refusal}. Nothing was written. Investigate who created it; if it is not this customer's BFF " +
+                        $"registration, delete it and resume. [{EntraAppRegRejectionCodes.AdoptionRefused}]");
+                }
             }
 
             if (string.IsNullOrWhiteSpace(app.Id) || string.IsNullOrWhiteSpace(app.AppId))
@@ -174,8 +221,23 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 await ReconcileExistingAppAsync(graph, app, cancellationToken).ConfigureAwait(false);
             }
 
+            // (2b) T240a: the code pages' SPA redirect + the pre-authorized shared clients, set exactly.
+            var accessFailure = await EnsureClientAccessAsync(graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            if (accessFailure is not null)
+            {
+                return accessFailure;
+            }
+
             // (3) Ensure service principal.
-            await EnsureServicePrincipalAsync(graph, app.AppId!, cancellationToken).ConfigureAwait(false);
+            var servicePrincipalId = await EnsureServicePrincipalAsync(graph, app.AppId!, cancellationToken).ConfigureAwait(false);
+
+            // (3b) Task 230b: the keyless-proof app role goes to the L2 Worker identity (H13 calls the stamp BFF with it).
+            var roleFailure = await EnsureKeylessProofRoleAssignmentAsync(
+                graph, app, servicePrincipalId, request, cancellationToken).ConfigureAwait(false);
+            if (roleFailure is not null)
+            {
+                return roleFailure;
+            }
 
             // (4) Ensure client secret (skip-if-valid) — GATED on
             //     RequireSecretFreeIdentity. Bucket B HIGH#3 SESSION 18: when
@@ -290,7 +352,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // App-reg ensure / reconcile
     // ---------------------------------------------------------------------
 
-    private async Task<Application?> FindByDisplayNameAsync(
+    private async Task<IReadOnlyList<Application>> FindByDisplayNameAsync(
         GraphServiceClient graph, string displayName, CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -300,7 +362,79 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         {
             rc.QueryParameters.Filter = filter;
         }, timeoutCts.Token).ConfigureAwait(false);
-        return page?.Value?.FirstOrDefault();
+        return page?.Value ?? new List<Application>();
+    }
+
+    /// <summary>
+    /// Reads the existing registration's owners and federated credentials and returns why it must not be adopted, or
+    /// null (T240a review). The owner check runs for Spaarke-tenant profiles only: in a customer-owned (Model 2) tenant
+    /// the control plane's principal id is a different object.
+    /// </summary>
+    private async Task<string?> CheckAdoptionAsync(
+        GraphServiceClient graph, Application app, EntraAppRegRequest request, CancellationToken ct)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+        var owners = await graph.Applications[app.Id].Owners
+            .GetAsync(rc => rc.QueryParameters.Select = ["id"], timeoutCts.Token).ConfigureAwait(false);
+        var fics = await graph.Applications[app.Id].FederatedIdentityCredentials
+            .GetAsync(rc => rc.QueryParameters.Select = ["name"], timeoutCts.Token).ConfigureAwait(false);
+
+        var customerOwned = string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase);
+        return AdoptionRefusal(
+            app,
+            (owners?.Value ?? []).Select(o => o.Id ?? string.Empty).ToList(),
+            (fics?.Value ?? []).Select(f => f.Name ?? string.Empty).ToList(),
+            customerOwned ? null : _identity.CanonicalPrincipalObjectId(),
+            _options.FicName,
+            request.RequireSecretFreeIdentity);
+    }
+
+    /// <summary>
+    /// Why an existing <c>spaarke-bff-api-{customerId}</c> registration must not be adopted, or null when it is safe
+    /// (T240a review). Safe means nobody but the control plane can act as it, now or later: no client secret or
+    /// certificate (stamps are secret-free), no federated credential other than H3's own (<paramref name="ficName"/>),
+    /// and no owner other than the control plane (an owner could add a credential after H3 finishes). An app with no
+    /// owner at all is safe. <paramref name="controlPlanePrincipalId"/> null skips the owner check (Model 2).
+    /// </summary>
+    internal static string? AdoptionRefusal(
+        Application existing,
+        IReadOnlyCollection<string> ownerIds,
+        IReadOnlyCollection<string> ficNames,
+        string? controlPlanePrincipalId,
+        string ficName,
+        bool requireSecretFreeIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        var reasons = new List<string>();
+
+        var secrets = existing.PasswordCredentials?.Count ?? 0;
+        var certificates = existing.KeyCredentials?.Count ?? 0;
+        if (requireSecretFreeIdentity && secrets + certificates > 0)
+        {
+            reasons.Add($"it holds {secrets} client secret(s) and {certificates} certificate(s), and a stamp's BFF " +
+                        "registration is secret-free");
+        }
+
+        var foreignFics = ficNames.Where(n => !string.Equals(n, ficName, StringComparison.Ordinal)).ToList();
+        if (foreignFics.Count > 0)
+        {
+            reasons.Add($"it carries federated credential(s) H3 did not create: {string.Join(", ", foreignFics)}");
+        }
+
+        if (controlPlanePrincipalId is not null)
+        {
+            var foreignOwners = ownerIds
+                .Where(id => !string.Equals(id, controlPlanePrincipalId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (foreignOwners.Count > 0)
+            {
+                reasons.Add($"it is owned by {string.Join(", ", foreignOwners)}, not only by the provisioning control plane");
+            }
+        }
+
+        return reasons.Count == 0 ? null : string.Join("; ", reasons);
     }
 
     private async Task<Application> CreateAppAsync(
@@ -324,6 +458,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             {
                 Oauth2PermissionScopes = new List<PermissionScope> { BuildExposedScope() },
             },
+            AppRoles = new List<AppRole> { BuildKeylessProofAppRole() },
         };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -393,10 +528,320 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             dirty = true;
         }
 
+        var plannedRoles = PlanKeylessProofAppRoles(app.AppRoles);
+        if (plannedRoles is not null)
+        {
+            patch.AppRoles = plannedRoles;
+            dirty = true;
+        }
+
         if (dirty)
         {
             await graph.Applications[app.Id].PatchAsync(patch, cancellationToken: timeoutCts.Token)
                 .ConfigureAwait(false);
+            if (plannedRoles is not null)
+            {
+                // The assignment step reads the role from the app object it was handed.
+                app.AppRoles = plannedRoles;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Client access (T240a) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>What <see cref="PlanClientAccess"/> decided: a PATCH body, nothing to do (both null), or an error.</summary>
+    internal sealed record ClientAccessPlan(Application? Patch, string? Error);
+
+    /// <summary>
+    /// Plans the PATCH that makes the app's <c>spa.redirectUris</c> exactly <paramref name="spaRedirectUris"/> and its
+    /// <c>api.preAuthorizedApplications</c> exactly <paramref name="preAuthorizedClientAppIds"/> on the enabled
+    /// <c>user_impersonation</c> scope. Order-insensitive; the app's own id is never pre-authorized on itself. When the
+    /// pre-authorization changes, the PATCH carries the app's existing scopes and other <c>api</c> values unchanged, so it
+    /// cannot drop them whether Graph merges or replaces the <c>api</c> object.
+    /// </summary>
+    internal static ClientAccessPlan PlanClientAccess(
+        Application current, IReadOnlyList<string>? spaRedirectUris, IReadOnlyList<string>? preAuthorizedClientAppIds)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+
+        // null = leave that part untouched; an empty list = make it empty.
+        var desiredSpa = spaRedirectUris?.Distinct(StringComparer.Ordinal).ToList();
+        var currentSpa = current.Spa?.RedirectUris ?? new List<string>();
+        var spaChanged = desiredSpa is not null && !currentSpa.ToHashSet(StringComparer.Ordinal).SetEquals(desiredSpa);
+
+        if (preAuthorizedClientAppIds is null)
+        {
+            return spaChanged
+                ? new ClientAccessPlan(new Application { Spa = new SpaApplication { RedirectUris = desiredSpa } }, null)
+                : new ClientAccessPlan(null, null);
+        }
+
+        var clients = preAuthorizedClientAppIds
+            .Where(id => !string.Equals(id, current.AppId, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var scopes = current.Api?.Oauth2PermissionScopes ?? new List<PermissionScope>();
+        var scopeId = scopes.FirstOrDefault(s =>
+            string.Equals(s.Value, "user_impersonation", StringComparison.Ordinal) && s.IsEnabled == true)?.Id;
+        if (clients.Count > 0 && scopeId is null)
+        {
+            return new ClientAccessPlan(null,
+                $"application {current.AppId} has no enabled user_impersonation scope to pre-authorize " +
+                $"{string.Join(", ", clients)} on");
+        }
+
+        var scopeIdText = scopeId?.ToString("D");
+        var currentPre = current.Api?.PreAuthorizedApplications ?? new List<PreAuthorizedApplication>();
+        var preChanged = currentPre.Count != clients.Count
+            || !clients.All(client => currentPre.Any(p =>
+                string.Equals(p.AppId, client, StringComparison.OrdinalIgnoreCase)
+                && p.DelegatedPermissionIds is { Count: 1 } ids
+                && string.Equals(ids[0], scopeIdText, StringComparison.OrdinalIgnoreCase)));
+
+        if (!spaChanged && !preChanged)
+        {
+            return new ClientAccessPlan(null, null);
+        }
+
+        var patch = new Application();
+        if (spaChanged)
+        {
+            patch.Spa = new SpaApplication { RedirectUris = desiredSpa! };
+        }
+        if (preChanged)
+        {
+            var api = new ApiApplication
+            {
+                Oauth2PermissionScopes = scopes.ToList(),
+                PreAuthorizedApplications = clients
+                    .Select(client => new PreAuthorizedApplication
+                    {
+                        AppId = client,
+                        DelegatedPermissionIds = new List<string> { scopeIdText! },
+                    })
+                    .ToList(),
+            };
+            // Carried only when set: an explicit null would ask Graph to clear them.
+            if (current.Api?.KnownClientApplications is { } known)
+            {
+                api.KnownClientApplications = known;
+            }
+            if (current.Api?.RequestedAccessTokenVersion is { } version)
+            {
+                api.RequestedAccessTokenVersion = version;
+            }
+            if (current.Api?.AcceptMappedClaims is { } acceptMapped)
+            {
+                api.AcceptMappedClaims = acceptMapped;
+            }
+            patch.Api = api;
+        }
+        return new ClientAccessPlan(patch, null);
+    }
+
+    /// <summary>
+    /// Reads the app fresh (the create response and a reconcile PATCH leave the in-memory object without its current
+    /// <c>api</c> / <c>spa</c>), plans with <see cref="PlanClientAccess"/>, and PATCHes this app only when something
+    /// differs. Retries a 404 while Entra propagates a just-created app. Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureClientAccessAsync(
+        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+                var current = await graph.Applications[appObjectId].GetAsync(rc =>
+                {
+                    rc.QueryParameters.Select = ["id", "appId", "api", "spa"];
+                }, timeoutCts.Token).ConfigureAwait(false);
+                if (current is null)
+                {
+                    return new EntraAppRegOutcome.Failure(
+                        $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
+                }
+
+                var plan = PlanClientAccess(current, request.SpaRedirectUris, request.PreAuthorizedClientAppIds);
+                if (plan.Error is not null)
+                {
+                    return new EntraAppRegOutcome.Failure($"{plan.Error}. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
+                }
+                if (plan.Patch is null)
+                {
+                    return null;
+                }
+
+                await graph.Applications[appObjectId].PatchAsync(plan.Patch, cancellationToken: timeoutCts.Token)
+                    .ConfigureAwait(false);
+                _logger.LogInformation(
+                    "H3 set client access: customerId={CustomerId} appId={AppId} spaRedirects={SpaCount} preAuthorizedClients={ClientCount}",
+                    request.CustomerId, current.AppId, request.SpaRedirectUris?.Count ?? 0,
+                    request.PreAuthorizedClientAppIds?.Count ?? 0);
+                return null;
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode == 404 && attempt < _options.RoleAssignmentRetryCount)
+            {
+                _logger.LogInformation(ex,
+                    "H3 client-access read attempt {Attempt}/{Max} returned 404 — retrying after propagation delay.",
+                    attempt, _options.RoleAssignmentRetryCount);
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+            catch (ODataError ex)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Setting the SPA redirect and pre-authorized clients on application {appObjectId} failed: Graph " +
+                    $"ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
+                    $"[{EntraAppRegRejectionCodes.ClientAccessFailed}]");
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Keyless-proof app role (task 230b) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>The application role that admits the L2 Worker identity to the stamp BFF's keyless proof.</summary>
+    internal static AppRole BuildKeylessProofAppRole() => new()
+    {
+        Id = Guid.Parse(KeylessProofContract.AppRoleId),
+        Value = KeylessProofContract.AppRoleValue,
+        AllowedMemberTypes = new List<string> { "Application" },
+        DisplayName = "Provisioning keyless proof",
+        Description = "Lets the Spaarke provisioning control plane run the stamp's keyless proof (one managed-identity " +
+                      "call per Azure service). Assigned only to the control plane's identity.",
+        IsEnabled = true,
+    };
+
+    /// <summary>
+    /// The app roles to PATCH so the keyless-proof role is present and enabled, or null when nothing changes. The role
+    /// is matched by VALUE: an existing role keeps its id (an enabled role's id cannot change), every other role is
+    /// carried over unchanged, and a disabled one is re-enabled.
+    /// </summary>
+    internal static List<AppRole>? PlanKeylessProofAppRoles(IReadOnlyList<AppRole>? current)
+    {
+        var roles = current ?? Array.Empty<AppRole>();
+        var existing = roles.FirstOrDefault(r => string.Equals(r.Value, KeylessProofContract.AppRoleValue, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            return roles.Append(BuildKeylessProofAppRole()).ToList();
+        }
+        if (existing.IsEnabled == true
+            && existing.AllowedMemberTypes?.Count == 1
+            && string.Equals(existing.AllowedMemberTypes[0], "Application", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        return roles
+            .Select(r => ReferenceEquals(r, existing)
+                ? new AppRole
+                {
+                    Id = existing.Id,
+                    Value = existing.Value,
+                    AllowedMemberTypes = new List<string> { "Application" },
+                    DisplayName = existing.DisplayName,
+                    Description = existing.Description,
+                    IsEnabled = true,
+                }
+                : r)
+            .ToList();
+    }
+
+    /// <summary>The keyless-proof role's id on this app — the existing role's when present, else the contract's.</summary>
+    internal static Guid KeylessProofRoleId(IReadOnlyList<AppRole>? roles)
+        => roles?.FirstOrDefault(r => string.Equals(r.Value, KeylessProofContract.AppRoleValue, StringComparison.Ordinal))?.Id
+           ?? Guid.Parse(KeylessProofContract.AppRoleId);
+
+    /// <summary>True when <paramref name="principalId"/> already holds <paramref name="appRoleId"/>.</summary>
+    internal static bool HasRoleAssignment(IEnumerable<AppRoleAssignment>? assignments, Guid principalId, Guid appRoleId)
+        => assignments?.Any(a => a.PrincipalId == principalId && a.AppRoleId == appRoleId) == true;
+
+    /// <summary>
+    /// Assignments of <paramref name="appRoleId"/> to anyone but <paramref name="principalId"/> — the role admits a caller
+    /// to the stamp's keyless proof, so only the L2 Worker identity may hold it (task 230b).
+    /// </summary>
+    internal static IReadOnlyList<AppRoleAssignment> ForeignRoleHolders(IEnumerable<AppRoleAssignment>? assignments, Guid principalId, Guid appRoleId)
+        => (assignments ?? Enumerable.Empty<AppRoleAssignment>())
+            .Where(a => a.AppRoleId == appRoleId && a.PrincipalId != principalId && !string.IsNullOrWhiteSpace(a.Id))
+            .ToList();
+
+    /// <summary>
+    /// Assigns the keyless-proof role on the BFF service principal to the L2 Worker identity, idempotently, and removes
+    /// the role from anyone else (only L2 may hold it). Retries while Entra has not yet propagated a just-added role
+    /// (400) or a just-created service principal (404). Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureKeylessProofRoleAssignmentAsync(
+        GraphServiceClient graph, Application app, string servicePrincipalId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        if (string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "H3: keyless-proof role defined but NOT assigned — the {Profile} app-reg is in the customer's tenant, where " +
+                "the L2 identity has no service principal (Model 2 gap, task 230b). customerId={CustomerId}",
+                request.Profile, request.CustomerId);
+            return null;
+        }
+
+        var principalId = Guid.Parse(_identity.CanonicalPrincipalObjectId());
+        var resourceId = Guid.Parse(servicePrincipalId);
+        var appRoleId = KeylessProofRoleId(app.AppRoles);
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+                var existing = await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo
+                    .GetAsync(rc => rc.QueryParameters.Top = 999, timeoutCts.Token).ConfigureAwait(false);
+
+                foreach (var foreign in ForeignRoleHolders(existing?.Value, principalId, appRoleId))
+                {
+                    _logger.LogWarning(
+                        "H3 removing the keyless-proof role from {PrincipalType} {PrincipalId} ({PrincipalName}) — only the L2 " +
+                        "identity may hold it (task 230b). customerId={CustomerId}",
+                        foreign.PrincipalType, foreign.PrincipalId, foreign.PrincipalDisplayName, request.CustomerId);
+                    await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo[foreign.Id]
+                        .DeleteAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+                }
+
+                if (HasRoleAssignment(existing?.Value, principalId, appRoleId))
+                {
+                    return null;
+                }
+
+                await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo.PostAsync(new AppRoleAssignment
+                {
+                    PrincipalId = principalId,
+                    ResourceId = resourceId,
+                    AppRoleId = appRoleId,
+                }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "H3 assigned the keyless-proof role to the L2 identity: customerId={CustomerId} appId={AppId} principal={PrincipalId}",
+                    request.CustomerId, app.AppId, principalId);
+                return null;
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode is 400 or 404 && attempt < _options.RoleAssignmentRetryCount)
+            {
+                // A role added moments ago (400) or a service principal created moments ago (404) may not be visible yet.
+                _logger.LogInformation(ex,
+                    "H3 keyless-proof role assignment attempt {Attempt}/{Max} returned {Status} — retrying after propagation delay.",
+                    attempt, _options.RoleAssignmentRetryCount, ex.ResponseStatusCode);
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+            catch (ODataError ex)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Assigning the keyless-proof app role ({KeylessProofContract.AppRoleValue}) to the L2 identity {principalId} on " +
+                    $"the BFF service principal {servicePrincipalId} failed: Graph ODataError {ex.ResponseStatusCode}: " +
+                    $"{ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. [{EntraAppRegRejectionCodes.KeylessProofRoleAssignmentFailed}]");
+            }
         }
     }
 
@@ -446,7 +891,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // Service principal + client secret
     // ---------------------------------------------------------------------
 
-    private async Task EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+    /// <summary>Ensures the app's service principal exists and returns its object id.</summary>
+    private async Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(_options.GraphRequestTimeout);
@@ -455,13 +901,16 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
         }, timeoutCts.Token).ConfigureAwait(false);
 
-        if (existing?.Value?.Count > 0)
+        var found = existing?.Value?.FirstOrDefault()?.Id;
+        if (!string.IsNullOrWhiteSpace(found))
         {
-            return;
+            return found;
         }
 
-        await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
+        var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
             cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+        return created?.Id
+            ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
     }
 
     private async Task<string> EnsureClientSecretAsync(GraphServiceClient graph, Application app, CancellationToken ct)
@@ -532,7 +981,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         {
             return new EntraAppRegOutcome.Failure(
                 $"Cannot compute FIC issuer — profile='{request.Profile}' requires " +
-                $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppReg:SpaarkeTenantId config")}, " +
+                $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppRegOptions:SpaarkeTenantId config (Worker setting EntraAppRegOptions__SpaarkeTenantId)")}, " +
                 $"which is blank. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
         }
 

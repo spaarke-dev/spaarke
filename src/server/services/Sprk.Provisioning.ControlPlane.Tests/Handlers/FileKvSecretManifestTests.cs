@@ -26,7 +26,7 @@
 //       determinism contract).
 //
 //   T226 (2026-09-30): from-shared-service retired; from-topology-constants
-//   (SPE-ContainerTypeId, task 214) now parses — before T226 the reader rejected
+//   (SPE-ContainerTypeId, task 214; retired again with that secret by T227e) parsed — before T226 the reader rejected
 //   it, so EVERY ReadAsync against the real manifest returned Failure. The keys
 //   the owner removed from the process must not be served.
 //
@@ -126,8 +126,6 @@ public sealed class FileKvSecretManifestTests
     [InlineData("BFF-API-ClientId", KvSecretValueSource.WrittenByEntraAppReg)]
     [InlineData("BFF-API-Audience", KvSecretValueSource.WrittenByEntraAppReg)]
     // (Redis-ConnectionString removed by task 242: stamp Redis is Entra-only, no secret.)
-    // T226: task 214's from-topology-constants — the reader rejected it before T226.
-    [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromTopologyConstants)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
@@ -183,19 +181,19 @@ public sealed class FileKvSecretManifestTests
         success.Entries.Should().NotContain(e => e.CanonicalName == canonicalName);
     }
 
-    // T226: H4 projects topology constants from run parameters through a fixed map. A
-    // from-topology-constants entry with no mapping fails on every run; a mapping with no
+    // T226 / task 245a: H4 projects intake values from run parameters through a fixed map. A
+    // from-intake-parameter entry with no mapping fails on every run; a mapping with no
     // entry is dead code.
     [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_IntakeSourcedEntriesMatchH4ParameterMap()
     {
-        // Every entry H4 fills from an intake value (from-topology-constants, task 245a's
-        // from-intake-parameter) has a parameter-key mapping in H4, and the map names nothing else.
+        // Every entry H4 fills from an intake value (task 245a's from-intake-parameter) has a
+        // parameter-key mapping in H4, and the map names nothing else.
         var result = await NewManifest().ReadAsync(CancellationToken.None);
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         var intakeSourced = success.Entries
-            .Where(e => e.ValueSource is KvSecretValueSource.FromTopologyConstants or KvSecretValueSource.FromIntakeParameter)
+            .Where(e => e.ValueSource is KvSecretValueSource.FromIntakeParameter)
             .Select(e => e.CanonicalName);
         H4KvSecretsPopulationHandler.IntakeValueParameterKeys.Keys.Should().BeEquivalentTo(intakeSourced);
         H4KvSecretsPopulationHandler.IntakeValueParameterKeys.Values
@@ -203,11 +201,12 @@ public sealed class FileKvSecretManifestTests
     }
 
     // T226: from-shared-service is no longer a value_source; task 225b (owner D18) removed
-    // from-platform-vault. A manifest that still carries one must be refused, not served
-    // with the entry silently skipped.
+    // from-platform-vault; T227e removed from-topology-constants. A manifest that still carries
+    // one must be refused, not served with the entry silently skipped.
     [Theory]
     [InlineData("from-shared-service")]
     [InlineData("from-platform-vault")]
+    [InlineData("from-topology-constants")]
     public void ParseYaml_UnrecognizedValueSource_IsRefusedNamingTheEntry(string retiredValueSource)
     {
         var yaml = $"""

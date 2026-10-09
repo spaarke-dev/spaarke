@@ -10,7 +10,8 @@
  * and passed to initializeAuth() at bootstrap.
  *
  * @spaarke/auth defaults:
- *   - authority: https://login.microsoftonline.com/organizations (multi-tenant)
+ *   - authority: tenant-specific, built from the `tenantId` the caller passes (index.tsx passes
+ *     the runtime config's); inside Dataverse it never falls back to /organizations (#1453)
  *   - redirectUri: window.location.origin (auto-detected)
  */
 

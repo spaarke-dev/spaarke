@@ -67,9 +67,10 @@ public partial class RouteAuthorizationGuardTests
     {
         // ---- the document / file-byte surface (task 074's original RouteLevelGate set) ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all eleven routes carry "
+            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all twelve routes carry "
             + "AddDocumentAuthorizationFilter (share-link since task 072; resolve-identity pairs DocumentUrlIdentityFilter "
-            + "with it; GET /{documentId}/identity since word-add-in task 112)."),
+            + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
+            + "DocumentEmailIdentityFilter with it since word-add-in task 120)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "
@@ -283,6 +284,9 @@ public partial class RouteAuthorizationGuardTests
             + "S-71, S-81; amendment f). PUT /reports/{reportId} was replaced by PATCH."),
         new GovernedFile("Api/ResilienceEndpoints.cs", Scope.RouteLevelGate,
             "circuit-breaker diagnostics behind sign-in only (task-167 UNOWNED-NEW, assigned to 166)."),
+        new GovernedFile("Api/Platform/KeylessProofEndpoints.cs", Scope.RouteLevelGate,
+            "the stamp's keyless proof for provisioning's acceptance gate (customer-provisioning task 230b): one managed-identity "
+            + "call per Azure service, behind an application role only the L2 Worker identity holds; no record is read or returned."),
         new GovernedFile("Api/UserEndpoints.cs", Scope.RouteLevelGate,
             "the caller's own profile and capabilities, read on behalf of the caller."),
         // Api/WorkAssignmentEndpoints.cs entry DELETED at the task-167 integration (2026-10-05): task 166 deleted the file
@@ -401,8 +405,6 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/SpeAdmin/SecurityEndpoints.cs", Scope.GroupGated, "SPE security alerts and score (nested group)."),
 
         // ---- outside Api/** ----
-        new GovernedFile("Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs", Scope.RouteLevelGate,
-            "the I4 tenant-container-resolver diagnostic, operator-gated in the handler (task 081); path from a const."),
         new GovernedFile("Endpoints/Onboarding/ConsentCallbackEndpoint.cs", Scope.RouteLevelGate,
             "the anonymous, HMAC-verified admin-consent callback; path from a const."),
         new GovernedFile("Infrastructure/DI/EndpointMappingExtensions.cs", Scope.RouteLevelGate,
@@ -667,7 +669,23 @@ public partial class RouteAuthorizationGuardTests
     // file registering only MapMethods would have been invisible), and it reads code with comments AND string literals
     // blanked (a log message naming ".MapGet(" no longer counts).
     //
-    // 117 -> 118 (2026-10-08, unified-access-control-r2 task 064, owner round 59 item 3):
+    // 117 -> 116 (2026-10-06, customer-provisioning-orchestration-r1 task 227f). A DOWNWARD move:
+    //
+    //   227f  -1  Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs DELETED with ITenantContainerResolver — GET
+    //             /api/diagnostics/tenant-container-resolver (the I4 diagnostic task 081 scoped) had no consumer left: the
+    //             L2 probe that called it was unregistered and H13's I4 reads the deployed app settings since T227c.
+    //             SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers (T227d). Its
+    //             GovernedFiles entry and its P:OperatorGateInHandler waiver went with it — a route that no longer exists
+    //             needs no gate.
+    //
+    // 116 -> 117 (2026-10-06, customer-provisioning-orchestration-r1 task 230b). An UPWARD move:
+    //
+    //   230b  +1  Api/Platform/KeylessProofEndpoints.cs — POST /api/platform/keyless-proof, the stamp's keyless proof
+    //             for provisioning's acceptance gate (H13). GovernedFiles entry, AdminMechanism
+    //             (AddKeylessProofAuthorizationFilter), AdminOnlyRoutes group and ClaimOnlyFilters entry added with it.
+    //
+    // 117 -> 118 (2026-10-08, unified-access-control-r2 task 064, owner round 59 item 3; merged with the 227f/230b
+    // moves above — they net to zero, so the merged count is 118):
     //
     //   064  +1  Api/ExternalAccess/RecordNoAccessEndpoint.cs ADDED — GET /api/v1/records/{type}/{recordId}/no-access for
     //            project, matter and work assignment: whether the record is Secure and under No Access (every caller with
@@ -837,6 +855,10 @@ public partial class RouteAuthorizationGuardTests
             + "from the /api/spe aggregator."),
         new AdminMechanism("AddRegistrationAuthorizationFilter",
             "The demo-registration approver role (RegistrationAuthorizationFilter.cs) on approve/reject."),
+        new AdminMechanism("AddKeylessProofAuthorizationFilter",
+            "The Provisioning.KeylessProof APPLICATION role on an app-only token (KeylessProofAuthorizationFilter.cs IsAdmitted: "
+            + "no scp, idtyp absent or 'app') — a machine credential H3 assigns only to the L2 Worker identity "
+            + "(allowedMemberTypes Application, so no user can hold it). Customer-provisioning task 230b."),
     };
 
     // =============================================================================================
@@ -928,6 +950,7 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddOfficeRateLimitFilter", "Office throughput limiter, explicitly fail-OPEN."),
         new NotAuthorizationForm("AddIdempotencyFilter", "Replays a cached response for a repeated client key."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentUrlIdentityFilter>", "Resolves a document URL to an id; the route's decision is its AddDocumentAuthorizationFilter."),
+        new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter(lambda)", "The one inline filter (OfficeEndpoints.cs:1521) validates Guid.Empty. An inline lambda is NEVER credited."),
         new NotAuthorizationForm("WithMetadata(new RequestSizeLimitAttribute)", "A request body size limit on the Compose save/mount routes."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateCreateEventRequestAsync)",
@@ -1090,6 +1113,7 @@ public partial class RouteAuthorizationGuardTests
     private const string SpeAdminPolicy = "AddSpeAdminAuthorizationFilter";
     private const string RagApiKeyCredential = "RequireAuthorization(AuthPolicies.RagApiKey)";
     private const string RegistrationApproverRole = "AddRegistrationAuthorizationFilter";
+    private const string KeylessProofRole = "AddKeylessProofAuthorizationFilter";
 
     private static readonly IReadOnlyList<AdminOnlyGroup> AdminOnlyRoutes = new[]
     {
@@ -1112,6 +1136,14 @@ public partial class RouteAuthorizationGuardTests
             {
                 "GET /api/admin/membership/discovered/{entityType}",
                 "POST /api/admin/membership/refresh-metadata",
+            }),
+        new AdminOnlyGroup("Api/Platform/KeylessProofEndpoints.cs", KeylessProofRole,
+            "PROVISIONING AUTOMATION behind the Provisioning.KeylessProof application role (no user acts): L2's acceptance gate "
+            + "(H13) asks the stamp's BFF to prove one managed-identity call per Azure service. Status and timing only — no "
+            + "record, data or secret is returned (task 230b).",
+            new[]
+            {
+                "POST /api/platform/keyless-proof",
             }),
         new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", RagApiKeyCredential,
             "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts). The key "
@@ -1689,6 +1721,10 @@ public partial class RouteAuthorizationGuardTests
             // PlaybookAuthorizationFilter's OWNER-COMPARISON entry was DELETED at the task-167 integration (2026-10-05): since
             // task 164 every mode asks the caller's own Dataverse Read through AuthorizationService (PlaybookAuthorizationFilter.cs
             // GetCallerRecordAccessAsync / AuthorizeAsync), so the filter passes Rule B on its own and is inspected like any other.
+            ["KeylessProofAuthorizationFilter"] =
+                "Provisioning acceptance surface (task 230b). Decides from the token's claims — the Provisioning.KeylessProof "
+                + "application role on an app-only token (no scp; idtyp absent or 'app') — one of the admin mechanisms. The "
+                + "route reads no record; it returns per-service status and timing only.",
             ["ReportingAuthorizationFilter"] =
                 "Power BI embed surface. Decides from role claims checked against configuration — a module role, not a record "
                 + "decision; it earns no Rule A credit (NonDecidingAttachments).",
@@ -1739,7 +1775,9 @@ public partial class RouteAuthorizationGuardTests
     //                                                  parent or regarding id.
     //                      CallerSuppliedContentOnly — processes only the request's own bytes or text; reads no stored
     //                                                  record, index or file by any id.
-    //                      OperatorGateInHandler     — the handler denies every caller outside an operator allow-list or
+    //                      OperatorGateInHandler     — (no route uses it since task 227f deleted the I4 diagnostic; kept as
+    //                                                  the basis a future operator-only route would declare) the handler
+    //                                                  denies every caller outside an operator allow-list or
     //                                                  app-only classification before any data access.
     //                      OwnerComparison           — (OWNER-COMPARISON, owner round 12 item 4) the handler loads the
     //                                                  record a caller-chosen id names and refuses unless its recorded
@@ -2554,14 +2592,14 @@ public partial class RouteAuthorizationGuardTests
             "Summarises the uploaded files in the request (WorkspaceFileEndpoints.cs:156-198); reads no stored "
             + "file by id."),
         Permanent("POST /api/workspace/matters/pre-fill", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Analyses the uploaded files; the only storage write is an OBO upload of those bytes to the "
-            + "configured staging container (MatterPreFillService.cs:343). Reads no record by id."),
+            "Analyses the uploaded files in memory (MatterPreFillService.cs:308); writes nothing to storage (task "
+            + "227f retired the staging upload). Reads no record by id."),
         Permanent("POST /api/workspace/matters/ai-summary", PermanentBasis.CallerSuppliedContentOnly, "167",
             "Summarises the matter fields the client sends (prompt from the request, "
             + "WorkspaceMatterEndpoints.cs:235); loads no matter by id."),
         Permanent("POST /api/workspace/projects/pre-fill", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Analyses the uploaded files (AnalyzeFilesAsync(files), WorkspaceProjectEndpoints.cs:100) — the "
-            + "same staging-upload pattern as the matter pre-fill; reads no record by id."),
+            "Analyses the uploaded files (AnalyzeFilesAsync(files), WorkspaceProjectEndpoints.cs:100) in memory, "
+            + "like the matter pre-fill; writes nothing to storage and reads no record by id."),
 
         // ---------- P:CreateWithNoPriorResource ----------
         Permanent("PUT /api/obo/me/files/{*path}", PermanentBasis.CreateWithNoPriorResource, "167",
@@ -2570,9 +2608,8 @@ public partial class RouteAuthorizationGuardTests
             + "and an unresolvable caller gets a typed 403."),
 
         // ---------- P:OperatorGateInHandler ----------
-        Permanent("GET /api/diagnostics/tenant-container-resolver", PermanentBasis.OperatorGateInHandler, "167",
-            "Task 081: denies every caller that is not a positively classified app-only caller on the operator "
-            + "allow-list (TenantContainerResolverEndpoint.cs:159-177), before any resolver call."),
+        // (GET /api/diagnostics/tenant-container-resolver was its only entry; the route was REMOVED by
+        // customer-provisioning-orchestration-r1 task 227f — a route that no longer exists needs no gate.)
 
         // ---------- N:161 ----------
         // The four thread/message write routes (rename, pin, DELETE thread, DELETE message) task 161's amendment owned were

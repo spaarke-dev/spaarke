@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Documents;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Membership = Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService;
 
@@ -35,7 +36,7 @@ public class OfficeEditAccessServiceTests
     private static readonly Guid ObjectId = Guid.Parse("17100000-0000-4000-8000-000000000004");
 
     private readonly Mock<Membership> _membership =
-        new(Mock.Of<IGraphClientFactory>(), NullLogger<Membership>.Instance) { CallBase = false };
+        new(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<Membership>.Instance) { CallBase = false };
     private readonly Mock<IGenericEntityService> _entities = new();
 
     public OfficeEditAccessServiceTests()

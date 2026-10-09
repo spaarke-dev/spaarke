@@ -34,7 +34,7 @@
 //
 // PATH (per docs/standards/TEST-ARCHITECTURE.md §3 KEEP categories):
 //   L2 project-scoped test — mirrors existing L2 Handlers/*Tests.cs pattern.
-//   The 7 KEEP path convention applies to tests/** (repo-level) — the L2
+//   The ADR-038 KEEP path convention (eight paths) applies to tests/** (repo-level) — the L2
 //   project has its own Sprk.Provisioning.ControlPlane.Tests project which
 //   is where every L2 handler test lives.
 // -----------------------------------------------------------------------------
@@ -141,15 +141,18 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4H3AndH5_UnlocksH4b()
+    public void ComputeReadyHandlers_AfterH4H3H5AndH8_UnlocksH4b()
     {
-        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
-        var withH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H8");
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        var withAll = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H8");
 
         _sut.ComputeReadyHandlers(withoutH5).Should().NotContain("H4b",
             "T245b: Dataverse__ServiceUrl / __EnvironmentUrl are H5's DataverseEnvUrl");
-        _sut.ComputeReadyHandlers(withH5).Should().Contain("H4b",
-            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL) have all run.");
+        _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H4b",
+            "T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId are H8's SpeContainerId");
+        _sut.ComputeReadyHandlers(withAll).Should().Contain("H4b",
+            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL, H8 for the container) have all run.");
     }
 
     [Fact]
@@ -162,7 +165,7 @@ public sealed class DagAdvancerTests
         var ready = _sut.ComputeReadyHandlers(run);
 
         ready.Should().NotContain("H9",
-            "EXEC-01: HandlerDependencies[H9] = { H3, H4b } — H9 must remain blocked until " +
+            "EXEC-01: HandlerDependencies[H9] = { H3, H4b, H6 } — H9 must remain blocked until " +
             "H4b lands the batched app-settings; deploying BFF against an incomplete app-settings " +
             "surface is precisely the F20 IOptions fail-fast chain r1 was written to prevent.");
         ready.Should().NotContain("H8",
@@ -181,19 +184,31 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH3AndH4b_UnlocksH9()
+    public void ComputeReadyHandlers_AfterH3AndH4b_H9StillWaitsForH6()
     {
-        // EXEC-01 companion — the "green path": H3 + H4b + H4 all done → H9 finally ready.
+        // T218b: H9 also waits for H6 — on an upgrade run the new BFF must not start against the old schema.
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H4", "H4b", "H3");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().Contain("H9",
-            "EXEC-01 green path: with H3 + H4b both landed, H9 (BFF deploy) is finally " +
-            "unblocked; BFF boots against complete KV refs + batched app-settings.");
+        ready.Should().NotContain("H9", "H6 (the Dataverse package) has not landed yet (T218b)");
         ready.Should().NotContain("H8",
             "H8 is unchanged by the H4b addition — it is gated on H3 and H5 (task 165), and H5 has not run here.");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH3H4bAndH6_UnlocksH9()
+    {
+        // EXEC-01 green path + T218b: H3 + H4b (KV refs + batched app-settings) and H6 (the package) → H9 ready.
+        var run = MakeRun(RunStatus.Running,
+            "H0", "H1", "H2a", "H4", "H4b", "H3", "H5", "H10", "H6");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H9",
+            "with H3 + H4b + H6 landed, H9 (BFF deploy) is unblocked: complete KV refs + batched app-settings, " +
+            "and the schema the BFF reads is already in the environment.");
     }
 
     [Fact]
@@ -224,13 +239,15 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH5AndH3_UnlocksH6()
+    public void ComputeReadyHandlers_AfterH5AndH3_UnlocksH10_AndH6WaitsForIt()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        // T228: H6 signs in to the customer environment as the BFF app registration, an application user there only once
+        // H10 has registered it — and H10 needs only H3 + H5 (H2a upstream of both).
+        var beforeH10 = _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5"));
+        beforeH10.Should().Contain("H10").And.NotContain("H6");
 
-        var ready = _sut.ComputeReadyHandlers(run);
-
-        ready.Should().Contain("H6");
+        var afterH10 = _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H10"));
+        afterH10.Should().Contain("H6").And.NotContain("H11", "H11's users get the solution's roles — it waits for H7 too");
     }
 
     [Fact]
@@ -277,7 +294,7 @@ public sealed class DagAdvancerTests
     [Fact]
     public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6", "H8");
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H10", "H9", "H6", "H8");
 
         var ready = _sut.ComputeReadyHandlers(run);
 

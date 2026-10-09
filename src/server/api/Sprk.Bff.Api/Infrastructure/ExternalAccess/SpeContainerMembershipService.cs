@@ -9,12 +9,14 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// When a Contact is granted access to a Secure Project, they are added to
 /// the project's SPE container so they can access files.
 ///
-/// This service uses app-only Graph authentication (ForApp) since container
-/// permission management requires elevated permissions beyond what OBO provides.
+/// This service uses app-only Graph authentication since container permission management requires
+/// elevated permissions beyond what OBO provides. Its client comes from
+/// <see cref="SpeContainerOwnershipGuard"/>: a container this stamp does not own is refused (404) before Graph is called, so a forged <c>sprk_containerid</c> cannot add an external user to another
+/// customer's container (task 227d).
 /// </summary>
 public class SpeContainerMembershipService
 {
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly ILogger<SpeContainerMembershipService> _logger;
 
     /// <summary>
@@ -53,10 +55,10 @@ public class SpeContainerMembershipService
     internal const string NoPermissionFoundError = "No permission found";
 
     public SpeContainerMembershipService(
-        IGraphClientFactory graphClientFactory,
+        SpeContainerOwnershipGuard ownership,
         ILogger<SpeContainerMembershipService> logger)
     {
-        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -90,9 +92,11 @@ public class SpeContainerMembershipService
             "Granting SPE container membership: containerId={ContainerId}, email={Email}, accessLevel={AccessLevel}",
             containerId, contactEmail, accessLevel);
 
+        // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
+
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
             var roles = AccessLevelRoleMap[accessLevel];
 
             // Graph SDK 5.x: use SharePointIdentity with userPrincipalName in AdditionalData
@@ -185,8 +189,10 @@ public class SpeContainerMembershipService
 
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
-
+            // Ownership INSIDE the try (task 227d): a refusal (a container this stamp does not own) or a marker read that
+            // got no answer is a failed result, like any other — never an exception. A revoke caller keeps going (its grant
+            // cache invalidation must still run) and reports the contact as not confirmed removed.
+            var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
             var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
             var targetPermission = FindPermissionByEmail(read.Permissions, contactEmail);
@@ -304,11 +310,13 @@ public class SpeContainerMembershipService
             "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
             distinct.Count, containerId);
 
+        // Ownership inside the try (task 227d): a refusal or an unanswered marker read fails every contact, like a client
+        // that cannot be obtained — every member gets an outcome (the closure / revoke callers report them and carry on).
         GraphServiceClient graphClient;
         PermissionReadResult read;
         try
         {
-            graphClient = _graphClientFactory.ForApp();
+            graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
             read = await ReadPermissionsAsync(graphClient, containerId, ct);
         }
         catch (Exception ex)
@@ -480,17 +488,22 @@ public class SpeContainerMembershipService
     /// <summary>
     /// Reads <paramref name="containerId"/>'s user roles (paged, honest about completeness) and its grant markers
     /// (<see cref="StandingWriterMarkerPrefix"/> / <see cref="JitWriterMarkerPrefix"/> custom properties).
-    /// Returns <see langword="null"/> when the container does not exist. Faults propagate.
+    /// Returns <see langword="null"/> when the container does not exist. A container this stamp does not own is refused
+    /// with <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> <c>spe_container_not_owned</c> (404) before Graph is called (task 227d).
+    /// Other faults propagate.
     /// </summary>
     public virtual async Task<ContainerAccess?> ReadAccessAsync(string containerId, CancellationToken ct = default)
     {
-        var markers = await ReadMarkersAsync(containerId, ct).ConfigureAwait(false);
+        // One ownership check for both reads (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+
+        var markers = await ReadMarkersCoreAsync(graphClient, containerId, ct).ConfigureAwait(false);
         if (markers is null)
         {
             return null;
         }
 
-        var read = await ReadPermissionsAsync(_graphClientFactory.ForApp(), containerId, ct).ConfigureAwait(false);
+        var read = await ReadPermissionsAsync(graphClient, containerId, ct).ConfigureAwait(false);
         var roles = read.Permissions
             .Where(p => !string.IsNullOrEmpty(p.Id) && p.GrantedToV2?.User is not null)
             .Select(p => new ContainerUserRole(
@@ -505,14 +518,23 @@ public class SpeContainerMembershipService
 
     /// <summary>
     /// Only the grant markers on <paramref name="containerId"/> (one container read) — the cheap first look the removal
-    /// pass takes at every secure container. <see langword="null"/> when the container does not exist; faults propagate.
+    /// pass takes at every secure container. <see langword="null"/> when the container does not exist. A container this
+    /// stamp does not own is refused (<c>spe_container_not_owned</c>, 404) before Graph is called; other faults propagate.
     /// </summary>
     public virtual async Task<IReadOnlyDictionary<string, string>?> ReadMarkersAsync(string containerId, CancellationToken ct = default)
+    {
+        // Ownership outside any try: a refusal is never "does not exist" (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+        return await ReadMarkersCoreAsync(graphClient, containerId, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, string>?> ReadMarkersCoreAsync(
+        GraphServiceClient graphClient, string containerId, CancellationToken ct)
     {
         Microsoft.Graph.Models.FileStorageContainer? container;
         try
         {
-            container = await _graphClientFactory.ForApp().Storage.FileStorage.Containers[containerId]
+            container = await graphClient.Storage.FileStorage.Containers[containerId]
                 .GetAsync(c => c.QueryParameters.Select = new[] { "id", "customProperties" }, ct)
                 .ConfigureAwait(false);
         }
@@ -551,7 +573,8 @@ public class SpeContainerMembershipService
             return MarkedGrantOutcome.Failed;
         }
 
-        var graphClient = _graphClientFactory.ForApp();
+        // Ownership before the try: a container this stamp does not own is refused (404), not reported as Failed (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
         string permissionId;
         try
         {
@@ -641,7 +664,8 @@ public class SpeContainerMembershipService
         ContainerAccess access,
         CancellationToken ct = default)
     {
-        var graphClient = _graphClientFactory.ForApp();
+        // Ownership before the try: a container this stamp does not own is refused (404), not reported as Failed (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
         try
         {
             var current = access.Roles.FirstOrDefault(r => string.Equals(r.PermissionId, permissionId, StringComparison.Ordinal));

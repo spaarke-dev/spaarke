@@ -29,6 +29,15 @@ jest.mock('@shared/taskpane/services/communicationSuggestionsService', () => ({
   fetchEnginePreSelection: (...args: unknown[]) => mockFetchEnginePreSelection(...args),
 }));
 
+// Task 118: the progress -> result dialog is shared with Word and covered by word/commands/__tests__/quickSaveDialog.test.ts;
+// here it is replaced by a recording fake, so these tests assert what the command SAYS and when it completes.
+const mockDialogShow = jest.fn();
+const mockDialogFinish = jest.fn();
+const mockOpenQuickSaveDialog = jest.fn();
+jest.mock('@shared/commands/quickSaveDialog', () => ({
+  openQuickSaveDialog: (...args: unknown[]) => mockOpenQuickSaveDialog(...args),
+}));
+
 type OfficeGlobal = {
   context: { mailbox: { item: unknown }; requirements: { isSetSupported: jest.Mock } };
   MailboxEnums: Record<string, unknown>;
@@ -78,6 +87,10 @@ describe('outlook/commands/index.ts — quickSave sends the email content (task 
     mockApiConfigure.mockReturnValue(undefined);
     mockApiPost.mockReset();
     mockApiPost.mockResolvedValue({ jobId: 'job-1' });
+    mockDialogShow.mockReset();
+    mockDialogFinish.mockReset();
+    mockOpenQuickSaveDialog.mockReset();
+    mockOpenQuickSaveDialog.mockResolvedValue({ show: mockDialogShow, finish: mockDialogFinish });
     mockFetchEnginePreSelection.mockResolvedValue(PREDICTION);
     office.context.requirements.isSetSupported.mockReturnValue(true);
 
@@ -117,8 +130,9 @@ describe('outlook/commands/index.ts — quickSave sends the email content (task 
     office.addin = originalAddin;
   });
 
+  /** Every result the command showed in the dialog, in order. */
   function messages(): string[] {
-    return replaceAsync.mock.calls.map(c => (c[1] as { message: string }).message);
+    return mockDialogShow.mock.calls.map(c => (c[0] as { message: string }).message);
   }
 
   it('sends the body and every attachment, names the non-inline ones for documents; a cloud link is reported', async () => {
@@ -138,7 +152,7 @@ describe('outlook/commands/index.ts — quickSave sends the email content (task 
     // The cloud link is never read.
     expect(getAttachmentContentAsync.mock.calls.map(c => c[0])).toEqual(['pdf', 'logo']);
     expect(messages()).toContain(
-      'Filed to Acme Matter. 1 attachment was left out: too large, a cloud link or unreadable.'
+      'Saved to Spaarke and filed to Acme Matter. 1 attachment was left out: too large, a cloud link or unreadable.'
     );
   });
 
@@ -150,12 +164,10 @@ describe('outlook/commands/index.ts — quickSave sends the email content (task 
     await commands.quickSave({ completed: jest.fn() });
 
     expect(mockApiPost).not.toHaveBeenCalled();
-    expect(replaceAsync).toHaveBeenLastCalledWith(
-      'spaarke_error',
-      expect.objectContaining({
-        message: "Couldn't read this email or an attachment, so nothing was saved. Open Spaarke to try again.",
-      })
-    );
+    expect(mockDialogShow).toHaveBeenLastCalledWith({
+      message: "Couldn't read this email or an attachment, so nothing was saved. Open Spaarke to try again.",
+      status: 'error',
+    });
   });
 
   it('a host without Mailbox 1.8 sends no content — the server fetches the email as before', async () => {
@@ -169,6 +181,6 @@ describe('outlook/commands/index.ts — quickSave sends the email content (task 
     expect('attachments' in email).toBe(false);
     expect(email.selectedAttachmentFileNames).toBeUndefined();
     expect(bodyGetAsync).not.toHaveBeenCalled();
-    expect(messages()).toContain('Filed to Acme Matter.');
+    expect(messages()).toContain('Saved to Spaarke and filed to Acme Matter.');
   });
 });

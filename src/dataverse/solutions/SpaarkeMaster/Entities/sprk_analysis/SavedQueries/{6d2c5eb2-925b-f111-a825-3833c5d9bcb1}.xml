@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{6d2c5eb2-925b-f111-a825-3833c5d9bcb1}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_analysisid">
+          <cell name="sprk_name" width="200" />
+          <cell name="sprk_documentid" width="100" />
+          <cell name="sprk_confidence" width="105" />
+          <cell name="sprk_workingdocument" width="151" />
+          <cell name="createdby" width="104" />
+          <cell name="createdon" width="105" />
+          <cell name="sprk_reviewdate" width="113" />
+          <cell name="sprk_disposition" width="105" />
+          <cell name="sprk_reviewerby" width="114" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" output-format="xml-platform" mapping="logical">
+        <entity name="sprk_analysis">
+          <attribute name="sprk_name" />
+          <attribute name="sprk_analysisid" />
+          <attribute name="createdby" />
+          <attribute name="createdon" />
+          <attribute name="sprk_documentid" />
+          <attribute name="sprk_reviewdate" />
+          <attribute name="sprk_disposition" />
+          <attribute name="sprk_workingdocument" />
+          <attribute name="sprk_confidence" />
+          <attribute name="sprk_reviewerby" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Insights Observations - Review Queue" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

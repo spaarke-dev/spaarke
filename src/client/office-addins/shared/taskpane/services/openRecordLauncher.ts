@@ -157,12 +157,61 @@ export function buildOpenSpaarkeUrl(orgUrl: string | undefined, appName: string)
 }
 
 /**
- * Default opener: `Office.context.ui.openBrowserWindow` — the mechanism Spike-2 selected. Never
- * `window.open` / the Office Dialog API for this path. Injectable so tests can assert the call
- * without driving a live Office.js host.
+ * `Office.context.ui.openBrowserWindow` — the mechanism Spike-2 selected for hosts that have it. Used by
+ * {@link openFileUrl} when the host supports `OpenBrowserWindowApi` 1.1.
  */
-function defaultOpener(url: string): void {
+function browserWindowOpener(url: string): void {
   Office.context.ui.openBrowserWindow(url);
+}
+
+/**
+ * Task 120: whether `OpenBrowserWindowApi` 1.1 is supported right now — the same runtime check the adapters make for
+ * `HostCapabilities.canOpenBrowserWindow` (never a manifest requirement). `false` outside Office or when the check
+ * throws. Office on the web reports `false` (task 119).
+ */
+export function isOpenBrowserWindowSupported(): boolean {
+  try {
+    return Office.context.requirements.isSetSupported('OpenBrowserWindowApi', '1.1');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Task 120: opens an https URL in a normal browser tab by whichever mechanism this host has —
+ * `Office.context.ui.openBrowserWindow` where `OpenBrowserWindowApi` 1.1 is supported (desktop Word/Outlook), else
+ * `window.open(url, '_blank')` from the click (Office on the web, where B2B guests work). The second is
+ * {@link openFileUrl}'s existing fallback, reused: it detects a blocked pop-up and detaches `opener` itself, which the
+ * `noopener` window feature would make impossible (with `noopener` `window.open` always returns `null`).
+ */
+export function openInBrowserTab(
+  url: string,
+  openers: {
+    browserWindow?: (url: string) => void;
+    windowOpen?: (url: string, target: string) => Window | null;
+  } = {}
+): OpenRecordResult {
+  return openFileUrl(url, isOpenBrowserWindowSupported(), openers);
+}
+
+/**
+ * Task 120: THE gate for every "Open in Spaarke" affordance in the pane (Save's View Document / Open Document / the
+ * "Filed to" card, Find's rows, To Do's and Email's "Open in Spaarke"): `ORG_URL` is set AND the pane can open a tab
+ * SOMEHOW — `canOpenBrowserWindow`, or a browser `window.open` (Office on the web). Before task 120 the affordances
+ * were gated on `canOpenBrowserWindow` alone, so none of them showed on the web (task 119's finding) — where guests
+ * work. Decided from capabilities, never `hostType` (NFR-10). `App` and `SaveView` pass its result as `canOpenRecord`.
+ */
+export function canOpenSpaarkeRecords(
+  capabilities: { canOpenBrowserWindow: boolean },
+  orgUrl: string | undefined = process.env.ORG_URL
+): boolean {
+  if (!orgUrl) {
+    return false;
+  }
+  if (capabilities.canOpenBrowserWindow) {
+    return true;
+  }
+  return typeof window !== 'undefined' && typeof window.open === 'function';
 }
 
 /**
@@ -188,7 +237,7 @@ export function openFileUrl(
   } = {}
 ): OpenRecordResult {
   if (canOpenBrowserWindow) {
-    (openers.browserWindow ?? defaultOpener)(url);
+    (openers.browserWindow ?? browserWindowOpener)(url);
     return { opened: true };
   }
 
@@ -239,11 +288,16 @@ export function openDesktopUrl(
  * - `orgUrl` is unset — mirrors the Quick Create precedent exactly (`App.tsx` `onQuickCreate`).
  * - `recordId` is empty once canonicalized.
  *
- * Callers MUST gate the affordance itself on `HostCapabilities.canOpenBrowserWindow` (NFR-10) —
- * this function does not re-check the capability, so it should only be reachable from UI already
- * gated on it.
+ * Callers MUST gate the affordance itself on {@link canOpenSpaarkeRecords} (NFR-10).
+ *
+ * Task 120: the default opener is {@link openInBrowserTab} — `openBrowserWindow` where supported, else `window.open`
+ * (Office on the web). A blocked pop-up comes back as `{ opened: false, reason }`. An injected `opener` that returns
+ * nothing is taken as opened.
  */
-export function openRecord(input: OpenRecordInput, opener: (url: string) => void = defaultOpener): OpenRecordResult {
+export function openRecord(
+  input: OpenRecordInput,
+  opener: (url: string) => OpenRecordResult | void = url => openInBrowserTab(url)
+): OpenRecordResult {
   if (!input.orgUrl) {
     const reason = 'ORG_URL is not configured.';
     console.warn(`[Spaarke] Open record disabled: ${reason}`);
@@ -258,6 +312,5 @@ export function openRecord(input: OpenRecordInput, opener: (url: string) => void
   }
 
   const url = buildOpenRecordUrl(input.orgUrl, input.entityType, id, input.appName ?? configuredSpaarkeAppName());
-  opener(url);
-  return { opened: true };
+  return opener(url) ?? { opened: true };
 }

@@ -87,7 +87,7 @@ public static class CustomerRunGuardModule
 
         // Singleton: both store + guard are stateless over their injected
         // collaborators (options, IHttpClientFactory, ILogger). Same lifetime
-        // choice as ISolutionCatalog / ICanonicalIndexCatalog / other pure
+        // choice as ICanonicalIndexCatalog / other pure
         // registration collaborators in L2.
         services.TryAddSingleton<IRegistryConcurrencyStore, DataverseRegistryConcurrencyStore>();
         services.TryAddSingleton<ICustomerRunGuard, CustomerRunGuard>();

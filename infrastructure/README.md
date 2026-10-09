@@ -65,8 +65,9 @@ Infrastructure": lint + compile, no deploy).
 
 There is no shared Model 1 tier any more (D-12, 2026-09-28): a Model 1 customer is a **dedicated stamp** in
 Spaarke's Azure tenant, built from `bicep/customer.bicep` by the L2 control plane (handler H2a) — run
-`/provision-environment`, see `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. (Until task 228 lands,
-H2a refuses Model 1 runs — fails closed — rather than deploy into a non-dedicated subscription.) The former
+`/provision-environment`, see `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, into the customer's own subscription
+(the operator creates it and grants the L2 identity Owner with `bicep/modules/controlplane-subscription-rbac.bicep` —
+task 228). The former
 `stacks/model1-shared.bicep` / `model1-customer.bicep` and their `parameters/{dev,staging,prod}.bicepparam` were
 retired by `customer-provisioning-orchestration-r1` task 225a (2026-10-01).
 

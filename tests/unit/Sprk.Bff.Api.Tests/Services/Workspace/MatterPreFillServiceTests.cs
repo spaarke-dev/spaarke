@@ -28,11 +28,9 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// </list>
 ///
 /// <para>
-/// Tests covering the full pre-fill pipeline (text extraction, SpeFileStore staging,
+/// Tests covering the full pre-fill pipeline (text extraction,
 /// playbook event consumption, $choices output shape) are intentionally OUT OF SCOPE
-/// here: <see cref="Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore"/> is a concrete
-/// non-virtual facade that cannot be cleanly mocked without a wider refactor, and the
-/// NFR-07-binding pre-fill flow is exercised end-to-end by existing integration tests.
+/// here: the NFR-07-binding pre-fill flow is exercised end-to-end by existing integration tests.
 /// Playbook resolution happens inside a private method behind that facade, so the routing
 /// contract is pinned via constructor reflection + source-text invariants (established
 /// pattern in this file since task 016).
@@ -73,6 +71,20 @@ public class MatterPreFillServiceTests
         parameters.Should().Contain(p => p.ParameterType == typeof(IConsumerRoutingService),
             "FR-P3-01 — IConsumerRoutingService MUST be a constructor dependency " +
             "for sprk_playbookconsumer routing-table resolution");
+    }
+
+    [Fact]
+    public void MatterPreFillService_Constructor_TakesNoStorageDependency_UploadsAreNeverStored()
+    {
+        // Task 227f: pre-fill extracts text in memory and stores nothing — the optional SPE staging container (configured
+        // by no environment) was retired. A storage dependency coming back would mean uploads persisted somewhere again.
+        var ctor = typeof(MatterPreFillService)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Single();
+
+        ctor.GetParameters().Should().NotContain(
+            p => p.ParameterType.Name == "SpeFileStore" || p.ParameterType.Name.EndsWith("SharePointEmbeddedOptions", StringComparison.Ordinal),
+            "pre-fill uploads are never stored (task 227f)");
     }
 
     [Fact]
