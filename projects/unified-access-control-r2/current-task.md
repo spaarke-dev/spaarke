@@ -1,106 +1,45 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–86) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-08.md`. Owner checks: `notes/owner-hands-on-checklist-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–89) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-08.md`. Owner checks: `notes/owner-hands-on-checklist-2026-10-08.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-08 late (checkpoint #24, before /compact).
+> **Last Updated**: 2026-10-09 (checkpoint #25).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 5/6. **174** (PR #1481) is merging: the background job **`bp5mztsrl`** waits for Router, squash-merges, deploys the BFF from C:\wtR2, then imports TrackingFieldTrio **1.0.43** (built in the PR). Everything else is waiting on the owner's checks or on 174. |
-| **Agents (idle, resumable by SendMessage)** | `exec174` (C:\wt174), `exec173` (C:\wt173), `exec153` (C:\wt153), `exec067` (C:\wt067), `fix1410` (C:\wt1410), `exec113`, `exec064`. None running. |
-| **Next Action** | (1) When `bp5mztsrl` reports: confirm MERGED + `bff exit=0` + `healthz=200` + `TrackingFieldTrioSolution 1.0.43`. Then ask `exec174` to run the live gate on dev: a CIAM contact with an org-wide grant on a NOT-flagged work assignment under a secure matter loses it in the SPA (record before/after in the batch5 notes); the Manage Access banner names the direct parent. No prod KV reads. Delete everything and read it back as 404. (2) Then start, in this order (they share files): **175** (deps 174; also absorb #1478's items), then **136**, then **099** (AccessGrantModal; can run beside 175 if the files don't overlap — check first). Use task-execute and opus executors in fresh `C:\wtNNN` worktrees from origin/master. Two verifier passes for auth/security tags, one otherwise. (3) When the owner reports checklist results, close the tasks (POML `<status>` + TASK-INDEX row + `scripts/check-task-status-drift.ps1`; the 9 known drift false-positives are expected) and sync the board (Project #808 item `PVTI_lAHODW0Pv84BEgWuzg3V-P0`, Tasks Completed field `PVTF_lAHODW0Pv84BEgWuzhWPlLY`, Task Count field `PVTF_lAHODW0Pv84BEgWuzhWPlLU`). |
+| **Task** | Session 28. Four PRs are verified and queued as a chained background merge/deploy (scratchpad `mergeNNNN.sh`; each waits for Router with 0 pending): **180** #1519 (`bxbsqfva2`: ribbons -Apply incl. hiding the "New Document" appaction) → **175** #1503 (`beis8njx7`: waits for 180; schema verify → BFF → 2 web resources → form lock → access ribbon -Verify → TFT 1.0.45) → **177** #1517 (`bils0r27l`: waits for 175; BFF) → **176** #1520 (`bab0yymf3`: waits for 177; BFF). The 175 schema step (`Set-AccessInheritanceSchema.ps1 -Apply/-Verify`) is ALREADY DONE on dev (column secured, BFF reads it). |
+| **Agents (idle, resumable)** | `exec175` (C:\wt175), `exec176` (C:\wt176), `exec177` (C:\wt177), `exec180` (C:\wt180); older: exec174, exec173, exec153, exec067, fix1410. |
+| **Next Action** | (1) As each job reports, check MERGED, the deploy exits, readbacks and healthz. For 175, read the form-lock and ribbon-verify output: if the ribbon verify FAILS, run `Set-AccessRibbon.ps1 -Apply` (after 180's ribbon import has finished). (2) After 175 deploys: watch two `secure-root-inheritance` job runs (`ResultJson.followParents`: notCompleted 0, no access_record_hidden / not_secured), re-run the schema `-Verify` (the read probe now runs), then the 175 live gate via `exec175`: unsecure a matter with a filed work assignment, which follows; Make Secure a work assignment under an ordinary matter, then secure and unsecure the matter, and it stays secure; Remove Secure hidden under a secure floor; the form refuses a looser Access Permission; clean up. (3) After 177 deploys: one-off Send-to-Index for the 141 dev documents (query in PR #1517 body). (4) 180 live gate G180-2: a read-only role sees no custom create buttons; testuser1 (Basic User) still sees them. (5) Close 174 ✅ (done); close 175/176/177/180 after their gates (POML status + TASK-INDEX + drift check + board sync). (6) Then start **179** and **181** (both after 175), then **178** (design note first → owner), then 136 → 099 → 036 → 090. |
 
-## Merge / deploy procedure (current practice)
-- **Merge jobs** are scratchpad scripts (`scratchpad/mergeNNNN.sh`):
-  - wait for `Router` = pass with no pending check, up to **360 × 20 s** (Build & Test takes about 1.5 h);
-  - **tolerate only** "Server tests (office scope)" when its job conclusion is `cancelled` (the 20-min timeout, #1474);
-  - check that the PR head equals the local head;
-  - then `gh pr merge --squash`.
-- **BFF:** from `C:\wtR2` (clean → `git checkout --detach origin/master`) run `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`. Only ONE job may use C:\wtR2 at a time.
-- **PCF:** `Solution/pack.ps1`, then `pac.cmd solution import --path <zip> --publish-changes` (full path `C:\Users\RalphSchroeder\AppData\Local\Microsoft\PowerAppsCLI\pac.cmd`; the bash `pac` shim does nothing).
-- **Form scripts:** `-Apply` then `-Verify`. A systemforms GET returns the PUBLISHED XML, so publish before any read-back (PR #1473).
+## Open with the owner
+- **Banner still shows "Access status unavailable"** after #1490 deployed (fixed script 1.0.1 confirmed in Dataverse; the `/no-access` route returns 200 for the owner's matters; CORS and the redirect URI are fine). Waiting on the owner's Network-tab status codes for `no-access|config/client` after Ctrl+Shift+R, plus `[Access Status]`/`[BffAuth]` console lines. Suspects: a cached old script, or MSAL ssoSilent failing in the browser. The Notepad "Failed to load memos [object Object]" error is probably separate.
+- Whether to add No Access Entries to the Matter Management app navigation (URL workaround given).
+- Policy question: curated Precedents as firm-wide knowledge (option c), for later.
+- Checklist §1–§8 (§7 is blocked by the banner); `Remove-TestContainers.ps1`; CIAM identities for 140; 171 users; 165 role grant; round 89 roles (set Share privilege after 179).
 
-## Dev state (2026-10-08)
-- **Deployed today:**
-  - #1411 (064), #1406 (113), #1419 (#1410 fix);
-  - #1434 (067), then TrackingFieldTrio 1.0.40;
-  - #1450 (153): banner web resource, forms registered and published (-Verify PASS), TrackingFieldTrio **1.0.41**;
-  - #1458 (173): web resource `sprk_accesspermission_inherited`, form lock on To Do / Event / Message / Document (-Verify PASS); the backfill converged (411 rows).
-  - Merged: ADR-006 amendment 2.1 (#1462), the script fix (#1473), the e2e spec fixes (#1440) and the hook cap of 20k (#1433).
-- **App settings (round 79):**
-  - `ExternalAccess__Reconciliation__WritesEnabled=true`;
-  - `Communication__OwnershipHoldAlertUserIds__0` = ralph.schroeder@spaarke.com.
-- **154 gap:** `AddAppComponents` did not add `sprk_noaccessentry` to the Matter Management app. The owner may need to add it in the app designer (checklist §1 g).
-- **Records left for the owner:**
-  - project `edb87d10…` + grant `144b5110…` (105, now closed, so delete both);
-  - No Access entry `33a4e845…` (154 (o) check, then delete).
-- **Containers:** `notes/Remove-TestContainers.ps1` lists 25. The owner runs it as SharePoint admin, `-WhatIfOnly` first.
-- **Form snapshots:** `scratchpad/snapshots/` (153 and 173).
+## Owner decisions this session (recorded in notes)
+- **R87:** the parent sets a FLOOR; a child may be stricter; only inherited values follow the parent down; a re-file never loosens; the lock covers Secure and Access Permission only. "Same as today" for who may act (Access Permission lowering needs Write only).
+- **R88:** one SPE container per secure family (top secure record's container; adopt an existing one where possible); un-secure MOVES files to the business unit → task 178.
+- **R89:** Manage Access needs the Share privilege (179); Create buttons follow the Create privilege (180); build internal grant notification (181). 174 stand-in accepted → 174 closed.
+- Main-session calls: 176 option B (batch read as the caller); index parent = governing record (one secure → it; none → most specific; two secure roots or unreadable → none); SearchDocuments unbound and trimmed; Precedents need every supporting matter readable; 180 hides the modern "New Document" appaction (owner OK).
 
 ## Task status
-- **Totals:** 126 of 157 in scope are done (172 tasks; 15 cancelled or deferred).
-- **Done today:** 064, 113, 146, 047, 105.
-- **On dev, waiting on OWNER checks** (checklist sections):
-  - 067 (§6), 153 (§7), 173 (§8);
-  - 154 (§1);
-  - 114 and 171 (§1–§5);
-  - batch 4: 137, 140, 142, 143, 147, 150, 157, 162, 163, 164, 165, 166, 168, 169 (§1–§5; their agent-runnable gates ran today and passed — see the gatesA section of batch5 notes).
-- **In review / merging:** 174.
-- **Not started:**
-  - 175 (deps 174; #1478 adds 5+4 stored-flag readers to make follow the cascade);
-  - 136 (shares files with 174);
-  - 099;
-  - 036 (after 136; ADR-034 path B approved; fold in #1414);
-  - 090 (wrap-up).
-- **Bookkeeping only:** 013, 037, 039 (close with 136); 058 (with 090); 066 (with 067).
+- **Done:** 125 (174 closed today).
+- **Verified, merging/deploying:** 175, 176, 177, 180.
+- **Waiting on owner checks:** 067 (§6), 153 (§7), 173 (§8), 154, 114, 171, batch 4 (137, 140, 142, 143, 147, 150, 157, 162–166, 168, 169).
+- **Not started:** 179, 181 (after 175); 178 (after 175 + 177; design first); 136; 099; 036; 090. Bookkeeping: 013/037/039 (with 136), 058 (090), 066 (067).
 
-## Owner decisions this session (recorded)
-- **R81:** children show the parent's Access Permission; a parentless child keeps its own (record only; may revisit).
-- **R82:** the parent's permissions control a filed child.
-- **R83:** decisions 1–11, recommendations accepted. Follow-ups still to schedule:
-  - (1) No Access picker via RegardingResolver "link only";
-  - (2) 101 views tweak (Granted By beside Created By; overdue in the 30-day view);
-  - (4) #1396 secure ownership for grant rows;
-  - (6) #1350 replace share-link with an open-record link.
-- **R84:** a child's access follows the parent BOTH ways, locked; replaces round 6 item 4.
-- **R85:**
-  - evidence stand-ins accepted (047, 143 v, 162 i/j, 146, 166 f, 105);
-  - NO prod Key Vault reads for dev work;
-  - 153 wording.
-- **R86:** ADR-006 amended for thin form-event scripts (path B).
-- **173 owner questions:** answered by default (no objection) — an unfiled thread counts as a parent; the control goes on the Message and Document main forms only.
+## Issues filed today
+#1488 (fixed), #1489 KPI/rollup `/api/api`, #1492 SpaarkeMaster source missing 2 web resources (added to the dev solution), #1506 → 178, #1510 → 177, #1511 → 176, #1514 per-document check cost, #1516 bulk indexing sweep broken + "Unknown Matter" labels, #1521 ribbon source drift, #1522 index-name resolver short names, #1533 search counts include unreadable docs, #1534 flaky ContentSafety test.
 
-## Open owner items
-- Work through the checklist (`notes/owner-hands-on-checklist-2026-10-08.md` §1–§8). §6–§8 close 067, 153 and 173.
-- Run `Remove-TestContainers.ps1`.
-- 140 needs 4 CIAM identities. 171 needs a licensed external user, a new BU1 user (D3) and a demo self-registration (J4). 165 needs the SPE Admin app role granted to testuser1 plus approval of the write probes.
-
-## Issues filed (not yet scheduled)
-
-| Issue | What it is |
-|---|---|
-| #1478 | Stored-flag readers that 175's cascade fixes (9 items) |
-| #1482 | `/unshare-user` has no Restricted carve-out for an external last reader |
-| #1474 | CI office-scope job hits its 20-min timeout repo-wide |
-| #1449 | Pill and indicator stale after Make Secure until reload |
-| #1435–#1439 | Small batch-4 defects (playbook share display, raw 403, log noise, Graph 403→401) |
-| #1441 | Invitation-onboarding e2e spec can't pass |
-| #1443 | Compose check-changes shares one change state per container |
-| #1444 | Dev runs older PCF bundles under master's version (next RegardingResolver = 1.6.2) |
-| #1445 | Deleting a provisioned record leaves container/files/JIT roles |
-| #1426 | Synchronizer checks only the root and direct parents (possible) |
-| #1394 / #1396 / #1397 | Grant-row name, secure grant rows in the root BU, Granted By |
-| #1404 / #1409 / #1414 / #1378 / #1379 | Earlier |
-
-#1313: do NOT mint a secret.
-
-## Coordination
-- **#1355 (ontology-r1):** their task 039 PR will come to us for review; their task 046 comes separately.
-- **Word add-in (r1):** the round-81 reply was sent. An optional follow-up naming task 173 / #1423 is drafted in this session's chat.
+## Gotchas learned today (also in project CLAUDE.md §6 where durable)
+- `sprk_BffApiBaseUrl` ends in `/api`: normalize it (#1488).
+- `Deploy-WebResourceInline.ps1` puts new web resources outside SpaarkeMaster (#1492).
+- A newly created column needs a table publish before `fieldpermissions` can reference it (175's script now waits).
+- Never start a merge job with `&` in a foreground call (no log); always use run_in_background.
 
 ## Worktrees
-- **Active:** C:\wt174 (merging).
-- **Deploy:** C:\wtR2.
-- **Removable after the merges:** C:\wt064, C:\wt067, C:\wt113, C:\wt153, C:\wt173, C:\wt1410, C:\wt154, C:\wt105, C:\wt101, C:\wt114u. Run `cmd /c rmdir` on any node_modules junction first, never `rm -rf` through a junction.
+- **Active:** C:\wt175, C:\wt176, C:\wt177, C:\wt180.
+- **Deploy:** C:\wtR2, used in sequence by the chained jobs.
+- **Removable:** C:\wt174, C:\wt1488, C:\wt064, C:\wt067, C:\wt113, C:\wt153, C:\wt173, C:\wt1410, C:\wt154, C:\wt105, C:\wt101, C:\wt114u. Run `cmd /c rmdir` on any node_modules junction first.
