@@ -23,14 +23,12 @@ In-app the parent-document `dialogCloseIconButton` click and `window.close()` ne
 
 ## D4 — Known limits (K-class)
 
-- **K**: the shared primitive swallows `navigateTo` rejections, so the upload launch no longer logs a non-cancel dialog error to the console, and the widget launch treats a rejected `navigateTo` as closed rather than the Retry state.
 - **K**: Find Similar's record lookup (`lookupObjects`) and its follow-on Relationship Viewer (`sprk_documentrelationshipviewer`, a non-wizard dialog, out of scope) still open platform surfaces.
 - **K**: `makeStyles` in `FindSimilarCodePage/App.tsx` uses the unsupported shorthand `borderColor` (Griffel warns in dev; pre-existing).
-- **K**: `main.tsx` of the Create Work Assignment code page has no test runner; its `handleComplete` mirrors Create Matter/Project and the shared dialog and host paths are covered.
 
 ## D5 — Defects found, not caused by this task (reported)
 
-- `FindSimilarApp` never reads the `documentId` / `containerId` launch params that `launchFindSimilarWizard`, `WorkspaceGrid` and `FindSimilarWizardWidget` send, so a preselected document is silently ignored (pre-existing).
+- **Fixed in the PR after review (no parking):** #1479 (`FindSimilarApp` ignored `documentId` / `containerId`; now read in both hosts via `launchParams.ts`, `containerId` carried but unused); the shared launch helper now logs non-cancel `navigateTo` failures with the surface name; `codePageMains.test.tsx` tests the Create Work Assignment and Find Similar `main.tsx` entry points directly.
 - Pre-existing failures on master (same on a clean baseline): `buildDynamicWorkspaceConfig` case (h) (#1345); `WorkspaceLayoutWizard` rowHeight / sectionInstanceAdvanced (14 tests); AI.Widgets `ContextWidgetAdapter` and `register-workspace-widgets`; `DocumentUploadWizard` jest config cannot resolve `@spaarke/ui-components`.
 
 ## Measurements

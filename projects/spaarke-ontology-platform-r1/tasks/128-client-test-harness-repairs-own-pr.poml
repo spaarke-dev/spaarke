@@ -4,7 +4,7 @@
     <title>Client test-harness repairs, own PR: Daily Briefing cleanGuid mock (#1416), SmartTodo jest key (#1417), WorkspaceLayoutWizard stale selectors (#1388), SemanticSearchControl jest (#1392)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** and test config in four packages (CLAUDE.md section 8: code-review + adr-check regardless).</rigor-reason>
     <model-tier>sonnet</model-tier>

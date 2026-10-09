@@ -4,7 +4,7 @@
     <title>ISS-014 (#1412): the SpaarkeAi build (ribbon step) fails in a clean checkout, so the Deploy SpaarkeAi workflow fails on every master push — own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Build/CI change on the Console's deploy path (root-cause debugging).</rigor-reason>
     <model-tier>sonnet</model-tier>
