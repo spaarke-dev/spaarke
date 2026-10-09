@@ -13,7 +13,8 @@ Follow-ups the same day: un-securing cascades ("Child follows"); it applies to w
 - The lock covers Secure and Access Permission only. `/grant`, `/share-user` and Update Access stay as they are.
 
 Absorbs #1478 (the five readers that decided Restricted from the record's own stored column). Verifier pass 1 on PR #1503
-found F1, a re-file that un-secured a record without F3; round 87 closes it.
+found F1, a re-file that un-secured a record without F3; round 87 closes it. The verifier's second pass found F1-1 (the
+access record was user-writable, so a forged one bypassed F3) and items (a)-(e); the fix round closes them (below).
 
 Branch `task/uac-r2-175`, rebased onto `origin/master` (`c8a87d818`: #1481 and #1490 merged).
 
@@ -57,7 +58,8 @@ the entry there, as for task 173.)
 
 ### The marker: one column, `sprk_accessinheritance`
 - Multiple lines of text on `sprk_workassignment` and `sprk_project`.
-- Written only by the BFF; never on a form.
+- Written only by the BFF; never on a form. Field-secured: only task 133's "Spaarke BFF-Managed Field Writers" profile (the
+  BFF application users) can read or write it; every BFF writer refuses a caller-supplied write that names it (fix round).
 - Versioned JSON: `parents`, `floorSecure`, `floorPermission`, `ownSecure`, `ownPermission`.
 - Data model: `docs/data-model/access-inheritance.md`. Schema: `scripts/Set-AccessInheritanceSchema.ps1`.
 
@@ -95,10 +97,13 @@ How it is read (`SecureRootInheritance.Decide`, pure):
   - a value EQUAL to the floor is inherited;
   - a value STRICTER than the floor is set on the record;
   - a parentless record's values are all its own.
-- Exception: inside a parent's own `/unsecure-project`, a flag below that parent counts as inherited, because the parent was
-  secure until that call (`parentWasSecure`, passed only when the call actually un-secured the parent).
-- Consequence: a child whose parent was un-secured BEFORE this deploy (under round 6's rule it stayed secure) reads as
-  stricter than its floor, so as set on the record. It stays secure. That is the stated rule.
+- No exception (fix round): an EMPTY record never loosens anything. The earlier `parentWasSecure` exception (a flag below a
+  parent being un-secured counted as inherited before its record existed) is removed: an empty record cannot be told from
+  one field security hides from the BFF, and reading either as "inherited" would loosen. Instead a record secured by
+  inheritance gets its record at once (fix a), and the job backfills the rest within one run.
+- Consequence: a child whose parent was un-secured BEFORE the job first saw it (under round 6's rule it stayed secure; or in
+  the minutes between the BFF deploy and the first job run) reads as stricter than its floor, so as set on the record. It
+  stays secure (fail closed); its F3 holder can remove it, since its parent is ordinary.
 
 ### What was built, per goal item
 1. **Cascade.** `SecureRootInheritance.FollowParentsAsync` (`SecureRootInheritance.Cascade.cs`, a partial of the ONE owner).
@@ -155,11 +160,26 @@ contract:
 BFF. The transition runs inside the parent's unsecure request, the re-file writers and Make Secure. The safety net is the
 existing in-process job (ADR-036/052). No package, endpoint, job or timer. One Dataverse column.
 
+## Fix round (verifier pass 2: F1-1 and a-e)
+
+| Item | What was wrong | Fix | Test |
+|---|---|---|---|
+| F1-1.1 FLS | `sprk_accessinheritance` was user-writable: forging "inherited" on a hand-secured child let the job un-secure it without F3 | `Set-AccessInheritanceSchema.ps1` creates the column SECURED and grants only "Spaarke BFF-Managed Field Writers" (read/create/update; members = the BFF app users, (p3)); no reader profile; any other profile that can read/write it FAILs. `-Verify` asserts IsSecured, the writer permission and members, and that each BFF user can READ it (System Administrator, or the platform's `RetrievePrincipalAttributePrivileges`; a read probe as the BFF user once a record exists). A grant failure leaves the column secured (fail closed), never reverted. (p7): a pre-existing unsecured column holding values blocks -Apply. | script `-SelfTest` 26 checks; `AccessInheritanceSchemaScriptAgreementTests` (6) |
+| F1-1.1 empty vs unreadable | an FLS read loss reads empty, like "no record yet" | an empty record never loosens (`parentWasSecure` removed). The two ARE told apart on a write: each record write is read back; empty = hidden (`sdap.inherit.access_record_hidden`), the run fails, and the pass writes no further record (no churn) | `AnEmptyAccessRecord_NeverLoosens_…`, `AnAccessRecordTheBffCannotRead_LoosensNothing_FailsTheRun_…` |
+| F1-1.2 writers | the BFF writers accepted the column in a caller's payload | `SecureRootFilingGate.CheckAsync` / `PlanCreateAsync` (every BFF writer: generic update handler, AI update/create handlers, `OwnedChildWrite`, Office record creation, field-mapping push) and `CheckRefileAsync` / `PlanCreateAsync` refuse any write that names it (any spelling, alone or with other columns, update or create): `sdap.access.access_record_server_only`. Only the cascade writes it. | `AForgedAccessRecord_IsRefusedByEveryBffWriter_AndNeverLeadsToAnUnsecure` |
+| F1-1.3 config | a field-mapping rule / AI topic row / email update field could target it | the script's (p6), the same three channels as task 150 (pinned equal to `SecureFlagFieldSecurityAssertion.ConfiguredWriterChannels`) | agreement test |
+| (a) | a record secured by inheritance had no record until the job ran, so a parent un-secured in between left it secure for good | `ProvisionAsync` writes the inherited record at once (`RecordInheritedSecureAsync`, best effort; the job writes it otherwise) | `ARecordSecuredByInheritance_GetsItsAccessRecordAtOnce_…` |
+| (b) | the unreadable-record guard was not pinned | a corrupt record is reported undetermined (`access_record_unreadable`), loosens nothing, and is NOT overwritten | `ACorruptAccessRecord_IsReported_LoosensNothing_AndIsKept` |
+| (c) | a user's edit between the read and the write was overwritten | `WritePermissionAsync` / `WriteMarkerAsync` re-read the column just before writing and skip on a change (`sdap.inherit.changed_concurrently`, counted `changedConcurrently`, not a failure); the next run decides again. `IGenericEntityService` has no row-version update, so it is re-read-and-compare (K below). | `AUsersEditBetweenTheReadAndTheWrite_IsNeverOverwritten_…` |
+| (d) | round-2 un-secures did not count against `MaxUnsecuresPerRun` | checked before and counted after each round-2 follow | `UnsecuresInTheLaterRounds_CountAgainstTheRunsBound` |
+| (e) | a failed record write was counted as in step | reported (`access_record_not_written`), `notCompleted`, the run fails | `AnAccessRecordThatCannotBeWritten_IsReportedAsAProblem` |
+
 ## Decisions and interpretations
-- **Access Permission vs F3.** Round 87 item 4 says removing extra strictness needs F3. On a parentless record today only
-  removing Secure is F3-gated; the Access Permission is edited on the form with Write. Applied with parity: Secure removal
-  goes through F3 (`/unsecure-project`), and a looser Access Permission at or above the floor through the form (Write). Owner
-  question O-5.
+- **Access Permission vs F3 (O-5, answered: "same as today").** Round 87 item 4 says removing extra strictness needs F3. On a
+  parentless record today only removing Secure is F3-gated; the Access Permission is edited on the form with Write
+  (`Set-SecureFlagFieldSecurity.ps1:47`: `sprk_accesspermission` stays editable by Write-holders). The owner chose "same as
+  today": Secure removal goes through F3 (`/unsecure-project`); lowering a hand-set Access Permission needs Write only and is
+  never below the floor. Kept as built.
 - **A parent's loosening.** A Secure floor can only drop through the parent's F3 unsecure, or an administrator outside the
   BFF. The inline cascade and the job both make inherited Secure follow. The job does it only when the parents are unchanged,
   so it is never a re-file.
@@ -207,7 +227,13 @@ New and changed tests, by area:
   - ribbon `accessRibbon.followsParent` (28);
   - form library `accessPermissionInherited.roots` (30);
   - existing suites with updated version pins.
-- **Script self-tests**: `Set-AccessInheritanceSchema.ps1 -SelfTest` 8 checks; `Set-InheritedAccessPermissionFormLock.ps1
+- **Fix round** (`ChildAccessCascadeTests`, +8; 22 in all): a forged record refused by every BFF writer and no un-secure;
+  an empty record never loosens through the route; a record secured by inheritance gets its record at once and follows; an
+  FLS read loss loosens nothing, fails the run and stops writing records; a corrupt record is reported and kept; a user's
+  concurrent edit is never overwritten; round-2 un-secures count against the bound; a record write failure is a problem.
+  `AccessInheritanceSchemaScriptAgreementTests` (6): the script's column, tables, writer profile, created-secured and (p6)
+  channels agree with the BFF. The "way back" tests seed the inherited record task 158 now writes (`InheritedAccessRecord`).
+- **Script self-tests**: `Set-AccessInheritanceSchema.ps1 -SelfTest` 26 checks; `Set-InheritedAccessPermissionFormLock.ps1
   -SelfTest` 47 checks.
 
 ### Seeding proofs (mutation checks, reverted)
@@ -217,20 +243,35 @@ New and changed tests, by area:
 | Loosen the Access Permission before the un-secure | `AFaultMidCascade_LeavesTheChildSecureAndRestricted_…` |
 | Re-file freeze removed | `ReFiling_NeverLoosensAChild` |
 | Target ignores the own Access Permission | `AnAccessPermissionSetOnTheChild_…` and `ReFiling_NeverLoosensAChild` |
+| No read-back after a record write (fix round) | `AnAccessRecordTheBffCannotRead_…` |
+| Round-2 un-secures not counted (fix d) | `UnsecuresInTheLaterRounds_CountAgainstTheRunsBound` |
 
-### Suite results (2026-10-09, final code, rebased on `c8a87d818`)
-- `tests/unit/Sprk.Bff.Api.Tests`: 19,091 passed, 0 failed, 54 skipped.
+### Suite results (2026-10-09, fix round, rebased on `c8a87d818`)
+- `tests/unit/Sprk.Bff.Api.Tests`: 19,098 passed, 7 failed, 54 skipped in the full run on a contended machine (other
+  sessions' test hosts at 6-7 GB each); the 7 (Compose, RAG, health-header and agreement seam tests, none touching this
+  task's code) all pass when re-run on their own (34 passed). Every task-175 class passes.
 - `tests/Spaarke.ArchTests`: 841 passed.
 - `Sprk.Bff.Api.IntegrationTests`: 87 passed, 5 skipped.
 - `Spe.Integration.Tests`: 350 passed, 25 skipped.
-- Jest: 586 passed. PCF TrackingFieldTrio `build:prod` 1.0.45 succeeded.
+- Jest (access ribbon, form library, AccessGrantModal, TrackingFieldTrio; no client change this round): 19 suites, 470
+  passed.
+- `Set-AccessInheritanceSchema.ps1 -SelfTest`: 26 checks PASS.
 
 ### Publish size, CVEs (CLAUDE.md §10, NFR-06)
-- Fresh master `e78c47149`: 38,110,531 B (192 files). No server change since then; `c8a87d818` is client only.
-- Branch: 38,146,669 B (192 files). **Delta +36,138 B (+0.03 MB).**
+- Fresh master `e78c47149`: 38,110,531 B zipped (Compress-Archive, as `Deploy-BffApi.ps1`; 192 files). No server change on
+  master since then (`c8a87d818` is client only).
+- Branch (fix round): 38,148,587 B (192 files). **Delta +38,056 B (+0.04 MB).**
 - `dotnet list package --vulnerable --include-transitive`: none (no package added).
 
 ## Known limits
+- **K2 (fix c):** the concurrency check is re-read-and-compare just before the write, not a row-version (`If-Match`) write:
+  the app-only `IGenericEntityService` the cascade writes through has no conditional update. A user edit landing in the
+  milliseconds between that re-read and the write can still be overwritten; the stored value is then never below the floor
+  and the next run records the edit's effect from what is stored.
+- **K2 (F1-1):** System Administrators keep full access to the field-secured column (platform rule, owner decision F4, as
+  for `sprk_issecure`).
+- **K2 (backfill):** a record secured through its parent before the BFF deploy, whose parent is un-secured before the job
+  first writes its record (one 5-minute run after the deploy), stays secure as its own; its F3 holder can remove it.
 - **K2:** a parent's change outside the BFF reaches the stored values within one job run. Enforcement already follows the
   parent.
 - **K2:** the inline cascade after a parent's unsecure is bounded at 50 records and `MaxFilingDepth`; the job does the rest.
@@ -244,8 +285,12 @@ New and changed tests, by area:
 - **K2:** the external SPA's project "secure" label reads the stored flag and catches up within a run.
 
 ## Deploy order (main session)
-1. `pwsh -File scripts/Set-AccessInheritanceSchema.ps1 -SelfTest`, then the dry run, then `-Apply`, then `-Verify`
-   (default env spaarkedev1). This MUST come before the BFF.
+1. **Schema + field security, BEFORE the BFF** (the BFF's writers refuse the column and its cascade needs to read it):
+   `pwsh -File scripts/Set-AccessInheritanceSchema.ps1 -SelfTest`, then
+   `pwsh -File scripts/Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+   (dry run), then the same with `-Apply`, then with `-Verify` (exit 0 required). Prerequisite: task 133's writer profile
+   and its members (`Set-RecordCreatorPersonSchema.ps1`), already live on dev. If `RetrievePrincipalAttributePrivileges`
+   cannot be called, `-Verify` FAILs and names the derivation; confirm it and re-run with `-AcceptDerivedReadCheck`.
 2. Merge; deploy the BFF from a fresh short-path worktree of `origin/master`:
    `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`.
 3. Web resources (existing names, so no `AddSolutionComponent`; read back and compare the hash):
@@ -260,7 +305,8 @@ New and changed tests, by area:
    - first run: `accessRecordsWritten` is about the number of work assignments and projects (the backfill), possibly deferred
      across runs at 500 per run;
    - then about 0;
-   - `notCompleted` 0.
+   - `notCompleted` 0 and no `sdap.inherit.access_record_hidden` problem.
+8. Re-run step 1's `-Verify`: now also the read probe (a record read as each BFF application user).
 
 ## Live gate (AC 8, main session)
 1. Secure a throwaway matter with a filed work assignment, then unsecure the matter.
@@ -272,10 +318,5 @@ New and changed tests, by area:
 6. Clean up.
 
 ## Open questions
-- **O-5 (owner):** round 87 item 4, "removing the extra strictness needs F3", as built:
-  - Secure: F3.
-  - Access Permission: Write on the form, as on a parentless record.
-
-  Should lowering a hand-set Access Permission (never below the floor) also need F3? That would need a server-side check of
-  who edited, because the form writes directly.
+- O-5 (answered by the owner, "same as today"): see Decisions.
 - O-2 / O-3 (resolved by the coordinator): Update Access, `/grant` and `/share-user` stay available on a child.

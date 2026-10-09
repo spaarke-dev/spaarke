@@ -131,6 +131,9 @@ public sealed record FollowParentsPass
     public int Unsecured { get; init; }
     public int PermissionsChanged { get; init; }
     public int MarkersWritten { get; init; }
+
+    /// <summary>Records a user changed between this run's read and its write: nothing was written; the next run decides them.</summary>
+    public int Conflicts { get; init; }
     public int Undetermined { get; init; }
     public int NotCompleted { get; init; }
     public int Deferred { get; init; }
@@ -221,6 +224,18 @@ internal sealed record AccessInheritance(
 {
     /// <summary>The column (Multiple lines of text) on <c>sprk_workassignment</c> and <c>sprk_project</c>.</summary>
     internal const string Column = "sprk_accessinheritance";
+
+    /// <summary>
+    /// Task 175 fix round (verifier F1-1): a caller-supplied write that names <see cref="Column"/> — the record of what is
+    /// the record's own and what is inherited — is refused by every BFF writer (<see cref="SecureRootInheritance.CheckRefileAsync"/>,
+    /// <see cref="SecureRootInheritance.PlanCreateAsync"/>). Only the cascade writes it; Dataverse field-level security keeps
+    /// users from writing it directly (<c>scripts/Set-AccessInheritanceSchema.ps1</c>).
+    /// </summary>
+    internal const string ServerOnlyReasonCode = "sdap.access.access_record_server_only";
+
+    /// <summary>True when a write key names the column (any spelling a BFF writer uses).</summary>
+    internal static bool IsNamedIn(IEnumerable<KeyValuePair<string, object?>> writes) =>
+        writes.Any(w => string.Equals(SecureRootInheritance.NormalizeColumn(w.Key), Column, StringComparison.OrdinalIgnoreCase));
 
     private const int Version = 1;
 
@@ -320,6 +335,23 @@ public sealed partial class SecureRootInheritance
     /// <summary>The Access Permission could not be written (task 175): left as it was, reported, retried.</summary>
     internal const string ReasonPermissionNotWritten = "sdap.inherit.permission_not_written";
 
+    /// <summary>The access record could not be written (task 175): reported; the next run reads the previous one.</summary>
+    internal const string ReasonMarkerNotWritten = "sdap.inherit.access_record_not_written";
+
+    /// <summary>
+    /// The column changed between the read this decision was made on and the write (task 175, verifier c): a user's edit is
+    /// never overwritten; nothing is written and the next run decides again.
+    /// </summary>
+    internal const string ReasonChangedConcurrently = "sdap.inherit.changed_concurrently";
+
+    /// <summary>
+    /// The access record was written but reads back EMPTY (task 175 fix round, verifier F1-1): field-level security hides
+    /// <c>sprk_accessinheritance</c> from the BFF (it can write it but not read it). Nothing is loosened — every record then
+    /// reads as "no record yet", and the backfill rule only ever raises — and the run fails naming it, so the profile is
+    /// fixed (<c>scripts/Set-AccessInheritanceSchema.ps1 -Verify</c>); the rest of the pass writes no further access record.
+    /// </summary>
+    internal const string ReasonMarkerHidden = "sdap.inherit.access_record_hidden";
+
     /// <summary>The record's own <c>sprk_issecure</c> is EMPTY (task 175): neither secured nor un-secured on a guess.</summary>
     internal const string ReasonOwnFlagEmpty = "sdap.inherit.own_flag_empty";
 
@@ -386,13 +418,15 @@ public sealed partial class SecureRootInheritance
     /// the stored values hold beyond the NEW floor becomes the record's own.</para>
     /// <para><b>Targets:</b> Secure = own OR floor; Access Permission = max(own, floor). So when the parents loosen (same
     /// parents, a lower floor) only the inherited part follows them down; an own value stays.</para>
+    /// <para><b>An empty record never loosens anything</b> (task 175 fix round, verifier F1-1): the backfill rule keeps every
+    /// stored value beyond the CURRENT floor as the record's own, so a record that is not written yet — or one the BFF cannot
+    /// read (field-level security lost) — is only ever raised, never lowered. Records secured by inheritance get their record
+    /// when they are secured (<see cref="ProvisionAsync"/>), and the job backfills every other one on first sight.</para>
     /// </remarks>
-    /// <param name="parentWasSecure">The caller has just un-secured a parent of this record (Mode A, <c>/unsecure-project</c>):
-    /// a flag that came from that parent is the floor's, not the record's own (the backfill rule applied as of a moment ago).</param>
     /// <param name="ownSecureSetNow">The caller has just made this record secure by hand (Make Secure): its secure is its own.</param>
     internal static FollowDecision Decide(
         bool? storedSecure, int? storedPermission, string? markerText, SecureParentsAnswer ancestry,
-        bool parentWasSecure = false, bool ownSecureSetNow = false)
+        bool ownSecureSetNow = false)
     {
         var parentStates = ancestry.DirectParents;
         if (!ancestry.IsKnown)
@@ -421,14 +455,13 @@ public sealed partial class SecureRootInheritance
         var parentsNow = parentStates.Select(p => ParentKey(p.Parent)).Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(k => k, StringComparer.Ordinal).ToList();
         var (floorSecure, floorRank) = FloorOf(ancestry);
-        var floorExplainsSecure = floorSecure || parentWasSecure;
 
         bool ownSecure;
         int? ownPermission;
         if (marker is null)
         {
             // The backfill rule (existing rows): stricter than the floor = set on the record; equal = inherited.
-            ownSecure = storedSecure == true && !floorExplainsSecure;
+            ownSecure = storedSecure == true && !floorSecure;
             ownPermission = storedRank > floorRank ? storedPermission : null;
         }
         else
@@ -439,7 +472,7 @@ public sealed partial class SecureRootInheritance
 
             // A user's edit since the record was written.
             var expectedSecure = ownSecure || marker.FloorSecure;
-            if (storedSecure == true && !expectedSecure && !floorExplainsSecure)
+            if (storedSecure == true && !expectedSecure && !floorSecure)
                 ownSecure = true; // Make Secure (or another own act)
             else if (storedSecure == false && expectedSecure)
                 ownSecure = false; // an F3 unsecure (or a flag cleared outside the BFF)
@@ -522,7 +555,7 @@ public sealed partial class SecureRootInheritance
     /// (<see cref="SecureIfFiledUnderSecureAsync"/>: provisioning's own steps, bounded by its callers).</para>
     /// </remarks>
     public async Task<FollowParentsResult> FollowParentsAsync(
-        string table, Guid recordId, string traceId, CancellationToken ct, bool parentWasSecure = false, bool ownSecureSetNow = false)
+        string table, Guid recordId, string traceId, CancellationToken ct, bool ownSecureSetNow = false)
     {
         if (!Inherits(table))
             throw new ArgumentOutOfRangeException(nameof(table), table, "Only work assignments and projects follow a parent.");
@@ -547,7 +580,7 @@ public sealed partial class SecureRootInheritance
 
         var ancestry = await ReadSecureParentsAsync(_dataverse, _logger, logical, recordId, ct, _recordTypes, MaxFilingDepth)
             .ConfigureAwait(false);
-        var d = Decide(own.Secure, own.Permission, own.Marker, ancestry, parentWasSecure, ownSecureSetNow);
+        var d = Decide(own.Secure, own.Permission, own.Marker, ancestry, ownSecureSetNow);
         var result = new FollowParentsResult(logical, recordId, d.Stop ?? FollowParentsOutcome.InStep)
         {
             PermissionFrom = own.Permission,
@@ -566,7 +599,13 @@ public sealed partial class SecureRootInheritance
             }
 
             if (d.MarkerChanged && d.Marker is { } parentlessMarker)
-                result = result with { MarkerWritten = await WriteMarkerAsync(logical, recordId, parentlessMarker, ct).ConfigureAwait(false) };
+            {
+                var written = await WriteMarkerAsync(logical, recordId, own.Marker, parentlessMarker, ct).ConfigureAwait(false);
+                if (written != ColumnWrite.Written)
+                    return Unwritten(result, written, "its access record");
+                result = result with { MarkerWritten = true };
+            }
+
             return result;
         }
 
@@ -576,8 +615,9 @@ public sealed partial class SecureRootInheritance
         // (a) A stricter Access Permission first.
         if (d.Tighten)
         {
-            if (!await WritePermissionAsync(logical, recordId, own.Permission, d.TargetPermission, parents, ct).ConfigureAwait(false))
-                return result with { Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonPermissionNotWritten, Detail = "its Access Permission could not be written" };
+            var tightened = await WritePermissionAsync(logical, recordId, own.Permission, d.TargetPermission, parents, ct).ConfigureAwait(false);
+            if (tightened != ColumnWrite.Written)
+                return Unwritten(result, tightened, "its Access Permission");
             result = result with { PermissionTo = d.TargetPermission };
             wrote = true;
         }
@@ -602,7 +642,7 @@ public sealed partial class SecureRootInheritance
                     FloorSecure = true,
                     FloorPermission = d.Loosen ? own.Permission ?? InheritedAccessPermission.Standard : d.Marker!.FloorPermission,
                 };
-                await WriteMarkerAsync(logical, recordId, applied, ct).ConfigureAwait(false);
+                await WriteMarkerAsync(logical, recordId, own.Marker, applied, ct).ConfigureAwait(false);
                 return result with { Outcome = FollowParentsOutcome.Incomplete };
             }
 
@@ -612,15 +652,21 @@ public sealed partial class SecureRootInheritance
         // (c) Only now a looser Access Permission (only its inherited part ever goes down: the target keeps an own value).
         if (d.Loosen)
         {
-            if (!await WritePermissionAsync(logical, recordId, own.Permission, d.TargetPermission, parents, ct).ConfigureAwait(false))
-                return result with { Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonPermissionNotWritten, Detail = "its Access Permission could not be written" };
+            var loosened = await WritePermissionAsync(logical, recordId, own.Permission, d.TargetPermission, parents, ct).ConfigureAwait(false);
+            if (loosened != ColumnWrite.Written)
+                return Unwritten(result, loosened, "its Access Permission");
             result = result with { PermissionTo = d.TargetPermission };
             wrote = true;
         }
 
         // (d) The access record, last.
         if (d.MarkerChanged)
-            result = result with { MarkerWritten = await WriteMarkerAsync(logical, recordId, d.Marker!, ct).ConfigureAwait(false) };
+        {
+            var marked = await WriteMarkerAsync(logical, recordId, own.Marker, d.Marker!, ct).ConfigureAwait(false);
+            if (marked != ColumnWrite.Written)
+                return Unwritten(result with { Outcome = wrote ? FollowParentsOutcome.Changed : FollowParentsOutcome.InStep }, marked, "its access record");
+            result = result with { MarkerWritten = true };
+        }
 
         return result with { Outcome = wrote ? FollowParentsOutcome.Changed : FollowParentsOutcome.InStep, ReasonCode = null, Detail = null };
     }
@@ -632,10 +678,8 @@ public sealed partial class SecureRootInheritance
     /// <see cref="SecureRootInheritanceJob"/>. A listing that cannot be read is <see cref="FiledCascadePass.Unreadable"/>.
     /// Never throws.
     /// </summary>
-    /// <param name="parentWasSecure">The parent has just been un-secured (Mode A): a flag below it that came from it is
-    /// inherited (see <see cref="Decide"/>).</param>
     public async Task<FiledCascadePass> CascadeBelowAsync(
-        string parentTable, Guid parentId, string traceId, CancellationToken ct, bool parentWasSecure = false)
+        string parentTable, Guid parentId, string traceId, CancellationToken ct)
     {
         if (!IsParent(parentTable))
             return new FiledCascadePass(false, Array.Empty<FiledRootRef>(), Array.Empty<FollowParentsResult>(), 0);
@@ -665,7 +709,7 @@ public sealed partial class SecureRootInheritance
                 continue;
             }
 
-            results.Add(await FollowParentsAsync(root.Table, root.Id, traceId, ct, parentWasSecure).ConfigureAwait(false));
+            results.Add(await FollowParentsAsync(root.Table, root.Id, traceId, ct).ConfigureAwait(false));
         }
 
         _logger.LogInformation(
@@ -690,15 +734,16 @@ public sealed partial class SecureRootInheritance
     {
         var listed = await ListRecordsAsync(ct).ConfigureAwait(false);
 
-        int parentless = 0, inStep = 0, unsecured = 0, permissions = 0, markers = 0, undetermined = 0, notCompleted = 0, deferred = 0;
+        int parentless = 0, inStep = 0, unsecured = 0, permissions = 0, markers = 0, undetermined = 0, notCompleted = 0, deferred = 0, conflicts = 0;
         int unsecuresTried = 0, writesTried = 0;
+        var markerHidden = false;
         var problems = new List<string>();
         var changes = new List<object>();
         (string Table, Guid Id)? lastUnsecureTried = null;
         var seen = new HashSet<(string, Guid)>();
 
         // Round 1: the batched decision over every record; follow only those with something to write.
-        var needs = new List<(ListedRecord Row, bool Unsecure)>();
+        var needs = new List<(ListedRecord Row, bool Unsecure, bool RecordOnly)>();
         foreach (var group in listed.GroupBy(r => r.Table))
         {
             var answers = await ReadSecureParentsOfManyAsync(_dataverse, _logger, group.Key, group.Select(r => r.Id).ToList(), ct,
@@ -709,7 +754,7 @@ public sealed partial class SecureRootInheritance
                 var d = Decide(row.Secure, row.Permission, row.Marker, answers[row.Id]);
                 if (d.NeedsWrite)
                 {
-                    needs.Add((row, d.Unsecure));
+                    needs.Add((row, d.Unsecure, !d.Tighten && !d.Unsecure && !d.Loosen));
                     continue;
                 }
 
@@ -732,20 +777,30 @@ public sealed partial class SecureRootInheritance
         // The un-secures in a fixed order resumed after the cursor; then the rest (projects before work assignments).
         var unsecureOrder = needs.Where(n => n.Unsecure).Select(n => n.Row)
             .OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+        var recordOnly = needs.Where(n => n.RecordOnly).Select(n => (n.Row.Table, n.Row.Id)).ToHashSet();
         var start = unsecureResumeAfter is { } after ? unsecureOrder.FindIndex(r => CompareKeys((r.Table, r.Id), after) > 0) : 0;
         if (start < 0)
             start = 0;
         var ordered = unsecureOrder.Skip(start).Concat(unsecureOrder.Take(start)).Select(r => (Row: r, Unsecure: true))
-            .Concat(needs.Where(n => !n.Unsecure).Select(n => (n.Row, Unsecure: false))
+            .Concat(needs.Where(n => !n.Unsecure).Select(n => (Row: n.Row, Unsecure: false))
                 .OrderBy(n => n.Row.Table, StringComparer.Ordinal).ThenBy(n => n.Row.Id))
             .ToList();
 
         var changedParents = new List<(string Table, Guid Id)>();
+        var hidden = 0;
         foreach (var (row, isUnsecure) in ordered)
         {
             if ((isUnsecure && unsecuresTried >= maxUnsecures) || (!isUnsecure && writesTried >= maxRecordWrites))
             {
                 deferred++;
+                continue;
+            }
+
+            // Field security hides the access record from the BFF (a write read back empty): writing more of them only
+            // churns - every one would read back empty again. The values themselves are still raised; nothing is loosened.
+            if (markerHidden && recordOnly.Contains((row.Table, row.Id)))
+            {
+                hidden++;
                 continue;
             }
 
@@ -760,6 +815,13 @@ public sealed partial class SecureRootInheritance
             }
 
             Tally(await FollowParentsAsync(row.Table, row.Id, traceId, ct).ConfigureAwait(false), counted: false);
+        }
+
+        if (hidden > 0)
+        {
+            notCompleted += hidden;
+            Problem($"{hidden} more access record(s) were not written: {AccessInheritance.Column} reads back empty to the BFF " +
+                $"({ReasonMarkerHidden}; run scripts/Set-AccessInheritanceSchema.ps1 -Verify)");
         }
 
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
@@ -782,6 +844,7 @@ public sealed partial class SecureRootInheritance
             changedParents = new List<(string Table, Guid Id)>();
             foreach (var root in below.Where(r => r.Confirmed))
             {
+                // Any of them may un-secure, so the un-secure bound is checked before each (verifier d) and counted after.
                 if (unsecuresTried >= maxUnsecures || writesTried >= maxRecordWrites)
                 {
                     deferred++;
@@ -789,8 +852,11 @@ public sealed partial class SecureRootInheritance
                 }
 
                 writesTried++;
+                var follow = await FollowParentsAsync(root.Table, root.Id, traceId, ct).ConfigureAwait(false);
+                if (follow.UnsecureOutcome is not null)
+                    unsecuresTried++;
                 // A record round 1 already counted is counted again only for what this round did (a write or a problem).
-                Tally(await FollowParentsAsync(root.Table, root.Id, traceId, ct).ConfigureAwait(false), counted: !seen.Add((root.Table, root.Id)));
+                Tally(follow, counted: !seen.Add((root.Table, root.Id)));
             }
         }
 
@@ -802,6 +868,7 @@ public sealed partial class SecureRootInheritance
             Unsecured = unsecured,
             PermissionsChanged = permissions,
             MarkersWritten = markers,
+            Conflicts = conflicts,
             Undetermined = undetermined,
             NotCompleted = notCompleted,
             Deferred = deferred,
@@ -831,8 +898,13 @@ public sealed partial class SecureRootInheritance
                     undetermined++;
                     Problem($"{result.Table}:{result.Id:D}: {result.Detail} ({result.ReasonCode})");
                     break;
+                case FollowParentsOutcome.Incomplete when result.ReasonCode == ReasonChangedConcurrently:
+                    conflicts++; // a user's edit landed between the read and the write: nothing was written; the next run decides
+                    Problem($"{result.Table}:{result.Id:D}: {result.Detail} ({result.ReasonCode})");
+                    break;
                 case FollowParentsOutcome.Incomplete:
                     notCompleted++;
+                    markerHidden |= result.ReasonCode == ReasonMarkerHidden;
                     Problem($"{result.Table}:{result.Id:D}: {result.Detail} ({result.ReasonCode})");
                     break;
                 case FollowParentsOutcome.Parentless when !counted:
@@ -947,40 +1019,101 @@ public sealed partial class SecureRootInheritance
         }
     }
 
-    /// <summary>Writes one column, <c>sprk_accesspermission</c>; false (logged) when the write failed.</summary>
-    private async Task<bool> WritePermissionAsync(
-        string logical, Guid recordId, int? from, int to, IReadOnlyList<SecureFilingParent> parents, CancellationToken ct)
+    /// <summary>How a one-column write ended.</summary>
+    private enum ColumnWrite { Written, ChangedConcurrently, Failed, ReadsBackEmpty }
+
+    /// <summary>The result for a column that was not written: a concurrent edit (nothing written, next run) or a failure.</summary>
+    private static FollowParentsResult Unwritten(FollowParentsResult result, ColumnWrite outcome, string what) =>
+        outcome switch
+        {
+            ColumnWrite.ChangedConcurrently => result with
+            {
+                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonChangedConcurrently,
+                Detail = $"{what} changed while it was being decided; nothing was written (the next run decides again)",
+            },
+            ColumnWrite.ReadsBackEmpty => result with
+            {
+                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonMarkerHidden,
+                Detail = $"{what} was written but reads back empty: field-level security hides {AccessInheritance.Column} from the BFF",
+            },
+            _ => result with
+            {
+                Outcome = FollowParentsOutcome.Incomplete,
+                ReasonCode = what.Contains("record", StringComparison.Ordinal) ? ReasonMarkerNotWritten : ReasonPermissionNotWritten,
+                Detail = $"{what} could not be written",
+            },
+        };
+
+    /// <summary>
+    /// Writes one column, <c>sprk_accesspermission</c> — only when it still holds <paramref name="expected"/> (verifier c:
+    /// re-read and compare just before the write, so a user's concurrent edit is never overwritten; the app-only reader has no
+    /// row-version write).
+    /// </summary>
+    private async Task<ColumnWrite> WritePermissionAsync(
+        string logical, Guid recordId, int? expected, int to, IReadOnlyList<SecureFilingParent> parents, CancellationToken ct)
     {
         try
         {
+            var now = await ReadOwnAccessAsync(logical, recordId, ct).ConfigureAwait(false);
+            if (now is null || now.Permission != expected)
+            {
+                _logger.LogInformation(
+                    "[FOLLOW-PARENT] {Table} {RecordId}: its Access Permission changed while it was being decided ({Expected} -> {Now}); " +
+                    "not written.", logical, recordId, expected?.ToString() ?? "null", now?.Permission?.ToString() ?? "gone");
+                return ColumnWrite.ChangedConcurrently;
+            }
+
             await _dataverse.UpdateAsync(logical, recordId,
                 new Dictionary<string, object> { [AccessPermissionColumn] = new OptionSetValue(to) }, ct).ConfigureAwait(false);
             _logger.LogInformation(
                 "[FOLLOW-PARENT] {Table} {RecordId}: Access Permission {From} -> {To} (follows {Parents}).",
-                logical, recordId, from?.ToString() ?? "null", to, string.Join(", ", parents.Select(p => $"{p.Table}:{p.Id:D}")));
-            return true;
+                logical, recordId, expected?.ToString() ?? "null", to, string.Join(", ", parents.Select(p => $"{p.Table}:{p.Id:D}")));
+            return ColumnWrite.Written;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "[FOLLOW-PARENT] {Table} {RecordId}: writing Access Permission {To} failed; retried.", logical, recordId, to);
-            return false;
+            return ColumnWrite.Failed;
         }
     }
 
-    /// <summary>Writes one column, the access record; false (logged) when the write failed — the next run reads the old one.</summary>
-    private async Task<bool> WriteMarkerAsync(string logical, Guid recordId, AccessInheritance marker, CancellationToken ct)
+    /// <summary>
+    /// Writes one column, the access record — only when it still holds <paramref name="expected"/> (verifier c). A failure is
+    /// reported by the caller (verifier e); the next run reads the previous record.
+    /// </summary>
+    private async Task<ColumnWrite> WriteMarkerAsync(
+        string logical, Guid recordId, string? expected, AccessInheritance marker, CancellationToken ct)
     {
         try
         {
+            var now = await ReadOwnAccessAsync(logical, recordId, ct).ConfigureAwait(false);
+            if (now is null || !string.Equals(now.Marker ?? string.Empty, expected ?? string.Empty, StringComparison.Ordinal))
+            {
+                _logger.LogInformation("[FOLLOW-PARENT] {Table} {RecordId}: its {Column} changed while it was being decided; not written.",
+                    logical, recordId, AccessInheritance.Column);
+                return ColumnWrite.ChangedConcurrently;
+            }
+
             await _dataverse.UpdateAsync(logical, recordId,
                 new Dictionary<string, object> { [AccessInheritance.Column] = marker.Serialize() }, ct).ConfigureAwait(false);
-            return true;
+
+            // Read it back: a secured column the BFF can write but not read answers EMPTY - indistinguishable, on a read,
+            // from "no record yet". Here the two ARE told apart (it was just written), and that is reported, not trusted.
+            var back = await ReadOwnAccessAsync(logical, recordId, ct).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(back?.Marker))
+            {
+                _logger.LogError("[FOLLOW-PARENT] {Table} {RecordId}: its {Column} was written but reads back empty - field-level " +
+                    "security hides it from the BFF. Nothing is loosened until it can be read.", logical, recordId, AccessInheritance.Column);
+                return ColumnWrite.ReadsBackEmpty;
+            }
+
+            return ColumnWrite.Written;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "[FOLLOW-PARENT] {Table} {RecordId}: writing its {Column} failed; the next run reads the previous one.",
                 logical, recordId, AccessInheritance.Column);
-            return false;
+            return ColumnWrite.Failed;
         }
     }
 

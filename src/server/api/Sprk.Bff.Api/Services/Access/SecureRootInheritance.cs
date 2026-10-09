@@ -496,6 +496,12 @@ public sealed partial class SecureRootInheritance
             return null;
 
         var materialized = writes as IReadOnlyCollection<KeyValuePair<string, object?>> ?? writes.ToList();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a caller never writes it.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke (it records what is set on the record and what is inherited), so it was not written");
+
         List<FilingWrite> filingWrites;
         try
         {
@@ -822,6 +828,12 @@ public sealed partial class SecureRootInheritance
         var logical = table.Trim().ToLowerInvariant();
         var noun = logical == Project ? "project" : "work assignment";
         var materialized = writes.ToArray();
+
+        // Task 175 fix round (verifier F1-1): the access record is the cascade's alone; a create never carries one.
+        if (AccessInheritance.IsNamedIn(materialized))
+            return SecureRootCreatePlan.Refused(Refusal(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so the {noun} was not created"));
+
         List<FilingWrite> filingWrites;
         try
         {
@@ -3006,6 +3018,7 @@ public sealed partial class SecureRootInheritance
                 _logger.LogInformation(
                     "[SECURE-INHERIT] {Table} {RecordId} is filed under a secure record and is now secure (provisioned for its " +
                     "creator). TraceId={TraceId}", table, recordId, traceId);
+                await RecordInheritedSecureAsync(table, recordId, traceId, ct).ConfigureAwait(false);
                 return Result(table, recordId, SecureRootInheritOutcome.Secured, null, null);
 
             case ProblemHttpResult problem:
@@ -3031,6 +3044,30 @@ public sealed partial class SecureRootInheritance
                     table, recordId, result.GetType().Name, traceId);
                 return Result(table, recordId, SecureRootInheritOutcome.Failed, ReasonUnexpectedResult,
                     "provisioning answered an unexpected result");
+        }
+    }
+
+    /// <summary>
+    /// Task 175 fix round (verifier a): a record this rule has just secured gets its access record at once — its Secure is
+    /// INHERITED (the floor explains it) — so that when its parent is later un-secured it follows, even before the job has
+    /// seen it. Without a record the backfill rule would keep it secure for good. Best effort: never throws; the job writes
+    /// the same record on its next run.
+    /// </summary>
+    private async Task RecordInheritedSecureAsync(string table, Guid recordId, string traceId, CancellationToken ct)
+    {
+        try
+        {
+            var follow = await FollowParentsAsync(table, recordId, traceId, ct).ConfigureAwait(false);
+            if (!follow.IsComplete)
+            {
+                _logger.LogWarning("[SECURE-INHERIT] {Table} {RecordId}: its access record was not written after securing ({Code}); " +
+                    "the job writes it.", table, recordId, follow.ReasonCode);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId}: recording its inherited secure failed; the job writes it.",
+                table, recordId);
         }
     }
 

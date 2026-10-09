@@ -1200,19 +1200,20 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 ```
 
 ### `Set-AccessInheritanceSchema.ps1`
-**Purpose:** Creates `sprk_accessinheritance` (Multiple lines of text, 4000) on `sprk_workassignment` and `sprk_project` and ships it in `SpaarkeCore` (task 175, owner round 87). The BFF writes there, as versioned JSON, what each record's stored Secure / Access Permission were derived from: the parents' floor, the parents, and what was set on the record (see `docs/data-model/access-inheritance.md`). `-Apply` creates the column where absent (or adds it to the solution) and publishes; it never alters an existing one (`COLUMN_MISMATCH` refuses). No data backfill: the BFF's job writes each record the first time it sees it.
-**Usage:** 🟡 Per environment, BEFORE deploying a BFF with task 175; `-Verify` any time.
+**Purpose:** Creates `sprk_accessinheritance` (Multiple lines of text, 4000) on `sprk_workassignment` and `sprk_project`, ships it in `SpaarkeCore`, and LOCKS it with field-level security (task 175, owner round 87; fix round, verifier F1-1). The BFF writes there, as versioned JSON, what each record's stored Secure / Access Permission were derived from: the parents' floor, the parents, and what was set on the record (see `docs/data-model/access-inheritance.md`). A forged value could make a hand-secured child look "inherited", so the column is created SECURED and only task 133's "Spaarke BFF-Managed Field Writers" profile (members = the BFF application users, checked) gets read/create/update; no reader profile. Preconditions: (p1) writer profile in the solution, (p3) its members exactly the `-BffApplicationIds` users, (p6) no field-mapping rule / AI topic row / email update field targets the column, (p7) a pre-existing unsecured column holds no value. `-Verify` also asserts no other profile can read or write it and that each BFF user can READ it (System Administrator, or the platform's `RetrievePrincipalAttributePrivileges`; `-AcceptDerivedReadCheck` accepts the membership derivation when the platform cannot be asked), plus a read probe as the BFF user once a record exists. A grant failure leaves the column secured (fail closed), never reverted. `COLUMN_MISMATCH` / `SOLUTION_MISSING` refuse. No data backfill: the BFF's job writes each record the first time it sees it.
+**Usage:** 🟡 Per environment, BEFORE deploying a BFF with task 175 (exit 0 from `-Verify` required); `-Verify` again after the BFF's first job run (read probe).
 **Lifecycle:** ✅ Maintained (added 2026-10-09 by `unified-access-control-r2` task 175)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-09 — `-SelfTest` PASS (8 checks). Not run against any environment yet.
+**Last Used:** 2026-10-09 — `-SelfTest` PASS (26 checks). Not run against any environment yet.
 
 **Command:**
 ```powershell
-.\Set-AccessInheritanceSchema.ps1 -SelfTest    # offline
-.\Set-AccessInheritanceSchema.ps1 -Verify      # read-only (exit 0 / 1)
-.\Set-AccessInheritanceSchema.ps1              # dry run
-.\Set-AccessInheritanceSchema.ps1 -Apply       # operator only
+.\Set-AccessInheritanceSchema.ps1 -SelfTest                                          # offline
+$bff = '5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c'   # dev BFF application ids
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff           # dry run
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff -Apply    # operator only
+.\Set-AccessInheritanceSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds $bff -Verify   # exit 0 / 1
 ```
 
 ### `Set-InheritedAccessPermissionFormLock.ps1`

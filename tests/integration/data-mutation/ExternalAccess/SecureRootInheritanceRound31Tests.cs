@@ -663,6 +663,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
 

@@ -105,6 +105,17 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
             fixture.ChildWorld.Set("sprk_workassignment", id, "sprk_name", name);
     }
 
+    /// <summary>
+    /// Task 175 (round 87): the access record task 158 now writes when it secures a record by inheritance — its Secure comes
+    /// from <paramref name="parents"/> (inherited, not its own), so it follows them out when they are un-secured. A record
+    /// without one is never loosened (the backfill rule).
+    /// </summary>
+    internal static void InheritedAccessRecord(
+        ProvisionProjectTestFixture fixture, string table, Guid id, params (string Table, Guid Id)[] parents) =>
+        fixture.ChildWorld.Set(table, id, AccessInheritance.Column, new AccessInheritance(
+            parents.Select(p => $"{p.Table}:{p.Id:D}").ToList(), true, Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Standard,
+            false, null).Serialize());
+
     /// <summary>A <c>sprk_recordtype_ref</c> row standing for <paramref name="logicalName"/>.</summary>
     internal static Guid RecordTypeRef(ProvisionProjectTestFixture fixture, string logicalName)
     {
@@ -704,6 +715,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecureFiledWorkAssignment(workAssignment, matter, name: "Due diligence");
+        InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
 
         var (invoiceTyped, typeUnreadable) = (Guid.NewGuid(), Guid.NewGuid());
         SecureProject(_fixture, invoiceTyped);
@@ -748,6 +760,8 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         SecureMatter(_fixture, otherMatter);
         SecureFiledWorkAssignment(mine, matter);
         SecureFiledWorkAssignment(theirs, matter, createdBy: Outsider);
+        InheritedAccessRecord(_fixture, "sprk_workassignment", mine, ("sprk_matter", matter));
+        InheritedAccessRecord(_fixture, "sprk_workassignment", theirs, ("sprk_matter", matter));
         SecureFiledWorkAssignment(elsewhere, otherMatter);
 
         var response = await UnsecureAsync("matter", matter, ("workassignment", elsewhere));
@@ -779,6 +793,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter, name: "Project Falcon");
         SecureFiledWorkAssignment(workAssignment, matter);
+        InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
 
         var refused = await UnsecureAsync("workassignment", workAssignment);
 

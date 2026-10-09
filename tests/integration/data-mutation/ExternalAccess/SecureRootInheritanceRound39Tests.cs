@@ -190,6 +190,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
         await ShareAsync("matter", matter, Colleague);
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.CoveredByExisting);
@@ -207,6 +208,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
         await ShareAsync("matter", matter, Colleague);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(RecordShareLevels.ViewOnlyRights) | Mirror);
@@ -224,6 +226,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CreatorAccessRights);
 
@@ -264,6 +267,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Creator)); // nobody else opens it any more
 

@@ -287,6 +287,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     unsecured = follow.Unsecured,
                     permissionsChanged = follow.PermissionsChanged,
                     accessRecordsWritten = follow.MarkersWritten,
+                    changedConcurrently = follow.Conflicts,
                     undetermined = follow.Undetermined,
                     notCompleted = follow.NotCompleted,
                     deferred = follow.Deferred,

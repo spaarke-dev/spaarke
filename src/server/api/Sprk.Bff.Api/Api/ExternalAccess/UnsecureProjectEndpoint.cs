@@ -312,10 +312,9 @@ public static class UnsecureProjectEndpoint
         string traceId,
         CancellationToken ct)
     {
-        // parentWasSecure only when THIS call un-secured it: a record below whose flag came from it is then inherited even
-        // before its access record exists (the backfill rule applied as of a moment ago, owner round 87).
-        var pass = await relatedRoots.CascadeBelowAsync(
-            root.LogicalName, recordId, traceId, ct, parentWasSecure: !response.AlreadyUnsecure);
+        // A record below with no access record yet is never loosened (the backfill rule keeps what it holds beyond the floor):
+        // its record is written when it is secured by inheritance, and the job backfills the rest (task 175 fix round).
+        var pass = await relatedRoots.CascadeBelowAsync(root.LogicalName, recordId, traceId, ct);
         if (pass.Unreadable)
         {
             logger.LogError(

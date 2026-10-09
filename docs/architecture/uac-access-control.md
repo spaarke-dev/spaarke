@@ -167,6 +167,9 @@ constraint. Round 87 refines round 84: the parent is a FLOOR, not an equality.
 - **The access record.** `sprk_accessinheritance` (JSON, BFF-written; `docs/data-model/access-inheritance.md`) keeps the
   floor last applied, the parents it came from, and the own values — so a user's edit, a parent's change and a re-file are
   told apart. Existing rows: the backfill rule (equal to the floor = inherited; stricter = own), applied on first sight.
+  An empty record never loosens anything. The column is field-secured (only the BFF application users read or write it),
+  and every BFF writer refuses a caller-supplied write naming it (`sdap.access.access_record_server_only`): a forged
+  "inherited" would otherwise let a parent's un-secure take a hand-set Secure away without F3 (verifier F1-1).
 - **One invariant owner:** `SecureRootInheritance.FollowParentsAsync` (`SecureRootInheritance.Cascade.cs`), called by the
   parent's `/unsecure-project` (everything filed below it, top-down, bounded at 50, the rest left to the job), by the BFF
   re-file writers (`SecureAfterWriteAsync`), right after a caller's Make Secure on a work assignment or project (records the
