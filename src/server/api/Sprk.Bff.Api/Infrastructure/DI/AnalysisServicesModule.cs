@@ -1382,6 +1382,13 @@ public static class AnalysisServicesModule
     /// </remarks>
     private static void AddPublicContractsFacade(IServiceCollection services)
     {
+        // IRetrievalAccessTrim → RetrievalAccessTrim (unified-access-control-r2 task 176, #1511): the ONE trim every AI
+        // retrieval path applies after searching the document index — chat tools, playbook retrieval, Insights search.
+        // One caller-scoped (OBO) read of sprk_documents per page through IDataverseUserClient (registered
+        // unconditionally in SpaarkeCore). Every consumer is compound-ON, so it lives here. Scoped: it uses the
+        // request's principal and user client.
+        services.AddScoped<IRetrievalAccessTrim, RetrievalAccessTrim>();
+
         services.AddScoped<IBriefingAi, BriefingAi>();
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
@@ -1720,7 +1727,9 @@ public static class AnalysisServicesModule
         // both providers into that seam in one pass avoids two concurrent agents racing on it).
         // Registering the provider now means it is DI-ready the moment that follow-on wiring
         // lands. No separate Null-Object peer is needed even then, per the note above.
-        services.AddSingleton<ISemanticScopeProvider, SemanticScopeProvider>();
+        // Task 176 (#1511): Scoped, not Singleton — it now depends on the per-request IRetrievalAccessTrim. Nothing
+        // resolves it from a singleton (no consumer is wired yet; see above).
+        services.AddScoped<ISemanticScopeProvider, SemanticScopeProvider>();
         Console.WriteLine("✓ Semantic-scope provider registered (FR-B-12; wraps IRagService, preserves PrivilegeFilterBuilder ACL)");
     }
 

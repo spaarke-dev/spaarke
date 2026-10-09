@@ -1,75 +1,111 @@
-# Task 176: AI retrieval access trim (#1511), escalation before implementation
+# Task 176: AI retrieval access trim (#1511)
 
-Status: **STOPPED on escalation trigger 1 (latency).** No production code is changed. The branch `task/uac-r2-176` holds the POML (in-progress), this note and the #1511 probe test.
+**Status:** implemented on `task/uac-r2-176`, with the PR open against master. The main session runs the two adversarial verifier passes (tags `auth` and `security`).
+
+**History:** the first pass stopped on escalation trigger 1 (latency; measurements in §2). The owner chose **option B** on 2026-10-09: one batch read per page, run as the caller.
 
 ## 1. #1511 re-confirmed on master c8a87d818
 
-`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/Issue1511ProbeTests.cs`: one chunk of a secure-matter document is returned by `IRagService`, and the chat call (`ExecuteChatAsync`, caller `UserId = caller-without-read`) is checked for the secret text.
+A probe ran Document Search and Document Discovery over one chunk of a secure-matter document, with the caller set to `UserId = caller-without-read`. On master, both methods put the secret text in `result.Data.content`: the full chunk for SearchDocuments, the 300-character preview for SearchDiscovery. The probe now lives in the regression suite as the `SecureDocument_*` tests (§5).
 
-| Method | Result on master |
+## 2. Why the task-163 call was not reused (trigger 1, measured)
+
+`IAiAuthorizationService.AuthorizeAsync` checks documents one at a time. On a Redis miss, each document costs four Dataverse round trips: `systemusers`, `RetrievePrincipalAccess`, team memberships and roles. The checks cannot run in parallel because they share one HttpClient header.
+
+Measured on dev App Insights `spe-insights-dev-67e2xz` over the last 7 days, a Web API call takes about 90 ms at p50 and 100–145 ms at p90. So each cold document costs about 360 ms, and 20 documents cost about 7.2 s. The trigger's limit was about 2 s.
+
+**Option B (owner decision):** one caller-scoped read per page. It goes through the existing user-OBO `IDataverseUserClient`, with at most 20 ids per read: `GET sprk_documents?$select=sprk_documentid&$filter=sprk_documentid eq … or …`. Dataverse returns only the rows the caller can Read. No Access walls are enforced by revoking shares, so the native read reflects them.
+
+## 3. What changed, per goal
+
+| Goal | Change |
 |---|---|
-| SearchDocuments | **FAIL**: `result.Data.content` contains the full chunk text |
-| SearchDiscovery | **FAIL**: `result.Data.content` contains the 300-char preview |
+| 1. One trim seam | New `IRetrievalAccessTrim` / `RetrievalAccessTrim` in `Services/Ai/PublicContracts` (the ADR-013 facade), registered Scoped in `AddPublicContractsFacade`. **Fails closed:** no declared caller, no request principal, or a request principal that is not the declared caller → `NoVerifiedCaller`, no rows. A read error, 429, missing token, OBO failure or malformed body → `CheckFailed`, no rows. A row with no usable GUID id is dropped. An answer naming an id that was not asked is ignored. **Ids:** parsed as GUIDs and written to the filter bare and lowercase (ADR-044), at most 20 per read, larger pages chunked. **Over-fetch:** 2× through `RetrievalAccessTrim.CandidatePoolSize`. Nothing is cached. The internal helper `ReadableRagSearch.SearchReadableAsync` (`Services/Ai`, so CRUD code never sees `IRagService`) does over-fetch → search → trim → cut to page. With no verified caller it does not run the search at all. `TotalCount` is the number of rows returned. |
+| 2. Every entry point | See the caller inventory in §4. |
+| 3. Caller identity | **Chat:** `ChatInvocationContext.UserId` (the oid). The seam requires it to equal the oid of the ambient request principal, whose bearer token the OBO read uses. **Playbook:** new `NodeExecutionContext.CallerObjectId` ← `PlaybookRunContext.StartedByOid` → new `ToolExecutionContext.CallerObjectId`. **HTTP analysis path:** `AnalysisOrchestrationService` sets it from `httpContext.User`. App-only and scheduled runs have none, so they get no rows. Tool results say so in `message` / `summary` (`RetrievalTrimResult.WithheldMessage`), and the seam logs a warning. |
+| 4. Scope | With a host, SearchDocuments is now bound to the host parent, as SearchDiscovery already was. The parent id is canonicalized per ADR-044. **When task 164 drops the host:** both methods search the tenant, and the trim keeps only readable documents. The index never returns an untrimmed tenant-wide page. **Choice recorded:** "trimmed tenant search" rather than "nothing", so standalone chat still finds the user's own documents, and the trim stays the authority. |
+| 5. Readable results unchanged | `ReadableDocument_IsReturnedExactlyAsBefore` compares the Data and Metadata JSON with and without the trim and finds them equal. |
 
-The issue had no test code attached, so this probe was written from its description. It becomes the regression test once the trim lands.
+## 4. Caller inventory: every `IRagService.SearchAsync` and semantic-search caller
 
-## 2. Escalation trigger 1 FIRED: the reused check costs about 360 ms per distinct document
-
-Trigger: "STOP … if the reused authorization call cannot check a row without a Dataverse round trip per row that makes chat unusably slow (more than about 2 s added for 20 rows)."
-
-**What the reused call does.** `IAiAuthorizationService.AuthorizeAsync` (the task-163 trim in `RagEndpoints.TrimToReadableDocumentsAsync`) loops over the distinct document ids **sequentially**. For each document, `CachedAccessDataSource` either hits Redis (key per user and document, TTL 60 s) or calls `DataverseAccessDataSource.GetUserAccessAsync`. That method makes four Dataverse Web API round trips per document: a `systemusers` lookup, `RetrievePrincipalAccess`, `teammembership_association` and `systemuserroles_association`. The user, team and role reads are per-user, but they repeat for every document. The checks cannot run in parallel: `DataverseAccessDataSource` sets `_httpClient.DefaultRequestHeaders.Authorization` on a client shared within the request scope (`SemanticSearchEndpoints` documents the same constraint).
-
-**Measured** (dev App Insights `spe-insights-dev-67e2xz`, `dependencies`, target `spaarkedev1.crm.dynamics.com`, last 7 days):
-
-| Call | n | p50 | p90 |
+| # | Caller | Reach | Disposition |
 |---|---|---|---|
-| `GET systemusers` | 266 | 90 ms | 100 ms |
-| `GET systemusers({id})/RetrievePrincipalAccess` | 36 | 93 ms | 144 ms |
-| Web API calls overall | 3077 | 92 ms | 115 ms |
-| `GET sprk_documents` (filtered reads) | 21 | 303 ms | 371 ms |
+| 1 | `DocumentSearchHandler` SearchDocuments: chat, and playbook via `ExecuteAsync` | chat tool "SYS-Document Search", always offered | **Trimmed**; bound to the host parent when there is one |
+| 2 | `DocumentSearchHandler` SearchDiscovery: chat and playbook | chat tool "SYS-Document Discovery" | **Trimmed**; host parent as before; no host → trimmed tenant search |
+| 3 | `KnowledgeRetrievalHandler` SearchKnowledgeBase | chat tool "SYS-Knowledge Base Search", playbooks | **Trimmed** |
+| 4 | `KnowledgeRetrievalHandler` GetKnowledgeSource | chat tool "SYS-Knowledge Source Retrieval", playbooks | **Trimmed** (a knowledge-source chunk with no document id is dropped; see §7) |
+| 5 | `AiAnalysisNodeExecutor.RetrieveDocumentContextAsync` (L2) | playbook nodes with `includeDocumentContext` | **Trimmed** with the run principal; app-only run → none. A parent named in ConfigJson that the caller cannot read now yields nothing. |
+| 6 | `SemanticSearchToolHandler` (2 calls, `ISemanticSearchService`) | analysis/playbook tool "Search Documents" | **Trimmed** (2× pool, page cut, counts = rows returned); no caller → `RESULTS_WITHHELD` warning |
+| 7 | `DocumentClassifierHandler.GetRagExamplesAsync` | analysis tool "Document Classifier", including app-only document profiling | **Trimmed.** The examples are other documents' text placed in the prompt. App-only profiling has no caller, so it classifies zero-shot. |
+| 8 | `AnalysisRagProcessor.ProcessRagKnowledgeAsync` (knowledge sources, after its tenant RAG cache) | HTTP analysis (`AnalysisOrchestrationService.ExecutePlaybookAsync`) | **Trimmed** after the cache, with the HTTP caller. The cache holds untrimmed rows and is never returned as is. With no caller, RAG sources contribute nothing. |
+| 9 | `InsightsOrchestrator.SearchAsync`, the only RAG call behind `/api/insights/search`, `/api/insights/assistant/query` and `AssistantToolCallHandler` | user routes (task-163 subject gate) | **Trimmed** with `request.CallerPrincipal`. The subject Read gate does not cover a restricted document under that subject (round 87: a child may be stricter). |
+| 10 | `CommunicationTriageAi.RetrieveMatterCorrespondenceGroundingAsync` | unattended communication enrichment; output persisted on the communication record | **Trimmed with NO caller → always withheld** (search not run); triage runs context-free. There is no single reader whose access could bound it: the output is read by every reader of the communication. **Behaviour change**, listed in §8. |
+| 11 | `SemanticScopeProvider.GetSemanticContextAsync` | no consumer is wired yet (DI only) | **Trimmed** with `request.CallerPrincipal`; lifetime changed Singleton → Scoped (no singleton resolves it) |
+| 12 | `RecallSessionFileHandler` (3 calls) | chat tool "SYS-Recall Session File" | **Exempt, with evidence.** It searches `spaarke-session-files` with `tenantId` + `sessionId = context.ChatSessionId`, which is server-built from the caller's session. Every chat session route carries `AddSessionOwnershipFilter`. The index has two writers, both indexing bytes the session owner uploaded: `ChatDocumentEndpoints.UploadDocumentAsync` (`POST …/sessions/{id}/documents`) and `SessionFileRehydrationService`, which re-indexes that upload's durable copy. The by-reference `…/documents/from-document` ingest is Read-gated (`AddAiAuthorizationFilter`) and does not index (`SearchDocumentIdsCsv = ""`). The rows are not sprk_documents, so the trim could not evaluate them. |
+| 13 | `SessionFileTextSource.FetchAsync` | chat summarize of the session's uploaded files | **Exempt**, same evidence as #12 (same index, same session filter, the caller's own uploads) |
+| 14 | `RagEndpoints.Search` (`/api/ai/rag/search`) | HTTP | **Already trimmed (task 163)**, left on `IAiAuthorizationService` (§6) |
+| 15 | `SemanticSearchEndpoints` (`/api/ai/search`), `RecordSearchEndpoints`, visualization "related" | HTTP | Already per-row checked (out of scope, unchanged) |
+| 16 | `FileIndexingService`, `RagIndexingPipeline`, `PostUploadIndexingEnqueuer`, `RelocatedFileIndexing`, `KnowledgeBaseEndpoints` (health counts) | indexing / counts | Do not return document content to a user; no change |
+| 17 | `ReferenceRetrievalService` (L1) | playbooks | Not `IRagService`: it reads the shared `spaarke-rag-references` corpus (`tenantId = "system"`, curated reference material, not customer documents). Outside the trim, as the issue says. |
 
-**Projected cost of the reused call on a Redis miss** (4 × ~90 ms per distinct document, run one after another):
+The search covered every `IRagService` injection (`grep -rn "IRagService"`) and every `.SearchAsync(` in `Sprk.Bff.Api`.
 
-| Distinct documents in the page | Added latency, p50 | Added latency, p90 |
-|---|---|---|
-| 5 (SearchDocuments default topK) | ~1.8 s | ~2.4 s |
-| 10 (SearchDiscovery default topK) | ~3.6 s | ~4.8 s |
-| 20 (MaxTopK) | ~7.2 s | ~9.6 s |
-| 3× over-fetch of 20 rows | worse, until a budget stops it | |
+## 5. Tests
 
-A Redis hit costs under 10 ms per document, but the TTL is 60 s, so a new query in a chat usually lands on cold documents. Rows are chunks, so 20 rows can come from fewer than 20 documents. The worst case is still 20 distinct documents, and over-fetching (goal 1) raises the count.
+| File | What |
+|---|---|
+| `tests/integration/regression/Ai/Issue1511_AiRetrievalAccessTrimTests.cs` (new, KEEP path) | Real trim plus the simulated user-OBO boundary. `SecureDocument_DoesNotReachDocumentSearch` (SearchDocuments and SearchDiscovery), `…KnowledgeRetrieval` (SearchKnowledgeBase and GetKnowledgeSource), `…PlaybookNodeDocumentContext` (through `AiAnalysisNodeExecutor.ExecuteAsync`), `…SemanticSearchTool`; `ReadableDocument_IsReturnedExactlyAsBefore`; `NoCallerIdentity_ReturnsNoRows_SaysSo_AndDoesNotSearch`; `UnattendedPlaybookRun_WithNoRunPrincipal_ReturnsNoRows`; `AFailedOrThrottledAccessCheck_ReturnsNoRows` (429); `HostDropped_DiscoverySearchesTheTenant_ButReturnsOnlyWhatTheCallerCanRead`; `WithAHost_SearchDocumentsIsBoundToTheHostParent`. 12 cases. |
+| `tests/unit/.../Services/Ai/PublicContracts/RetrievalAccessTrimTests.cs` (new) | The owner's batch-read rules: ADR-044 canonicalization, chunks of 20 (45 ids → 20/20/5) with order kept, unusable ids dropped, an unasked id in the answer ignored, caller ≠ request principal → nothing and no read, malformed answer → nothing. 6 cases. |
+| `tests/unit/.../Insights/InsightsOrchestratorTests.cs` (+1) | `SearchAsync_DocumentTheCallerCannotRead_IsNotReturnedOrSummarized` (caller #9) |
+| Shared helpers (new) | `tests/integration/Shared/ReadableDocumentsUserClient.cs` (simulated `IDataverseUserClient`, the documented mock boundary); `PermitAllRetrievalAccessTrim.cs` (for suites that test what callers do with permitted rows) |
+| Updated | `DocumentSearchHandlerTests`, `KnowledgeRetrievalHandlerTests`, `DocumentClassifierHandlerTests`, `InsightsOrchestratorTests`, `PredictMatterCostPlaybookTests`, `AnalysisOrchestrationServiceTests`, `SemanticScopeProviderSeamTests`: constructors take the trim (permit-all). `ExecuteChatAsync_SearchDiscovery_DefaultTopK_IsTen` now asserts the 2× pool (page size still 10). |
 
-## 3. Options
+**Beyond the stated contract (one line each):**
+- "unasked id ignored" guards the line that keeps a Dataverse answer from widening the result.
+- "malformed answer" covers the `CheckFailed` branch that a non-error status does not reach.
+- The Insights test covers caller #9, which a user reaches and which none of the AC tests cover.
+- Callers #7, #8, #10 and #11 use the same `SearchReadableAsync` path the AC tests prove, so no per-caller test was added (K3).
 
-| | Option | Latency for 20 documents | Same decision as task 163? | New surface | Cost |
-|---|---|---|---|---|---|
-| **A** | Reuse `AuthorizeAsync` as is. Check documents lazily in rank order and stop when the page is full or a budget of N documents is spent. Rows not examined are dropped and a "partial" note is added (the `SemanticSearchEndpoints` pattern) | about N × 360 ms; N = 5 gives ~1.8 s | Yes, the identical call | Seam only | Recall: a caller who can read few of the top documents gets short or empty pages. Still about 1.8 s per tool call on a Redis miss |
-| **B** | ONE caller-scoped (OBO) read per page through the existing `IDataverseUserClient`: `GET sprk_documents?$select=sprk_documentid&$filter=Microsoft.Dynamics.CRM.In(PropertyName='sprk_documentid',PropertyValues=[…])`. Dataverse returns only the rows the caller can Read | one round trip, ~0.1–0.4 s, for the whole over-fetched page | The same Dataverse Read evaluation as RetrievePrincipalAccess (No Access walls are enforced by revoking shares, so native read reflects them). It is not the same code path as task 163 | Seam only; `IDataverseUserClient` already exists and is user-OBO only, fails closed with no user context, and is general BFF infrastructure since task 126 | Two trims in the BFF (163: per-document RPA; 176: batch read) unless task 163's trim is moved onto the same seam, which would also be one call per page there |
-| **C** | Make `DataverseAccessDataSource` cache the per-user reads (systemuser, teams, roles) for the request, so a document costs about one RPA round trip | ~20 × 90 ms ≈ 1.8 s | Yes | None, but it changes shared `Spaarke.Dataverse` code that every authorization path uses | Wider blast radius than this task; still over 1 s per 20 cold documents |
-| **D** | Run the RPA checks in parallel | — | Yes | — | Blocked by the shared HttpClient header (above); needs a per-check client |
+## 6. Seeding proof and the task-163 swap
 
-**Recommendation: B**, with goal 2's over-fetch (3× topK, capped) and the fail-closed rules unchanged: no document id drops the row; a fault, a missing caller or no `HttpContext` returns no rows. It is the only option that meets the 2 s bar at 20 documents without giving up recall. It also reuses an existing caller-scoped boundary, and the owner can choose to move task 163's `/api/ai/rag/search` trim onto the same seam so that there is one trim. If the owner wants the task-163 call itself, A with N = 5 is the fallback. It is about 1.8 s worst case per tool call, and short pages are announced.
+**Seeding proof:** `RetrievalAccessTrim.TrimAsync` was changed to `var kept = rows.ToList();` (trim disabled). Seven tests failed: `SecureDocument_DoesNotReachDocumentSearch` ×2, `…KnowledgeRetrieval` ×2, `…PlaybookNodeDocumentContext`, `…SemanticSearchTool` and `HostDropped_…`. The change was reverted, and all pass.
 
-## 4. Escalation trigger 2 (tenant-wide legitimate corpus): evaluated, not fired
+**The task-163 trim stays as is.** `RagEndpoints.TrimToReadableDocumentsAsync` is not moved onto the seam. Its tests (`RagEndpoints*`, contract and auth suites) drive the real `AiAuthorizationService` through `CallerAccessSeam` (`GetUserAccessAsync`), so a swap to `IDataverseUserClient` would change those tests. Per the owner's condition ("only if mechanical with its tests unchanged"), it is not done. `/api/ai/rag/search` keeps its per-document cost; that is recorded, not fixed.
 
-- The reference knowledge base (`spaarke-rag-references`) holds chunks with `tenantId = "system"` and no `documentId`. It is fed only by `scripts/ai-search/Add-ReferenceToIndex.ps1`. `IRagService.SearchAsync` always filters on `tenantId eq '<caller tenant>'` against the tenant's files index, so no `IRagService` caller can reach it. `ReferenceRetrievalService` (L1) reads it directly, not through `IRagService`, and is outside the trim.
-- Knowledge-source chunks inside a tenant's files index can come only from `POST /api/ai/rag/enqueue-indexing` (RagApiKey; `/index-file` refuses knowledge-source fields since task 163). No producer of that route exists in the repo (only docs). If a deployment has such chunks WITHOUT a `documentId`, the trim drops them from `KnowledgeRetrievalHandler.GetKnowledgeSource`/`SearchKnowledgeBase` and from `AnalysisRagProcessor` (knowledge-source-scoped). This is the same rule task 163 applied to `/api/ai/rag/search` (its trigger 4). **Live-data check recommended before deploy**: count chunks in `spaarke-files-index` with `knowledgeSourceId ne null and documentId eq null`.
+## 7. Knowledge-source chunks without a document id (escalation trigger 2): count
 
-## 5. Planned caller inventory (from code reading; dispositions are proposed, not implemented)
+Read-only, with the dev **query** key, against `spaarke-search-dev` / `spaarke-files-index` (1,347 chunks):
 
-| # | Caller | Reachable from chat/playbook | Proposed disposition |
-|---|---|---|---|
-| 1 | `DocumentSearchHandler` SearchDocuments (chat + playbook) | yes | trim; bind to host parent when the chat has one |
-| 2 | `DocumentSearchHandler` SearchDiscovery (chat + playbook) | yes | trim; host parent as today; no host → trimmed tenant search, never untrimmed |
-| 3 | `KnowledgeRetrievalHandler` SearchKnowledgeBase / GetKnowledgeSource | yes | trim |
-| 4 | `AiAnalysisNodeExecutor.RetrieveDocumentContextAsync` (L2) | playbook | trim with the run principal; app-only run → no rows |
-| 5 | `SemanticSearchToolHandler` (`IAnalysisToolHandler`, `ISemanticSearchService`, 2 calls) | analysis/playbook tool path (not a chat `IToolHandler`) | trim the rows (per-row document check) |
-| 6 | `AnalysisRagProcessor` (knowledge sources, analysis path) | playbook legacy mode | trim (see §4) |
-| 7 | `RecallSessionFileHandler`, `SessionFileTextSource` | chat | session-files index, `tenantId + sessionId` filter, session ownership owned by the session — **review**; no sprk_document rows |
-| 8 | `DocumentClassifierHandler` | playbook | **review** |
-| 9 | `InsightsOrchestrator` / `AssistantToolCallHandler` | `/api/insights/*` (task 163 subject gate) | **review**: rows reach the model after a subject Read gate only |
-| 10 | `CommunicationTriageAi`, `SemanticScopeProvider` | non-chat | **review** |
-| 11 | `RagEndpoints` `/search` | HTTP | already trimmed (task 163) |
-| 12 | `SemanticSearchEndpoints`, `RecordSearchEndpoints`, visualization | HTTP | already per-row checked (out of scope) |
+| Filter | Count |
+|---|---|
+| `knowledgeSourceId ne null and documentId eq null` | **0** |
+| `knowledgeSourceId ne null` | 0 |
+| `documentId eq null` (any orphan) | 2 (dropped by the trim, as task 163 drops them) |
 
-Rows 7–10 still need disposition reading. That work waits for the owner's option choice, because the seam's shape decides how each one is wired.
+Trigger 2 was not fired on dev. The reference KB is in `spaarke-rag-references` (`tenantId = "system"`), which no `IRagService` caller can reach. **Before a customer deploy**, repeat the first count per environment: a non-zero count means GetKnowledgeSource or knowledge-source-scoped search for those sources returns nothing after this change.
+
+## 8. Known behaviour changes (for the owner)
+
+1. **Unattended runs get no document results** (fail closed, with a warning logged by the seam). This covers app-only and scheduled playbook runs (`ExecuteAppOnlyAsync`, `PlaybookSchedulerJob`, Service Bus analysis) and app-only document profiling.
+   - **Dev survey:** no `sprk_playbooknode` has `includeDocumentContext`, and no playbook node is linked to Document Search, Document Discovery, Knowledge Base Search, Knowledge Source Retrieval, Search Documents or Document Classifier. So no scheduled playbook on dev uses document retrieval today.
+   - The Daily Briefing scheduler composite and the notification playbooks use Dataverse queries, not RAG.
+2. **Communication triage runs context-free** (caller #10): matter-correspondence grounding is withheld for every email.
+3. **Document Classifier RAG examples:** examples under app-only profiling are gone (zero-shot).
+4. **Chat search pages:** they may be shorter than topK when the caller can read few of the top 2× candidates. No "partial" flag is added, because the chat text already states the count.
+
+## 9. §10 / §11 placement and justification
+
+**Placement:** `Services/Ai/PublicContracts` (the ADR-013 facade), so a future CRUD consumer can trim without touching `IRagService`. Registered in `AddPublicContractsFacade` (compound-ON), because every consumer is compound-ON. Its dependencies (`IDataverseUserClient`, `IHttpContextAccessor`) are unconditional.
+
+**§11 justification:**
+1. **Existing:** it overlaps the task-163 `RagEndpoints.TrimToReadableDocumentsAsync` (per-document `IAiAuthorizationService`) and the semantic-search per-parent loop. Both are private to their endpoints, and both cost one Dataverse round trip or more per document.
+2. **Extension:** the task-163 helper could not be extended to meet the owner's latency bar. It is a per-document RPA loop (about 360 ms per cold document), and it takes an `HttpContext` that chat tool handlers do not have. The batch read is a different mechanism on an existing client.
+3. **Cost of doing nothing:** chat, playbook and Insights retrieval keep returning the text of secure, Restricted and No Access documents to users who cannot read them (#1511, F1).
+
+**New surface:** `ToolExecutionContext.CallerObjectId` and `NodeExecutionContext.CallerObjectId` (needed to carry the run principal, goal 3; `UserId` there is a systemuserid, not an oid), and `ReadableRagSearch` (internal helper, one copy of over-fetch/trim/cut instead of eight).
+
+**Publish size:** see §10.
+
+## 10. Publish-size delta
+
+(filled in after measurement)

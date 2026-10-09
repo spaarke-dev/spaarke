@@ -35,6 +35,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
 
     private readonly IOpenAiClient _openAiClient;
     private readonly IRagService? _ragService;
+    private readonly PublicContracts.IRetrievalAccessTrim? _accessTrim;
     private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly PromptSchemaRenderer _promptSchemaRenderer;
     private readonly ILogger<DocumentClassifierHandler> _logger;
@@ -90,8 +91,10 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
         IOptions<ModelSelectorOptions> modelSelectorOptions,
         PromptSchemaRenderer promptSchemaRenderer,
         ILogger<DocumentClassifierHandler> logger,
-        IRagService? ragService = null)
+        IRagService? ragService = null,
+        PublicContracts.IRetrievalAccessTrim? accessTrim = null)
     {
+        _accessTrim = accessTrim;
         _openAiClient = openAiClient;
         _modelSelectorOptions = modelSelectorOptions.Value;
         _promptSchemaRenderer = promptSchemaRenderer;
@@ -204,6 +207,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                     documentText,
                     context.TenantId,
                     config.RagExampleCount,
+                    context.CallerObjectId,
                     cancellationToken);
                 ragExamples = ragResult.Examples;
                 ragTokens = ragResult.Tokens;
@@ -340,6 +344,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                     documentText,
                     context.TenantId,
                     config.RagExampleCount,
+                    context.CallerObjectId,
                     cancellationToken);
                 ragExamples = ragResult.Examples;
                 ragTokens = ragResult.Tokens;
@@ -506,14 +511,26 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
     /// <summary>
     /// Get RAG examples for few-shot classification.
     /// </summary>
+    /// <remarks>
+    /// Task 176 (#1511): the examples are other documents' text placed in the prompt, so they are trimmed to what
+    /// <paramref name="callerObjectId"/> can read. No trim service or no verified caller (app-only document profiling):
+    /// no examples, and classification runs zero-shot.
+    /// </remarks>
     private async Task<(List<RagExample> Examples, int Tokens)> GetRagExamplesAsync(
         string documentText,
         string tenantId,
         int exampleCount,
+        string? callerObjectId,
         CancellationToken cancellationToken)
     {
         if (_ragService is null)
             return (new List<RagExample>(), 0);
+
+        if (_accessTrim is null)
+        {
+            _logger.LogWarning("RAG examples withheld: no access trim is available (task 176, fail closed)");
+            return (new List<RagExample>(), 0);
+        }
 
         try
         {
@@ -522,7 +539,8 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 ? documentText.Substring(0, 500)
                 : documentText;
 
-            var searchResult = await _ragService.SearchAsync(
+            var (searchResult, _) = await _accessTrim.SearchReadableAsync(
+                _ragService,
                 queryText,
                 new RagSearchOptions
                 {
@@ -530,6 +548,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                     TopK = exampleCount,
                     MinScore = 0.5f
                 },
+                callerObjectId,
                 cancellationToken);
 
             var examples = searchResult.Results

@@ -48,6 +48,7 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
     private DocumentSearchHandler CreateHandler() => new(
         _ragServiceMock.Object,
+        PermitAllRetrievalAccessTrim.Instance,
         CreateLogger<DocumentSearchHandler>());
 
     private static AnalysisTool BuildDocumentSearchTool(string method) =>
@@ -475,8 +476,9 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
-        capturedOptions!.TopK.Should().Be(10,
-            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearch chat-tools)");
+        // Task 176: the page size is still 10; the index is asked for the 2x candidate pool the access trim cuts back to it.
+        capturedOptions!.TopK.Should().Be(Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim.CandidatePoolSize(10),
+            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearch chat-tools), drawn from a 2x pool");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

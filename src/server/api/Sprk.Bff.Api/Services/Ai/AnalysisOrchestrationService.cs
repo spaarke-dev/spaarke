@@ -436,7 +436,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             Keywords = string.Empty,
             Entities = new AiExtractedEntities()
         };
-        var processedKnowledge = await _ragProcessor.ProcessRagKnowledgeAsync(scopes.Knowledge, ragAnalysisContext, cancellationToken);
+        // Task 176 (#1511): knowledge-source rows are trimmed to what the HTTP caller can read.
+        var callerObjectId = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User);
+        var processedKnowledge = await _ragProcessor.ProcessRagKnowledgeAsync(
+            scopes.Knowledge, ragAnalysisContext, callerObjectId, cancellationToken);
 
         // Get tenant ID from claims
         var tenantId = _ragProcessor.GetTenantIdFromClaims() ?? "default";
@@ -458,6 +461,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                     ["PlaybookName"] = playbook.Name
                 }
             },
+            CallerObjectId = callerObjectId,
             UserContext = request.AdditionalContext
         };
 

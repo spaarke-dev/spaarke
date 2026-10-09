@@ -103,6 +103,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private readonly IIngestDocumentSource _ingestDocumentSource;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IRagService _ragService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly AssistantToolCallHandler _assistantHandler;
     private readonly INodeService _nodeService;
     private readonly ILogger<InsightsOrchestrator> _logger;
@@ -115,6 +116,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
         IIngestDocumentSource ingestDocumentSource,
         IConsumerRoutingService consumerRouting,
         IRagService ragService,
+        IRetrievalAccessTrim accessTrim,
         AssistantToolCallHandler assistantHandler,
         INodeService nodeService,
         ILogger<InsightsOrchestrator> logger)
@@ -126,6 +128,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
         _ingestDocumentSource = ingestDocumentSource ?? throw new ArgumentNullException(nameof(ingestDocumentSource));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _assistantHandler = assistantHandler ?? throw new ArgumentNullException(nameof(assistantHandler));
         _nodeService = nodeService ?? throw new ArgumentNullException(nameof(nodeService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -960,7 +963,21 @@ public sealed class InsightsOrchestrator : IInsightsAi
         // FeatureDisabledException with ErrorCode = "ai.rag.disabled" (ADR-032 P3).
         // We propagate it unchanged so the endpoint can catch and convert to 503
         // ProblemDetails via AsFeatureDisabled503(). DO NOT swallow.
-        var ragResponse = await _ragService.SearchAsync(request.Query, ragOptions, cancellationToken);
+        //
+        // Task 176 (#1511): the subject Read gate on the route does not cover a document under that subject that is
+        // itself restricted, so every row is trimmed to what the caller can read before it is summarized or cited.
+        var (ragResponse, trim) = await _accessTrim.SearchReadableAsync(
+            _ragService,
+            request.Query,
+            ragOptions,
+            Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(request.CallerPrincipal),
+            cancellationToken);
+        if (trim.Withheld)
+        {
+            _logger.LogWarning(
+                "InsightsOrchestrator.SearchAsync withheld all rows for tenant {TenantId}: {Outcome} (task 176, fail closed)",
+                request.TenantId, trim.Outcome);
+        }
 
         // Project RagSearchResult → InsightsSearchHit (the Zone B-importable shape).
         // Predicate is derived from the first matching Insights-shaped tag when present;
