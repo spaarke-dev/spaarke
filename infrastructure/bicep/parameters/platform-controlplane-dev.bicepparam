@@ -99,6 +99,11 @@ param ciamTenantIds = [
   '7052feba-bfc4-43e0-b09e-65014b429131'
 ]
 
+// ISS-008 (#1484), owner OK 2026-10-09: the CustomerRunGuard (spec §4D I5 / FR-32) is on. The L2 UAMI
+// sprk-controlplane-dev-uami (965a4a01-…) is an Application User on the admin environment (spaarkedev1) with the scoped
+// role 'Spaarke Provisioning Registry' (Grant-ControlPlaneIdentity.ps1, verified 2026-10-09) — the guard needs no more.
+param customerRunGuardEnabled = true
+
 // ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
