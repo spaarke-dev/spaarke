@@ -23,6 +23,9 @@ public class NodeService : INodeService
     private const string EntitySetName = "sprk_playbooknodes";
     private const string EntityLogicalName = "sprk_playbooknode";
 
+    // sprk_analysisplaybook.sprk_playbooktype option value for Notification (same value as PlaybookSchedulerJob).
+    private const int NotificationPlaybookType = 2;
+
     // N:N relationship names
     private const string SkillRelationship = "sprk_playbooknode_skill";
     private const string KnowledgeRelationship = "sprk_playbooknode_knowledge";
@@ -378,11 +381,67 @@ public class NodeService : INodeService
     }
 
     /// <inheritdoc />
+    public async Task EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default)
+    {
+        string? name = null;
+        try
+        {
+            await EnsureAuthenticatedAsync(cancellationToken);
+
+            var url = $"sprk_analysisplaybooks({playbookId})?$select=sprk_name,sprk_issystemplaybook,sprk_playbooktype";
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var playbook = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            if (playbook.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException("Playbook record was not a JSON object.");
+
+            name = playbook.TryGetProperty("sprk_name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+
+            if (playbook.TryGetProperty("sprk_issystemplaybook", out var sys) && sys.ValueKind == JsonValueKind.True)
+                Refuse(playbookId, name, ProtectedPlaybookReason.SystemFlag);
+
+            if (playbook.TryGetProperty("sprk_playbooktype", out var type)
+                && type.ValueKind == JsonValueKind.Number && type.GetInt32() == NotificationPlaybookType)
+                Refuse(playbookId, name, ProtectedPlaybookReason.NotificationType);
+
+            var nodes = await GetNodesRawAsync(playbookId, cancellationToken);
+            if (nodes.Any(e => ExtractCanvasNodeId(e.ConfigJson) == null))
+                Refuse(playbookId, name, ProtectedPlaybookReason.RepoDeployedNodes);
+        }
+        catch (ProtectedPlaybookCanvasSyncException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: if protection cannot be ruled out, do not let the sync delete anything.
+            _logger.LogWarning(ex, "Could not verify canvas-sync eligibility for playbook {PlaybookId}; refusing", playbookId);
+            throw new ProtectedPlaybookCanvasSyncException(playbookId, name, ProtectedPlaybookReason.Unverifiable);
+        }
+    }
+
+    private void Refuse(Guid playbookId, string? name, ProtectedPlaybookReason reason)
+    {
+        _logger.LogWarning(
+            "Canvas sync refused for protected playbook {PlaybookId} ('{PlaybookName}'): {Reason}",
+            playbookId, name, reason);
+        throw new ProtectedPlaybookCanvasSyncException(playbookId, name, reason);
+    }
+
+    /// <inheritdoc />
     public async Task SyncCanvasToNodesAsync(
         Guid playbookId,
         CanvasLayoutDto canvasLayout,
         CancellationToken cancellationToken = default)
     {
+        // D-97 / PB-08: refuse before any delete/create/update for repo-deployed system playbooks.
+        await EnsureCanvasSyncAllowedAsync(playbookId, cancellationToken);
+
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var nodes = canvasLayout.Nodes;
