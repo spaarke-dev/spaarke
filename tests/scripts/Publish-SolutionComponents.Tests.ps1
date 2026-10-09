@@ -262,6 +262,7 @@ Describe 'Publish-SolutionComponents (mocked Dataverse)' {
                 '*/EntityDefinitions(*' { return [pscustomobject]@{ LogicalName = 'sprk_event' } }
                 '*savedqueries*' { return [pscustomobject]@{ value = @() } }
                 '*systemforms*' { return [pscustomobject]@{ value = @() } }
+                '*savedqueryvisualizations*' { return [pscustomobject]@{ value = @() } }
                 '*/webresourceset(*' { return [pscustomobject]@{ content = 'same' } }
                 default { return $null }
             }
@@ -298,6 +299,139 @@ Describe 'Publish-SolutionComponents (mocked Dataverse)' {
             }
         }
         { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -SkipCollateralCheck } | Should -Throw '*still unpublished*'
+    }
+}
+
+Describe 'read-back covers entities and site maps (round-4 fix-now)' {
+    It 'reports an entity whose view or form is still unpublished after the publish' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'systemforms.*RetrieveUnpublishedMultiple') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ formid = 'F1'; name = 'Main'; modifiedon = '9' }) }
+            }
+            return [pscustomobject]@{ value = @() }
+        }
+        $r = @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ Entities = @('sprk_event') }))
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match 'entity sprk_event'
+    }
+    It 'compares charts (savedqueryvisualization) as well as views and forms' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'savedqueryvisualizations.*RetrieveUnpublishedMultiple') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ savedqueryvisualizationid = 'C1'; name = 'Chart'; modifiedon = '9' }) }
+            }
+            return [pscustomobject]@{ value = @() }
+        }
+        $r = @(Get-EntityPublishCollateral -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Entity sprk_event)
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match 'savedqueryvisualizations'
+    }
+    It 'reports nothing for an entity with no pending items' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ value = @() } }
+        @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ Entities = @('sprk_event') })).Count | Should -Be 0
+    }
+    It 'reports a site map whose published copy differs from the unpublished one' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'RetrieveUnpublished') { return [pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' } }
+            return [pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' }
+        }
+        $r = @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ SiteMaps = @('{11111111-1111-1111-1111-111111111111}') }))
+        $r | Should -Be @('sitemap 11111111-1111-1111-1111-111111111111')
+    }
+    It 'reports nothing for a published site map' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ sitemapxml = '<same/>'; modifiedon = '1' } }
+        @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ SiteMaps = @('{11111111-1111-1111-1111-111111111111}') })).Count | Should -Be 0
+    }
+    It 'Publish-SolutionComponents fails when a site map is still unpublished after the request' {
+        Mock Invoke-RestMethod {
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 62; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                '*RetrieveUnpublished*' { return [pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' } }
+                '*/sitemaps(*' { return [pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' } }
+                default { return $null }
+            }
+        }
+        { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -SkipCollateralCheck } | Should -Throw '*sitemap*'
+    }
+}
+
+Describe 'request order and resume command' {
+    It 'puts option sets and web resources first, entities next, app modules last' {
+        $chunks = @(Split-PublishPlan -Entities @('sprk_a', 'sprk_b') -WebResources @('11111111-1111-1111-1111-111111111111') -OptionSets @('sprk_o') `
+                -SiteMaps @('22222222-2222-2222-2222-222222222222') -AppModules @('33333333-3333-3333-3333-333333333333') -ChunkSize 2)
+        $flat = @(foreach ($c in $chunks) { foreach ($k in 'OptionSets', 'WebResources', 'Entities', 'SiteMaps', 'AppModules') { foreach ($v in @($c[$k])) { $k } } })
+        $flat | Should -Be @('OptionSets', 'WebResources', 'Entities', 'Entities', 'SiteMaps', 'AppModules')
+    }
+    It 'prints the exact resume command (no re-import) when a request fails' {
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { throw 'request timed out' }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                default { return $null }
+            }
+        }
+        $err = $null
+        try { Publish-SolutionComponents -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } -SolutionUniqueName MySol -SkipCollateralCheck } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'request 1 of 1'
+        $err | Should -Match 'pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl https://org.crm.dynamics.com -SolutionUniqueName MySol -PublishOnly'
+        $err | Should -Match 'WITHOUT re-importing'
+    }
+}
+
+Describe 'workflows (type 29)' {
+    It 'are refused by default and accepted only with -AllowWorkflows' {
+        Test-ComponentTypeKnown 29 | Should -BeFalse
+        Test-ComponentTypeKnown 29 -AllowWorkflows | Should -BeTrue
+        $lookup = { param($kind, $id) $null }
+        @((Resolve-PublishPlan -Lookup $lookup -Components @([pscustomobject]@{ componenttype = 29; objectid = 'w1' })).Unmapped).Count | Should -Be 1
+        $p = Resolve-PublishPlan -Lookup $lookup -Components @([pscustomobject]@{ componenttype = 29; objectid = 'w1' }) -AllowWorkflows
+        @($p.Unmapped).Count | Should -Be 0
+        @($p.Workflows) | Should -Be @('w1')
+    }
+    It 'Test-WorkflowsActivated returns the workflows whose statecode is not 1' {
+        Mock Invoke-RestMethod { if ("$Uri" -match 'wf-ok') { [pscustomobject]@{ statecode = 1; name = 'ok' } } else { [pscustomobject]@{ statecode = 0; name = 'draft' } } }
+        $r = @(Test-WorkflowsActivated -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -WorkflowIds @('wf-ok', 'wf-bad'))
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match 'wf-bad'
+    }
+    It 'the import adds --activate-plugins only with -AllowWorkflows' {
+        Mock Invoke-ImportPreflight { }
+        $script:PacArgs = $null
+        function global:pac-fake { $script:PacArgs = $args; $global:LASTEXITCODE = 0 }
+        Mock Publish-SolutionComponents { [pscustomobject]@{} }
+        Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-fake' -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -AllowWorkflows | Out-Null
+        ($script:PacArgs -join ' ') | Should -Match '--activate-plugins'
+        Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-fake' -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } | Out-Null
+        ($script:PacArgs -join ' ') | Should -Not -Match '--activate-plugins'
+        Remove-Item function:global:pac-fake
+    }
+}
+
+Describe 'app setting parent outside the solution (pre-flight warning)' {
+    It 'lists the parent app''s pending changes and says it is outside the solution' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(10075); AllTypes = @(10075); UnknownParts = @(); RootEntities = @(); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { @([pscustomobject]@{ componenttype = 10075; objectid = 's1' }) }
+        Mock Get-AppSettingParent { '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}' }
+        Mock Get-AppPendingChanges { @('app setting theirs (x)') }
+        $w = $null
+        Invoke-ImportPreflight -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -ZipPath 'a.zip' -SolutionUniqueName S -WarningVariable w -WarningAction SilentlyContinue | Out-Null
+        ($w -join ' ') | Should -Match 'OUTSIDE the solution'
+        ($w -join ' ') | Should -Match 'app setting theirs'
+    }
+    It 'Get-AppPendingChanges compares the app module and its settings against RetrieveUnpublished' {
+        Mock Invoke-RestMethod {
+            switch -Wildcard ("$Uri") {
+                '*appmodules(*RetrieveUnpublished*' { return [pscustomobject]@{ name = 'App'; modifiedon = '2' } }
+                '*appmodules(*' { return [pscustomobject]@{ name = 'App'; modifiedon = '1' } }
+                '*appsettings/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple*' { return [pscustomobject]@{ value = @([pscustomobject]@{ appsettingid = 'S9'; displayname = 'Theme'; modifiedon = '5' }) } }
+                default { return [pscustomobject]@{ value = @() } }
+            }
+        }
+        $r = @(Get-AppPendingChanges -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -AppId '{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}')
+        $r.Count | Should -Be 2
+        ($r -join ' ') | Should -Match 'app module App'
+        ($r -join ' ') | Should -Match 'app setting Theme'
     }
 }
 

@@ -26,19 +26,28 @@ param(
     [string[]]$ImportArgs = @('--force-overwrite'),
     [switch]$PlanOnly,
     # Also publish the entities of forms that host an imported PCF control. Off by default (see the module note).
-    [switch]$IncludeControlHostEntities
+    [switch]$IncludeControlHostEntities,
+    # Resume after a failed publish request: publish the installed solution's components, no import.
+    [switch]$PublishOnly,
+    # The solution contains workflows (type 29): import with --activate-plugins and fail unless every workflow reads statecode 1.
+    [switch]$AllowWorkflows
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
 
 $ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
 if ($PlanOnly) {
-    $plan = Get-SolutionPublishPlan -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities
+    $plan = Get-SolutionPublishPlan -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
     if (@($plan.Unmapped).Count -gt 0) { Write-Warning "Unmapped component(s): $(@($plan.Unmapped) -join ', ')" }
     New-PublishParameterXmlFromPlan -Plan $plan
     return
 }
+if ($PublishOnly) {
+    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows | Out-Null
+    Write-Host "Scoped-published $SolutionUniqueName (no import). No tenant-wide publish was run."
+    return
+}
 if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) { throw "-ZipPath is required and must exist (got '$ZipPath')." }
 Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName `
-    -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities | Out-Null
+    -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows | Out-Null
 Write-Host "Imported and scoped-published $SolutionUniqueName. No tenant-wide publish was run."

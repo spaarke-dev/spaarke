@@ -21,19 +21,48 @@
     A component type this module cannot map is reported in Plan.Unmapped and stops the publish. It is NEVER answered
     with a publish-all.
 
-    Component types that need no publish (security roles, plug-ins, flows, environment variables, ...) are listed in
+    Component types that need no publish (security roles, plug-ins, environment variables, ...) are listed in
     $script:NoPublishComponentTypes and are skipped on purpose.
+
+    ORDER. A publish is split into requests of at most 25 items (one PublishXml call over about 129 entities and 270 web
+    resources can exceed the request time limit). Option sets and web resources go first, then entities, the application
+    ribbon, site maps and dashboards, and app modules LAST, so a form or an app never goes live before the web resource, PCF
+    bundle or option set it uses. If a request fails, the error prints the exact resume command (re-run the publish
+    WITHOUT re-importing): pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -SolutionUniqueName <name> -PublishOnly
+
+    READ-BACK after every request (a failure stops the run and names what is still unpublished):
+      web resources  published content equals RetrieveUnpublished content
+      app modules    published modifiedon equals the unpublished one
+      app settings   published value and modifiedon equal the unpublished ones
+      entities       no system form, saved query or chart of the entity differs from its RetrieveUnpublished copy
+      site maps      published modifiedon and sitemapxml equal the unpublished ones. Microsoft Learn says the <sitemap> value in
+                     ParameterXml "is not used", so a site map that failed to publish would otherwise pass silently
+    KNOWN LIMIT: option sets and the application ribbon have no read-back surface here. They are sent in the request, and a
+    failure of the request itself is the only signal. Check them by effect (a choice column's options; the effective ribbon).
+
+    WORKFLOWS (type 29) are refused by default: the RetrieveUnpublished probe answers 200 for them, so a draft layer cannot be
+    excluded, and a workflow is activated by the import, not by PublishXml. When a solution does contain one, opt in with
+    -AllowWorkflows (Import-SolutionScoped.ps1 / Invoke-ScopedSolutionImport). That adds `--activate-plugins` to the pac import
+    (pac help: "Activate plug-ins and workflows on the solution"; same switch as the provisioning importer's PublishWorkflows)
+    and, after the publish, reads workflows(id).statecode for every workflow in the solution and fails unless it is 1 (Activated).
+
+    PROBE METHOD (why a type is in the no-publish list): <set>(<fake id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished(). Only error
+    code 0x80060888 ("Resource not found for the segment 'Microsoft.Dynamics.CRM.RetrieveUnpublished()'") proves the table is not
+    bound to the unpublished-layer function. Error 0x80040217 ("... With Id = ... Does Not Exist") means the function IS bound and
+    only the record is missing, so the table has a draft layer. A bare 404 on a real id is not enough on its own.
 #>
 
 # No Set-StrictMode here: a dot-sourced module's strict mode would leak into the calling script (reading a missing
 # property such as @odata.nextLink on a last page would start to throw). Task 130 review F1.
 
-# solutioncomponent.componenttype values that have nothing to publish. Evidence for each: on spaarkedev1 the table answers 404 to
-# <set>(id)/Microsoft.Dynamics.CRM.RetrieveUnpublished() (it has no unpublished layer), probed 2026-10-08 (task 130 review rounds 1-2):
-# roles, field security profiles, field permissions, entity/attribute maps, environment variables, plug-in assemblies and steps,
-# service endpoints, canvas apps, privileges, display strings, Dataverse search tables, ai skill configs.
-# Types WITHOUT a 404 proof are deliberately absent, so they stay unmapped and block the import: workflows/flows (29, the probe
-# answered 200), SLAs and routing rules (150-154), connectors (371/372): no rows to probe in dev.
+# solutioncomponent.componenttype values that have nothing to publish. Evidence (task 130 review rounds 2-4): for each table,
+# <set>(<fake id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished() on spaarkedev1 answers error 0x80060888 "Resource not found for the
+# segment", i.e. the table is not bound to the unpublished-layer function. (0x80040217 would mean "record missing", the function IS
+# bound: that is what appsettings and workflows answer.) The reviewer re-probed every type below with a fake id: all 0x80060888.
+# Tables: roles, privileges, display strings, entity/attribute maps, field security profiles, field permissions, plug-in assemblies,
+# steps and step images, service endpoints, canvas apps, environment variables, Dataverse search tables, ai skill configs.
+# Types without that proof are deliberately absent so they stay unmapped and block the import: workflows/flows (29, bound), SLAs and
+# routing rules (150-154) and connectors (371/372) (no rows in dev to probe).
 $script:NoPublishComponentTypes = @{
     20 = 'security role'; 21 = 'privilege'; 22 = 'display string'
     46 = 'entity map'; 47 = 'attribute map'
@@ -50,7 +79,8 @@ $script:MappedComponentTypes = @(1, 2, 9, 10, 26, 50, 59, 60, 61, 62, 66, 80, 10
 function Test-ComponentTypeKnown {
 <# True when the type is mapped to a publish bucket or is deliberately a no-publish type. Pure. #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][int]$ComponentType)
+    param([Parameter(Mandatory)][int]$ComponentType, [switch]$AllowWorkflows)
+    if ($AllowWorkflows -and $ComponentType -eq 29) { return $true }
     return ($script:MappedComponentTypes -contains $ComponentType) -or $script:NoPublishComponentTypes.ContainsKey($ComponentType)
 }
 
@@ -154,7 +184,7 @@ function Resolve-PublishPlan {
                           name ('form' returns $null for a dashboard); 'control' -> web resource ids (array)
 #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object[]]$Components, [Parameter(Mandatory)][scriptblock]$Lookup, [switch]$IncludeControlHostEntities)
+    param([Parameter(Mandatory)][object[]]$Components, [Parameter(Mandatory)][scriptblock]$Lookup, [switch]$IncludeControlHostEntities, [switch]$AllowWorkflows)
     $entities = New-Object System.Collections.Generic.HashSet[string]
     $webs = New-Object System.Collections.Generic.HashSet[string]
     $opts = New-Object System.Collections.Generic.HashSet[string]
@@ -162,7 +192,7 @@ function Resolve-PublishPlan {
     $dash = New-Object System.Collections.Generic.HashSet[string]
     $apps = New-Object System.Collections.Generic.HashSet[string]
     $sets = New-Object System.Collections.Generic.HashSet[string]
-    $skipped = @(); $unmapped = @(); $appRibbon = $false
+    $skipped = @(); $unmapped = @(); $appRibbon = $false; $flows = @()
     foreach ($c in $Components) {
         $t = [int]$c.componenttype; $id = "$($c.objectid)"
         switch ($t) {
@@ -191,7 +221,8 @@ function Resolve-PublishPlan {
                 if ($IncludeControlHostEntities) { foreach ($e in @(& $Lookup 'controlhosts' $id)) { if ($e) { [void]$entities.Add("$e") } } }
             }
             default {
-                if ($script:NoPublishComponentTypes.ContainsKey($t)) { $skipped += "$t ($($script:NoPublishComponentTypes[$t]))" }
+                if ($AllowWorkflows -and $t -eq 29) { $flows += $id; $skipped += '29 (workflow, activated by the import)' }
+                elseif ($script:NoPublishComponentTypes.ContainsKey($t)) { $skipped += "$t ($($script:NoPublishComponentTypes[$t]))" }
                 else { $unmapped += "$t/$id" }
             }
         }
@@ -205,6 +236,7 @@ function Resolve-PublishPlan {
         Dashboards   = & $sorted $dash
         AppModules   = & $sorted $apps
         AppSettings  = & $sorted $sets
+        Workflows    = @($flows)
         ApplicationRibbon = $appRibbon
         Skipped      = $skipped
         Unmapped     = $unmapped
@@ -259,6 +291,14 @@ function Get-ZipSolutionInfo {
         if (-not $doc) { throw "No solution.xml in $ZipPath." }
         $cust = & $readXml 'customizations.xml'
         $folders = @($zip.Entries | ForEach-Object { ($_.FullName -split '/')[0] } | Sort-Object -Unique)
+        # Best effort: the parent app module id of every app setting file in the ZIP (appsettings/<id>/appsetting.xml).
+        $settingParents = @()
+        foreach ($en in @($zip.Entries | Where-Object { $_.FullName -ilike 'appsettings/*' -and $_.FullName -like '*.xml' })) {
+            $sr = New-Object System.IO.StreamReader($en.Open())
+            try { $txt = $sr.ReadToEnd() } finally { $sr.Dispose() }
+            $mm = [regex]::Match($txt, 'parentappmodule[^>]*>\s*\{?([0-9a-fA-F-]{36})')
+            if ($mm.Success) { $settingParents += $mm.Groups[1].Value.ToLowerInvariant() }
+        }
     } finally { $zip.Dispose() }
     $m = $doc.ImportExportXml.SolutionManifest
     $roots = @($m.RootComponents.RootComponent | Where-Object { $_ })
@@ -284,6 +324,7 @@ function Get-ZipSolutionInfo {
         RootTypes    = @($roots | ForEach-Object { [int]$_.type } | Sort-Object -Unique)
         AllTypes     = @($types | Sort-Object)
         UnknownParts = $unknown
+        AppSettingParents = @($settingParents | Sort-Object -Unique)
         RootEntities = @($roots | Where-Object { [int]$_.type -eq 1 } | ForEach-Object { "$($_.schemaName)".ToLowerInvariant() } | Sort-Object -Unique)
     }
 }
@@ -298,12 +339,13 @@ function Invoke-ImportPreflight {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$SolutionUniqueName,
-        [string[]]$ExtraEntities = @()
+        [string[]]$ExtraEntities = @(),
+        [switch]$AllowWorkflows
     )
     $zipInfo = Get-ZipSolutionInfo -ZipPath $ZipPath
     $installed = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
     $types = @($zipInfo.AllTypes) + @($installed | Where-Object { $_ } | ForEach-Object { [int]$_.componenttype })
-    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_) } | ForEach-Object { "type $_" }) + @($zipInfo.UnknownParts)
+    $unknown = @($types | Sort-Object -Unique | Where-Object { -not (Test-ComponentTypeKnown $_ -AllowWorkflows:$AllowWorkflows) } | ForEach-Object { "type $_" }) + @($zipInfo.UnknownParts)
     if ($unknown.Count -gt 0) {
         throw "Refusing to import ${SolutionUniqueName}: $($unknown -join ', ') cannot be published by the scoped procedure. Map them in scripts/lib/Publish-SolutionComponents.ps1 first. Nothing was imported."
     }
@@ -311,13 +353,27 @@ function Invoke-ImportPreflight {
     foreach ($ent in @($zipInfo.RootEntities) + $ExtraEntities | Select-Object -Unique) {
         foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $own)) { Write-Warning "Entity publish of $ent will also publish pending change: $c" }
     }
+    # K2: an app setting whose parent app sits OUTSIDE the solution publishes that whole app, with anyone else's pending changes to it.
+    $inSolutionApps = @($installed | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)".Trim('{', '}').ToLowerInvariant() })
+    $parents = @()
+    foreach ($row in @($installed | Where-Object { $_ -and [int]$_.componenttype -eq 10075 })) {
+        $p = Get-AppSettingParent -Context $Context -AppSettingId "$($row.objectid)"
+        if ($p) { $parents += "$p".Trim('{', '}').ToLowerInvariant() }
+    }
+    $parents += @($zipInfo.AppSettingParents)
+    foreach ($app in @($parents | Where-Object { $_ } | Select-Object -Unique)) {
+        $where = if ($inSolutionApps -contains $app) { 'in the solution' } else { 'OUTSIDE the solution (or not yet installed)' }
+        foreach ($c in @(Get-AppPendingChanges -Context $Context -AppId $app)) {
+            Write-Warning "App setting publish will publish the whole parent app $app ($where); pending change: $c"
+        }
+    }
     return $zipInfo
 }
 
 function Get-SolutionPublishPlan {
 <# Reads the solution's components from Dataverse and returns the plan. Read-only. #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$SolutionUniqueName, [switch]$IncludeControlHostEntities)
+    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$SolutionUniqueName, [switch]$IncludeControlHostEntities, [switch]$AllowWorkflows)
     $api = $Context.Api; $h = $Context.Headers
     $components = Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName
     if ($null -eq $components) { throw "Solution '$SolutionUniqueName' not found in $api." }
@@ -347,7 +403,7 @@ function Get-SolutionPublishPlan {
             }
         }
     }
-    return Resolve-PublishPlan -Components $components -Lookup $lookup -IncludeControlHostEntities:$IncludeControlHostEntities
+    return Resolve-PublishPlan -Components $components -Lookup $lookup -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
 }
 
 function Compare-UnpublishedArtifacts {
@@ -374,7 +430,7 @@ function Get-EntityPublishCollateral {
     param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$Entity, [string[]]$ExcludeIds = @())
     $api = $Context.Api; $h = $Context.Headers; $out = @()
     $skipIds = @($ExcludeIds | Where-Object { $_ } | ForEach-Object { $_.Trim('{', '}').ToLowerInvariant() })
-    foreach ($spec in @(@{ Set = 'savedqueries'; Id = 'savedqueryid'; Filter = "returnedtypecode eq '$Entity'" }, @{ Set = 'systemforms'; Id = 'formid'; Filter = "objecttypecode eq '$Entity'" })) {
+    foreach ($spec in @(@{ Set = 'savedqueries'; Id = 'savedqueryid'; Filter = "returnedtypecode eq '$Entity'" }, @{ Set = 'systemforms'; Id = 'formid'; Filter = "objecttypecode eq '$Entity'" }, @{ Set = 'savedqueryvisualizations'; Id = 'savedqueryvisualizationid'; Filter = "primaryentitytypecode eq '$Entity'" })) {
         $sel = "`$select=$($spec.Id),name,modifiedon&`$filter=$($spec.Filter)"
         $map = { param($rows) @(@($rows) | Where-Object { $_ } | ForEach-Object { @{ id = $_.($spec.Id); modifiedon = $_.modifiedon; name = $_.name } }) }
         $published = & $map (Get-DvPages "$api/$($spec.Set)?$sel" $h)
@@ -385,6 +441,42 @@ function Get-EntityPublishCollateral {
         }
     }
     return $out
+}
+
+function Get-AppSettingParent {
+<# The parent app module id of an app setting, or $null. Read-only. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$AppSettingId)
+    return (Invoke-RestMethod -Method Get -Headers $Context.Headers -Uri "$($Context.Api)/appsettings($($AppSettingId.Trim('{', '}')))?`$select=_parentappmoduleid_value").'_parentappmoduleid_value'
+}
+
+function Get-AppPendingChanges {
+<# Read-only. Pending (unpublished) changes on an app module and its settings. Publishing an app publishes ALL of them. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$AppId)
+    $api = $Context.Api; $h = $Context.Headers; $g = $AppId.Trim('{', '}'); $out = @()
+    $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appmodules($g)?`$select=modifiedon,name"
+    $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appmodules($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=modifiedon,name"
+    if ($pub.modifiedon -ne $unp.modifiedon) { $out += "app module $($pub.name) ($g)" }
+    $sel = "`$select=appsettingid,displayname,modifiedon&`$filter=_parentappmoduleid_value eq $g"
+    $map = { param($rows) @(@($rows) | Where-Object { $_ } | ForEach-Object { @{ id = $_.appsettingid; modifiedon = $_.modifiedon; name = $_.displayname } }) }
+    $published = & $map (Get-DvPages "$api/appsettings?$sel" $h)
+    $unpublished = & $map (Get-DvPages "$api/appsettings/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$sel" $h)
+    foreach ($d in @(Compare-UnpublishedArtifacts -Published $published -Unpublished $unpublished)) { $out += "app setting $($d.name) ($($d.id))" }
+    return $out
+}
+
+function Test-WorkflowsActivated {
+<# Read-back for -AllowWorkflows: every workflow in the list must have statecode 1 (Activated). Returns the ones that are not. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Context, [string[]]$WorkflowIds = @())
+    $bad = @()
+    foreach ($id in @($WorkflowIds | Where-Object { $_ })) {
+        $g = $id.Trim('{', '}')
+        $w = Invoke-RestMethod -Method Get -Headers $Context.Headers -Uri "$($Context.Api)/workflows($g)?`$select=statecode,name"
+        if ([int]$w.statecode -ne 1) { $bad += "workflow $($w.name) ($g) statecode=$($w.statecode)" }
+    }
+    return $bad
 }
 
 function Invoke-PublishXml {
@@ -406,19 +498,28 @@ function Test-PublishedReadBack {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][object]$Plan)
     $api = $Context.Api; $h = $Context.Headers; $pending = @()
-    foreach ($id in @($Plan.WebResources)) {
+    foreach ($id in @($Plan.WebResources | Where-Object { $_ })) {
         $g = $id.Trim('{', '}')
         $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/webresourceset($g)?`$select=content"
         $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/webresourceset($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=content"
         if ($pub.content -ne $unp.content) { $pending += "webresource $g" }
     }
-    foreach ($id in @($Plan.AppModules)) {
+    foreach ($id in @($Plan.AppModules | Where-Object { $_ })) {
         $g = $id.Trim('{', '}')
         $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appmodules($g)?`$select=modifiedon"
         $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appmodules($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=modifiedon"
         if ($pub.modifiedon -ne $unp.modifiedon) { $pending += "appmodule $g" }
     }
-    foreach ($id in @($Plan.AppSettings)) {
+    foreach ($id in @($Plan.SiteMaps | Where-Object { $_ })) {
+        $g = $id.Trim('{', '}')
+        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps($g)?`$select=sitemapxml,modifiedon"
+        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=sitemapxml,modifiedon"
+        if ($pub.sitemapxml -ne $unp.sitemapxml -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "sitemap $g" }
+    }
+    foreach ($ent in @($Plan.Entities | Where-Object { $_ })) {
+        foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent)) { $pending += "entity ${ent}: $c" }
+    }
+    foreach ($id in @($Plan.AppSettings | Where-Object { $_ })) {
         $g = $id.Trim('{', '}')
         $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appsettings($g)?`$select=value,modifiedon"
         $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/appsettings($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=value,modifiedon"
@@ -442,10 +543,14 @@ function Split-PublishPlan {
     )
     if ($ChunkSize -lt 1) { throw 'ChunkSize must be at least 1.' }
     $items = New-Object System.Collections.Generic.List[object]
-    foreach ($spec in @(@('Entities', $Entities), @('WebResources', $WebResources), @('OptionSets', $OptionSets), @('SiteMaps', $SiteMaps), @('Dashboards', $Dashboards), @('AppModules', $AppModules))) {
+    # Order matters: what a form, app or site map USES goes live first (option sets, web resources), app modules last.
+    foreach ($spec in @(@('OptionSets', $OptionSets), @('WebResources', $WebResources), @('Entities', $Entities))) {
         foreach ($v in @($spec[1] | Where-Object { $_ })) { $items.Add(@{ Kind = $spec[0]; Value = $v }) }
     }
     if ($ApplicationRibbon) { $items.Add(@{ Kind = 'Ribbon'; Value = 'application' }) }
+    foreach ($spec in @(@('SiteMaps', $SiteMaps), @('Dashboards', $Dashboards), @('AppModules', $AppModules))) {
+        foreach ($v in @($spec[1] | Where-Object { $_ })) { $items.Add(@{ Kind = $spec[0]; Value = $v }) }
+    }
     $chunks = @()
     for ($i = 0; $i -lt $items.Count; $i += $ChunkSize) {
         $slice = @($items | Select-Object -Skip $i -First $ChunkSize)
@@ -471,9 +576,10 @@ function Publish-SolutionComponents {
         [string[]]$ExtraEntities = @(),
         [switch]$IncludeControlHostEntities,
         [switch]$SkipCollateralCheck,
+        [switch]$AllowWorkflows,
         [int]$ChunkSize = 25
     )
-    $plan = Get-SolutionPublishPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities
+    $plan = Get-SolutionPublishPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
     if (@($plan.Unmapped).Count -gt 0) {
         throw "Cannot publish $SolutionUniqueName without a tenant-wide publish: unmapped component(s) $(@($plan.Unmapped) -join ', '). Add a mapping in scripts/lib/Publish-SolutionComponents.ps1 (never use publish-all)."
     }
@@ -489,17 +595,27 @@ function Publish-SolutionComponents {
             foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $e -ExcludeIds $own)) { Write-Warning "Entity publish of $e will also publish pending change: $c" }
         }
     }
-    $pending = @()
+    $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
+    $resume = "pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl $envUrl -SolutionUniqueName $SolutionUniqueName -PublishOnly" + $(if ($AllowWorkflows) { ' -AllowWorkflows' } else { '' })
     $n = 0
     foreach ($c in $chunks) {
         $n++
-        $xml = New-PublishParameterXml -Entities $c.Entities -WebResources $c.WebResources -OptionSets $c.OptionSets -SiteMaps $c.SiteMaps `
-            -Dashboards $c.Dashboards -AppModules $c.AppModules -ApplicationRibbon:([bool]$c.ApplicationRibbon)
-        Invoke-PublishXml -Context $Context -ParameterXml $xml
-        # Read each chunk back as soon as it is published.
-        $pending += @(Test-PublishedReadBack -Context $Context -Plan ([pscustomobject]@{ WebResources = $c.WebResources; AppModules = $c.AppModules; AppSettings = $c.AppSettings }))
+        try {
+            $xml = New-PublishParameterXml -Entities $c.Entities -WebResources $c.WebResources -OptionSets $c.OptionSets -SiteMaps $c.SiteMaps `
+                -Dashboards $c.Dashboards -AppModules $c.AppModules -ApplicationRibbon:([bool]$c.ApplicationRibbon)
+            Invoke-PublishXml -Context $Context -ParameterXml $xml
+            # Read this request back before the next one goes out.
+            $pending = @(Test-PublishedReadBack -Context $Context -Plan ([pscustomobject]@{
+                        WebResources = $c.WebResources; AppModules = $c.AppModules; AppSettings = $c.AppSettings; Entities = $c.Entities; SiteMaps = $c.SiteMaps }))
+            if ($pending.Count -gt 0) { throw "still unpublished after PublishXml: $($pending -join ', ')" }
+        } catch {
+            throw "Publish request $n of $($chunks.Count) for $SolutionUniqueName failed: $($_.Exception.Message). The solution is already imported; resume WITHOUT re-importing: $resume"
+        }
     }
-    if ($pending.Count -gt 0) { throw "Published, but still unpublished after PublishXml: $($pending -join ', ')." }
+    if ($AllowWorkflows -and @($plan.Workflows).Count -gt 0) {
+        $inactive = @(Test-WorkflowsActivated -Context $Context -WorkflowIds $plan.Workflows)
+        if ($inactive.Count -gt 0) { throw "Workflow(s) not activated after the import (statecode must be 1): $($inactive -join ', '). Import with --activate-plugins and re-check; resume the publish with: $resume" }
+    }
     return $plan
 }
 
@@ -519,7 +635,8 @@ function Invoke-ScopedSolutionImport {
         [hashtable]$Context,
         [string[]]$ExtraWebResources = @(),
         [string[]]$ExtraEntities = @(),
-        [switch]$IncludeControlHostEntities
+        [switch]$IncludeControlHostEntities,
+        [switch]$AllowWorkflows
     )
     if ($ImportArgs | Where-Object { $_ -match '^(--publish-changes|-pc)$' }) { throw '--publish-changes is a tenant-wide publish and is not allowed.' }
     if (-not $PacExe) {
@@ -530,10 +647,11 @@ function Invoke-ScopedSolutionImport {
     if (-not $Context) { $Context = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
 
     # PRE-FLIGHT (before anything is imported): an import must never be left unpublished.
-    Invoke-ImportPreflight -Context $Context -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ExtraEntities $ExtraEntities | Out-Null
+    Invoke-ImportPreflight -Context $Context -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ExtraEntities $ExtraEntities -AllowWorkflows:$AllowWorkflows | Out-Null
+    if ($AllowWorkflows -and ($ImportArgs -notcontains '--activate-plugins')) { $ImportArgs = @($ImportArgs) + '--activate-plugins' }
 
     & $PacExe solution import --environment $EnvironmentUrl --path $ZipPath @ImportArgs
     if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
     return Publish-SolutionComponents -Context $Context -SolutionUniqueName $SolutionUniqueName `
-        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck
+        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck -AllowWorkflows:$AllowWorkflows
 }
