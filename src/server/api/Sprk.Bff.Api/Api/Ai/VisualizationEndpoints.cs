@@ -272,7 +272,26 @@ public static class VisualizationEndpoints
             });
         }
 
-        var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+        // A malformed multipart body (e.g. a section without Content-Disposition) is a CLIENT error: answer 400
+        // instead of letting the parser's exception surface as a 500. Logged by type + trace id only — the
+        // parser's message can echo request content. Cancellation is deliberately not caught here.
+        IFormCollection form;
+        try
+        {
+            form = await httpContext.Request.ReadFormAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is System.IO.InvalidDataException or BadHttpRequestException)
+        {
+            logger.LogWarning(
+                "Visualization content upload rejected: malformed multipart body ({ExceptionType}), TraceId={TraceId}",
+                ex.GetType().Name, httpContext.TraceIdentifier);
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Request body is not valid multipart/form-data.");
+        }
+
         var file = form.Files.GetFile("file");
 
         if (file == null || file.Length == 0)
