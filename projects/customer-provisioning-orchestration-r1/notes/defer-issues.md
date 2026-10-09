@@ -226,6 +226,30 @@ Pending-invite marker written by this stamp's invitation; bind by email only whe
 
 ---
 
+### ISS-011 — BFF asymmetric registrations: services that cannot be constructed when a feature gate is off (204e F1–F4)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — BFF code (ADR-032 decision per service); latent for customer stamps |
+| **Urgency** | before any environment runs with a gate off (DocIntel / AI Search) |
+| **Filed** | 2026-10-09 (task 204e) |
+| **Source** | `tests/Spaarke.ArchTests/Adr032/*` ledgers; `notes/task-202-punch-list.md` rows 204e-F1..F4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1487 |
+
+**Description**
+
+Finance job handlers (F1), the app-only analysis job handlers + `EmbeddingMigrationService` (F2 — the BFF cannot be
+constructed with `DocumentIntelligence:Enabled=false`, the code default), AI Search / chat-client consumers registered
+unconditionally (F3), and ~35 services when DocIntel is on without an AI Search endpoint (F4). Stamps set DocIntel on and
+the AI Search endpoint, so none of this hits T186.
+
+**Suggested fix**
+
+Per service: register on the dependency's gate, or give the dependency a Null-object peer (ADR-032); delete the ledger
+row as each is fixed.
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->

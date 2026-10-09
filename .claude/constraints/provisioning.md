@@ -260,7 +260,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 
 - New BFF `AddOptions<T>().ValidateOnStart()` module → MUST add corresponding entry to `per_env_settings` list in `scripts/canonical-secret-catalog/manifest.yaml`.
 - Deploy discipline: H4b bulk-set applies ALL settings in ONE batch → ONE App Service restart cycle. NO manual `az webapp config appsettings set` single-setting fixes in production.
-- Nightly `IOptions-inventory-drift` ArchTest (planned task 203-followup) catches drift between BFF DI + manifest.
+- `tests/Spaarke.ArchTests/IOptionsDriftTests.cs` (task 204e) fails the PR when a `ValidateOnStart` options type demands a key no stamp channel writes. Per-PR, not nightly. Checklist: `bff-extensions.md` §F.5.
 
 Full mechanic: `.claude/patterns/provisioning/progressive-fail-fast-recovery.md`.
 
