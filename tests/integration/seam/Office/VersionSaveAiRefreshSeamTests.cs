@@ -340,6 +340,7 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                 Mock.Of<IFileIndexingService>(),
                 _jobSubmission.Object,
                 Mock.Of<IDocumentDataverseService>(),
+                TestDocumentIndexParentResolver.Over(),
                 Options.Create(new AnalysisOptions { SharedIndexName = DefaultIndex }),
                 Options.Create(new PostUploadIndexingOptions()),
                 NullLogger<PostUploadIndexingEnqueuer>.Instance));
@@ -388,6 +389,7 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                 Idempotency,
                 Mock.Of<IDocumentDataverseService>(),
                 resolver.Object,
+                TestDocumentIndexParentResolver.Over(),
                 new RagTelemetry(),
                 NullLogger<RagIndexingJobHandler>.Instance);
 
