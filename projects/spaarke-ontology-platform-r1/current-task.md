@@ -2,14 +2,14 @@
 
 > **Last Updated**: 2026-10-09 (main session, after D-106). State only — history is in git log, task `<completion>`
 > blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: ontology critical
-> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-108; **D-107** = merge reviewed ontology PRs into the project branch when green). Issues for after the
+> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-112; **D-107** = merge reviewed ontology PRs into the project branch when green). Issues for after the
 > project: [`notes/defer-issues.md`](notes/defer-issues.md) (D-106 section). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 6 🔄 (044, 051, 070, 066, 067, 123), 41 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
+| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **61 ✅**, 4 🔄 (044, 052, 054, 071), 38 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), synced with master 2026-10-09 (`217b8f3c6`). Signal-ownership invariant is **I-17**. |
 | **Rule** | **D-106:** fix an issue only if ontology functionality needs it; document everything else in `notes/defer-issues.md` (D-106 section, GitHub link) for post-project review. Every sub-agent/reviewer prompt carries it. No demo/non-dev work. |
 | **Critical path** | **#1390 (039) waits on uac-r2 approval** → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064 Briefing cutover. Decision path: 040 (after 039) + 044 + 046 + 070 → 043 commit route → 058 wizard → 045. |
@@ -17,15 +17,14 @@
 
 ## Running now (SendMessage resumes an agent by ID)
 
-| ID | What | Then |
+| What | State | Then |
 |---|---|---|
-| `afc4660035026f317` (author) / `a85de685334513317` (reviewer) | **044** #1515 round 2 (`576517b0f`: PascalCase nav names, `PreflightAsync` on every executor, revision owner via resolver + `sprk_budgetrevision` lineage/config entries, census) in re-check | **Merge only after uac-r2 OKs the lineage/config entries** (#1355 comment 6083936041) + green CI (D-107). Live proof needs: a low-privilege user token + zz-044 test matter/budget (+ a Secure one) → owner decision |
-| `a9ff474067cdc0aa5` / `a6a2b6b48dc7c9a1e` / `ae631a5184b49f2f7` | **066** eventstatus inventory (`C:\wts-066`) · **067** To Do score (`C:\wts-067`) · **123** triage enabled/active, ISS-010 only (`C:\wts-123`) — all off the project branch | PR → independent review → merge per D-107 |
-| (agent) | **071** disposition accrual (`C:\wts-071`) — 070 merged 19e2720c9 | PR → review → merge (D-107) |
-| `a9de4b9dd3d9105b0` / `ae2b8cf45db19864a` | **052** MetricCard count filters + C-9 (`C:\wts-052`) · **054** reconciliation tab + aggregate (`C:\wts-054`) | PR → review → merge (D-107) |
-| bg `bz01xg8cg` | **130** #1467 approved (`cc8f49fa5`) | Merges into master when CI green (D-102) → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → owner: 4 live proofs |
+| **044** #1515 (`b6cc4da30`, approved) | Code done; uac-r2 asked to OK the `sprk_budgetrevision` lineage/config entries (#1355 comment 6083936041) | Merge into the project branch on uac-r2 OK + green CI (D-107) |
+| **054** #1531 (`f60c36688`), **052** #1536 (`e769687f8`), **071** #1532 (`499dd8dba`) | All approved; merge jobs (`merge-when-green.sh` in scratchpad) waiting on CI | On merge: pull the branch, mark tasks done |
+| **130** #1542 (skill amendments, master) | Merge job waiting on CI (D-102) | Mark 130 code-complete; live proof = the D-112 E2E dev deploy |
+| **039** #1390 | Up to date with master (`1c8f4d120`), build + ArchTests 929 green | uac-r2 approval → **owner merge (master)** → 039 live gate (D-67) → 037, 040 |
 
-Merged today: **#1415** (111 code, master `47ffb8537`); **#1480** (113). Writer role grants **D-108** applied in dev 15:04Z.
+Merged today: #1415 (111 code), #1480 (113), #1467 (130 code), #1513 (051), #1512 (070), #1525 (067), #1526 (123), #1528 (066). Role grants D-108/D-109 applied in dev.
 
 ## Waiting on others
 
