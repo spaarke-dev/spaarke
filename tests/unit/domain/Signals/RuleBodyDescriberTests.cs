@@ -4,8 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
-using NSubstitute.ExceptionExtensions;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
@@ -55,10 +54,9 @@ public class RuleBodyDescriberTests
         ILogger<RuleBodyDescriber> logger, params (string Table, Guid Id, string Name)[] rows)
     {
         var queries = new List<QueryExpression>();
-        var entities = Substitute.For<IGenericEntityService>();
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>()).Returns(call =>
+        var entitiesMock = new Mock<IGenericEntityService>();
+        entitiesMock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>())).Returns((QueryExpression query, CancellationToken _) =>
         {
-            var query = call.Arg<QueryExpression>();
             queries.Add(query);
             var collection = new EntityCollection();
             foreach (var row in rows.Where(r => r.Table == query.EntityName))
@@ -68,6 +66,7 @@ public class RuleBodyDescriberTests
 
             return Task.FromResult(collection);
         });
+        var entities = entitiesMock.Object;
 
         var schema = new RuleBodySchemaValidator();
         var compiler = new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero)));
@@ -167,9 +166,10 @@ public class RuleBodyDescriberTests
     public async Task ANameReadFault_IsARefusal_NotAnException_LoggedWithAStableEventId_AndMetered()
     {
         var logger = new CapturingLogger<RuleBodyDescriber>();
-        var entities = Substitute.For<IGenericEntityService>();
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+        var entitiesMock = new Mock<IGenericEntityService>();
+        entitiesMock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("dataverse is down"));
+        var entities = entitiesMock.Object;
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(
             schema, new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero))),
@@ -196,9 +196,10 @@ public class RuleBodyDescriberTests
     public async Task ATimeoutStyleTaskCanceledException_WhenTheCallerDidNotCancel_IsARefusal_NotAnException()
     {
         var logger = new CapturingLogger<RuleBodyDescriber>();
-        var entities = Substitute.For<IGenericEntityService>();
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+        var entitiesMock = new Mock<IGenericEntityService>();
+        entitiesMock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("the HTTP client timed out"));
+        var entities = entitiesMock.Object;
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(
             schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
@@ -213,11 +214,12 @@ public class RuleBodyDescriberTests
     [Fact]
     public async Task ACancelledRead_StillThrows_ItIsNotARefusal()
     {
-        var entities = Substitute.For<IGenericEntityService>();
+        var entitiesMock = new Mock<IGenericEntityService>();
         using var cts = new CancellationTokenSource();
         cts.Cancel(); // the CALLER cancelled
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+        entitiesMock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var entities = entitiesMock.Object;
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(
             schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
@@ -41,9 +41,10 @@ public sealed class RuleBodyDescriberSeamTests
 
     private static RuleBodyDescriber LiveDescriber(ServiceClient client)
     {
-        var entities = Substitute.For<IGenericEntityService>();
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-            .Returns(call => client.RetrieveMultipleAsync(call.Arg<QueryExpression>(), call.Arg<CancellationToken>()));
+        var entitiesMock = new Mock<IGenericEntityService>();
+        entitiesMock.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken ct) => client.RetrieveMultipleAsync(query, ct));
+        var entities = entitiesMock.Object;
         var schema = new RuleBodySchemaValidator();
         var compiler = new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero)));
         return new RuleBodyDescriber(new PolicyVersionValidator(schema, compiler, NullLogger<PolicyVersionValidator>.Instance), entities, NullLogger<RuleBodyDescriber>.Instance);
