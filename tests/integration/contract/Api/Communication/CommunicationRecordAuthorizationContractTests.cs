@@ -412,6 +412,30 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         (await NormalizedBodyAsync(unknown)).Should().Be(await NormalizedBodyAsync(denied));
     }
 
+    // Task 066 F2-A: an old client still sends the retired `status` (deprecated 0-7 vocabulary, whose 1 and 2 are valid
+    // statuscodes too). Over HTTP the body is refused 422 STATUS_FIELD_RETIRED and NOTHING is created; `statusCode` is accepted.
+    [Fact]
+    public async Task CreateAdHocTask_WithTheRetiredStatusField_Is422_AndNothingIsCreated_WhileStatusCodeIsAccepted()
+    {
+        var id = Guid.NewGuid();
+        VisibleCommunication(id);
+        var matter = Guid.NewGuid();
+        GrantTaskRights(matter);
+
+        var oldShape = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/create-task",
+            new { subject = "Old client", regardingEntity = "sprk_matter", regardingRecordId = matter, status = 2 }));
+
+        oldShape.StatusCode.Should().Be((HttpStatusCode)422);
+        (await oldShape.Content.ReadAsStringAsync()).Should().Contain("STATUS_FIELD_RETIRED");
+        AssertNoCreate("sprk_event");
+        AssertNoCreate("sprk_emailreviewlog");
+
+        var newShape = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/create-task",
+            new { subject = "New client", regardingEntity = "sprk_matter", regardingRecordId = matter, statusCode = 659490002 }));
+
+        newShape.StatusCode.Should().Be(HttpStatusCode.OK, await newShape.Content.ReadAsStringAsync());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -70,7 +70,7 @@ public sealed class CreateTaskApplySeamTests
     {
         BaseDate = new DateOnly(2026, 8, 1),
         FinalDueDate = new DateOnly(2026, 9, 15),
-        Status = EventStatusOpen,
+        StatusCode = EventStatusOpen,
         AssignedTo = AssignedToUserId,
     };
 
@@ -220,6 +220,56 @@ public sealed class CreateTaskApplySeamTests
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // Task 066 F2-A: the field was renamed status -> statusCode. An old client's `status` (deprecated 0-7 vocabulary; its 1 and 2
+    // are valid statuscodes too, so a value check cannot catch it) is refused 422 STATUS_FIELD_RETIRED before anything is read
+    // or written; the new shape binds. The JSON goes through the same System.Text.Json web defaults the endpoint binds with.
+    private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    [Theory]
+    [InlineData("{\"status\":2}")]                       // old Completed = statuscode No Further Action
+    [InlineData("{\"Status\":1,\"baseDate\":\"2026-08-01\"}") // old Open = statuscode Draft (any casing)
+    ]
+    public async Task ApplyAsync_WithTheRetiredStatusField_Refuses422_AndWritesNothing(string oldBody)
+    {
+        var sut = BuildSut();
+        var request = System.Text.Json.JsonSerializer.Deserialize<ApplyCreateTaskRequest>(oldBody, WebJson);
+
+        var act = () => sut.ApplyAsync(ReviewLogId, request, new ClaimsPrincipal(), CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.StatusCode.Should().Be(422);
+        ex.Code.Should().Be("STATUS_FIELD_RETIRED");
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAdHocAsync_WithTheRetiredStatusField_Refuses422_AndWritesNothing()
+    {
+        var sut = BuildSut();
+        var request = System.Text.Json.JsonSerializer.Deserialize<CreateAdHocTaskRequest>(
+            "{\"subject\":\"x\",\"regardingEntity\":\"sprk_matter\",\"regardingRecordId\":\"" + Guid.NewGuid() + "\",\"status\":2}", WebJson)!;
+
+        var act = () => sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.StatusCode.Should().Be(422);
+        ex.Code.Should().Be("STATUS_FIELD_RETIRED");
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void TheStatusCodeWireField_Binds_AndLeavesNoRetiredField()
+    {
+        var request = System.Text.Json.JsonSerializer.Deserialize<ApplyCreateTaskRequest>("{\"statusCode\":659490002}", WebJson)!;
+
+        request.StatusCode.Should().Be(659490002);
+        request.ExtensionData.Should().BeNull();
+        CommunicationCreateTaskApplyService.RejectRetiredStatusField(request.ExtensionData); // does not throw
+    }
+
     // NEGATIVE — wrong endpoint: a Job B field-update proposal (real targetfield, not the __create_task__ sentinel)
     // POSTed here is refused (422); nothing is created.
     [Fact]
@@ -321,7 +371,7 @@ public sealed class CreateTaskApplySeamTests
         DueDate = new DateOnly(2026, 9, 1),
         BaseDate = new DateOnly(2026, 8, 1),
         FinalDueDate = new DateOnly(2026, 9, 15),
-        Status = EventStatusOpen,
+        StatusCode = EventStatusOpen,
         AssignedTo = AssignedToUserId,
     };
 
@@ -392,7 +442,7 @@ public sealed class CreateTaskApplySeamTests
             .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
             .ReturnsAsync(new UpdateRecordResult(true, new[] { "statuscode", "statecode", "sprk_completeddate" }, null));
 
-        var request = AdHocRequest() with { Status = EventStatusCompleted, CompletedDate = new DateOnly(2026, 8, 7) };
+        var request = AdHocRequest() with { StatusCode = EventStatusCompleted, CompletedDate = new DateOnly(2026, 8, 7) };
         await sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
 
         patched.Should().NotBeNull();

@@ -147,7 +147,8 @@ describe('TaskReconcileTab', () => {
 
     await waitFor(() => expect(postCall('/create-task/apply')).toBeTruthy());
     const body = JSON.parse(postCall('/create-task/apply')![1].body);
-    expect(body.status).toBe(659490002); // statuscode Completed (D-28, task 066)
+    expect(body.statusCode).toBe(659490002);
+    expect(body).not.toHaveProperty('status'); // statuscode Completed (D-28, task 066)
     expect(body.completedDate).toBe('2026-08-07');
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith('rl-1', 'applied'));
   });

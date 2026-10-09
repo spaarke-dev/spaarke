@@ -26,8 +26,7 @@ Every deprecated value has a `statuscode` equivalent, so the POML escalation tri
 Further Action, the status the archive commands already set.
 
 Live disagreement (83 rows, `GROUP BY statuscode, sprk_eventstatus`): 38 Draft rows have the column null; 18 Open rows null; the column is `Open` on 7
-rows whose statuscode is Completed, and `Completed` on 1 Draft + 2 Open rows; `Reassigned` on 1 Open row. 26 rows are Open by statuscode; 20 rows have
-`sprk_eventstatus = 1`, of which only 6 are Open by statuscode.
+rows whose statuscode is Completed, and `Completed` on 1 Draft + 2 Open rows; `Reassigned` on 1 Open row. 27 rows are Open by statuscode (coordinator re-count, round 2); V-1 "My Tasks Open" returns 15 rows and misses 18 of the 24 open tasks.
 
 ## Inventory (file:line is on the base commit, before this task's change)
 
@@ -53,7 +52,7 @@ Already on `statuscode` and untouched: `EventEndpoints.cs`, `TodoGenerationServi
 |---|---|---|
 | `solutions/EventCommands/sprk_event_ribbon_commands.js:84-92` (map 0-7) | W/R | Map now the live statuscode values; added `StateOfStatus`, `_statusPayload`, `_saveThenSetStatus`. |
 | `…ribbon_commands.js:190-203` (`IsEventActive`) | R | Now reads `statuscode` (open work: Draft, Open, On Hold, Reassigned; same set as `EventStatusCode.IsOpenWork`); falls back to the header `statecode` when `statuscode` is not on the form. |
-| `…ribbon_commands.js:281,345,482,591,650,714,750` (Complete, Cancel, Reassign, Close, Archive, On Hold, Resume: `getAttribute("sprk_eventstatus").setValue`) | W | `statuscode` is not an attribute of the main form (only the `statecode` header is), so the status is now written by `_saveThenSetStatus`: form save (dates, owner, history), then a `statuscode` + `statecode` PATCH, then form refresh. |
+| `…ribbon_commands.js:281,345,482,591,650,714,750` (Complete, Cancel, Reassign, Close, Archive, On Hold, Resume: `getAttribute("sprk_eventstatus").setValue`) | W | the status is now written (round 1 believed `statuscode` was not a form attribute; round 2: the main form has it, but the PATCH works either way) by `_saveThenSetStatus`: form save (dates, owner, history), then a `statuscode` + `statecode` PATCH, then form refresh. |
 | `…ribbon_commands.js:823` (bulk complete), `:881,912,942,972,1016` (homepage bulk), `:1072,1079` (homepage archive) | W | PATCH body is `{statuscode, statecode}` (+ `sprk_completeddate` for complete). Archive is one update (was two). |
 | `solutions/EventCommands/EventRibbonDiffXml.xml:11`, `…ribbon_commands.js:24` | D | Value list updated. |
 | `solutions/EventsPage/src/registerEventHandlers.ts:34,52,57,75,99,114` | W | Bulk status handlers write `{statuscode, statecode}`; archive writes No Further Action + Inactive in one update; `EventStatus` map is the live set. |
@@ -82,7 +81,7 @@ Already on `statuscode` and untouched: `EventEndpoints.cs`, `TodoGenerationServi
 | Item | Count | Detail |
 |---|---|---|
 | Entity.xml | 4 lines | The column definition (stays until removal is approved). |
-| Main form (`{90d2eff7-…}.xml` and `_managed`) | 2 | The column's form placement (stays: POML constraint). `statuscode` is NOT on the form. |
+| Event modal form (`{90d2eff7-…}.xml` and `_managed`) | 2 | The column as an editable field (stays: POML constraint; see owner decision 2). This is the modal form, not the main form; the main form already has `statuscode`. |
 | Views (`SavedQueries`) that FILTER `sprk_eventstatus eq 1` (R) | 6 | V-1 My Tasks Open `12a510e4`; V-2 Matter All Tasks Open 7 Days `1e26ed14`; V-3 All Tasks Open 7 Days `491e5733`; V-4 My Events Open `9399ba21`; V-5 All Tasks Open `e0d27d71`; V-6 All Tasks Open subgrid `9268f905`. |
 | Views that only DISPLAY the column (layout cell + fetch attribute) (R) | 5 | All Tasks subgrid `174210c3`, All Tasks `32c1041a`, All Events `b836398f`, All Deadlines `db70b5a9`, Matter All Events `f0221227`. |
 | Web resources in the export | 5 | `sprk_event_ribbon_commands.js` (a stale pre-task-098 copy, 43 refs; it is overwritten when the source above is deployed), and four bundles (`sprk_corporateworkspace`, `sprk_eventdetailsidepane.html`, `sprk_eventspage.html`, `sprk_spaarkeai`): generated, change when their source rebuilds (POML scope). |
@@ -97,19 +96,32 @@ Already on `statuscode` and untouched: `EventEndpoints.cs`, `TodoGenerationServi
 | Scripts / docs | 6 | 0 | 1 | 5 |
 | Dataverse export (untouched) | 4 kinds (entity, form, 11 views, 5 web resources) | 11 views | 0 | |
 
+### Live readers in Dataverse found in review round 2 (not in the solution export; all unchanged, all part of the removal prerequisites)
+
+| Item | Reads | Detail |
+|---|---|---|
+| `sprk_gridconfiguration` "Event Default" and "Event Default - Calendar Widget" | R | `filterChips.allowlist` names the column; their default view is V-5 (All Tasks Open). |
+| `sprk_chartdefinition` "Matter Tasks" | R | filter `sprk_eventstatus ne 2`. |
+| `sprk_chartdefinition` "TASKS & EVENTS" | R | filter `sprk_eventstatus eq 1`. |
+| Charts "Due Date Count Card" and "Due Date Card List" | R | inherit V-3's filter (All Tasks Open 7 Days). |
+| Personal view "My Tasks Open" (`userquery` 9b207347) | R | filters the column like V-1. |
+| "Event modal form" (`90d2eff7`) | R/W | still carries the column as an editable field. The main form already has `statuscode` (correcting the round-1 note, which said it was not on the form). |
+
 ## Owner decisions needed (Dataverse changes are out of this task)
 
-1. **Views V-1 to V-6 filter the deprecated column and give wrong answers today.** "My Tasks Open" (the My Tasks widget source) returns the 20 rows
-   with `sprk_eventstatus = 1` (6 Open, 7 Draft, 7 Completed by statuscode) and misses the 20 Open rows where the column is null. Change each condition to
+1. **Views V-1 to V-6 (and the grid configurations, charts and personal view in the table above) filter the deprecated column and give wrong answers today.**
+   "My Tasks Open" (the My Tasks widget source) returns 15 rows and misses 18 of the 24 open tasks. Change each condition to
    `statuscode eq 659490001` (or `in (1, 659490001, 659490006, 659490007)` for open work) and swap the layout cell/attribute to `statuscode`. The solution
    export is refreshed from Dataverse, so this is a live view edit followed by a re-export.
-2. **Add Status Reason (`statuscode`) to the main form** if the ribbon enable rule must hide Complete/Cancel on finished events. Without it,
-   `IsEventActive` degrades to the `statecode` header, and Completed and Closed are Active, so those buttons stay enabled on finished events. The
-   form saves still work either way (status is written through the Web API).
-3. **Deployment coupling.** The reconcile tab now sends `status` as a statuscode value and the BFF accepts only statuscode values on the create-task
-   apply and ad-hoc endpoints. Deploy the BFF and the client bundle that carries `Spaarke.Communication.Components` together. An old client against the new
-   BFF would send 2 (read as No Further Action, Inactive) for "Completed". The converse (new client, old BFF) sends a value the old coercion rejects with 422.
-4. **Column removal** (recommendation): after decisions 1 and 2 are applied and verified, remove the form placement, then the column. Nothing in `src/`
+2. **The "Event modal form" (`90d2eff7`) still carries `sprk_eventstatus` as an editable field.** Replace it with Status Reason (`statuscode`) on that form
+   (the main form already has `statuscode`, so the ribbon enable rule reads it; this corrects round 1, which assumed it was missing). Until then a user can edit
+   the deprecated column from the modal.
+3. **Deployment coupling (hardened in round 2).** The request field was renamed `status` to `statusCode` on the create-task apply and ad-hoc endpoints, and a
+   body that still carries `status` is refused 422 `STATUS_FIELD_RETIRED` with nothing written (values 1 and 2 are valid in both vocabularies, so a value check
+   could not catch an old client). A mixed deploy therefore fails loudly instead of mis-mapping. Deploy the BFF with every bundle that carries the reconcile
+   tab (Console via AI.Widgets, LegalWorkspace, the CommunicationReconciliation code page). A new client against an old BFF has its `statusCode` ignored
+   (the old BFF reads `status`), so the task is created without the chosen status.
+4. **Column removal** (recommendation): after decisions 1 and 2 are applied and verified (views, grid configurations, charts, personal view and the modal form), remove the form placements, then the column. Nothing in `src/`
    or `scripts/` reads or writes it any more; the guard test will stay green and should then be deleted with the column. Do not remove before 1: the
-   six views break.
+   six views, two grid configurations, charts and the personal view break.
 5. **Data**: 38 Draft and 18 Open rows have the column null, 10 rows disagree. No backfill is needed once readers are on `statuscode`.

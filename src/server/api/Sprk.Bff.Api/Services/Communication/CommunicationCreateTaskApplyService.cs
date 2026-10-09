@@ -114,8 +114,12 @@ public sealed record ApplyCreateTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28): the deprecated 0-7 status column's values are no longer accepted.</summary>
-    public int? Status { get; init; }
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28). The wire name is <c>statusCode</c>: the former <c>status</c> carried the deprecated 0-7 vocabulary, whose 1 and 2 are valid statuscodes too (Draft, No Further Action), so a value check cannot tell an old client from a new one. A body that still carries <c>status</c> is refused (<c>STATUS_FIELD_RETIRED</c>).</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>Properties the body carries that this record does not declare; only used to refuse the retired <c>status</c>.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 
     /// <summary>The task Owner (<c>ownerid</c> systemuser) — set at create via
     /// <see cref="CreateTaskRequest.OwnerId"/>.</summary>
@@ -152,8 +156,12 @@ public sealed record CreateAdHocTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28): the deprecated 0-7 status column's values are no longer accepted.</summary>
-    public int? Status { get; init; }
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28). The wire name is <c>statusCode</c>: the former <c>status</c> carried the deprecated 0-7 vocabulary, whose 1 and 2 are valid statuscodes too (Draft, No Further Action), so a value check cannot tell an old client from a new one. A body that still carries <c>status</c> is refused (<c>STATUS_FIELD_RETIRED</c>).</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>Properties the body carries that this record does not declare; only used to refuse the retired <c>status</c>.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
     /// <summary>The task Owner (<c>ownerid</c> systemuser).</summary>
     public Guid? AssignedTo { get; init; }
 }
@@ -245,6 +253,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 detail: "The caller could not be resolved to a Dataverse systemuser; the apply is refused (fail closed — the write must run under the confirming user's identity, never app-only).",
                 statusCode: 403);
         }
+
+        // (1b) Task 066 F2-A: refuse the retired `status` field BEFORE anything is read or written (see RejectRetiredStatusField).
+        RejectRetiredStatusField(request?.ExtensionData);
 
         // (2) Load the proposal row.
         var row = await LoadReviewLogRowAsync(reviewLogId, ct).ConfigureAwait(false);
@@ -447,6 +458,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 statusCode: 403);
         }
 
+        // (1b) Task 066 F2-A: refuse the retired `status` field BEFORE anything is written (see RejectRetiredStatusField).
+        RejectRetiredStatusField(request.ExtensionData);
+
         // (2) Validate the request shape. There is no proposal to derive from, so subject + the regarding (the
         //     confirmed record, NFR-10) are REQUIRED. Association gating is the UI's — matching the applied-proposal
         //     sibling's posture (no second server-side association re-check; see class remarks).
@@ -513,7 +527,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         var createdTaskId = createResult.TaskId;
 
         // (4) PATCH the remaining FR-E5 fields under the confirming user's impersonation (same as the applied path).
-        var mappings = BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+        var mappings = BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.StatusCode);
         UpdateRecordResult? patchResult = null;
         if (mappings.Count > 0)
         {
@@ -665,10 +679,28 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         return new UndoCreateTaskResult(taskId, EventStatusCancelled);
     }
 
+    /// <summary>
+    /// Task 066 F2-A. The request field was renamed <c>status</c> to <c>statusCode</c> when it moved from the deprecated
+    /// 0-7 vocabulary to <c>statuscode</c>. Values 1 and 2 are valid in both vocabularies (Open/Completed there, Draft/No
+    /// Further Action here), so an old client's <c>status</c> cannot be told apart by value and would silently hide the task
+    /// or deactivate it. Any body that still carries <c>status</c> is refused with 422 and nothing is written.
+    /// </summary>
+    internal static void RejectRetiredStatusField(IDictionary<string, JsonElement>? extensionData)
+    {
+        if (extensionData is null || !extensionData.Keys.Any(k => string.Equals(k, "status", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        throw new SdapProblemException(
+            code: "STATUS_FIELD_RETIRED",
+            title: "Status Field Retired",
+            detail: "The request field 'status' was retired (it carried the deprecated 0-7 status vocabulary). Send 'statusCode' with a sprk_event statuscode value (e.g. 659490002 for Completed) and update the client.",
+            statusCode: 422);
+    }
+
     private static List<ActionFieldMapping> BuildPatchMappings(ApplyCreateTaskRequest? request) =>
         request is null
             ? new List<ActionFieldMapping>()
-            : BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+            : BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.StatusCode);
 
     /// <summary>Builds the FR-E5 impersonated-PATCH field mappings (base/final-due/completed dates + status Choice).
     /// Shared by the applied-proposal path and the ad-hoc path so both write the identical field set the same way.</summary>

@@ -242,7 +242,7 @@ function buildApplyBody(form: TaskFormState): Record<string, unknown> {
   if (form.baseDate) b.baseDate = form.baseDate;
   if (form.finalDueDate) b.finalDueDate = form.finalDueDate;
   if (form.completedDate) b.completedDate = form.completedDate;
-  if (form.status) b.status = Number(form.status);
+  if (form.status) b.statusCode = Number(form.status); // D-28: the wire field is statusCode (`status` is refused with 422 STATUS_FIELD_RETIRED)
   if (form.assignedTo) b.assignedTo = form.assignedTo;
   return b;
 }
