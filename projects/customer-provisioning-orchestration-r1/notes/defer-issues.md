@@ -128,6 +128,30 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 
 ---
 
+### ISS-008 — L2 CustomerRunGuard (I5 / FR-32) is off in every environment
+
+| Field | Value |
+|---|---|
+| **Status** | Open — before T186; needs an owner-approved live step |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 (punch-list re-verification, 203b row A27) |
+| **Source** | `infrastructure/bicep/platform-controlplane.bicep` `customerRunGuardEnabled` default false; no `.bicepparam` sets it; live dev Api `CustomerRunGuard__Enabled = False` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1484 |
+
+**Description**
+
+Two runs for the same customer can overlap: the guard that serializes them (spec §4D I5, FR-32 — required ON in
+production) is disabled. It authenticates as the L2 UAMI against the admin Dataverse environment and fails fast at host
+start when enabled without that access, which is why the default is off.
+
+**Suggested fix**
+
+Owner OK → ensure the UAMI is an Application User on the admin environment (`Grant-ControlPlaneIdentity.ps1`); set
+`customerRunGuardEnabled = true` in `platform-controlplane-dev.bicepparam` (and the prod parameter file when created);
+redeploy; prove a second concurrent run for one customer is refused.
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
