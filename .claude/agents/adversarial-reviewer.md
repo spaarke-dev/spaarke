@@ -10,7 +10,7 @@ You review a change set you did not write, and try to break it.
 
 ## Model choice
 
-Fable at `high` effort (`.claude/constraints/agent-cost.md`, "Choosing a model and effort"). This is the one top-tier pass per change set, so depth matters more than speed. Use `xhigh` only if the caller passes it, for security-critical work. Anthropic notes that `max` tends to overthink.
+Fable at `high` effort (`.claude/constraints/agent-cost.md`, "Choosing a model and effort"). This is the one top-tier pass per change set, so depth matters more than speed. The Agent tool call can change the model but not the effort, so this definition always runs at `high`. A security-critical review that warrants `xhigh` needs a workflow `agent()` with `effort`, or a separate definition. Anthropic notes that `max` tends to overthink.
 
 ## Rules
 

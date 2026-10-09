@@ -22,7 +22,7 @@ The same parallelism exhausted the machine's memory. Bash fork failed with `0xC0
 
 ## Rules
 
-1. **Every agent states its model and effort, chosen for the work.** There is no blanket default model. Choose from the table in "Choosing a model and effort" below, by the work's difficulty and how much verification it needs. Pass `model` (and `effort` where it differs from the default) on the call, use an agent definition that sets them (`implementer`, `adversarial-reviewer`, `code-mapper`, `researcher`), or name `model` in every workflow `agent()` call. A `PreToolUse` hook refuses a launch that names no model, and the session picks one and re-issues the call; it never asks the user. A task's POML `<model-tier>` / `<effort>` still decide task execution (`project-pipeline` Step 5).
+1. **Every agent states its model and effort, chosen for the work.** There is no blanket default model. Choose from the table in "Choosing a model and effort" below, by the work's difficulty and how much verification it needs. Pass `model` on the call, use an agent definition that sets `model` and `effort` (`implementer`, `adversarial-reviewer`, `code-mapper`, `researcher`), or name `model` in every workflow `agent()` call. A `PreToolUse` hook refuses a launch that names no model, and the session picks one and re-issues the call; it never asks the user. A task's POML `<model-tier>` / `<effort>` still decide task execution (`project-pipeline` Step 5).
 2. **One independent review per change set, not per fix round.** This is one full adversarial pass on the top tier (two for `auth`, `security`, `tenant-isolation`, per root §8.5). Re-checks of fix diffs are scoped to the diff and its direct callers, and run on Sonnet. Review still limits ceremony, never fixing.
 3. **Small, scoped agents.** An agent re-sends its whole growing context on every tool step, so a long agent costs more than proportionally. Give each agent one deliverable, the exact files and the expected output. If a brief will clearly take more than about 100 tool steps, split it into sequential agents with short hand-off briefs, or say why it can't be split.
 4. **Don't resume an idle agent after a long pause.** A sub-agent's prompt cache lives 5 minutes. Messaging an agent that has been idle longer rewrites its whole context, often 200–400k tokens, at the cache-write price. For follow-up work after a pause, start a fresh Sonnet agent with a short brief: the branch, the commits, the findings and the files.
@@ -40,7 +40,7 @@ The goal is the best code per dollar: a higher tier where it changes the result,
 - **Effort** controls how much the model reasons and how many tool calls it makes. Thinking is billed as output.
   - Higher effort costs more tokens.
   - `max` "may show diminishing returns and is prone to overthinking".
-  - At lower effort the model "scopes its work to what was asked".
+  - At lower effort, Anthropic's Opus 4.7 guidance says the model "scopes its work to what was asked rather than doing more than requested".
   - Opus 5.5 "tends to think more per turn" than Opus 5, so Anthropic suggests starting at `medium`.
 
 | Work | Model | Effort | Why |
@@ -54,13 +54,20 @@ The goal is the best code per dollar: a higher tier where it changes the result,
 | Search, inventory, "map X", counting (`code-mapper`) | sonnet | low | Locating, not judging |
 | Mechanical edits: rename, formatting, regenerating a report | haiku or sonnet | low | No reasoning needed |
 | Microsoft or AI platform research (`researcher`) | opus (definition) | high | Stale training data; needs synthesis |
-| Claude Code or Anthropic docs questions (`claude-code-guide`) | sonnet | medium | Lookup and summary |
+| Claude Code or Anthropic docs questions (`claude-code-guide`) | its built-in model (Haiku) | — | Lookup and summary; the hook exempts it |
+
+**How effort is set.** Effort comes from the agent definition's `effort:` frontmatter, or a workflow `agent()` option. The Agent tool call in this Claude Code build takes `model` only, so per-call effort isn't available. A POML `<effort>` that differs from a definition's effort needs a workflow `agent()` or another definition; until then `project-pipeline` Step 5 runs such tasks at the definition's or the session's effort.
+
+**Where this deliberately differs from defaults:**
+- **Workflows:** Claude Code's built-in workflow guidance says to omit `model` when unsure. In this repo every `agent()` names one; that is the owner's rule.
+- **Implementation effort:** Anthropic suggests `medium` for well-specified Sonnet 5.5 work. The table keeps `high` for implementation and fixes, because verification matters there (root §8.5) and the owner puts quality first.
+- **Opus rows:** Opus 5.5's default effort is `medium`. The Opus rows use `high`, because they are the hard-reasoning cases (planning, root cause) where Anthropic's guidance puts `high`.
 
 **Escalate on evidence.** If an agent's result is wrong despite a clear brief, re-run that piece one tier up and say why in a line. If it skipped verification, raise the effort before the model.
 
 **Don't switch models or effort inside a long-running session.** It invalidates the prompt cache, and in-flight work changes hands mid-stream. Start a fresh agent at the tier you want.
 
-**The main session's own effort** comes from `modelSettings.<model>.effortLevel` in user settings; `/effort` changes it for one session. Change it at a session start, not mid-task.
+**The main session's own effort** comes from `modelSettings.<model>.effortLevel` in user settings. `/effort` saves a new default (its `s` option is session-only). Change it at a session start, not mid-task.
 
 ## Settings reference
 

@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/quality/require-agent-model.py\""
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/require-agent-model.py\""
           }
         ]
       }

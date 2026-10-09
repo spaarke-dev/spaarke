@@ -37,6 +37,12 @@ class RequireAgentModel(unittest.TestCase):
             f.write("---\nname: inheritor\ndescription: x\nmodel: inherit\n---\nbody\n")
         with open(os.path.join(agents, "nomodel.md"), "w", encoding="utf-8") as f:
             f.write("---\nname: nomodel\ndescription: x\n---\nbody\n")
+        # Claude Code matches agents by frontmatter name and scans recursively; files may carry a BOM.
+        with open(os.path.join(agents, "mapper-file.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: mapper\ndescription: x\nmodel: sonnet\n---\nbody\n")
+        os.makedirs(os.path.join(agents, "sub"))
+        with open(os.path.join(agents, "sub", "nested.md"), "w", encoding="utf-8-sig") as f:
+            f.write("---\r\nname: nested\r\ndescription: x\r\nmodel: haiku\r\n---\r\nbody\r\n")
 
     @classmethod
     def tearDownClass(cls):
@@ -89,6 +95,37 @@ class RequireAgentModel(unittest.TestCase):
 
     def test_malformed_input_fails_open(self):
         self.check("not json", False)
+
+    # review findings (2026-10-09)
+    def test_definition_matched_by_frontmatter_name(self):
+        self.check({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "mapper"}}, False)
+
+    def test_nested_bom_crlf_definition(self):
+        self.check({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "nested"}}, False)
+
+    def test_unknown_definition_fires_with_accurate_reason(self):
+        code, out = run({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "nosuch"}}, self.tmp.name)
+        self.assertTrue(denied(out))
+        self.assertIn("No agent definition named 'nosuch'", out)
+
+    def test_fixed_model_built_ins_allowed(self):
+        self.check({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "claude-code-guide"}}, False)
+
+    def test_workflow_comment_is_not_a_call(self):
+        script = "// agent(prompt, opts) wraps the call\n/* agent(x) */\nawait agent(\"x\", {model: \"sonnet\"})"
+        self.check({"tool_name": "Workflow", "tool_input": {"script": script}}, False)
+
+    def test_workflow_agent_type_with_model_definition(self):
+        script = "await agent('x', {agentType: 'reviewer', label: 'r'})"
+        self.check({"tool_name": "Workflow", "tool_input": {"script": script}}, False)
+
+    def test_workflow_agent_type_without_model_definition(self):
+        script = "await agent('x', {agentType: 'nomodel'})"
+        self.check({"tool_name": "Workflow", "tool_input": {"script": script}}, True)
+
+    def test_workflow_model_shorthand(self):
+        script = "const model = 'opus'\nawait agent('x', {label: 'a', model})"
+        self.check({"tool_name": "Workflow", "tool_input": {"script": script}}, False)
 
 
 if __name__ == "__main__":
