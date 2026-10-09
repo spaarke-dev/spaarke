@@ -149,11 +149,17 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
+---
+
+## Resolved
+
+<!-- Resolved entries move here with the resolution date and commit/PR. -->
+
 ### ISS-007 — CI identity trusts the `pull_request` OIDC subject
 
 | Field | Value |
 |---|---|
-| **Status** | Open — owner action (Entra write) |
+| **Status** | Resolved 2026-10-08 — owner OK; credential deleted (4 remaining: master, environment dev/staging/production); OIDC guide no longer creates it |
 | **Urgency** | soon (security exposure; nothing uses the subject) |
 | **Filed** | 2026-10-08 (T218d review) |
 | **Source** | T218d — the new publish workflow uses the same CI identity |
@@ -168,9 +174,3 @@ in to Azure as the app, with all its roles, before review.
 **Suggested fix**
 
 Delete the credential; drop `pull_request` from the OIDC guide's setup loop (guide row already corrected).
-
----
-
-## Resolved
-
-<!-- Resolved entries move here with the resolution date and commit/PR. -->
