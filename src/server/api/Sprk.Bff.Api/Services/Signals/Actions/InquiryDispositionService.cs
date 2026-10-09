@@ -179,14 +179,31 @@ public sealed class InquiryDispositionService(
     }
 
     /// <summary>
-    /// The deterministic id of an Inquiry's "Record the outcome" To Do: the same Inquiry always yields the same id, which
-    /// makes creating it idempotent (a second create is a duplicate key) and finding it to complete it a lookup by id.
+    /// The namespace of the To Do ids (RFC 4122 version 5). A CONSTANT of the contract, not a secret: the client computes the
+    /// same id (SHA-1 of this namespace's 16 network-order bytes followed by the UTF-8 name, version and variant bits set).
+    /// Documented in notes/071-disposition-accrual.md. Never change it: every existing To Do id derives from it.
     /// </summary>
-    internal static Guid TodoIdFor(Guid serviceRequestId)
+    public static readonly Guid TodoIdNamespace = new("6f1c0a52-3b7e-4d1a-9c2e-5a8d4b7e1f30");
+
+    /// <summary>
+    /// The deterministic id of an Inquiry's "Record the outcome" To Do: a version-5 UUID of the name
+    /// <c>"inquiry-outcome-todo:" + serviceRequestId</c> (lower-case "D" form) in <see cref="TodoIdNamespace"/>. The same
+    /// Inquiry always yields the same id, which makes creating it idempotent (a second create is a duplicate key), finding it
+    /// to complete it a lookup by id, and the To Do's link back to its Inquiry recoverable by a client that can compute SHA-1
+    /// even when the notes hint is gone.
+    /// </summary>
+    public static Guid TodoIdFor(Guid serviceRequestId)
     {
-        var hash = System.Security.Cryptography.MD5.HashData(
-            System.Text.Encoding.UTF8.GetBytes("inquiry-outcome-todo:" + serviceRequestId.ToString("D")));
-        return new Guid(hash);
+        var name = System.Text.Encoding.UTF8.GetBytes("inquiry-outcome-todo:" + serviceRequestId.ToString("D"));
+        var input = new byte[16 + name.Length];
+        TodoIdNamespace.ToByteArray(bigEndian: true).CopyTo(input, 0);
+        name.CopyTo(input, 16);
+
+        var hash = System.Security.Cryptography.SHA1.HashData(input);
+        var bytes = hash[..16];
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x50); // version 5
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // RFC 4122 variant
+        return new Guid(bytes, bigEndian: true);
     }
 
     private async Task<bool> CompleteTodoAsync(Guid serviceRequestId, CancellationToken ct)

@@ -221,9 +221,25 @@ public sealed class InquiryReplyTodoCreatorTests
     }
 
     [Fact]
-    public void The_todo_id_is_stable_per_inquiry_and_differs_between_inquiries()
+    public void The_todo_id_is_a_valid_version_5_uuid_and_deterministic()
     {
-        InquiryDispositionService.TodoIdFor(Inquiry).Should().Be(InquiryDispositionService.TodoIdFor(Inquiry));
-        InquiryDispositionService.TodoIdFor(Inquiry).Should().NotBe(InquiryDispositionService.TodoIdFor(Guid.NewGuid()));
+        var id = InquiryDispositionService.TodoIdFor(Inquiry);
+        var text = id.ToString("D");
+
+        text[14].Should().Be('5', "RFC 4122 version 5");
+        "89ab".Should().Contain(text[19].ToString(), "RFC 4122 variant");
+        InquiryDispositionService.TodoIdFor(Inquiry).Should().Be(id);
+        InquiryDispositionService.TodoIdFor(Guid.NewGuid()).Should().NotBe(id);
+    }
+
+    [Theory]
+    [InlineData("11111111-2222-3333-4444-555555555555", "231eac72-8c74-5a3d-be96-949700bd959b")]
+    [InlineData("00000000-0000-0000-0000-000000000001", "864cb0f1-b3f1-5de3-909b-cdbe9d6398f9")]
+    public void Known_answer_vectors_let_a_client_mirror_the_derivation(string serviceRequestId, string todoId)
+    {
+        // Namespace 6f1c0a52-3b7e-4d1a-9c2e-5a8d4b7e1f30; name "inquiry-outcome-todo:" + the lower-case id. The vectors were
+        // computed independently (Python uuid.uuid5), so they pin the algorithm, not just this implementation.
+        InquiryDispositionService.TodoIdNamespace.Should().Be(Guid.Parse("6f1c0a52-3b7e-4d1a-9c2e-5a8d4b7e1f30"));
+        InquiryDispositionService.TodoIdFor(Guid.Parse(serviceRequestId)).Should().Be(Guid.Parse(todoId));
     }
 }
