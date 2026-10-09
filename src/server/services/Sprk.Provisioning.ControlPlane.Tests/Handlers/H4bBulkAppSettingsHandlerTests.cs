@@ -6,19 +6,21 @@
 // (task 047) test exemplar shape.
 //
 // ADR-038 CATEGORY:
-//   Path #1 — pure C# unit test. NO live pwsh / HTTP / Kudu / Azure API.
+//   Path #1 — pure C# unit test. NO live HTTP / Kudu / Azure API.
 //   Fakes replace the repository + ALL FOUR collaborator seams (manifest,
-//   process runner, healthz probe, container log fetcher). Live-integration
-//   coverage belongs in env-guarded smoke tests (out of scope for CI here).
+//   app-settings writer, healthz probe, container log fetcher). The ARM write
+//   itself is ArmAppServiceSettingsWriterTests; parity with the generated
+//   Configure script is H4bConfigureScriptParityTests (task 253).
 //
 // COVERAGE (POML acceptance-criteria mapping):
-//   AC-1  Happy path — all resolved + Configure exit 0 + healthz Success →
-//         HandlerResult.Success + Cosmos advanced.
+//   AC-1  Happy path — all resolved + write Success + healthz Success →
+//         HandlerResult.Success + Cosmos advanced; the write carries the KV
+//         references (stamp vault) and the per-env values.
 //   AC-2  Per-env-input missing → Failure(Resumable, PerEnvInputMissing)
-//         BEFORE any script call; diagnostic names the source-key +
+//         BEFORE any write; diagnostic names the source-key +
 //         iOptionsModule.
-//   AC-3  PS non-zero exit → Failure(Resumable, AppSettingsWriteFailed)
-//         with redacted diagnostic.
+//   AC-3  Writer Failure / throw → Failure(Resumable, AppSettingsWriteFailed);
+//         caller cancellation propagates.
 //   AC-4  Healthz timeout with parseable module log → Failure
 //         (QuarantineRequired, HealthzTimeout, "BFF fail-fast on SpeAdminModule").
 //   AC-5  Healthz timeout with UN-parseable log → Failure
@@ -34,19 +36,19 @@
 //   AC-12 Run not found → Resumable + RunNotFound.
 //   AC-13 Optional per_env entry with missing source → skipped, no fail.
 //   AC-14 Empty manifest (0 per_env_settings entries) — happy path still works;
-//         script is still invoked (KV-refs alone might be needed).
+//         the KV references are still written.
 //
 //   Task 205c / punch row A39 (auth-v4 §10.2 live-contract 8-entry set):
 //   AC-15 All 8 §10.2 entries resolve + apply correctly in ONE HandleAsync
 //         pass — literal entries need no envelope lookup, FromHandlerOutput
 //         entries resolve via the shared service_bus_fqns / uami_client_id
-//         sources, and the 3 ServiceBus FQNS settings collapse to ONE
-//         -ServiceBusFqns argv pair (source-dedup convention).
+//         sources, and the 3 ServiceBus FQNS settings all carry the one
+//         resolved value.
 //   AC-16 Missing service_bus_fqns (entries 4/5/6's shared source) →
-//         Failure(Resumable, PerEnvInputMissing) BEFORE any script call.
+//         Failure(Resumable, PerEnvInputMissing) BEFORE any write.
 //   AC-17 Missing uami_client_id (entry 3's source — the POML's explicit
 //         load-bearing-key-omission case) → Failure(Resumable,
-//         PerEnvInputMissing) BEFORE any script call; does NOT silently skip.
+//         PerEnvInputMissing) BEFORE any write; does NOT silently skip.
 //   AC-18 SF-18 required=true sweep — the shipped A39 entry set (as
 //         constructed by BuildA39Entries) carries Required=true on all 7 new
 //         entries (metadata assertion; the real-manifest.yaml equivalent
@@ -86,22 +88,22 @@ public sealed class H4bBulkAppSettingsHandlerTests
     // ---------- AC-1 happy path ----------
 
     [Fact]
-    public async Task AC1_HappyPath_ResolveAllInputsAndAdvanceCosmos()
+    public async Task AC1_HappyPath_WritesKeyVaultReferencesAndPerEnvValues_AndAdvancesCosmos()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-1");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
         success.IdempotencyKey.Should().Be(
             H4bBulkAppSettingsHandler.BuildIdempotencyKey(EnvironmentName, SecretsVer));
-        runner.CallCount.Should().Be(1);
+        writer.CallCount.Should().Be(1);
         probe.CallCount.Should().Be(1);
         // Fetch NOT called on happy path.
         fetcher.CallCount.Should().Be(0);
@@ -110,41 +112,58 @@ public sealed class H4bBulkAppSettingsHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle()
             .Which.Phase.Should().Be(HandlerIds.H4b);
 
-        // Verify the pwsh argv contains the fixed args in the expected order + the
-        // per-env source values by PascalCase name.
-        var args = runner.LastArgs!;
-        args.Should().Contain("-VaultName");
-        args.Should().Contain(KeyVaultName);
-        args.Should().Contain("-AppServiceName");
-        args.Should().Contain(AppServiceName);
-        args.Should().Contain("-ResourceGroupName");
-        args.Should().Contain(ResourceGroupName);
-        args.Should().Contain("-KvVaultUri");
-        args.Should().Contain("https://sprk-prod-kv.vault.azure.net/");
+        // The write targets the stamp's App Service in the customer's subscription.
+        var request = writer.LastRequest!;
+        request.SubscriptionId.Should().Be(SubscriptionId);
+        request.ResourceGroupName.Should().Be(ResourceGroupName);
+        request.AppServiceName.Should().Be(AppServiceName);
+        // A KV reference names the STAMP vault (H2a's KeyVaultName) and the secret's canonical name.
+        request.Settings["AzureOpenAI__Endpoint"].Should()
+            .Be("@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=AzureOpenAI-Endpoint)");
+        // A per-env value is the run's resolved value.
+        request.Settings["SpeAdmin__KeyVaultUri"].Should().Be("https://sprk-prod-kv.vault.azure.net/");
+        request.Settings["Graph__ManagedIdentity__Enabled"].Should().Be("true");
     }
 
-    // ---------- AC-1b every PerEnvSourceCatalog source reaches the script (task 245a) ----------
+    [Fact]
+    public async Task AC1a_PerEnvEntryWithTheSameKeyAsAKeyVaultReference_WinsOverTheReference()
+    {
+        // The generated script emitted per-env lines after the KV references and az kept the last value:
+        // AzureAd__TenantId is both a TenantId secret app_setting and a per_env_settings entry.
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-1a"), FakePerEnvManifest.Success(BuildStandardEntries()),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["AzureAd__TenantId"].Should().Be(TenantId);
+        writer.LastRequest.Settings["TENANT_ID"].Should().Be("@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=TenantId)",
+            "a KV reference nobody overrides stays a reference");
+    }
+
+    // ---------- AC-1b every PerEnvSourceCatalog source reaches the write (task 245a) ----------
 
     [Fact]
-    public async Task AC1b_EverySourceInTheCatalog_PassesItsOwnRunValueToTheScript()
+    public async Task AC1b_EverySourceInTheCatalog_WritesItsOwnRunValue()
     {
         // Expected values are written out from BuildRun(), NOT computed with the catalog's Resolve —
         // a source wired to the wrong InterStepState property must fail here.
-        var expected = new Dictionary<string, (string Argument, string Value)>(StringComparer.Ordinal)
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["kv_vault_uri"] = ("-KvVaultUri", "https://sprk-prod-kv.vault.azure.net/"),
-            ["cosmos_endpoint"] = ("-CosmosEndpoint", "https://sprk-prod-cosmos.documents.azure.com/"),
-            ["uami_client_id"] = ("-UamiClientId", "00000000-1111-2222-3333-555555555555"),
-            ["service_bus_fqns"] = ("-ServiceBusFqns", "spaarke-acme-prod-sbus.servicebus.windows.net"),
-            ["redis_endpoint"] = ("-RedisEndpoint", "sprk-acme-prod-redis.westus2.redis.azure.net:10000"),   // T242: H2a's RedisEndpoint
-            ["content_safety_endpoint"] = ("-ContentSafetyEndpoint", "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/"),   // T246: H2a's ContentSafetyEndpoint
-            ["bff_app_client_id"] = ("-BffAppClientId", "00000000-aaaa-bbbb-cccc-999999999999"),
-            ["tenant_id"] = ("-TenantId", TenantId),
-            ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
-            ["customer_id"] = ("-CustomerId", CustomerId),   // T238: the run's own customerId, verbatim
-            ["dataverse_env_url"] = ("-DataverseEnvUrl", "https://acme.crm.dynamics.com/"),   // T245b: H5's DataverseEnvUrl
-            ["spe_container_id"] = ("-SpeContainerId", "b!h8-created-customer-container"),   // T227c: H8's SpeContainerId
-            ["openai_monthly_limit_usd"] = ("-OpenaiMonthlyLimitUsd", "500"),   // T254: the optional OpenAI spend limit (intake)
+            ["kv_vault_uri"] = "https://sprk-prod-kv.vault.azure.net/",
+            ["cosmos_endpoint"] = "https://sprk-prod-cosmos.documents.azure.com/",
+            ["uami_client_id"] = "00000000-1111-2222-3333-555555555555",
+            ["service_bus_fqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net",
+            ["redis_endpoint"] = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",   // T242: H2a's RedisEndpoint
+            ["content_safety_endpoint"] = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",   // T246: H2a's ContentSafetyEndpoint
+            ["bff_app_client_id"] = "00000000-aaaa-bbbb-cccc-999999999999",
+            ["tenant_id"] = TenantId,
+            ["container_type_id"] = "00000000-dead-beef-0000-000000000001",
+            ["customer_id"] = CustomerId,   // T238: the run's own customerId, verbatim
+            ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
+            ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
+            ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
         expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -154,29 +173,28 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 s.ProducerHandlerId is null ? PerEnvSettingSource.FromHandlerParameter : PerEnvSettingSource.FromHandlerOutput,
                 LiteralValue: null, ParameterKey: s.SourceKey, Required: true, IOptionsModuleName: "AnyModule"))
             .ToList();
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var handler = Build(new FakeRepository(BuildRun(), "etag-1b"), FakePerEnvManifest.Success(oneEntryPerSource),
-            runner, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        var args = runner.LastArgs!.ToList();
-        foreach (var (sourceKey, (argument, value)) in expected)
+        var settings = writer.LastRequest!.Settings;
+        foreach (var (sourceKey, value) in expected)
         {
-            var at = args.IndexOf(argument);
-            at.Should().BeGreaterThanOrEqualTo(0, $"source '{sourceKey}' must reach the script as {argument}");
-            args[at + 1].Should().Be(value, $"source '{sourceKey}' must carry its own run value");
+            settings.Should().ContainKey($"Setting__For__{sourceKey}")
+                .WhoseValue.Should().Be(value, $"source '{sourceKey}' must carry its own run value");
         }
     }
 
     // ---------- T254: an optional (required: false) setting the run does not carry ----------
 
     [Fact]
-    public async Task T254_AnOptionalSettingTheRunDoesNotCarry_IsSkipped_AndPassesNoArgument()
+    public async Task T254_AnOptionalSettingTheRunDoesNotCarry_IsNotWritten()
     {
-        // No openAiMonthlyLimitUsd at intake = no spend limit (owner G37): H4b writes nothing for it, and the generated
-        // script's parameter is optional, so the absent argument is not an error.
+        // No openAiMonthlyLimitUsd at intake = no spend limit (owner G37): H4b writes nothing for it, so a value an
+        // operator set on the site (scripts/Set-AiSpendLimit.ps1) survives the merge.
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(IntakeParameterCatalog.OpenAiMonthlyLimitUsd);
         var entries = new List<PerEnvSettingEntry>
@@ -184,30 +202,48 @@ public sealed class H4bBulkAppSettingsHandlerTests
             new("AiSpendLimit__MonthlyLimitUsd", PerEnvSettingSource.FromHandlerParameter, LiteralValue: null,
                 ParameterKey: "openai_monthly_limit_usd", Required: false, IOptionsModuleName: "AnalysisServicesModule"),
         };
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var handler = Build(new FakeRepository(run, "etag-t254"), FakePerEnvManifest.Success(entries),
-            runner, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        runner.LastArgs!.Should().NotContain("-OpenaiMonthlyLimitUsd");
+        writer.LastRequest!.Settings.Should().NotContainKey("AiSpendLimit__MonthlyLimitUsd");
+    }
+
+    [Fact]
+    public async Task T254_AnOptionalSettingTheRunCarries_IsWritten()
+    {
+        var entries = new List<PerEnvSettingEntry>
+        {
+            new("AiSpendLimit__MonthlyLimitUsd", PerEnvSettingSource.FromHandlerParameter, LiteralValue: null,
+                ParameterKey: "openai_monthly_limit_usd", Required: false, IOptionsModuleName: "AnalysisServicesModule"),
+        };
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-t254b"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["AiSpendLimit__MonthlyLimitUsd"].Should().Be("500");
     }
 
     // ---------- AC-2 per-env-input missing ----------
 
     [Fact]
-    public async Task AC2_PerEnvInputMissing_ResumableFailure_BeforeAnyScriptCall()
+    public async Task AC2_PerEnvInputMissing_ResumableFailure_BeforeAnyWrite()
     {
         var run = BuildRun();
         // H2a's KeyVaultUri output is missing (kv_vault_uri source).
         run.InterStepState.KeyVaultUri = null;
         var repo = new FakeRepository(run, "etag-2");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -219,7 +255,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Diagnostic.Should().Contain("SpeAdminModule");
         failure.Diagnostic.Should().Contain("InterStepState.KeyVaultUri", "the diagnostic names where the value lives");
         failure.Diagnostic.Should().Contain("H2a must complete", "and which handler produces it");
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
 
@@ -229,8 +265,8 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(IntakeParameterCatalog.ContainerTypeId);
         var repo = new FakeRepository(run, "etag-2b");
-        var runner = FakeProcessRunner.Zero();
-        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), runner,
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), writer,
             FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -239,11 +275,11 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
         failure.Diagnostic.Should().Contain("container_type_id");
         failure.Diagnostic.Should().Contain("supply it at intake");
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task AC2c_PerEnvSourceNotInCatalog_FailsManifestReadFailed_BeforeAnyScriptCall()
+    public async Task AC2c_PerEnvSourceNotInCatalog_FailsManifestReadFailed_BeforeAnyWrite()
     {
         // A hand-built manifest bypasses FilePerEnvSettingsManifest's load-time check; H4b must
         // still refuse a source it cannot resolve rather than treat it as "missing".
@@ -255,8 +291,8 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 LiteralValue: null, ParameterKey: "not_a_catalog_source", Required: true,
                 IOptionsModuleName: "SomeModule"),
         };
-        var runner = FakeProcessRunner.Zero();
-        var handler = Build(repo, FakePerEnvManifest.Success(entries), runner,
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(repo, FakePerEnvManifest.Success(entries), writer,
             FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -264,31 +300,61 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.ManifestReadFailed);
         failure.Diagnostic.Should().Contain("not_a_catalog_source");
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-3 PS non-zero exit ----------
+    // ---------- AC-3 the write fails ----------
 
     [Fact]
-    public async Task AC3_ProcessNonZeroExit_ResumableFailure_WithRedactedDiagnostic()
+    public async Task AC3_WriterReportsFailure_ResumableFailure_WithWriterDiagnostic()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-3");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.NonZero(exitCode: 1, stdout: "attempting...", stderr: "az: authentication failed");
+        var writer = FakeSettingsWriter.Fails("ARM refused the app-settings merge on the staging slot (HTTP 403, AuthorizationFailed).");
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.AppSettingsWriteFailed);
-        failure.Diagnostic.Should().Contain("exit code 1");
-        failure.Diagnostic.Should().Contain("az: authentication failed");
+        failure.Diagnostic.Should().Contain("staging slot").And.Contain("AuthorizationFailed");
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty("a failed write never marks H4b complete");
         // Probe not reached.
         probe.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC3b_WriterThrows_ResumableFailure_NotAnUnhandledException()
+    {
+        var writer = FakeSettingsWriter.Throws(new InvalidOperationException("credential unavailable"));
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-3b"), FakePerEnvManifest.Success(BuildStandardEntries()),
+            writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.AppSettingsWriteFailed);
+        failure.Diagnostic.Should().Contain("credential unavailable").And.Contain(AppServiceName);
+        probe.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC3c_CallerCancelsDuringWrite_CancellationPropagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var writer = FakeSettingsWriter.CancelsCaller(cts);
+        var handler = Build(new FakeRepository(BuildRun(), "etag-3c"), FakePerEnvManifest.Success(BuildStandardEntries()),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var act = async () => await handler.HandleAsync(BuildEnvelope(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("a Worker shutdown is not a run failure");
     }
 
     // ---------- AC-4 healthz timeout with parseable module ----------
@@ -299,7 +365,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-4");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Timeout("HTTP 502 (elapsed 480s across 5 attempts)");
         var fetcher = new FakeContainerLogFetcher
         {
@@ -307,7 +373,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
                        "Unhandled exception. System.InvalidOperationException: SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.\n" +
                        "   at Sprk.Bff.Api.Infrastructure.DI.SpeAdminModule.AddSpeAdminModule(IServiceCollection services)\n",
         };
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -327,10 +393,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-5");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Timeout("no response (elapsed 480s)");
         var fetcher = new FakeContainerLogFetcher { NextLogs = "starting up... waiting for db..." };
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -360,10 +426,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
         });
         var repo = new FakeRepository(run, "etag-6");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -372,7 +438,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         // Idempotent no-op does NOT invoke process / probe. The manifest is read once — its content
         // version is the key's secretsVer (task 245b).
         manifest.CallCount.Should().Be(1);
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
         repo.LastWrittenRun.Should().BeNull();
     }
@@ -396,19 +462,19 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 IOptionsModuleName: "GraphModule"),
         };
         var manifest = FakePerEnvManifest.Success(literalOnly);
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        // No per-env resolved source → argv only has the 3 fixed args (no -<PsVar>).
-        var args = runner.LastArgs!;
-        args.Should().NotContain(a => a.StartsWith("-", StringComparison.Ordinal) && a.Length > 1 &&
-                                       a != "-VaultName" && a != "-AppServiceName" && a != "-ResourceGroupName" &&
-                                       a != "-NoProfile" && a != "-NonInteractive" && a != "-File");
+        // The literal is written verbatim; the fake manifest's KV references come along.
+        var settings = writer.LastRequest!.Settings;
+        settings["Graph__ManagedIdentity__Enabled"].Should().Be("true");
+        settings.Keys.Except(StandardKeyVaultReferences.Select(r => r.AppSettingKey))
+            .Should().Equal("Graph__ManagedIdentity__Enabled");
     }
 
     // ---------- AC-8 TryParseFailFastModule theory ----------
@@ -472,17 +538,17 @@ public sealed class H4bBulkAppSettingsHandlerTests
         run.Parameters.NonSecret.Remove(parameterKey);
         var repo = new FakeRepository(run, "etag-guard");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(expectedRejectionCode);
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
 
@@ -502,9 +568,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             case nameof(InterStepState.AppServiceName): run.InterStepState.AppServiceName = null; break;
         }
         var repo = new FakeRepository(run, "etag-guard-iss");
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
-        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), runner, probe,
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), writer, probe,
             new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -513,7 +579,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(expectedRejectionCode);
         failure.Diagnostic.Should().Contain($"InterStepState.{interStepStateProperty}");
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
 
@@ -525,7 +591,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(IntakeParameterCatalog.EnvironmentName);
         var repo = new FakeRepository(run, "etag-env");
-        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), FakeProcessRunner.Zero(),
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), FakeSettingsWriter.Succeeds(),
             FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -542,10 +608,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-10");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var wrong = new HandlerEnvelope
         {
@@ -581,10 +647,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
     {
         var repo = new FakeRepository(run: null, etag: null);
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -610,83 +676,86 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 IOptionsModuleName: "SomeOptionalModule"),
         };
         var manifest = FakePerEnvManifest.Success(entries);
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        runner.CallCount.Should().Be(1);
+        writer.CallCount.Should().Be(1);
+        writer.LastRequest!.Settings.Should().NotContainKey("Some__OptionalSetting");
     }
 
     // ---------- AC-14 empty per_env_settings manifest ----------
 
     [Fact]
-    public async Task AC14_EmptyPerEnvSettingsManifest_ScriptStillInvoked_HappyPath()
+    public async Task AC14_EmptyPerEnvSettingsManifest_KeyVaultReferencesStillWritten_HappyPath()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-14");
         var manifest = FakePerEnvManifest.Success(Array.Empty<PerEnvSettingEntry>());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        runner.CallCount.Should().Be(1, "Configure script writes KV-refs even when per_env_settings is empty");
-        // Fixed args only — no per-env sources contributed.
-        var args = runner.LastArgs!;
-        args.Should().Contain("-VaultName");
-        args.Should().Contain("-AppServiceName");
-        args.Should().Contain("-ResourceGroupName");
+        writer.CallCount.Should().Be(1, "the KV references are written even when per_env_settings is empty");
+        writer.LastRequest!.Settings.Keys.Should().BeEquivalentTo(StandardKeyVaultReferences.Select(r => r.AppSettingKey));
     }
 
     // ---------- AC-15 A39 8-entry happy path ----------
 
     [Fact]
-    public async Task AC15_A39EightEntries_ResolveAndDedupServiceBusFqns_HappyPath()
+    public async Task AC15_A39EightEntries_ResolveSharedServiceBusFqns_HappyPath()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, "etag-15");
         var entries = BuildStandardEntries().Concat(BuildA39Entries()).ToList();
         var manifest = FakePerEnvManifest.Success(entries);
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        var args = runner.LastArgs!;
-        // Literal entries (Order__0, RequireSecretFreeIdentity, AiSearch/AiSafety
-        // MI flags) contribute NO -<PsVar> argv — they are emitted verbatim by
-        // the generator, not resolved by H4b.
-        args.Should().NotContain("-GraphCredentialsOrder0");
-        args.Should().NotContain("-GraphCredentialsRequireSecretFreeIdentity");
-        // The 3 ServiceBus FQNS settings share ONE source key → ONE argv pair.
-        args.Should().Contain("-ServiceBusFqns");
-        args.Count(a => a == "-ServiceBusFqns").Should().Be(1);
-        args.Should().Contain("spaarke-acme-prod-sbus.servicebus.windows.net");
+        var settings = writer.LastRequest!.Settings;
+        // Literal entries (Order__0, RequireSecretFreeIdentity, AiSearch/AiSafety MI flags) are written verbatim.
+        settings["Graph__Credentials__Order__0"].Should().Be("ManagedIdentityFederated");
+        settings["Graph__Credentials__RequireSecretFreeIdentity"].Should().Be("true");
+        settings["AiSearch__ManagedIdentity__Enabled"].Should().Be("true");
+        settings["AiSafety__ContentSafety__ManagedIdentity__Enabled"].Should().Be("true");
+        // The 3 ServiceBus FQNS settings share ONE source key → all three carry its one value.
+        foreach (var key in new[]
+                 {
+                     "ServiceBus__FullyQualifiedNamespace",
+                     "Membership__EventPublisher__ServiceBusNamespace",
+                     "Membership__JunctionUpdater__ServiceBusNamespace",
+                 })
+        {
+            settings[key].Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
+        }
     }
 
     // ---------- AC-16 missing service_bus_fqns (entries 4/5/6 shared source) ----------
 
     [Fact]
-    public async Task AC16_MissingServiceBusFqns_ResumableFailure_BeforeAnyScriptCall()
+    public async Task AC16_MissingServiceBusFqns_ResumableFailure_BeforeAnyWrite()
     {
         var run = BuildRun();
         run.InterStepState.ServiceBusFullyQualifiedNamespace = null;
         var repo = new FakeRepository(run, "etag-16");
         var manifest = FakePerEnvManifest.Success(BuildA39Entries());
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -694,7 +763,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
         failure.Diagnostic.Should().Contain("service_bus_fqns");
-        runner.CallCount.Should().Be(0);
+        writer.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
     }
 
@@ -713,10 +782,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 IOptionsModuleName: "GraphModule"),
         };
         var manifest = FakePerEnvManifest.Success(entry3Only);
-        var runner = FakeProcessRunner.Zero();
+        var writer = FakeSettingsWriter.Succeeds();
         var probe = FakeHealthzProbe.Success();
         var fetcher = new FakeContainerLogFetcher();
-        var handler = Build(repo, manifest, runner, probe, fetcher);
+        var handler = Build(repo, manifest, writer, probe, fetcher);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -725,8 +794,8 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
         failure.Diagnostic.Should().Contain("uami_client_id");
         failure.Diagnostic.Should().Contain("ManagedIdentity__ClientId");
-        // MUST fail hard, not silently skip — no script call reached.
-        runner.CallCount.Should().Be(0);
+        // MUST fail hard, not silently skip — no write reached.
+        writer.CallCount.Should().Be(0);
     }
 
     // ---------- AC-18 SF-18 required=true sweep over the A39 entry set ----------
@@ -761,17 +830,138 @@ public sealed class H4bBulkAppSettingsHandlerTests
             "allowance choice to hold");
     }
 
+    // ---------- task 253: parity with the generated Configure-AppServiceSettings script ----------
+    //
+    // H4b used to run scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1. It now
+    // builds the settings itself. These tests run H4b over the REAL embedded manifest and compare what it writes with
+    // what that generated script would have written for the same run: the script's $settings array (and its
+    // `required: false` lines) evaluated with the run's values, last value winning — `az webapp config appsettings
+    // set` semantics. A manifest change the generator was not re-run for, or a C# rule that drifts from the
+    // generator's, fails here.
+
+    /// <summary>The generated script's per-source parameters (PascalCase of the source key) → BuildRun()'s values.</summary>
+    private static readonly IReadOnlyDictionary<string, string> ScriptArguments = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["KvVaultUri"] = "https://sprk-prod-kv.vault.azure.net/",
+        ["CosmosEndpoint"] = "https://sprk-prod-cosmos.documents.azure.com/",
+        ["UamiClientId"] = "00000000-1111-2222-3333-555555555555",
+        ["ServiceBusFqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net",
+        ["RedisEndpoint"] = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
+        ["ContentSafetyEndpoint"] = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
+        ["BffAppClientId"] = "00000000-aaaa-bbbb-cccc-999999999999",
+        ["TenantId"] = TenantId,
+        ["ContainerTypeId"] = "00000000-dead-beef-0000-000000000001",
+        ["CustomerId"] = CustomerId,
+        ["DataverseEnvUrl"] = "https://acme.crm.dynamics.com/",
+        ["SpeContainerId"] = "b!h8-created-customer-container",
+        ["OpenaiMonthlyLimitUsd"] = "500",
+    };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Parity_WritesExactlyTheSettingsTheGeneratedScriptWrote(bool runCarriesSpendLimit)
+    {
+        var run = BuildRun();
+        var arguments = new Dictionary<string, string>(ScriptArguments, StringComparer.Ordinal);
+        if (!runCarriesSpendLimit)
+        {
+            run.Parameters.NonSecret.Remove(IntakeParameterCatalog.OpenAiMonthlyLimitUsd);
+            arguments["OpenaiMonthlyLimitUsd"] = string.Empty;   // the script's optional parameter, defaulted ''
+        }
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-parity"),
+            new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var scriptSettings = EvaluateGeneratedConfigureScript(KeyVaultName, arguments);
+        writer.LastRequest!.Settings.Should().BeEquivalentTo(scriptSettings,
+            "H4b must write exactly what Configure-AppServiceSettings.generated.ps1 wrote — same names, same values, " +
+            "same Key Vault references (re-run Invoke-CatalogGenerator.ps1 if the manifest changed)");
+
+        // The cases the parity rests on, stated explicitly.
+        scriptSettings.Count.Should().BeGreaterThan(40, "the evaluator must have read the whole $settings array");
+        scriptSettings["AzureAd__TenantId"].Should().Be(TenantId, "the per-env value wins over TenantId's KV reference");
+        scriptSettings["AzureOpenAI__Endpoint"].Should().Be("@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=AzureOpenAI-Endpoint)");
+        scriptSettings.ContainsKey("AiSpendLimit__MonthlyLimitUsd").Should().Be(runCarriesSpendLimit,
+            "T254: the optional spend limit is written only when the run carries it");
+    }
+
+    /// <summary>
+    /// Evaluates the generated script's settings the way PowerShell + az did: every line of the <c>$settings = @( … )</c>
+    /// array, then each conditional <c>$settings += …</c> line whose parameter is not blank; <c>$(Format-KvRef 'S')</c>
+    /// becomes the Key Vault reference, <c>$Var</c> the argument; a later duplicate key wins.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> EvaluateGeneratedConfigureScript(
+        string vaultName, IReadOnlyDictionary<string, string> arguments)
+    {
+        var path = LocateRepoFile(Path.Combine(
+            "scripts", "canonical-secret-catalog", "generated", "Configure-AppServiceSettings.generated.ps1"));
+        var lines = File.ReadAllLines(path).Select(l => l.TrimEnd('\r')).ToList();
+
+        var arrayLine = new System.Text.RegularExpressions.Regex("^\\s*\"(?<key>[^=\"]+)=(?<value>[^\"]*)\",?$");
+        var optionalLine = new System.Text.RegularExpressions.Regex(
+            "^if \\(-not \\[string\\]::IsNullOrWhiteSpace\\(\\$(?<var>\\w+)\\)\\) \\{ \\$settings \\+= \"(?<key>[^=\"]+)=(?<value>[^\"]*)\" \\}$");
+        var kvRef = new System.Text.RegularExpressions.Regex("\\$\\(Format-KvRef '(?<secret>[^']+)'\\)");
+        var variable = new System.Text.RegularExpressions.Regex("\\$(?<var>[A-Za-z]\\w*)");
+
+        string Expand(string value)
+        {
+            var withRefs = kvRef.Replace(value, m => $"@Microsoft.KeyVault(VaultName={vaultName};SecretName={m.Groups["secret"].Value})");
+            return variable.Replace(withRefs, m => arguments.TryGetValue(m.Groups["var"].Value, out var argument)
+                ? argument
+                : throw new InvalidOperationException(
+                    $"The generated script uses ${m.Groups["var"].Value}, which this test has no value for — add it to ScriptArguments."));
+        }
+
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        var start = lines.FindIndex(l => l.Trim() == "$settings = @(");
+        start.Should().BeGreaterThanOrEqualTo(0, "the generated script declares its $settings array");
+        var i = start + 1;
+        for (; i < lines.Count && lines[i].Trim() != ")"; i++)
+        {
+            var match = arrayLine.Match(lines[i]);
+            match.Success.Should().BeTrue($"every $settings line is \"key=value\" (line {i + 1}: {lines[i]})");
+            settings[match.Groups["key"].Value] = Expand(match.Groups["value"].Value);
+        }
+        for (; i < lines.Count; i++)
+        {
+            var match = optionalLine.Match(lines[i]);
+            if (match.Success && !string.IsNullOrWhiteSpace(arguments[match.Groups["var"].Value]))
+            {
+                settings[match.Groups["key"].Value] = Expand(match.Groups["value"].Value);
+            }
+        }
+        return settings;
+    }
+
+    private static string LocateRepoFile(string relativePath)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, relativePath);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        throw new FileNotFoundException($"Could not locate {relativePath} by walking up from {AppContext.BaseDirectory}.");
+    }
+
     // ---------- helpers ----------
 
     private static H4bBulkAppSettingsHandler Build(
         IProvisioningRunRepository repo,
         IPerEnvSettingsManifest manifest,
-        IProcessRunner runner,
+        IAppServiceSettingsWriter writer,
         IHealthzProbe probe,
         IContainerLogFetcher fetcher)
     {
         return new H4bBulkAppSettingsHandler(
-            repo, manifest, runner, probe, fetcher,
+            repo, manifest, writer, probe, fetcher,
             Options.Create(new BulkAppSettingsOptions()),
             NullLogger<H4bBulkAppSettingsHandler>.Instance);
     }
@@ -918,7 +1108,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         public int CallCount { get; private set; }
         private FakePerEnvManifest(PerEnvSettingsManifestReadResult result) => _result = result;
         public static FakePerEnvManifest Success(IReadOnlyList<PerEnvSettingEntry> entries, string contentVersion = SecretsVer)
-            => new(new PerEnvSettingsManifestReadResult.Success(entries, contentVersion));
+            => new(new PerEnvSettingsManifestReadResult.Success(entries, contentVersion, StandardKeyVaultReferences));
         public static FakePerEnvManifest Failure(string diag)
             => new(new PerEnvSettingsManifestReadResult.Failure(diag));
         public Task<PerEnvSettingsManifestReadResult> ReadAsync(CancellationToken ct)
@@ -928,32 +1118,46 @@ public sealed class H4bBulkAppSettingsHandlerTests
         }
     }
 
-    private sealed class FakeProcessRunner : IProcessRunner
+    /// <summary>
+    /// A few of the shipped manifest's KV references (secrets[].app_settings) — including TenantId's
+    /// AzureAd__TenantId, which a per_env_settings entry overrides.
+    /// </summary>
+    private static readonly IReadOnlyList<KeyVaultReferenceSetting> StandardKeyVaultReferences =
+    [
+        new("AzureOpenAI__Endpoint", "AzureOpenAI-Endpoint"),
+        new("AzureAd__TenantId", "TenantId"),
+        new("TENANT_ID", "TenantId"),
+    ];
+
+    private sealed class FakeSettingsWriter : IAppServiceSettingsWriter
     {
-        private readonly int _exitCode;
-        private readonly string _stdout;
-        private readonly string _stderr;
+        private readonly Func<AppServiceSettingsWriteRequest, CancellationToken, Task<AppServiceSettingsWriteResult>> _respond;
         public int CallCount { get; private set; }
-        public IReadOnlyList<string>? LastArgs { get; private set; }
+        public AppServiceSettingsWriteRequest? LastRequest { get; private set; }
 
-        private FakeProcessRunner(int exitCode, string stdout, string stderr)
+        private FakeSettingsWriter(Func<AppServiceSettingsWriteRequest, CancellationToken, Task<AppServiceSettingsWriteResult>> respond)
+            => _respond = respond;
+
+        public static FakeSettingsWriter Succeeds() => new((_, _) => Task.FromResult<AppServiceSettingsWriteResult>(
+            new AppServiceSettingsWriteResult.Success(new[] { "production", "staging" })));
+
+        public static FakeSettingsWriter Fails(string diagnostic) => new((_, _) =>
+            Task.FromResult<AppServiceSettingsWriteResult>(new AppServiceSettingsWriteResult.Failure(diagnostic)));
+
+        public static FakeSettingsWriter Throws(Exception exception) => new((_, _) => throw exception);
+
+        public static FakeSettingsWriter CancelsCaller(CancellationTokenSource caller) => new((_, ct) =>
         {
-            _exitCode = exitCode;
-            _stdout = stdout;
-            _stderr = stderr;
-        }
-        public static FakeProcessRunner Zero() => new(0, "OK", "");
-        public static FakeProcessRunner NonZero(int exitCode, string stdout, string stderr)
-            => new(exitCode, stdout, stderr);
+            caller.Cancel();
+            ct.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("the caller's token was not passed to the writer");
+        });
 
-        public Task<ProcessResult> RunAsync(
-            string executable, IReadOnlyList<string> args,
-            IReadOnlyDictionary<string, string>? environment,
-            TimeSpan? timeout, CancellationToken cancellationToken)
+        public Task<AppServiceSettingsWriteResult> MergeAsync(AppServiceSettingsWriteRequest request, CancellationToken cancellationToken)
         {
             CallCount++;
-            LastArgs = args;
-            return Task.FromResult(new ProcessResult(_exitCode, _stdout, _stderr));
+            LastRequest = request;
+            return _respond(request, cancellationToken);
         }
     }
 

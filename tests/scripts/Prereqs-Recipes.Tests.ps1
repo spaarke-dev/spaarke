@@ -270,18 +270,8 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
-    Context 'PRQ-C-07 required applications (the old recipe called PowerShell Select-String under bash)' {
-        It 'exits 1 when the application is not listed' {
-            Set-Rules $script:Dir pac @(, @('application list', '0', 'Some_Other_App  1.0\n'))
-            $r = Invoke-Recipe 'PRQ-C-07' $script:Common $script:Dir
-            $r.Exit | Should Be 1
-            $r.Output | Should Match 'msft_PowerBI_Anchor'
-        }
-        It 'exits 0 when it is listed' {
-            Set-Rules $script:Dir pac @(, @('application list', '0', 'msft_PowerBI_Anchor  1.0.0.1  Installed\n'))
-            (Invoke-Recipe 'PRQ-C-07' $script:Common $script:Dir).Exit | Should Be 0
-        }
-    }
+    # PRQ-C-07 (required applications) retired by T253 (2026-10-08): H6 installs no application;
+    # SpaarkeMasterApplicationDependencyTests guards the package instead.
 
     Context 'PRQ-C-09 operator-created environment' {
         It 'exits 1 when the L2 identity is not an application user (no parenthesis in the az query)' {

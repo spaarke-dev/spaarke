@@ -19,8 +19,9 @@
 // discipline T226 applied to the secret manifest's value_source.
 //
 // The source KEY (the part after the colon) also names the generated
-// Configure-AppServiceSettings script parameter (PascalCase), so it must stay
-// stable once used in the manifest.
+// Configure-AppServiceSettings script parameter (PascalCase — the operator
+// artifact H4b's settings are parity-tested against, task 253), so it must
+// stay stable once used in the manifest.
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Models;

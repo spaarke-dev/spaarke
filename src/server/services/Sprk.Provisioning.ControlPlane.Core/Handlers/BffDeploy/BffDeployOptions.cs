@@ -19,11 +19,10 @@
 //   constructs its OWN BlobContainerClient rather than sharing H2a's DI
 //   registration, per this project's established "self-contained against
 //   sibling handler ports" convention — see Worker/Program.cs's H2a
-//   registration comment). All pre-existing fields below are UNCHANGED and
-//   remain load-bearing for the RETIRED-but-kept-on-disk collaborators
-//   (DotnetR3GateVerifier / DeployBffApiScriptRunner / AzCliAppServiceSlotSwapper)
-//   per this project's retirement convention (retain fields so retired files
-//   still compile; they are simply unregistered from DI).
+//   registration comment). The retired shell-out collaborators
+//   (DeployBffApiScriptRunner / AzCliAppServiceSlotSwapper /
+//   DotnetR3GateVerifier) are gone from disk; task 253 (G38) deleted the
+//   pwsh / az / dotnet / script-path fields only they read.
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-12 (H9 acceptance).
@@ -41,34 +40,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 /// </summary>
 public sealed class BffDeployOptions
 {
-    /// <summary>
-    /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via PATH).
-    /// Parity with <see cref="BicepInfraDeploy.BicepInfraDeployOptions.PwshExecutable"/>.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Path to the <c>az</c> CLI executable. Defaults to <c>az</c> (resolved
-    /// via PATH). On Linux App Service the operator install path is
-    /// <c>/usr/bin/az</c>.
-    /// </summary>
-    public string AzCliExecutable { get; set; } = "az";
-
-    /// <summary>
-    /// Path to the <c>dotnet</c> CLI executable used by the r3-gate verifier
-    /// to run <c>dotnet build</c> + <c>dotnet test</c>. Defaults to
-    /// <c>dotnet</c> (resolved via PATH).
-    /// </summary>
-    public string DotnetExecutable { get; set; } = "dotnet";
-
-    /// <summary>
-    /// Absolute path to <c>scripts/Deploy-BffApi.ps1</c>. Defaults to
-    /// <c>scripts/Deploy-BffApi.ps1</c> relative to
-    /// <see cref="AppContext.BaseDirectory"/>; production deployments should
-    /// override via app-setting so the linux-x64 publish layout is honored.
-    /// </summary>
-    public string DeployBffApiScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "Deploy-BffApi.ps1");
+    // Task 253 (G38): PwshExecutable, AzCliExecutable, DeployBffApiScriptPath, BffPublishDirectory and DeployTimeout
+    // were DELETED — they served the retired Deploy-BffApi.ps1 / az shell-outs (task 132); nothing read them, and the
+    // Worker host has no pwsh or az.
 
     /// <summary>
     /// Absolute path to <c>scripts/Deploy-Release.ps1</c>. Read by the H9
@@ -79,15 +53,6 @@ public sealed class BffDeployOptions
     /// </summary>
     public string DeployReleaseScriptPath { get; set; }
         = Path.Combine(AppContext.BaseDirectory, "scripts", "Deploy-Release.ps1");
-
-    /// <summary>
-    /// Absolute path to the BFF publish output directory used to measure
-    /// publish size for NFR-01 reporting. Defaults to <c>deploy/api-publish</c>
-    /// relative to <see cref="AppContext.BaseDirectory"/> (parity with
-    /// Deploy-BffApi.ps1's default publish location).
-    /// </summary>
-    public string BffPublishDirectory { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "deploy", "api-publish");
 
     /// <summary>
     /// Absolute path to the BFF publish zip used to measure the deploy-artifact
@@ -122,40 +87,9 @@ public sealed class BffDeployOptions
     /// </summary>
     public long AbsolutePublishSizeCeilingBytes { get; set; } = 60L * 1024L * 1024L;
 
-    /// <summary>
-    /// Absolute path to the repository root used by the r3-gate verifier to
-    /// locate <c>src/server/api/Sprk.Bff.Api/</c> for the analyzers-as-errors
-    /// build and <c>tests/Spaarke.ArchTests/</c> for the god-class ratchet
-    /// + ArchTest gates. Defaults to the effective repo root of the L2
-    /// publish. Override via app-setting for non-standard publish layouts.
-    /// </summary>
-    public string RepositoryRoot { get; set; }
-        = AppContext.BaseDirectory;
-
-    /// <summary>
-    /// Absolute path to <c>scripts/naming-conformance-check.ps1</c> used by
-    /// the r3-gate verifier. Defaults to the canonical script path relative
-    /// to <see cref="AppContext.BaseDirectory"/>. The verifier tolerates
-    /// script-not-found and reports the gate as
-    /// <c>Skipped</c> — parity with the other non-yet-authored r3-era gates.
-    /// </summary>
-    public string NamingConformanceScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "naming-conformance-check.ps1");
-
-    /// <summary>
-    /// Maximum time to wait for a single r3-gate step (dotnet build /
-    /// dotnet test / naming-conformance script). Defaults to 10 minutes.
-    /// The whole verifier fan-out therefore ceilings at ~50 minutes worst-case;
-    /// in practice the god-class ratchet + ArchTests run in seconds.
-    /// </summary>
-    public TimeSpan R3GateStepTimeout { get; set; } = TimeSpan.FromMinutes(10);
-
-    /// <summary>
-    /// Maximum time to wait for the <c>Deploy-BffApi.ps1</c> invocation
-    /// (build + zip + deploy-to-staging-slot + slot health check). Defaults
-    /// to 30 minutes.
-    /// </summary>
-    public TimeSpan DeployTimeout { get; set; } = TimeSpan.FromMinutes(30);
+    // Task 253 (G38): RepositoryRoot, NamingConformanceScriptPath, R3GateStepTimeout and DotnetExecutable were
+    // DELETED with the retired DotnetR3GateVerifier / IR3GateVerifier (dotnet + pwsh shell-outs, unregistered since
+    // task 132) — the five r3-era gates run in CI.
 
     /// <summary>
     /// Maximum time to wait for a single <c>az webapp deployment slot swap</c>

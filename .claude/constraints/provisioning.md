@@ -131,6 +131,13 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 
 Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence: `projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md`.
 
+## The L2 Worker runs no shell tool (BINDING, task 253 / G38)
+
+- The L2 Worker host is App Service `DOTNETCORE|10.0`: no pwsh, pac or az, and its publish carries no `scripts/` or `infrastructure/` folder. **MUST NOT** start a process (`Process.Start`, `ProcessStartInfo`) in any `Sprk.Provisioning.ControlPlane.*` assembly — `tests/Spaarke.ArchTests/ControlPlaneNoProcessStartGuardTests.cs` fails the build. Port to an SDK / REST client (ARM SDK, Dataverse Web API, Graph, Key Vault SDK); a PowerShell-only Exchange operation belongs in the H14a sidecar.
+- **MUST NOT** read a repo file at run time (`AppContext.BaseDirectory/scripts/...`): ship it as an `<EmbeddedResource>` (as the secret-catalog manifest, the seed manifest and the index schemas are).
+- H4b writes the BFF app settings through `IAppServiceSettingsWriter` (ARM SDK, production + `staging`, merge never replace). They equal `Configure-AppServiceSettings.generated.ps1`'s (parity test in `H4bBulkAppSettingsHandlerTests`) — regenerate the script with every manifest change.
+- H6 installs no Power Platform application: SpaarkeMaster may depend only on platform applications (`SpaarkeMasterApplicationDependencyTests`). Remove a new dependency at source; never add an installer.
+
 ## SPE owning app — MI-FIC, nothing stored (BINDING, task 248 / owner D16)
 
 - L2 acts as an SPE container type's **owning app** only through `SpeConfidentialClientGraphFactory`, whose credential is `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential`: the Worker UAMI's token for `api://AzureADTokenExchange` is the client assertion for the owning app's federated identity credential (ADR-028 A4's default). **NEVER** add a certificate, a client secret or a Key Vault read for an owning-app credential, and never add a client secret to an owning app — the SharePoint admin center asks for one when a container type is created; decline it.

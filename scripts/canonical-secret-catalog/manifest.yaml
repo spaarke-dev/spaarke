@@ -520,8 +520,10 @@ secrets:
 # `az webapp config appsettings set --settings @settings` call per slot is
 # preserved). Runtime consumer: H4bBulkAppSettingsHandler resolves each
 # non-literal entry through PerEnvSourceCatalog (task 245a) — a typed
-# InterStepState output of a named handler, or an intake parameter — then
-# shells to the generated script.
+# InterStepState output of a named handler, or an intake parameter — and
+# writes the same settings the generated script writes (secrets' app_settings
+# as KV references + these entries) through the ARM SDK on both slots (task
+# 253: the L2 Worker host has no pwsh; a parity test pins H4b to the script).
 #
 # Per-entry schema:
 #   - key                — App Service app-setting name (double underscore for

@@ -515,11 +515,13 @@ builder.Services.AddSingleton<IOperatorKvRbacBootstrapper>(sp =>
 });
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
-// Task 201: H4b BulkAppSettings handler + three collaborator seams
+// Task 201: H4b BulkAppSettings handler + four collaborator seams
 // (IPerEnvSettingsManifest — reads the same embedded manifest.yaml as
-// IKvSecretManifest but exposes only the per_env_settings top-level list;
-// IProcessRunner — narrow wrapper around System.Diagnostics.Process for
-// H4b's pwsh Configure-script invocation; IHealthzProbe — 8-min backoff
+// IKvSecretManifest: the per_env_settings list + each secret's app_settings;
+// IAppServiceSettingsWriter — task 253 (G38): ArmAppServiceSettingsWriter
+// merges the settings into the production site + staging slot through the
+// ARM SDK, replacing the pwsh run of the generated Configure script (this
+// host has no pwsh and no scripts/ folder); IHealthzProbe — 8-min backoff
 // HTTP /healthz poll; IContainerLogFetcher — Kudu SCM docker-log fetch +
 // regex parse of the failing IOptions module name on healthz timeout).
 //
@@ -534,28 +536,36 @@ builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H4b
 // uses IProvisioningRunRepository (task 037) + the three dedicated seams;
 // no BFF-facade dependencies. Runs AFTER H4 (task 047) — KV must be
-// seeded so the KV-ref settings resolve when the batched
-// Configure script writes them — and BEFORE H9 (BFF deploy).
+// seeded so the KV-ref settings resolve when H4b writes them — and BEFORE
+// H9 (BFF deploy).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
-//   - ADR-028 UAMI outbound: KuduContainerLogFetcher uses the shared UAMI-
-//     pinned TokenCredential for Kudu SCM bearer-token acquisition; no
-//     `az` shell-out. H4b's own Configure-script shell-out receives per-env
-//     cleartext values as argv (never Log*'d, never persisted to Cosmos).
+//   - ADR-028 UAMI outbound: KuduContainerLogFetcher and
+//     ArmAppServiceSettingsWriter use the shared UAMI-pinned TokenCredential
+//     (Kudu SCM bearer token; ArmClient); no `az` / pwsh shell-out. Per-env
+//     values are never Log*'d (setting names only) nor persisted to Cosmos.
 //   - §4C rollback: per-env-input-missing / write-failed / concurrent-conflict
 //     are Resumable; /healthz timeout with parsed fail-fast module is
 //     QuarantineRequired (half-configured App Service — new dispatch compounds).
 builder.Services.Configure<BulkAppSettingsOptions>(
     builder.Configuration.GetSection(nameof(BulkAppSettingsOptions)));
 builder.Services.AddSingleton<IPerEnvSettingsManifest, FilePerEnvSettingsManifest>();
-builder.Services.AddSingleton<IProcessRunner, PwshProcessRunner>();
+builder.Services.AddSingleton<IAppServiceSettingsWriter>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmAppServiceSettingsWriter>>();
+    return new ArmAppServiceSettingsWriter(armClient, logger);
+});
 builder.Services.AddHttpClient<IHealthzProbe, HttpHealthzProbe>();
 builder.Services.AddHttpClient<IContainerLogFetcher, KuduContainerLogFetcher>();
 builder.Services.AddScoped<H4bBulkAppSettingsHandler>();
 
 // Task 070 / 150: H12a AI seed chain handler + two collaborator seams
-// (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
-// retired-artifact scan; ISeedManifestRunner = task 150's
+// (ISeedManifestReader = EmbeddedSeedManifestReader: the embedded manifest
+// + SHA-256 hash + defense-in-depth retired-artifact scan — task 253 (G38):
+// never a disk read, this publish has no scripts/ folder; also read by H12b;
+// ISeedManifestRunner = task 150's
 // DataverseWebApiSeedWriter — YamlDotNet manifest parse + direct Dataverse
 // Web API writes, replacing the pwsh shell-out to task-069's
 // scripts/seed-data/Invoke-SeedManifest.ps1 -Live + its powershell-yaml
@@ -573,7 +583,7 @@ builder.Services.AddScoped<H4bBulkAppSettingsHandler>();
 // retired-artifact check.
 builder.Services.Configure<AiSeedChainOptions>(
     builder.Configuration.GetSection(nameof(AiSeedChainOptions)));
-builder.Services.AddSingleton<ISeedManifestReader, FileSeedManifestReader>();
+builder.Services.AddSingleton<ISeedManifestReader, EmbeddedSeedManifestReader>();
 builder.Services.AddHttpClient<ISeedManifestRunner, DataverseWebApiSeedWriter>();
 builder.Services.AddScoped<H12aAiSeedChainHandler>();
 
@@ -634,14 +644,15 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>()
     .ConfigureHttpClient((sp, client) =>
         client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
-// HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
-// required-applications installer + org-settings applier + their canonical
-// manifests. Wave 2 ships scaffolds (log + return Success); the incremental
-// change to real `pac application install` / `pac org update-settings`
-// shell-outs lands without touching H6.
-builder.Services.AddSingleton<IRequiredApplicationsInstaller, PacRequiredApplicationsInstaller>();
-builder.Services.AddSingleton<IRequiredApplicationsManifest, StaticRequiredApplicationsManifest>();
-builder.Services.AddSingleton<IOrgSettingsContractApplier, PacOrgSettingsContractApplier>();
+// HANDLER-08 (F14) org-settings applier + its canonical contract. Task 253
+// (G38): DataverseWebApiOrgSettingsContractApplier — one organization GET +
+// PATCH as H6's importer identity — replaced the `pac org update-settings`
+// shell-out (this host has no pac). The HANDLER-07 required-applications
+// installer (`pac application install`) is deleted: the CI-built SpaarkeMaster
+// depends on no application a fresh environment lacks.
+builder.Services.AddHttpClient<IOrgSettingsContractApplier, DataverseWebApiOrgSettingsContractApplier>()
+    .ConfigureHttpClient((sp, client) =>
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 builder.Services.AddSingleton<IOrgSettingsContractManifest, StaticOrgSettingsContractManifest>();
 builder.Services.AddScoped<H6SolutionImportHandler>();
 
@@ -827,8 +838,8 @@ builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
 // ISlotStickyAppSettingWriter = ArmSlotStickyAppSettingWriter, is the
 // scheduled-jobs slot guard added for GitHub #987 — registered below). Task 132
 // replaced the two shell-out collaborators (DotnetR3GateVerifier /
-// DeployBffApiScriptRunner — both RETIRED, kept on disk unregistered per
-// their retirement banners) AND the ARM-adjacent-but-CLI AzCliAppServiceSlotSwapper
+// DeployBffApiScriptRunner — both RETIRED; DotnetR3GateVerifier deleted by
+// task 253) AND the ARM-adjacent-but-CLI AzCliAppServiceSlotSwapper
 // (also RETIRED) with pure SDK/REST ports: IArtifactManifestVerifier =
 // ArtifactManifestVerifier (pure C# metadata check — downloads + parses
 // task 116's latest.json manifest via a shared BlobContainerClient; hard-

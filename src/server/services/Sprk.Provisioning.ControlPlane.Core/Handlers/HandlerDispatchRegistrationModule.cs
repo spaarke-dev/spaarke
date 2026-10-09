@@ -109,8 +109,8 @@ public static class HandlerDispatchRegistrationModule
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4, (sp, _) => sp.GetRequiredService<H4KvSecretsPopulationHandler>());
         // Task 201: H4b (F20/F20a automation) — BulkAppSettings handler.
-        // Thin wrapper around task 084's Configure-AppServiceSettings.generated.ps1
-        // (extended with per_env_settings). Runs AFTER H4, BEFORE H9. (H4-shared retired T226, 2026-09-30.)
+        // Writes the manifest's KV refs + per_env_settings through the ARM SDK (task 253).
+        // Runs AFTER H4, BEFORE H9. (H4-shared retired T226, 2026-09-30.)
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4b, (sp, _) => sp.GetRequiredService<H4bBulkAppSettingsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

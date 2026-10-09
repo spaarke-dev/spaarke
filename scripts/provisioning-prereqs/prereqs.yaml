@@ -45,6 +45,9 @@ author_task: customer-provisioning-orchestration-r1 / task 202
 # direction; PRQ-E-08/13 used pac commands/columns that do not exist; PRQ-C-01/02 checked gpt-5 instead of the three
 # DataZoneStandard pins (mirrored from PinnedModelCatalog.cs); PRQ-C-07 ran Select-String under bash. Rescoped
 # once_per_tenant -> once_per_env: PRQ-T-01..T-05 ({containerTypeId} / {env} are unknown while the tenant scope runs).
+# also manifest_version 10 (2026-10-08, customer-provisioning-orchestration-r1 T253): PRQ-C-07 RETIRED (the CI-built
+# SpaarkeMaster needs no Power BI Extensions; H6 installs no application); PRQ-C-06 remediation — H6 applies the
+# org-settings contract through the Dataverse Web API (the Worker has no pac).
 # manifest_version 9 (2026-10-07, customer-provisioning-orchestration-r1 T232): PRQ-C-10 (the environment's security
 # group sprk-{customerId}-users — intake environmentSecurityGroupId), PRQ-C-11 (the environment linked to a
 # pay-as-you-go billing policy on the stamp subscription — owner 2026-10-07: Spaarke pays guest access PAYG, no
@@ -797,28 +800,25 @@ prereqs:
         [ "$v" -ge 25600000 ] 2>/dev/null || { echo "maxuploadfilesize=$v is below 25600000 on $res - pac org update-settings --name maxuploadfilesize --value 25600000"; exit 1; }
         echo ok
       expect: '`ok` - `organization.maxuploadfilesize` is a number >= 25600000 (the 5242880 default exits 1)'
-    remediation: '`pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog.'
-    related_findings: [F14]
+    remediation: 'Nothing to do before the run: H6 applies it before the import (Dataverse Web API `organization` PATCH as its importer identity — T253; no pac on the Worker). By hand: `pac org update-settings --name maxuploadfilesize --value 25600000`.'
+    related_findings: [F14, T253]
 
   - id: PRQ-C-07
-    name: Required Applications manifest satisfied (Power BI Anchor + others)
+    name: 'RETIRED — required Power Platform applications (Power BI Extensions, msft_PowerBI_Anchor)'
     scope: once_per_customer
-    frequency: per run (Step 2 preflight OR H6 pre-import)
-    owner: Spaarke platform admin (auto-applied by H6)
-    consequence_of_absence: F13 — SpaarkeMaster import fails on Power BI dependency; `--skip-dependency-check` does NOT help (not a product-update dep).
-    check_recipe:
-      cli: |
-        set -o pipefail
-        out=$(pac application list --environment "{dvUrl}" 2>&1) || { echo "pac application list failed: $out"; exit 1; }
-        failed=0
-        for app in msft_PowerBI_Anchor; do
-          echo "$out" | grep -qi "$app" || { echo "MISSING application $app in {dvUrl}"; failed=1; }
-        done
-        [ "$failed" = 0 ] || exit 1
-        echo ok
-      expect: '`ok` - every required application appears in `pac application list` for the environment; each missing one is printed and the recipe exits 1'
-    remediation: '`pac application install --application-name msft_PowerBI_Anchor` (~6 min).'
-    related_findings: [F13]
+    status: retired
+    retired_on: 2026-10-08
+    retired_by: customer-provisioning-orchestration-r1 T253 (G38)
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. F13's Power BI Extensions dependency came from a spurious dependency in the hand-made 2026-08 SpaarkeMaster;
+      the CI-built package (src/dataverse/solutions/SpaarkeMaster, T218) depends on no application a fresh environment
+      lacks, and tests/Spaarke.ArchTests/SpaarkeMasterApplicationDependencyTests.cs fails the build if one returns. H6
+      installs no application (the `pac application install` step could not run on the Worker host, which has no pac).
+    remediation: |
+      Nothing to do.
+    related_findings: [F13, T253]
 
   - id: PRQ-C-08
     name: Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (H14a)

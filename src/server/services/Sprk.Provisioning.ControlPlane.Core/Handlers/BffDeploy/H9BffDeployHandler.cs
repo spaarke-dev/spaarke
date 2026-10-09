@@ -25,7 +25,7 @@
 //   production → (9) rollback re-swap on failure (EXISTING logic, PRESERVED
 //   unchanged). ZERO dotnet-publish build step, ZERO repo checkout, ZERO dotnet SDK
 //   dependency at provision time — DeployBffApiScriptRunner and
-//   DotnetR3GateVerifier's shell-outs are RETIRED (kept on disk unregistered).
+//   DotnetR3GateVerifier's shell-outs are RETIRED (the latter deleted, task 253).
 //
 // RUN CONTEXT (task 245a, G25 — see Models/InterStepState.cs):
 //   - Intake values, read from run.Parameters.NonSecret (written ONLY by

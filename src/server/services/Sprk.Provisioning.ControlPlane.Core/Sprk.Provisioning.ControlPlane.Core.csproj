@@ -323,14 +323,11 @@
          immediately above) so YamlSeedManifestEngine's read is self-
          contained at runtime (no repo-checkout dependency in the L2 publish
          output, same "content files in the payload" rationale the POML
-         names). FileSeedManifestReader (the H12a handler's ISeedManifestReader
-         collaborator — SHA-256 hash + defense-in-depth retired-artifact
-         scan) intentionally keeps its existing on-disk Content-copy read
-         path (AiSeedChainOptions.ManifestPath) — unchanged by this task,
-         out of the declared file-modify scope; the writer's embedded copy
-         and the reader's on-disk copy are both sourced from the SAME
-         scripts/seed-data/manifest.yaml file at build time, so there is no
-         drift risk despite the two read mechanisms. -->
+         names). Task 253 (G38): EmbeddedSeedManifestReader (H12a + H12b's
+         ISeedManifestReader — SHA-256 hash + defense-in-depth retired-
+         artifact scan) reads THIS embedded manifest too; its former on-disk
+         read (AiSeedChainOptions.ManifestPath) failed on the Worker host,
+         whose publish has no scripts/ folder. -->
     <EmbeddedResource Include="..\..\..\..\scripts\seed-data\manifest.yaml"
                        Link="Handlers\AiSeedChain\SeedContent\manifest.yaml">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.manifest.yaml</LogicalName>
