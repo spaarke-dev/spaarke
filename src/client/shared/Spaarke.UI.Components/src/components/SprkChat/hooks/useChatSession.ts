@@ -23,6 +23,7 @@ import {
   IHostContext,
   AuthenticatedFetchFn,
 } from '../types';
+import { isApiError } from '../../../utils/thrownFetchError';
 
 interface UseChatSessionOptions {
   /** Base URL for the BFF API */
@@ -180,6 +181,12 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
       setMessages(historyMessages);
       return { ok: true };
     } catch (err: unknown) {
+      // `@spaarke/auth`'s authenticatedFetch THROWS ApiError(404) instead of returning the 404 the
+      // branch above checks, so the stale-session signal has to be recognised here too — otherwise the
+      // host never learns to start a fresh session.
+      if (isApiError(err, 404)) {
+        return { ok: false, staleSession: true };
+      }
       const errorObj = err instanceof Error ? err : new Error('Failed to load history');
       setError(errorObj);
       return { ok: false };

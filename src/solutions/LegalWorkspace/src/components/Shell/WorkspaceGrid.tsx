@@ -324,44 +324,39 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Summarize Files — opens Code Page dialog via navigateTo (UDSS-017)
+  // Summarize Files / Find Similar — task 113 (ontology-platform-r1, D-26): opened IN-APP through
+  // the shared `navigateToWebResourceSurfaceAsync` while the Console's InAppWizardHost is
+  // mounted; the same navigateTo(webresource) dialog otherwise (UDSS-017). The document list
+  // refetches when the wizard closes, as before.
   // -------------------------------------------------------------------------
 
   const handleOpenSummarize = React.useCallback(async (documentIds?: string[]) => {
     try {
       const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Summarize Files" }
-      );
-      docRefetchRef.current?.();
+      await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_summarizefileswizard",
+        data,
+        title: "Summarize Files",
+      });
     } catch {
-      docRefetchRef.current?.();
+      // getBffBaseUrl() throws before runtime config is initialised — nothing opens (as before).
     }
+    docRefetchRef.current?.();
   }, []);
-
-  // -------------------------------------------------------------------------
-  // Find Similar — opens Code Page dialog via navigateTo (UDSS-017)
-  // -------------------------------------------------------------------------
 
   const handleOpenFindSimilar = React.useCallback(async (documentId?: string, containerId?: string) => {
     try {
       const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Find Similar Documents" }
-      );
-      docRefetchRef.current?.();
+      await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_findsimilar",
+        data,
+        title: "Find Similar Documents",
+      });
     } catch {
-      docRefetchRef.current?.();
+      // getBffBaseUrl() throws before runtime config is initialised — nothing opens (as before).
     }
+    docRefetchRef.current?.();
   }, []);
 
   // Event / To Do: the feed / To Do lists refetch after the wizard closes, as before.
@@ -466,15 +461,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     );
   }, []);
 
-  // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
+  // Open the Document Upload wizard — task 113 (ontology-platform-r1, D-26): IN-APP through the
+  // shared `navigateToWebResourceSurfaceAsync` while the Console's InAppWizardHost is mounted; the
+  // same navigateTo(webresource) dialog otherwise (Integration Pattern C — frame-walking).
   const handleAddDocument = React.useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-    if (!xrm?.Navigation?.navigateTo) {
-      console.warn("[WorkspaceGrid] Xrm.Navigation not available");
-      return;
-    }
-
     // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
     // business-unit container lookup and its `if (!containerId) return;` guard.
     //
@@ -505,23 +495,17 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "&theme=" + theme +
       "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 
-    try {
-      await xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_documentuploadwizard",
-          data: encodeURIComponent(dataString),
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-        }
-      );
-    } catch (error: any) {
-      if (error?.errorCode !== 2) {
-        console.error("[WorkspaceGrid] Upload dialog error:", error);
-      }
+    // The shared primitive never rejects (cancel / dialog errors resolve as `cancelled`).
+    const outcome = await navigateToWebResourceSurfaceAsync({
+      webresourceName: "sprk_documentuploadwizard",
+      // The envelope is URI-encoded once, as the code page expects (it decodes it in main.tsx);
+      // the in-app renderer reads it with the same `resolveUploadLaunchParams`.
+      data: encodeURIComponent(dataString),
+    });
+    if (outcome.busy) {
+      console.warn("[WorkspaceGrid] A wizard is already open; the upload wizard was not opened.");
+    } else if (!outcome.launched) {
+      console.warn("[WorkspaceGrid] Xrm.Navigation not available");
     }
   }, []);
 
@@ -781,13 +765,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     [setActiveLayoutById],
   );
 
-  const handleEditLayout = React.useCallback(() => {
+  const handleEditLayout = React.useCallback(async () => {
     if (!activeLayout) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
       const mode = activeLayout.isSystem ? "saveAs" : "edit";
 
       // For saveAs mode, pass the system layout data so the wizard can pre-populate
@@ -799,48 +779,28 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         dataParams += `&name=${encodeURIComponent(activeLayout.name)}`;
       }
 
-      xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_workspacelayoutwizard",
-          data: dataParams,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
-        },
-      ).then(() => {
-        // Wizard closed — refetch layouts in case changes were saved
-        refetchLayouts();
-      }).catch(() => { /* user cancelled */ });
+      // Task 113 (D-26): in-app while the Console's host is mounted, else the same navigateTo.
+      const outcome = await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_workspacelayoutwizard",
+        data: dataParams,
+        title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
+      });
+      // Wizard closed — refetch layouts in case changes were saved (nothing opened or a dialog failure → nothing to refetch)
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }
   }, [activeLayout, refetchLayouts]);
 
-  const handleCreateLayout = React.useCallback(() => {
+  const handleCreateLayout = React.useCallback(async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
-      xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_workspacelayoutwizard",
-          data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: "Create New Workspace",
-        },
-      ).then(() => {
-        refetchLayouts();
-      }).catch(() => { /* user cancelled */ });
+      // Task 113 (D-26): in-app while the Console's host is mounted, else the same navigateTo.
+      const outcome = await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_workspacelayoutwizard",
+        data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+        title: "Create New Workspace",
+      });
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }

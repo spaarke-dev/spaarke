@@ -9,8 +9,9 @@
       publisher prefix (sprk_):
         Entity (not N:N intersect tables — they ship with their relationship), global OptionSet, WebResource
         (incl. every code page), CustomControl (PCF), AppModule, SiteMap, EnvironmentVariableDefinition;
-      + sprk_ custom columns on non-sprk (OOB) tables, unmanaged system views / forms on OOB tables, and unmanaged
-        dashboards;
+      + sprk_ custom columns on non-sprk (OOB) tables, unmanaged sprk_ alternate keys on OOB tables (T255 — e.g. the
+        contact identity-binding key sprk_ExternalObjectIdUniqueKey; a key on a sprk_ table ships with its table),
+        unmanaged system views / forms on OOB tables, and unmanaged dashboards;
       + security roles of the ROOT business unit whose name matches the scope's role pattern, plus the named extras;
       + every unmanaged field security profile (they secure sprk_ columns; no other publisher authors in dev);
       − the committed exclusions in docs/data-model/package-scope.json (each with a reason and a date).
@@ -30,6 +31,7 @@ $script:TypeCodes = [ordered]@{
     Entity                        = 1
     Attribute                     = 2
     OptionSet                     = 9
+    EntityKey                     = 14
     Role                          = 20
     WebResource                   = 61
     SiteMap                       = 62
@@ -135,6 +137,21 @@ function Get-PackageRuleComponents {
         foreach ($a in @($e.Attributes)) {
             if ($a.IsCustomAttribute -and -not $a.IsManaged -and $a.LogicalName.StartsWith($prefix) -and -not $a.AttributeOf) {
                 $items.Add((New-ScopeItem Attribute $a.MetadataId "$($e.LogicalName).$($a.LogicalName)" $e.MetadataId))
+            }
+        }
+    }
+
+    # T255: unmanaged sprk_ alternate keys on OOB tables (an OOB table's key is not a column, so the column rule above
+    # misses it — the contact identity-binding key sprk_ExternalObjectIdUniqueKey was absent from SpaarkeMaster, and the
+    # BFF's create-by-key fails without it). Keys of sprk_ tables ship with their table. Separate query, so a fault here
+    # names itself and leaves the column discovery untouched.
+    foreach ($e in @(Get-AllPages $Get "EntityDefinitions?`$select=LogicalName,MetadataId&`$expand=Keys(`$select=LogicalName,MetadataId,IsManaged)")) {
+        if ($e.LogicalName.StartsWith($prefix)) { continue }
+        if (-not ($e.PSObject.Properties.Name -contains 'Keys')) { continue }
+        foreach ($k in @($e.Keys)) {
+            if ($null -eq $k) { continue }
+            if (-not $k.IsManaged -and ([string]$k.LogicalName).StartsWith($prefix)) {
+                $items.Add((New-ScopeItem EntityKey $k.MetadataId "$($e.LogicalName).$($k.LogicalName)" $e.MetadataId))
             }
         }
     }

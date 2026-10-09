@@ -48,6 +48,20 @@ public sealed class WorkerL2OwnedOptionsBootTests
     }
 
     [Theory]
+    [InlineData("ReservedTenants:SpaarkeTenantId", "*ReservedTenants:SpaarkeTenantId*")]
+    [InlineData("ReservedTenants:CiamTenantIds:0", "*ReservedTenants:CiamTenantIds:0*")]
+    public void BlankReservedTenant_FailsHostStart(string setting, string expectedMessage)
+    {
+        // T255: H4b and H13 refuse Spaarke's tenant and the CIAM tenant as customer workforce tenants — a Worker that
+        // does not know them must not start (the Api host registers the same options).
+        using var factory = new L2OptionsWorkerTestFactory(b => b.UseSetting(setting, " "));
+
+        var act = () => factory.Services;
+
+        act.Should().Throw<InvalidOperationException>().WithMessage(expectedMessage);
+    }
+
+    [Theory]
     [InlineData("ContainerTypeId")]
     [InlineData("OwnerAppId")]
     public void IncompleteSpeOwnerEntry_FailsHostStart(string blankSetting)

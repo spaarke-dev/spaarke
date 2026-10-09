@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9198315704373949356"
+      "templateHash": "15852394455888017560"
     }
   },
   "parameters": {
@@ -104,6 +104,13 @@
         "description": "CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module's value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)"
       }
     },
+    "ciamTenantIds": {
+      "type": "array",
+      "minLength": 1,
+      "metadata": {
+        "description": "Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): POST /api/runs refuses either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Api startup without it. Same value the Worker module receives."
+      }
+    },
     "appInsightsConnectionString": {
       "type": "string",
       "metadata": {
@@ -126,6 +133,7 @@
     }
   },
   "variables": {
+    "reservedTenantSettings": "[concat(createArray(createObject('name', 'ReservedTenants__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('ciamTenantIds'))), lambda('i', createObject('name', format('ReservedTenants__CiamTenantIds__{0}', lambdaVariables('i')), 'value', parameters('ciamTenantIds')[lambdaVariables('i')]))))]",
     "appSettings": [
       {
         "name": "AzureAd__Audience",
@@ -187,7 +195,8 @@
         "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
         "value": "~3"
       }
-    ]
+    ],
+    "allAppSettings": "[concat(variables('appSettings'), variables('reservedTenantSettings'))]"
   },
   "resources": [
     {
@@ -214,7 +223,7 @@
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
           "healthCheckPath": "/healthz",
-          "appSettings": "[variables('appSettings')]"
+          "appSettings": "[variables('allAppSettings')]"
         }
       }
     },
@@ -241,7 +250,7 @@
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
           "healthCheckPath": "/healthz",
-          "appSettings": "[variables('appSettings')]"
+          "appSettings": "[variables('allAppSettings')]"
         }
       },
       "dependsOn": [

@@ -198,6 +198,7 @@ import type {
   IRecordNoAccessEntry,
 } from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
+import { isApiError, isAuthFailure, problemOf } from '../../utils/thrownFetchError';
 import { cleanGuid } from '../../utils/guid';
 import {
   buildNoAccessPath,
@@ -207,11 +208,14 @@ import {
   describeCoverage,
   describeNotInForce,
   describeSubjectKind,
+  describeInheritedFrom,
+  effectiveAccessState,
+  parseEffectiveAccess,
   parseNoAccessResponse,
   suppressionFor,
   vetoFor,
 } from './noAccess';
-import type { NoAccessSectionState } from './noAccess';
+import type { IEffectiveRecordAccess, NoAccessSectionState } from './noAccess';
 
 const useStyles = makeStyles({
   section: {
@@ -429,26 +433,48 @@ class AccessGrantModalApiError extends Error {
   static async fromResponse(response: Response): Promise<AccessGrantModalApiError> {
     const status = response.status;
     try {
-      const body = (await response.json()) as {
-        reasonCode?: string;
-        detail?: string;
-        title?: string;
-        // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
-        // carries these today; every other ProblemDetails leaves them undefined.
-        deactivatedCount?: number;
-        speContainerOutcome?: string;
-      };
-      const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
-      const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
-      const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
-      const speContainerOutcome =
-        typeof body?.speContainerOutcome === 'string'
-          ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
-          : undefined;
-      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
+      return AccessGrantModalApiError.fromBody(status, await response.json());
     } catch {
       return new AccessGrantModalApiError(status, `HTTP ${status}`);
     }
+  }
+
+  /**
+   * Builds an error from what `@spaarke/auth`'s `authenticatedFetch` THROWS for a non-OK response —
+   * it never returns one, so without this every `instanceof AccessGrantModalApiError` branch in this
+   * file is unreachable under the fetch every host injects. An `ApiError` carries the status and the
+   * already-parsed ProblemDetails (read exactly as {@link fromResponse} reads a body); an `AuthError`
+   * is the 401 whose retries ran out. Returns `null` for anything else (a network failure), which the
+   * caller rethrows untouched — it is not a server answer.
+   */
+  static fromThrown(err: unknown): AccessGrantModalApiError | null {
+    if (isApiError(err)) {
+      const problem = problemOf(err);
+      return problem ? AccessGrantModalApiError.fromBody(err.status, problem) : new AccessGrantModalApiError(err.status, err.message);
+    }
+    if (isAuthFailure(err)) {
+      return new AccessGrantModalApiError(401, err instanceof Error && err.message ? err.message : 'HTTP 401');
+    }
+    return null;
+  }
+
+  /** The shared ProblemDetails read behind {@link fromResponse} and {@link fromThrown}. */
+  private static fromBody(status: number, raw: unknown): AccessGrantModalApiError {
+    const body = (raw ?? {}) as {
+      reasonCode?: string;
+      detail?: string;
+      title?: string;
+      // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
+      // carries these today; every other ProblemDetails leaves them undefined.
+      deactivatedCount?: number;
+      speContainerOutcome?: string;
+    };
+    const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
+    const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
+    const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+    const speContainerOutcome =
+      typeof body?.speContainerOutcome === 'string' ? (body.speContainerOutcome as SpeContainerRevokeOutcome) : undefined;
+    return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
   }
 }
 
@@ -756,6 +782,15 @@ export const EXTERNAL_USER_NO_ACCESS_LABEL = 'External user — no access';
  */
 export function describeAccessPermission(
   state: AccessPermissionState,
+  isSecureRecord: boolean,
+  inheritedFrom: string | null = null
+): { intent: 'error' | 'warning'; title: string; text: string } | null {
+  const banner = describeOwnAccessPermission(state, isSecureRecord);
+  return banner && inheritedFrom ? { ...banner, text: `${banner.text} ${inheritedFrom}` } : banner;
+}
+
+function describeOwnAccessPermission(
+  state: AccessPermissionState,
   isSecureRecord: boolean
 ): { intent: 'error' | 'warning'; title: string; text: string } | null {
   const restrictedText =
@@ -823,13 +858,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   title = 'Manage Access',
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
-  accessPermissionState = 'standard',
-  isSecureRecord = false,
+  accessPermissionState: hostAccessPermissionState = 'standard',
+  isSecureRecord: hostIsSecureRecord = false,
   fetchSecureOwnerInfo,
   fetchContactOrganizationMemberships,
   initialSection,
 }) => {
   const styles = useStyles();
+
+  // Task 174 (owner round 84; task 067's amendment): the record's EFFECTIVE access, as task 064's read reports it — a
+  // work assignment or project filed under a secure, Limited or Restricted parent is enforced as its parent is, whatever
+  // its own stored values (which the host passes) read. The gate, the banner and the "No effect" marks below use the
+  // STRICTER of the two; never less strict than the host's. `null` (not read yet, or untrusted): the host's values alone.
+  const [serverAccess, setServerAccess] = React.useState<IEffectiveRecordAccess | null>(null);
+  const { state: accessPermissionState, isSecure: isSecureRecord } = effectiveAccessState(
+    hostAccessPermissionState,
+    hostIsSecureRecord,
+    serverAccess
+  );
 
   // Access-Permission sharing gate (task 043, FR-14 Option A; task 138). Deliberately
   // computed from the props alone — never from `effectiveAccessLevel` or any other
@@ -842,8 +888,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const isRestricted = accessPermissionState === 'restricted';
   const contactGrantsOffered = !isRestricted;
   const organizationGrantsOffered = accessPermissionState === 'standard';
-  // The one explanatory banner per non-standard state (owner O1 FINAL, 2026-10-01).
-  const permissionBanner = describeAccessPermission(accessPermissionState, isSecureRecord);
+  // The one explanatory banner per non-standard state (owner O1 FINAL, 2026-10-01); task 174 names the parent the state
+  // follows when it is inherited.
+  const permissionBanner = describeAccessPermission(accessPermissionState, isSecureRecord, describeInheritedFrom(serverAccess));
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
@@ -887,6 +934,25 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
   // Secure-record owner/BU read-only display (task 065, design.md §6).
   const [secureOwnerInfo, setSecureOwnerInfo] = React.useState<ISecureOwnerInfo | null>(null);
+
+  /** Calls the host `authenticatedFetch` and returns the OK response. A non-OK
+   * answer becomes {@link AccessGrantModalApiError} whichever way the fetch
+   * delivers it: THROWN (`@spaarke/auth`'s authenticatedFetch — every host
+   * today) or RETURNED (a non-throwing fetch). Anything else it throws (a
+   * network failure) is rethrown untouched. */
+  const requestOk = React.useCallback(
+    async (path: string, init: RequestInit): Promise<Response> => {
+      let res: Response;
+      try {
+        res = await authenticatedFetch(path, init);
+      } catch (err) {
+        throw AccessGrantModalApiError.fromThrown(err) ?? err;
+      }
+      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
+      return res;
+    },
+    [authenticatedFetch]
+  );
 
   // Task 067: the read-only No Access List (064's per-record read), and the contacts in Current Access that belong to
   // a walled organization (contact id → that organization's name). `orgWallCheck` is 'notChecked' when an
@@ -938,11 +1004,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * success. */
   const getJson = React.useCallback(
     async <T,>(path: string): Promise<T> => {
-      const res = await authenticatedFetch(path, { method: 'GET' });
-      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
+      const res = await requestOk(path, { method: 'GET' });
       return (await res.json()) as T;
     },
-    [authenticatedFetch]
+    [requestOk]
   );
 
   /** Reads this record's internal system-user shares (task 063/065, FR-29) —
@@ -1006,15 +1071,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * route's uniform 404), a network failure, an unparseable body, another record's answer — is the section's error
    * state, never an empty list. Not behind the delegation gate (the route has its own Read/Write tiers), so a failure
    * here never sets the Write-required banner. */
-  const fetchNoAccess = React.useCallback(async (): Promise<NoAccessSectionState> => {
+  const fetchNoAccess = React.useCallback(async (): Promise<{
+    section: NoAccessSectionState;
+    access: IEffectiveRecordAccess | null;
+  }> => {
     try {
       const res = await authenticatedFetch(buildNoAccessPath(recordType, recordId), { method: 'GET' });
-      if (res.status !== 200) return { kind: 'error' };
+      if (res.status !== 200) return { section: { kind: 'error' }, access: null };
       // The echo is checked against the record shown NOW, not the one this request was sent for: the modal stays
       // mounted while the form rebinds, so an answer for the previous record must never be accepted.
-      return parseNoAccessResponse(await res.json(), currentRecordIdRef.current);
+      const body: unknown = await res.json();
+      return {
+        section: parseNoAccessResponse(body, currentRecordIdRef.current),
+        // Task 174: the same answer carries the record's effective access, for Read and Write callers alike.
+        access: parseEffectiveAccess(body, currentRecordIdRef.current),
+      };
     } catch {
-      return { kind: 'error' };
+      return { section: { kind: 'error' }, access: null };
     }
   }, [authenticatedFetch, recordType, recordId]);
 
@@ -1031,7 +1104,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList, noAccess] =
+      const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
         await Promise.all([
           fetchCandidates(),
           fetchExistingGrants(),
@@ -1058,6 +1131,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           fetchNoAccess(),
         ]);
       if (!isCurrent()) return;
+      const noAccess = noAccessRead.section;
+      // Task 174: the effective access the gate and the "No effect" marks use (null: the host's values alone).
+      setServerAccess(noAccessRead.access);
       // Union standing + user-share rows into Current Access, deduped by
       // contactId — an explicit per-record `sprk_externalrecordaccess` grant
       // (which carries an accessRecordId and IS revocable) wins over a
@@ -1119,6 +1195,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
+      setServerAccess(null);
       setContactWalledOrgs(new Map());
       setOrgWallCheck('notNeeded');
     } finally {
@@ -1150,6 +1227,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setAccessDenyState(null);
       // Task 067: a fresh open never shows the previous record's or session's No Access answer.
       setNoAccessState({ kind: 'loading' });
+      // Task 174: nor the previous record's effective access.
+      setServerAccess(null);
       setContactWalledOrgs(new Map());
       setOrgWallCheck('notNeeded');
       setSectionToReveal(initialSection === 'noAccess' ? 'noAccess' : null);
@@ -1180,15 +1259,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * either the designed deny banner or a non-blocking notice. */
   const postJson = React.useCallback(
     async <T,>(path: string, body: unknown): Promise<T> => {
-      const res = await authenticatedFetch(path, {
+      const res = await requestOk(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
       return (await res.json()) as T;
     },
-    [authenticatedFetch]
+    [requestOk]
   );
 
   /** Outcome of a single {@link grantContact} call — the grant write itself

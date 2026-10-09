@@ -9,11 +9,9 @@
 //
 // TASK 123 (Wave G-2, Option D hybrid): ProvisioningArtifactsContainerUri +
 // ArmManifestBlobName added for <see cref="ArmDeploymentRunner"/> — the SDK
-// port no longer shells out to Provision-Customer.ps1 / az CLI (those two
-// legacy fields + PwshExecutable/AzCliExecutable stay ONLY for residual
-// scaffold consumers (task 245b removed BicepDirectory with the on-disk
-// template inspector); ArmDeploymentRunner, ArmKeyVaultRefProbe, and
-// ArmWhatIfDriftDetector consume none of them). See task 117's
+// port no longer shells out to Provision-Customer.ps1 / az CLI (task 245b
+// removed BicepDirectory with the on-disk template inspector; task 253 removed
+// the pwsh / az / script-path / deploy-timeout fields nothing read). See task 117's
 // .github/workflows/publish-provisioning-arm-artifacts.yml for the artifact
 // shape this options class points at.
 // -----------------------------------------------------------------------------
@@ -26,33 +24,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 /// </summary>
 public sealed class BicepInfraDeployOptions
 {
-    /// <summary>
-    /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
-    /// PATH). Parity with <see cref="Preflight.PreflightModuleOptions.PwshExecutable"/>.
-    /// Retained only for legacy/scaffold consumers — <see cref="ArmDeploymentRunner"/>
-    /// (task 123) does not shell out.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Path to the <c>az</c> CLI executable. Defaults to <c>az</c> (resolved
-    /// via PATH). On Linux App Service the operator install path is
-    /// <c>/usr/bin/az</c>. Retained only for legacy/scaffold consumers —
-    /// <see cref="ArmKeyVaultRefProbe"/> / <see cref="ArmWhatIfDriftDetector"/>
-    /// (task 123) do not shell out.
-    /// </summary>
-    public string AzCliExecutable { get; set; } = "az";
-
-    /// <summary>
-    /// Absolute path to <c>scripts/Provision-Customer.ps1</c>. Defaults to
-    /// <c>scripts/Provision-Customer.ps1</c> relative to
-    /// <see cref="AppContext.BaseDirectory"/>; production deployments should
-    /// override via app-setting so the linux-x64 publish layout is honored.
-    /// Retained only for legacy/scaffold consumers (task 123 deleted the
-    /// shell-out runner that consumed this).
-    /// </summary>
-    public string ProvisionCustomerScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "Provision-Customer.ps1");
+    // Task 253 (G38): PwshExecutable, AzCliExecutable, ProvisionCustomerScriptPath and DeployTimeout were DELETED —
+    // nothing read them since task 123 ported H2a to the ARM SDK, and the Worker host has no pwsh or az.
 
     /// <summary>
     /// Full blob-container URI (e.g.
@@ -108,15 +81,6 @@ public sealed class BicepInfraDeployOptions
     /// </summary>
     public string RunNotesDirectory { get; set; }
         = Path.Combine(AppContext.BaseDirectory, "runNotes");
-
-    /// <summary>
-    /// Maximum time to wait for a single Bicep deploy invocation. Defaults
-    /// to 45 minutes — H2a's Bicep deploys are documented at 10–20 min per
-    /// design.md §4.2 / FR-22; the ceiling absorbs cold-provisioning of
-    /// Cosmos + OpenAI + AI Search without truncating a slow-but-progressing
-    /// deploy.
-    /// </summary>
-    public TimeSpan DeployTimeout { get; set; } = TimeSpan.FromMinutes(45);
 
     /// <summary>
     /// Maximum time to wait for the <c>az deployment group what-if</c>

@@ -113,7 +113,7 @@ public static class VisualizationEndpoints
         // Validate required parameters
         if (documentId == Guid.Empty)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Document ID is required",
@@ -190,7 +190,7 @@ public static class VisualizationEndpoints
                 "[VISUALIZATION] Source document not found: DocumentId={DocumentId}",
                 documentId);
 
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Document Not Found",
                 Detail = $"Source document with ID {documentId} was not found or has no embedding",
@@ -264,7 +264,7 @@ public static class VisualizationEndpoints
 
         if (!httpContext.Request.HasFormContentType)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Bad Request",
                 Detail = "Request must be multipart/form-data with a 'file' field",
@@ -296,7 +296,7 @@ public static class VisualizationEndpoints
 
         if (file == null || file.Length == 0)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Bad Request",
                 Detail = "No file provided. Include a 'file' field in the multipart form data.",

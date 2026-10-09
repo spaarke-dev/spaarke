@@ -16,7 +16,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 **Key Concepts**:
 - **Local quality gates** run before commits (code-review, adr-check, lint)
 - **`CI / Router`** (`ci-router.yml`) is the single required status check on every PR to `master` — it dispatches a blocking Tier 1 and an advisory Tier 2
-- Several other workflows report on PRs (actionlint, `css-reset-gate.yml`, `office-addins-tests.yml`, `provisioning-prereqs-validate.yml`, path-scoped gates) but are **not** in the required-check list, so a red there does not by itself block merge
+- Several other workflows report on PRs (actionlint, `css-reset-gate.yml`, `office-addins-tests.yml`, path-scoped gates) but are **not** in the required-check list, so a red there does not by itself block merge
 - **Deployment is operator-driven**: every deploy workflow in this repo is either `workflow_dispatch`-only, or auto-deploys only to a non-production target (dev slot). Production always requires a manual trigger or a GitHub Environment reviewer approval
 - A legacy monolithic pipeline (`sdap-ci.yml` + its `sdap-ci-docs-only.yml` fallback) still runs but is **no longer the required branch-protection check** — it has been superseded by `CI / Router` and is pending deletion by another project
 
@@ -70,8 +70,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │   the gate (excluded from adjudication by construction).            │
 └────────────────────────────────────────────────────────────────────┘
    Also run on PRs, REPORTING but NOT in the required-check list:
-   actionlint (every PR) · provisioning-prereqs-validate.yml (every PR,
-   advisory) · css-reset-gate.yml (Code Page index.html paths) ·
+   actionlint (every PR) · css-reset-gate.yml (Code Page index.html paths) ·
    office-addins-tests.yml (office-addins + related server paths) ·
    build-provisioning-sidecar.yml (sidecar paths — build+Trivy+size only
    on PR, no push) · deploy-infrastructure.yml lint + compile only (bicep
@@ -123,7 +122,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | Local Quality | Manual | ~30s | Yes (recommended) |
 | `CI / Router` (`ci-router.yml`) | PR → master, push → master, merge_group | Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (spec budgets) | **Yes — the only required status check** |
 | actionlint (`workflows-validate.yml`) | Every PR, no path filter | ~17s | Reports only — not in the required-check list (see note below) |
-| `provisioning-prereqs-validate.yml` | PR, push → master, merge_group | ~30s cold | Advisory |
 | `css-reset-gate.yml` | PR/push touching Code Page `index.html` | sub-second | Reports only — not in the required-check list |
 | `office-addins-tests.yml` | PR/push touching office-addins + related server/test paths | gated-jest ~16s; other jobs vary | Reports only — not in the required-check list |
 | `build-provisioning-sidecar.yml` | PR/push touching the sidecar; dispatch | n/a | Blocking for its own scope (fixable HIGH/CRITICAL Trivy finding hard-fails); push leg also publishes the image |
@@ -165,7 +163,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
 | `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
-| `provisioning-prereqs-validate.yml` | provisioning-prereqs-validate | PR/push/merge_group; advisory | Validates `prereqs.yaml` + `intake.schema.json` shape and parser parity with the `/provision-environment` skill |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads. ⚠️ Cannot succeed on a clean checkout; being replaced by a pack-from-git SpaarkeMaster publish (customer-provisioning-orchestration-r1 T218d) |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
@@ -497,7 +494,9 @@ The subsections below are grouped by what each workflow does: the PR gate, stand
 
 **Triggers**: `pull_request` → `master`, `push` → `master`, `merge_group`
 
-The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` / `provisioning_prereqs` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+
+**`prereqs` job (blocking, since 2026-10-09 — customer-provisioning-orchestration-r1 task 208).** Runs when `scripts/provisioning-prereqs/**`, `.claude/skills/provision-environment/**` or `ci-router.yml` changes — **including docs-only diffs**, because `.claude/**` counts as documentation and would otherwise skip the check for a skill-only change. It validates `scripts/provisioning-prereqs/prereqs.yaml` (top-level shape, per-prereq required fields, scope enum, unique ids, the SPE `never_delete` guard on `PRQ-T-01`) with `validate.ps1`, using the **same** `powershell-yaml` parser the `/provision-environment` skill uses (never substitute another parser), and compiles `intake.schema.json` as a Draft 2020-12 JSON Schema via `ajv-cli` + `ajv-formats` (needed for the `format: uuid` checks on `tenantId`/`subscriptionId`). It is adjudicated by `router-result` (`allowed-skips: tier1,prereqs`), so a red `prereqs` fails `CI / Router`. It replaced the standalone advisory `provisioning-prereqs-validate.yml`, which is deleted.
 
 #### `ci-tier1-blocking.yml` — CI Tier 1 (Blocking)
 
@@ -542,12 +541,6 @@ Every job carries `continue-on-error: true`. Spec budget: p95 ≤ 8 min (NFR-02)
 **Triggers**: `pull_request`, no path filter (deliberate — a path filter here previously deadlocked PRs that never touched `.github/workflows/**`)
 
 One job (`lint`) downloads `actionlint` and runs it with `-shellcheck=` (shellcheck integration disabled to avoid pre-existing `run:` block noise). Not a required check — see the note under [Pipeline Summary](#pipeline-summary).
-
-#### `provisioning-prereqs-validate.yml`
-
-**Triggers**: `pull_request`, `push` → `master`, `merge_group`
-
-Validates `scripts/provisioning-prereqs/prereqs.yaml` (top-level shape, per-prereq required fields, scope enum, unique ids, the SPE `never_delete` guard on `PRQ-T-01`) using the **same** `powershell-yaml` parser the `/provision-environment` skill uses, plus validates `intake.schema.json` as a Draft 2020-12 JSON Schema via `ajv-cli` + `ajv-formats` (needed for the `format: uuid` checks on `tenantId`/`subscriptionId`). Advisory; a follow-on task is filed to route it through the router's `classify` job.
 
 #### `css-reset-gate.yml` — CSS Reset Gate
 

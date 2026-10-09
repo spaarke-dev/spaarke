@@ -13,4 +13,4 @@ KEEP-protected. Deletion requires same-PR replacement covering the same endpoint
 
 ## Inventory status (2026-06-26)
 
-117 KEEP-endpoint-contract files identified — the second-largest KEEP category after domain-logic. Bulk move pending.
+117 KEEP-endpoint-contract files identified — the second-largest KEEP category after domain-logic. (Historical: the bulk move into this folder has since landed.)

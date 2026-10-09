@@ -155,10 +155,6 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     finishingLabel = 'Processing…',
     finishLabel = 'Finish',
     footerLeftExtra,
-    // Deprecated raw-string sizing (v1.1.63). Honoured in modal mode through SprkModal's
-    // transitional `legacySize`; task 111 maps the remaining callers to named sizes.
-    maxWidth,
-    height,
     initialStepId,
     // ontology task 056 — additive props (modal-only where noted in wizardShellTypes)
     size = 'wizard',
@@ -490,7 +486,6 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
   // Modal mode: the wizard preset of SprkModal (ADR-050 as amended 2026-10-07). SprkModal owns the
   // envelope, the header (nav · title · maximize · ×), dismiss, size + uiScale, and the footer layout.
-  const legacySize = maxWidth || height ? { width: maxWidth, height } : undefined;
   return (
     <SprkModal
       open={open}
@@ -499,7 +494,6 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       size={size}
       dismiss={dismiss}
       uiScale={uiScale}
-      legacySize={legacySize}
       nav={nav}
       padded={false}
       footerStart={successConfig ? undefined : footerStart}
