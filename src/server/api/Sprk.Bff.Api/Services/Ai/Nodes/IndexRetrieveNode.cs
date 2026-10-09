@@ -56,7 +56,8 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// decides it: the row's SOURCE DOCUMENT when its <c>document</c> evidence names one (a bare <c>sprk_document</c> id,
 /// or <c>spe://drive/{d}/item/{i}</c> matched on <c>sprk_driveitemid</c>), so a restricted document under a readable
 /// matter is caught; otherwise its scope record (matter / project / invoice / work assignment). A row with neither is
-/// dropped. With no run principal (app-only, scheduled) nothing is returned, and the EvidenceGuard then applies.
+/// dropped. A Precedent is kept only when the caller can read EVERY supporting matter (owner decision, option b); one
+/// with no supporting-matter evidence, or an unreadable one, is dropped. One batched check per page. With no run principal (app-only, scheduled) nothing is returned, and the EvidenceGuard then applies.
 /// </para>
 /// </remarks>
 public sealed class IndexRetrieveNode : INodeExecutor
@@ -294,21 +295,28 @@ public sealed class IndexRetrieveNode : INodeExecutor
 
             // 5. Materialize rows + parse valueJson into InsightArtifact-shaped projections, each with the record
             //    that decides whether the run principal may see it.
-            var candidates = new List<(InsightRowProjection Row, RetrievalRecordKey? Key)>();
+            var candidates = new List<InsightRowProjection>();
+            var checks = new List<(int Row, RetrievalRecordKey Key)>();
             await foreach (var hit in response.Value.GetResultsAsync().ConfigureAwait(false))
             {
                 var projection = MapToProjection(hit);
-                candidates.Add((projection, AccessRecordOf(hit.Document, projection)));
+                foreach (var key in AccessRecordsOf(hit.Document, projection))
+                {
+                    checks.Add((candidates.Count, key));
+                }
+
+                candidates.Add(projection);
             }
 
-            // 5b. Task 176 (#1511): trim to what the run principal can read. Fail closed: no principal, a failed check
-            //     or a row with no deciding record keeps nothing.
-            RetrievalTrimResult<(InsightRowProjection Row, RetrievalRecordKey? Key)> trim;
+            // 5b. Task 176 (#1511): trim to what the run principal can read, in ONE batched pass for the page. A row is
+            //     kept only when it has at least one deciding record and EVERY one of them is readable. Fail closed: no
+            //     principal or a failed check keeps nothing.
+            RetrievalTrimResult<(int Row, RetrievalRecordKey Key)> trim;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var accessTrim = scope.ServiceProvider.GetRequiredService<IRetrievalAccessTrim>();
-                trim = await accessTrim.TrimByRecordAsync(
-                    candidates, c => c.Key, context.CallerObjectId, cancellationToken).ConfigureAwait(false);
+                trim = await accessTrim.TrimByRecordAsync<(int Row, RetrievalRecordKey Key)>(
+                    checks, c => c.Key, context.CallerObjectId, cancellationToken).ConfigureAwait(false);
             }
 
             if (trim.Withheld)
@@ -318,7 +326,14 @@ public sealed class IndexRetrieveNode : INodeExecutor
                     context.Node.Id, candidates.Count, trim.Outcome);
             }
 
-            var rows = trim.Rows.Take(topK).Select(c => c.Row).ToList();
+            var required = checks.GroupBy(c => c.Row).ToDictionary(g => g.Key, g => g.Count());
+            var passed = trim.Rows.GroupBy(c => c.Row).ToDictionary(g => g.Key, g => g.Count());
+            var rows = candidates
+                .Where((_, i) => required.TryGetValue(i, out var need)
+                                 && passed.TryGetValue(i, out var got)
+                                 && got == need)
+                .Take(topK)
+                .ToList();
 
             // The count of rows the caller may see, never the index count (which would disclose unreadable matches).
             var totalCount = rows.Count;
@@ -477,12 +492,42 @@ public sealed class IndexRetrieveNode : INodeExecutor
         value.Replace("'", "''");
 
     /// <summary>
-    /// The record that decides whether a caller may see this artifact (task 176): its first <c>document</c> evidence ref
-    /// that names a document (bare <c>sprk_document</c> id, or an <c>spe://</c> item), else its scope record
-    /// (<c>scope.entityType</c> + <c>scope.entityId</c>, or the legacy <c>scope.matterId</c>). Null when there is
-    /// neither, and the row is then dropped.
+    /// Every record the caller must be able to read to see this artifact (task 176). A Precedent needs ALL of its
+    /// supporting matters (<c>supporting-matter</c> evidence, <c>matter://{id}</c>; owner decision, option b); any
+    /// other artifact needs the single record from <see cref="AccessRecordOf"/>. Empty means the row is dropped.
     /// </summary>
-    internal static RetrievalRecordKey? AccessRecordOf(IDictionary<string, object> doc, InsightRowProjection row)
+    internal static IReadOnlyList<RetrievalRecordKey> AccessRecordsOf(IDictionary<string, object> doc, InsightRowProjection row)
+    {
+        if (string.Equals(row.ArtifactType, "precedent", StringComparison.OrdinalIgnoreCase))
+        {
+            var matters = new List<RetrievalRecordKey>();
+            foreach (var entry in EvidenceEntries(doc))
+            {
+                if (!string.Equals(Get(entry, "refType"), "supporting-matter", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var reference = Get(entry, "ref")?.Trim();
+                var id = reference is not null && reference.StartsWith("matter://", StringComparison.OrdinalIgnoreCase)
+                    ? reference["matter://".Length..]
+                    : reference;
+                if (RetrievalRecordKey.ParentRecord("matter", id) is not { } key)
+                {
+                    // An unparseable supporting matter cannot be checked, so the Precedent cannot be shown.
+                    return Array.Empty<RetrievalRecordKey>();
+                }
+
+                matters.Add(key);
+            }
+
+            return matters;
+        }
+
+        return AccessRecordOf(doc, row) is { } single ? new[] { single } : Array.Empty<RetrievalRecordKey>();
+    }
+
+    private static IEnumerable<IDictionary<string, object>> EvidenceEntries(IDictionary<string, object> doc)
     {
         if (doc.TryGetValue("evidence", out var evidenceObj)
             && evidenceObj is System.Collections.IEnumerable evidence
@@ -490,30 +535,43 @@ public sealed class IndexRetrieveNode : INodeExecutor
         {
             foreach (var item in evidence)
             {
-                if (item is not IDictionary<string, object> entry)
+                if (item is IDictionary<string, object> entry)
                 {
-                    continue;
+                    yield return entry;
                 }
+            }
+        }
+    }
 
-                string? Get(string key) => entry.TryGetValue(key, out var v) ? v?.ToString() : null;
+    private static string? Get(IDictionary<string, object> entry, string key) =>
+        entry.TryGetValue(key, out var v) ? v?.ToString() : null;
 
-                if (!string.Equals(Get("refType"), "document", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+    /// <summary>
+    /// The record that decides whether a caller may see this artifact (task 176): its first <c>document</c> evidence ref
+    /// that names a document (bare <c>sprk_document</c> id, or an <c>spe://</c> item), else its scope record
+    /// (<c>scope.entityType</c> + <c>scope.entityId</c>, or the legacy <c>scope.matterId</c>). Null when there is
+    /// neither, and the row is then dropped.
+    /// </summary>
+    internal static RetrievalRecordKey? AccessRecordOf(IDictionary<string, object> doc, InsightRowProjection row)
+    {
+        foreach (var entry in EvidenceEntries(doc))
+        {
+            if (!string.Equals(Get(entry, "refType"), "document", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-                var reference = Get("ref")?.Trim();
-                if (RetrievalRecordKey.Document(reference) is { } byId)
-                {
-                    return byId;
-                }
+            var reference = Get(entry, "ref")?.Trim();
+            if (RetrievalRecordKey.Document(reference) is { } byId)
+            {
+                return byId;
+            }
 
-                if (reference is not null
-                    && SpeDocumentRef.Match(reference) is { Success: true } spe
-                    && RetrievalRecordKey.DocumentByDriveItem(spe.Groups["itemId"].Value) is { } byItem)
-                {
-                    return byItem;
-                }
+            if (reference is not null
+                && SpeDocumentRef.Match(reference) is { Success: true } spe
+                && RetrievalRecordKey.DocumentByDriveItem(spe.Groups["itemId"].Value) is { } byItem)
+            {
+                return byItem;
             }
         }
 

@@ -393,6 +393,68 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             Row("o-ok-item", Visible + "-D", secureMatter, ("document", "spe://drive/b!x/item/ITEM-READABLE")),
             Row("o-ok-matter", Visible + "-E", readableMatter),
         };
+        var json = await RunIndexRetrieveAsync("{\"artifactType\":\"observation\",\"predicate\":\"settlementAmount\"}", hits);
+
+        json.Should().NotContain(Secret, because: "no observation the caller cannot read reaches the cohort");
+        json.Should().Contain(Visible + "-D").And.Contain(Visible + "-E");
+        _userClient.ReadSets.Should().Contain("sprk_matters").And.Contain("sprk_documents");
+    }
+
+    /// <summary>Owner decision (option b): a Precedent is kept only when the caller can read EVERY supporting matter.</summary>
+    [Theory]
+    [InlineData("all-readable", true)]
+    [InlineData("one-unreadable", false)]
+    [InlineData("list-missing", false)]
+    public async Task Precedent_IsKeptOnlyWhenEverySupportingMatterIsReadable(string shape, bool kept)
+    {
+        var readableA = Guid.NewGuid();
+        var readableB = Guid.NewGuid();
+        var unreadable = Guid.NewGuid();
+        _userClient.Allow("sprk_matters", readableA.ToString("D")).Allow("sprk_matters", readableB.ToString("D"));
+        var supporting = shape switch
+        {
+            "all-readable" => new[] { readableA, readableB },
+            "one-unreadable" => new[] { readableA, unreadable },
+            _ => Array.Empty<Guid>(),
+        };
+        const string Pattern = "PRECEDENT-1511-pattern-statement";
+        var doc = new Azure.Search.Documents.Models.SearchDocument
+        {
+            ["id"] = "p1",
+            ["tenantId"] = "tenant-1",
+            ["artifactType"] = "precedent",
+            ["subject"] = "pattern:p1",
+            ["predicate"] = "precedentStatement",
+            ["valueJson"] = Pattern,
+            ["status"] = "confirmed",
+            ["evidence"] = supporting
+                .Select(m => (object)new Azure.Search.Documents.Models.SearchDocument
+                {
+                    ["refType"] = "supporting-matter", ["ref"] = $"matter://{m:D}",
+                })
+                .ToArray(),
+        };
+
+        var json = await RunIndexRetrieveAsync(
+            "{\"artifactType\":\"precedent\",\"filter\":\"status eq 'confirmed'\",\"requireEvidence\":false}",
+            Azure.Search.Documents.Models.SearchModelFactory.SearchResult(doc, 0.9, null));
+
+        if (kept)
+        {
+            json.Should().Contain(Pattern);
+            _userClient.Reads.Should().ContainSingle(because: "the supporting matters are checked in one batched read")
+                .Which.Should().HaveCount(2);
+        }
+        else
+        {
+            json.Should().NotContain(Pattern);
+        }
+    }
+
+    private async Task<string> RunIndexRetrieveAsync(
+        string configJson,
+        params Azure.Search.Documents.Models.SearchResult<Azure.Search.Documents.Models.SearchDocument>[] hits)
+    {
         var results = Azure.Search.Documents.Models.SearchModelFactory.SearchResults(
             hits, totalCount: hits.Length, facets: null, coverage: null, rawResponse: Mock.Of<Azure.Response>());
         var searchClient = new Mock<Azure.Search.Documents.SearchClient>();
@@ -409,15 +471,11 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
         var node = new IndexRetrieveNode(
             indexClient.Object, Mock.Of<IOpenAiClient>(), provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<IndexRetrieveNode>.Instance);
-        var context = NodeContext(ExecutorType.IndexRetrieve, "{\"artifactType\":\"observation\",\"predicate\":\"settlementAmount\"}");
 
-        var output = await node.ExecuteAsync(context, CancellationToken.None);
+        var output = await node.ExecuteAsync(NodeContext(ExecutorType.IndexRetrieve, configJson), CancellationToken.None);
 
-        output.Success.Should().BeTrue();
-        var json = output.StructuredData!.Value.GetRawText() + output.TextContent;
-        json.Should().NotContain(Secret, because: "no observation the caller cannot read reaches the cohort");
-        json.Should().Contain(Visible + "-D").And.Contain(Visible + "-E");
-        _userClient.ReadSets.Should().Contain("sprk_matters").And.Contain("sprk_documents");
+        output.Success.Should().BeTrue(output.ErrorMessage);
+        return output.StructuredData!.Value.GetRawText() + output.TextContent;
     }
 
     // ── L3 entity context (verifier F1) ─────────────────────────────────────────────────────────
