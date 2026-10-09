@@ -220,8 +220,17 @@ Describe "Source-level regression guards (A38c no-regress obligations)" {
         $rotateSecretsSource | Should Not Match 'az redis regenerate-keys'
     }
 
-    It "Rotate-Secrets.ps1: both ServiceBus-ConnectionString gate sites are present (platform + per-customer)" {
-        ([regex]::Matches($rotateSecretsSource, 'Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString"')).Count | Should Be 2
+    It "Rotate-Secrets.ps1: the platform ServiceBus-ConnectionString gate is present" {
+        ([regex]::Matches($rotateSecretsSource, 'Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString"')).Count | Should Be 1
+    }
+
+    It "Rotate-Secrets.ps1: customer-scope Storage and Service Bus rotation is retired (task 244: stamps are keyless)" {
+        # NEGATIVE: no storage-key renewal anywhere, and the customer branch never calls a rotation function
+        $rotateSecretsSource | Should Not Match 'function Rotate-StorageKey'
+        $rotateSecretsSource | Should Not Match 'az storage account keys renew'
+        $customerBranch = [regex]::Match($rotateSecretsSource, '(?s)function Rotate-CustomerSecrets.*?\n\}').Value
+        $customerBranch | Should Match 'Retired by task 244'
+        $customerBranch | Should Not Match 'Rotate-ServiceBusKey `'
     }
 
     It "Rotate-Secrets.ps1: gate comments document Model 1 vs Model 2 fleet consistency" {

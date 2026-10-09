@@ -80,6 +80,12 @@ export interface LaunchSurfaceOutcome {
    * opened" (surface-launch-mechanism §7), NOT a committed launch.
    */
   readonly launched: boolean;
+  /**
+   * `true` (with `launched: false`) when an in-app host is mounted but another in-app wizard was
+   * already open, so nothing opened. Distinct from "no Xrm host" / unmapped, so a caller that cares
+   * can tell the user to close the open wizard first.
+   */
+  readonly busy?: boolean;
   /** The resolved registry entry (undefined when unmapped). */
   readonly entry?: SurfaceLaunchRegistryEntry;
   /**
@@ -188,7 +194,7 @@ export async function launchSurface(input: LaunchSurfaceInput): Promise<LaunchSu
       });
       if (!outcome.launched) {
         clearHandoff(handoffId);
-        return { handoffId, launched: false, entry };
+        return outcome.busy ? { handoffId, launched: false, busy: true, entry } : { handoffId, launched: false, entry };
       }
       // Wizard wrote its outcome to sessionStorage (or nothing → treat as cancel).
       const written = readHandoffResult(handoffId);

@@ -77,7 +77,8 @@ const ENV_CONFIG = {
  * see packaging/mergeUnifiedManifest.js and projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md.
  *
  * Two ids that the standalone JSON manifests used to CONFLATE are kept apart here:
- *   - ADDIN_CLIENT_ID  → the Entra app registration. Goes in `webApplicationInfo.id` ONLY.
+ *   - ADDIN_CLIENT_ID  → the Entra app registration. NOT in the package (task 115: no `webApplicationInfo`); the
+ *                        merge only refuses it as the package id.
  *   - ADDIN_APP_ID     → the app PACKAGE id. Its own GUID. The admin center identifies the app by it, so it
  *                        must stay STABLE for the life of the package — every release is an update of it.
  * Both live add-ins today are XML (Outlook 5e4d66d0-…, Word b3965ea0-…), so the package is a NEW app; the XML
@@ -88,11 +89,13 @@ const ENV_CONFIG = {
  * user sees is what the admin uploaded.
  *
  * 1.1.1 (task 089, UAT-10): the Word ribbon's Share is replaced by "Open Spaarke".
+ * 1.1.2 (task 115): no `webApplicationInfo` (a customer tenant's deployment failed on its consent step,
+ *   AADSTS700016); the 404 `CommandRuntime.code.script` entries removed.
  */
 const UNIFIED_PACKAGE = {
   APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
   TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
-  VERSION: '1.1.1',
+  VERSION: '1.1.2',
 };
 
 /** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
@@ -342,8 +345,13 @@ module.exports = async (env, options) => {
             // URL substitution (ADDIN_BASE_URL) that resolves the manifest's Commands.Url also
             // resolves this page when word/commands/index.ts builds its displayDialogAsync URL
             // from window.location.origin at runtime (no separate substitution needed here).
-            from: './word/commands/notify.html',
+            from: './shared/commands/notify.html',
             to: 'word/commands-notify.html',
+          },
+          {
+            // task 118: the SAME page for the Outlook ribbon Quick Save dialog (one page, served per host).
+            from: './shared/commands/notify.html',
+            to: 'outlook/commands-notify.html',
           },
           {
             // Unified JSON manifest (email-communication-solution-r4 task 072 / FR-25) —

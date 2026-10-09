@@ -24,6 +24,8 @@ This directory contains authoritative documentation for Dataverse entity schemas
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
 | [sprk_communication.md](sprk_communication.md) | Communication entity | 2026-04-05 | 2026-04-05 | Current |
+| [access-inheritance.md](access-inheritance.md) | `sprk_accessinheritance` on work assignment and project: the BFF-written JSON record of what the stored Secure / Access Permission were derived from (the parents' floor, the parents, what was set on the record) — owner round 87: the parent sets a floor, a child may be stricter, a re-file never loosens | 2026-10-09 | 2026-10-09 | Current |
+| [child-access-permission.md](child-access-permission.md) | `sprk_accesspermission` on To Do, Event, Communication and Document: a display copy of the parent's value (most restrictive across parents), written by the BFF, locked on the form while a parent exists; a parentless record keeps its own (owner round 81). Includes `sprk_document.sprk_accesspermission` | 2026-10-08 | 2026-10-08 | Current |
 | [sprk_communicationaccount.md](sprk_communicationaccount.md) | Communication account entity | 2026-04-05 | 2026-04-05 | Current |
 
 ### Entity Documentation — Notification Spine

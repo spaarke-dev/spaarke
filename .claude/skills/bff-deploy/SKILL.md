@@ -37,7 +37,7 @@ Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 | Resource Group | `rg-spaarke-dev` |
 | Health Check | `https://spaarke-bff-dev.azurewebsites.net/healthz` |
 | Deploy Script | `scripts/Deploy-BffApi.ps1` |
-| Auth setup (operator runbook) | [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10-section runbook incl. §7 Exchange ApplicationAccessPolicy |
+| Auth setup (operator runbook) | [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — auth §6.5/§7.3/§7.7; Exchange mailbox access §4.2.1/§7.9 (`auth-deployment-setup.md` is a retired stub) |
 | Canonical auth ADR | [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI, HMAC webhooks, named API keys |
 
 ---
@@ -52,9 +52,9 @@ After every fresh-env deploy OR cutover involving MI/auth changes, verify per [`
 - §9e Browser MSAL regression on any Spaarke PCF/Code Page (no popup, tenant-specific authority)
 
 **Common post-deploy auth failure modes** (not deploy-script issues):
-- MI deploy succeeds but Graph 403 → MI missing `Sites.Selected` or other app role grants. See `auth-deployment-setup.md` §5.
-- MI deploy succeeds but Dataverse 401 → MI not registered as Dataverse Application User in the target env. See §6.
-- Graph `Mail.*` returns `ErrorAccessDenied` → Exchange `ApplicationAccessPolicy` not configured for BFF MI or app reg. See §7.
+- MI deploy succeeds but Graph 403 → MI missing `Sites.Selected` or other app role grants. See `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.7.
+- MI deploy succeeds but Dataverse 401 → MI not registered as Dataverse Application User in the target env. See the same guide, §7.7.
+- Graph `Mail.*` returns `ErrorAccessDenied` → the managed identity has no Exchange mailbox scoping: RBAC for Applications on control-plane-provisioned environments (guide §7.9), or a legacy `ApplicationAccessPolicy` on environments set up before 2026-10-04.
 
 ---
 

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227e" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H8 reuses the customer's existing container (re-runs and later runs); remove the unread SPE-ContainerTypeId secret / DEFAULT_CT_ID</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (found by the T227c code review, 2026-10-06)</phase>
+    <gate>after 227c (✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handler code (H8 + Graph), KV manifest/catalog contract, tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded handler change with a named lookup; catalog removal follows the T227c precedent.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, l2-controlplane, spe, key-vault, model1-dedicated, testing</tags>
+    <deps>227c</deps>
+  </metadata>
+
+  <prompt>Make H8 create a customer's container only once, ever; and remove the container-type KV secret nothing reads.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Microsoft Graph SPE, canonical secret catalog).</role>
+
+  <goal>
+    (1) H8 never creates a second container for a customer: before creating, it looks for the customer's existing
+    container (the run's InterStepState.SpeContainerId when a WaitingOnGate re-run already created one; otherwise the
+    container of this container type whose displayName is the customer's — the owning app's app-only listing, as H13 T6
+    does) and reuses it. Since T227c, H4b points the BFF at H8's container, so a second container would silently move
+    the customer to an empty one. (2) SPE-ContainerTypeId (KV, app setting DEFAULT_CT_ID) and the from-topology-constants
+    machinery are removed if nothing reads them (T227c adr-check W4: DEFAULT_CT_ID appears only in appsettings.template.json
+    and appsettings.tokens.md; SharePointEmbedded__ContainerTypeId is the plain setting the BFF reads).
+  </goal>
+
+  <context>
+    <background>
+      T227c code review #3: H8 always POSTs a new container — its idempotency is per run (CompletedPhases). A ReplicationPending
+      re-run (WaitingOnGate, no CompletedPhase) creates another; an upgrade/second run creates another. Fresh first runs are
+      unaffected unless replication lag is hit (near-instant in practice). Legacy scripts/Provision-Customer.ps1 reads
+      SPE-ContainerTypeId from KV — check whether that script is still a supported path before removing the secret.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/{H8SpeContainerHandler,GraphContainerProvisioner,ISpeContainerProvisioner}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/GraphContainersListAppOnlyProbe.cs (listing pattern)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (SPE-ContainerTypeId); Handlers/KvSecretsPopulation/** (FromTopologyConstants)</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json, appsettings.tokens.md (DEFAULT_CT_ID)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="data">Never delete or replace an existing customer container. Two containers matching the customer → fail Resumable naming both (operator decides), never pick one silently.</constraint>
+    <constraint source="tests">Real Graph SDK against a scripted HttpMessageHandler (GraphContainerProvisionerGrantTests pattern).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H8: find-or-create (InterStepState.SpeContainerId first, then listing by display name); tests incl. re-run after ReplicationPending and a second run.</step>
+    <step order="2">Remove SPE-ContainerTypeId + DEFAULT_CT_ID (+ from-topology-constants if then unused) if nothing reads them; regenerate catalog; recompile customer.json.</step>
+    <step order="3">Verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A WaitingOnGate re-run and a later run for the same customer create no second container (tests).</criterion>
+    <criterion testable="true">Two matching containers → Resumable failure naming both; nothing created.</criterion>
+    <criterion testable="true">`git grep DEFAULT_CT_ID` and the catalog have no unread container-type secret (or a recorded reason to keep it).</criterion>
+    <criterion testable="true">ControlPlane.Tests, Worker build, ArchTests pass; catalog -Verify OK.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - From T227d (2026-10-06): the BFF recognises a container as the customer's when it is configured (H4b settings)
+      OR carries custom property `spaarkeCustomerId` = the run's customerId (`Customer__Id`). H8 should write that marker
+      on the container it creates/reuses — PATCH /storage/fileStorage/containers/{id}/customProperties (after activation;
+      not settable in the create body) — and find-or-create should look for the marker first (listing by display name is
+      the fallback for containers created before the marker). Marker shape and semantics: SpeContainerOwnershipGuard.MarkOwnedAsync.
+
+    COMPLETED 2026-10-06 (SESSION 38) — delivered TWICE: v1 (listing lookup, local WIP bb0f38561, never pushed) was
+    superseded at the master merge by unified-access-control-r2 #1312 (task 165), which had reworked H8 (typed creation
+    record InterStepState.SpeContainerCreation + resume + in-doubt quarantine; root-business-unit bind; and the owner
+    rule "H8 never guesses by listing the shared type"). T227e was re-applied on that design:
+    - Re-run / WaitingOnGate / resume: task 165's creation record (no second container) — unchanged.
+    - LATER run: H8 reads the container the environment records — env var sprk_SharePointEmbeddedContainerId, which H7
+      writes from H8's container on the first run (IDataverseRootBusinessUnitReader.ReadRecordedContainerIdAsync; only an
+      environmentvariablevalue counts, never the definition's defaultvalue; >1 value → throws). Found + no record →
+      recorded as StatusAdopted and resumed (verify, bind, marker) — ProvisionAsync never called. Record and environment
+      naming different containers → Resumable spe-duplicate-customer-containers naming both. Unreadable → Resumable
+      spe-recorded-container-unreadable, nothing created. No listing (honours the uac-r2 owner rule; rename-proof).
+    - An ADOPTED container is never removed by a failed bind: SpeContainerBindRequest.RemoveIfNotBound=false →
+      NotBound(Removed:false) → QuarantineRequired spe-container-binding-failed-not-removed (a new container is still
+      removed, per task 165).
+    - Marker: EnsureCustomerMarkerAsync after the bind (GET, PATCH only when absent; another customer's / unreadable
+      marker → Failure, untouched) → Resumable spe-container-marker-failed / -infra-fault, container stays on the record.
+      Marker name = ONE source-linked constant src/server/shared/Contracts/SpeContainerCustomerMarker.cs (compiled into BFF
+      + L2, the SpeContainerBusinessUnitBinding.cs mechanism); ArchTest SpeContainerMarkerParityTests pins it (seeded
+      rename → fails).
+    - T227b grants re-applied onto task 165's H8 (after root-BU resolution, before anything is created); DAG H8 ← H3, H5.
+    - Removed (nothing read them): KV SPE-ContainerTypeId, value_source from-topology-constants (reader refuses it; enum
+      value 6 kept as a gap), H4's containerTypeId input, BFF DEFAULT_CT_ID. Catalog -Verify OK; customer.json recompiled.
+      Provision-Customer.ps1 / Seed-ProductionKeyVault.ps1 use the PLATFORM vault's copy — legacy, kept. FR-35 read-only
+      check: spaarke-bff-dev has DEFAULT_CT_ID as a plain unread value — harmless leftover, not removed (live change, not
+      needed). Existing vaults keep their SPE-ContainerTypeId (secrets are never deleted).
+    - Merge also reconciled T227d with uac-r2 on the BFF: create = bind (uac) then mark (T227d); DriveItemOperations'
+      new GetItemCreatorAsync / DownloadFileVersionAsync + SpeAdminGraphService.GetContainerBindingForConfigAsync go
+      through the ownership guard; bulk jobs get a per-container client (refusal = ContainerNotInScopeError, no oracle);
+      dashboard filters the type-wide listing before reading bindings; uac tests construct the guard
+      (TestSpeOwnership.AllowAll); ArchTests BootedBff sets AiSafety:ContentSafety:Endpoint (T246 requires it outside Dev).
+    - Tests: H8SpeContainerHandlerTests G1..G3 (T227b grants) + R1..R7 (later-run adoption, disagreement, unreadable,
+      adopted re-entry, first run bind-with-removal then marker, marker refusal / fault); GraphContainerProvisionerReuseTests
+      (marker M1..M4 + unreadable, B1 reused container not deleted); FileKvSecretManifestTests refuses
+      from-topology-constants. ControlPlane.Tests 2192/0 (1 pre-existing skip), ArchTests 828/828, Worker builds.
+    - Step 9.5 (v1): code-review 0 critical; adr-check 0 violations. Their display-name ownership warning (W2 / ADR W1) is
+      moot in v2 (no listing). W4 timeouts: master's provisioner returns timeouts as in-doubt outcomes. W6 concurrency:
+      task 165's ETag-merged record. Recorded: the env-var read uses the same Worker identity as the root-BU read — T186
+      live check that it may read environmentvariabledefinitions.
+    - Step 9.5 (v2, merged design): adr-check 1 violation — an adopted container was bound before its owner was checked —
+      fixed (Path C): InspectContainerAsync (read-only: type, marker, business-unit stamp) runs before adoption is recorded
+      and before every bind; missing → Resumable spe-recorded-container-not-found (not the replication wait), not the
+      customer's → Resumable spe-recorded-container-not-the-customers, nothing written. code-review 3 critical, all fixed:
+      C1 staging (all files staged at commit), C2 membership revoke/remove now return failed results on a refusal or an
+      unanswered marker read (inside the try — the revoke endpoint's cache invalidation still runs), C3 = the ADR violation.
+      Warnings fixed: adoption persisted (SpeContainerCreationRecord.AdoptedRootContainerId — a later empty read can never
+      enable removal); all checks before the grant writes; operator messages never advise removing an adopted container;
+      guard MarkOwnedAsync deletes on ANY failure; SPE Admin search no longer drops owned hits beyond `size` on the last
+      Graph page; marker compare trimmed on both sides; reader refuses a definition without its values; fixture
+      AdminSurfaceHostFixture passes the guard. Recorded, not built: a new run after H8 completed but before H7 would create a
+      second container — operator rule "resume, never start a new run" (guide §7.5, provisioning.md); building it needs a
+      cross-run Cosmos query on IProvisioningRunRepository. Reader interface name kept (master's seam; rename = churn).
+      Tests added: H8 R8 (x3) .. R12; isolation: revoke/remove foreign → failed results, bulk foreign → ContainerNotInScopeError.
+    - BFF §10 publish size (fresh short-path worktrees, Compress-Archive Optimal, incl. PDBs): origin/master dc469d4a2 = 36.13 MB / 192 files; branch 4cd7dee3b (merge + T227e) = 36.15 MB / 192 files → +0.02 MB for ALL of this branch's unmerged BFF work. No package change (no CVE delta).
+    - T186 live unknowns added: Worker identity can read environmentvariabledefinitions/values in the customer env;
+      marker PATCH succeeds right after the bind PATCH on the same container.
+  </notes>
+</task>

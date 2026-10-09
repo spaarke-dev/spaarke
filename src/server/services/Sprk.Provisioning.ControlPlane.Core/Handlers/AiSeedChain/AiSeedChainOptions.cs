@@ -23,18 +23,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 /// </summary>
 public sealed class AiSeedChainOptions
 {
-    /// <summary>
-    /// Absolute path to <c>scripts/seed-data/manifest.yaml</c> — consumed by
-    /// <see cref="FileSeedManifestReader"/> (SHA-256 hash + defense-in-depth
-    /// retired-artifact scan) ONLY. <see cref="DataverseWebApiSeedWriter"/>
-    /// reads the SAME source file via an embedded resource instead (task 150
-    /// file header "SCOPE BOUNDARY" note) — this path is unaffected by that
-    /// change. Defaults relative to <see cref="AppContext.BaseDirectory"/>;
-    /// production deployments should override via app-setting so the
-    /// linux-x64 publish layout is honored.
-    /// </summary>
-    public string ManifestPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "seed-data", "manifest.yaml");
+    // Task 253 (G38): ManifestPath DELETED — it pointed at {AppContext.BaseDirectory}/scripts/seed-data/manifest.yaml,
+    // which the Worker publish does not carry. EmbeddedSeedManifestReader reads the embedded copy of that file (the
+    // same resource DataverseWebApiSeedWriter seeds from).
 
     /// <summary>
     /// Maximum time to wait for the full seed-manifest invocation (all
@@ -59,7 +50,7 @@ public sealed class AiSeedChainOptions
     public TimeSpan DataverseRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Regex patterns whose presence in <see cref="ManifestPath"/> content
+    /// Regex patterns whose presence in the seed manifest's content
     /// triggers a <see cref="AiSeedChainRejectionCodes.ManifestContainsRetiredArtifact"/>
     /// startup failure. Defense-in-depth against a hand-edit that bypasses the
     /// generator + Invoke-SeedManifest.ps1's own <c>retiredArtifacts</c> scan.

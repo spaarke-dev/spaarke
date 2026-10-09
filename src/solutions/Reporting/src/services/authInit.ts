@@ -9,7 +9,7 @@
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId } from "../config/runtimeConfig";
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId } from "../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -27,6 +27,9 @@ export function ensureAuthInitialized(): Promise<void> {
       try {
         await initAuth({
           clientId: getMsalClientId(),
+          // The environment's tenant (sprk_TenantId, via runtime config) — a tenant-specific authority is required
+          // for B2B guests (#1453). The library validates it and ignores an invalid value.
+          tenantId: getTenantId(),
           bffBaseUrl: getBffBaseUrl(),
           bffApiScope: getBffOAuthScope(),
           proactiveRefresh: true,

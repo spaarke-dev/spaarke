@@ -41,6 +41,7 @@ import type {
   HostAdapterErrorCode,
   EmailComposeContent,
   ComposeEmailResult,
+  EmailIdentityKeys,
 } from './types';
 
 /**
@@ -76,6 +77,21 @@ type ItemMode = 'read' | 'compose' | 'unknown';
  */
 function createHostAdapterError(code: HostAdapterErrorCode, message: string, innerError?: Error): HostAdapterError {
   return { code, message, innerError };
+}
+
+/**
+ * `Office.MailboxEnums.AttachmentType` → {@link AttachmentInfo.attachmentType}. Compared as lower-case strings, not
+ * against the enum object, so an unknown or absent value maps to `undefined` instead of throwing (task 116a).
+ */
+function toAttachmentType(value: unknown): AttachmentInfo['attachmentType'] {
+  const v = typeof value === 'string' ? value.toLowerCase() : '';
+  return v === 'file' || v === 'item' || v === 'cloud' ? v : undefined;
+}
+
+/** `Office.MailboxEnums.AttachmentContentFormat` → {@link AttachmentInfo.contentFormat}; same rule (task 116a). */
+function toContentFormat(value: unknown): AttachmentInfo['contentFormat'] {
+  const v = typeof value === 'string' ? value.toLowerCase() : '';
+  return v === 'base64' || v === 'eml' || v === 'icalendar' || v === 'url' ? v : undefined;
 }
 
 /**
@@ -362,16 +378,18 @@ export class OutlookAdapter implements IHostAdapter {
       return [];
     }
 
-    return attachments.map(
-      (attachment): AttachmentInfo => ({
+    return attachments.map((attachment): AttachmentInfo => {
+      const attachmentType = toAttachmentType(attachment.attachmentType);
+      return {
         id: attachment.id,
         name: attachment.name,
         contentType: attachment.contentType,
         size: attachment.size,
         isInline: attachment.isInline,
+        ...(attachmentType ? { attachmentType } : {}),
         // Content is not populated here - use getAttachmentContent() to retrieve
-      })
-    );
+      };
+    });
   }
 
   /**
@@ -408,14 +426,18 @@ export class OutlookAdapter implements IHostAdapter {
       item.getAttachmentContentAsync(attachmentId, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           const content = result.value;
+          const attachmentType = toAttachmentType(attachmentMeta.attachmentType);
+          const contentFormat = toContentFormat(content.format);
           resolve({
             id: attachmentMeta.id,
             name: attachmentMeta.name,
             contentType: attachmentMeta.contentType,
             size: attachmentMeta.size,
             isInline: attachmentMeta.isInline,
-            // content.content is base64-encoded for file attachments
-            // content.format indicates the format (Base64, Url, etc.)
+            ...(attachmentType ? { attachmentType } : {}),
+            // content.content is base64 for a file attachment, but TEXT for an attached item (eml/icalendar)
+            // and a LINK for a cloud attachment — the format says which (task 116a).
+            ...(contentFormat ? { contentFormat } : {}),
             content: content.content,
           });
         } else {
@@ -633,6 +655,8 @@ export class OutlookAdapter implements IHostAdapter {
       canReadDocumentStamp: false,
       // No open document in Outlook — task 089's stamp write is Word-only
       canWriteDocumentStamp: false,
+      // task 120 (UAT round 12 O6): a message being READ has a Message-ID to look up; a draft being composed has none.
+      canResolveEmailIdentity: isReadMode,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support
@@ -657,7 +681,8 @@ export class OutlookAdapter implements IHostAdapter {
       // task 040 / FR-19: triage/auto-match suggestions (spec.md Assumptions Outlook-only list) —
       // unconditionally true here, matching the pre-existing `hostType !== 'outlook'` guard this
       // formalizes (`SaveFlow.tsx`'s related-candidates fetch). The fetch is itself best-effort and
-      // already no-ops without an `itemId`, so this capability need not additionally restrict by mode.
+      // already no-ops without an `internetMessageId` (task 121; a compose item has none), so this capability need
+      // not additionally restrict by mode.
       canSuggestRelatedRecords: true,
       // task 020 / FR-06: unconditionally FALSE — not because Outlook cannot supply a name
       // (`getSubject()` returns the email subject), but because the Save tab's Document Name box
@@ -845,6 +870,25 @@ export class OutlookAdapter implements IHostAdapter {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Task 120 (UAT round 12 O6): the open email's identity keys for `POST /api/documents/resolve-email-identity` —
+   * the RFC Message-ID and the Exchange item id, each exactly as Office reports it. Both are sent because a task-pane
+   * save made before task 121 stored the item id on the saved `.eml` (every save now stores the Message-ID). The Save
+   * tab reads the Message-ID from here too, for the save request (task 121).
+   *
+   * @returns `null` when the item has no Message-ID.
+   * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` outside read mode (see `canResolveEmailIdentity`).
+   */
+  async getEmailIdentityKeys(): Promise<EmailIdentityKeys | null> {
+    const item = this.getReadItem();
+    const internetMessageId = (item.internetMessageId ?? '').trim();
+    if (!internetMessageId) {
+      return null;
+    }
+    const exchangeItemId = (item.itemId ?? '').trim();
+    return { internetMessageId, exchangeItemId: exchangeItemId || null };
   }
 
   /**

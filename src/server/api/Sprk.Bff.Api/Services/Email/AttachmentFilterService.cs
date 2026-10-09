@@ -17,8 +17,6 @@ public class AttachmentFilterService
     private readonly Regex[] _signaturePatterns;
     private readonly Regex[] _trackingPixelPatterns;
 
-    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
-
     // Image MIME types for size-based filtering
     private static readonly HashSet<string> ImageMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -215,7 +213,11 @@ public class AttachmentFilterService
     {
         try
         {
-            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, RegexTimeout);
+            // Per-pattern match budget from EmailProcessingOptions.SignatureImageRegexTimeout (default 1 s, the ReDoS
+            // guard), shared with EmailAttachmentProcessor — the same seam spaarke-ontology-platform-r1 task 095 added
+            // there, so a heavily parallel test run can use a budget that absorbs scheduling delay. A timed-out match
+            // is a non-match (IsSignatureImage / IsTrackingPixel catch it): the attachment is kept, never lost.
+            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, _options.SignatureImageRegexTimeout);
         }
         catch (ArgumentException ex)
         {

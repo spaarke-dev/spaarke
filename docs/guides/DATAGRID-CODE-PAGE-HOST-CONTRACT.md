@@ -364,7 +364,9 @@ $env:DATAVERSE_URL = "https://spaarkedev1.crm.dynamics.com"
 
 The script's consumer registry (top of the file) is the source of truth — extend it when a new Custom Page mounts `<DataGrid>`.
 
-Do NOT cherry-pick individual `Deploy-EventsPage.ps1` / `Deploy-CorporateWorkspace.ps1` runs after framework changes. That was the workflow that produced 5 iterations of task 035 UAT — each consumer drifting from the framework in slightly different ways.
+The script does not deploy the Console (`sprk_spaarkeai`), which embeds LegalWorkspace and its `<DataGrid>` sections; deploy it separately with `scripts/Deploy-SpaarkeAi.ps1`. `sprk_corporateworkspace` is retired and is no longer a consumer.
+
+Do NOT cherry-pick individual `Deploy-EventsPage.ps1` runs after framework changes. That was the workflow that produced 5 iterations of task 035 UAT — each consumer drifting from the framework in slightly different ways.
 
 ---
 

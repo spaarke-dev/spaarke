@@ -460,17 +460,10 @@ export interface ICreateRecordWizardProps {
   /** When true, renders without Dialog wrapper (Dataverse modal provides chrome). */
   embedded?: boolean;
   /**
-   * Optional modal max-width, forwarded to `WizardShell` (non-embedded mode only).
-   * Defaults to WizardShell's `95vw`. Set a fixed px value (e.g. `'640px'`) so an
-   * in-app modal (`embedded={false}`) matches the Dataverse Create-wizard modal size
-   * instead of filling the viewport. Ignored in embedded mode.
+   * App-shell `--sprk-ui-scale`, forwarded to `WizardShell` → `SprkModal` (non-embedded mode only;
+   * ADR-050: wizards pass `uiScale` like every other preset). Task 112 (in-app host).
    */
-  maxWidth?: string;
-  /**
-   * Optional modal height, forwarded to `WizardShell` (non-embedded mode only).
-   * Defaults to WizardShell's `70vh`. Ignored in embedded mode.
-   */
-  height?: string;
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------

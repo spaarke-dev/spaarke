@@ -1,4 +1,6 @@
 ## SharePoint Embedded + Graph
+- [SPE app-only per-container isolation (2026-10-06)](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT; no per-container app scoping; CT-per-customer is the only hard boundary
+- [SPE container customProperties (2026-10-06)](spe-container-custom-properties.md) — not settable at create (PATCH …/customProperties after); `$select=id,containerTypeId,customProperties` reads type+marker in one app-only GET; any app with Write/Full on the CT and container Writers can edit; containerId == driveId (`b!`)
 - [SPE owner app via MI-as-FIC (2026-10-02)](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; FIC token appidacr=2; registration now Graph v1.0 PUT
 - [SPE version comment (2026-09-12)](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}; no read-back in Graph (CSDL); repo checkin drops comment
 - [SPE WOPI co-auth lock / 423 (2026-07-30)](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases co-auth lock; checkout/checkin = formal checkout only; ~30-min timeout
@@ -42,6 +44,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence; `pac licensing *billing-policy*` (not pac admin); JIT role-assoc by oid alternate key; BAP addUser = tenant admin only
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values
 - [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification app-wide/persists; setFormNotification text-only; PCF MessageBar REC
 - [Impersonation for async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — documented for services; trust = S2S app controls access; SB SAS → forgeable caller id
@@ -87,6 +90,7 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
+- [Copilot agent for B2B guests (2026-10-08)](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents in resource tenant → home-tenant install; OAuth+PKCE AnyTenant; publish delegated-only
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo
 - [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology still preview, read-only over OneLake; complements, not replaces
 - [Authority-model MS platform scan (2026-09-21)](authority-model-ms-platform-scan-2026-09-21.md) — Entra Agent ID preview; Agent 365 GA; build authority model, adopt identity+audit

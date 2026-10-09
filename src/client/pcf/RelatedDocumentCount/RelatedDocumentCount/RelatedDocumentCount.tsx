@@ -119,7 +119,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
     error,
     lastUpdated,
     refetch,
-  } = useRelatedDocumentGraphData(documentId, effectiveTenantId, effectiveApiBaseUrl, isAuthReady);
+  } = useRelatedDocumentGraphData(documentId, effectiveApiBaseUrl, isAuthReady);
 
   // Dialog open/close state
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
@@ -157,7 +157,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
       : null;
 
   return (
-    <div data-pcf-version="1.21.4">
+    <div data-pcf-version="1.21.5">
       <RelationshipCountCard
         count={count}
         isLoading={effectiveIsLoading}

@@ -13,13 +13,13 @@ The shared UI library (`@spaarke/ui-components`) serves two consumer tiers with 
 
 | Consumer | React Version | Import Path |
 |----------|--------------|-------------|
-| PCF controls | 16/17 (platform-provided, immutable) | `@spaarke/ui-components/src/pcf-safe` |
+| PCF controls | 16/17 (platform-provided, immutable) | Compiled `dist/` paths: deep `@spaarke/ui-components/dist/components/…` (ADR-012) or `@spaarke/ui-components/dist/pcf-safe`; never `src/` |
 | Code pages | 19 (bundled) | `@spaarke/ui-components` |
 | Solutions (Vite) | 18+ (bundled) | `@spaarke/ui-components` |
 
 ## MUST
 
-- PCF controls MUST import from `pcf-safe.ts` barrel — never from the main `index.ts`
+- PCF controls MUST import compiled `dist/` paths (deep paths per ADR-012, or the `dist/pcf-safe` barrel) — never a `src/` path (ADR-022, TS2786). The bare main barrel works only with a per-control webpack stub for `pdfjs-dist`/`mammoth` (see `src/client/pcf/CLAUDE.md`)
 - Components exported from `pcf-safe.ts` MUST NOT use React 18+ APIs:
   - `useId()`, `useDeferredValue()`, `useTransition()`, `useSyncExternalStore()`
   - `use()` (React 19)

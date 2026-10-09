@@ -784,7 +784,7 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
         // The handler's existing 400 (same constant), returned before any lookup.
         if (request?.PlaybookId is not { } playbookId)
         {
-            return Results.Json(new { error = AnalysisEndpoints.PlaybookIdRequiredMessage }, statusCode: StatusCodes.Status400BadRequest);
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, AnalysisEndpoints.PlaybookIdRequiredMessage);
         }
 
         FinanceAuthorizationTargets targets;

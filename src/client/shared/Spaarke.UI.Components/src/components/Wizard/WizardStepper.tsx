@@ -2,7 +2,7 @@
  * WizardStepper.tsx
  * Vertical sidebar step indicator for multi-step wizard dialogs.
  * Renders an ordered list of steps with status-driven visual states
- * (pending / active / completed). Supports dynamic steps added at runtime.
+ * (pending / active / completed / skipped). Supports dynamic steps added at runtime.
  */
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
@@ -34,7 +34,7 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground2,
-    borderRightWidth: '1px',
+    borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
     boxSizing: 'border-box',
@@ -70,7 +70,7 @@ const useStyles = makeStyles({
     left: '11px', // center under the 24px icon
     top: '36px',
     bottom: '0px',
-    width: '1px',
+    width: tokens.strokeWidthThin,
     backgroundColor: tokens.colorNeutralStroke2,
   },
   // Step indicator circle
@@ -78,10 +78,10 @@ const useStyles = makeStyles({
     width: '22px',
     height: '22px',
     borderRadius: '50%',
-    borderTopWidth: '2px',
-    borderRightWidth: '2px',
-    borderBottomWidth: '2px',
-    borderLeftWidth: '2px',
+    borderTopWidth: tokens.strokeWidthThick,
+    borderRightWidth: tokens.strokeWidthThick,
+    borderBottomWidth: tokens.strokeWidthThick,
+    borderLeftWidth: tokens.strokeWidthThick,
     borderTopStyle: 'solid',
     borderRightStyle: 'solid',
     borderBottomStyle: 'solid',
@@ -100,10 +100,10 @@ const useStyles = makeStyles({
     width: '22px',
     height: '22px',
     borderRadius: '50%',
-    borderTopWidth: '2px',
-    borderRightWidth: '2px',
-    borderBottomWidth: '2px',
-    borderLeftWidth: '2px',
+    borderTopWidth: tokens.strokeWidthThick,
+    borderRightWidth: tokens.strokeWidthThick,
+    borderBottomWidth: tokens.strokeWidthThick,
+    borderLeftWidth: tokens.strokeWidthThick,
     borderTopStyle: 'solid',
     borderRightStyle: 'solid',
     borderBottomStyle: 'solid',
@@ -140,6 +140,21 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     color: tokens.colorBrandForeground1,
+  },
+  // Skipped (ontology task 056): an empty dashed ring — deliberately NO tick, so a skipped step never
+  // reads as done. Token strokes only.
+  indicatorSkipped: {
+    width: '22px',
+    height: '22px',
+    boxSizing: 'border-box',
+    borderRadius: tokens.borderRadiusCircular,
+    border: `${tokens.strokeWidthThick} dashed ${tokens.colorNeutralStroke1}`,
+    backgroundColor: 'transparent',
+    flexShrink: 0,
+  },
+  labelSkipped: {
+    color: tokens.colorNeutralForeground3,
+    lineHeight: '1.3',
   },
   // Step label text
   labelPending: {
@@ -191,6 +206,10 @@ const StepIndicator: React.FC<IStepIndicatorProps> = ({ status }) => {
     );
   }
 
+  if (status === 'skipped') {
+    return <span className={styles.indicatorSkipped} aria-hidden="true" />;
+  }
+
   // pending
   return <span className={styles.indicatorPending} aria-hidden="true" />;
 };
@@ -211,7 +230,9 @@ const StepRow: React.FC<IStepRowProps> = ({ step, isLast }) => {
       ? styles.labelActive
       : step.status === 'completed'
         ? styles.labelCompleted
-        : styles.labelPending;
+        : step.status === 'skipped'
+          ? styles.labelSkipped
+          : styles.labelPending;
 
   return (
     <li className={styles.stepItem} role="listitem" aria-current={step.status === 'active' ? 'step' : undefined}>

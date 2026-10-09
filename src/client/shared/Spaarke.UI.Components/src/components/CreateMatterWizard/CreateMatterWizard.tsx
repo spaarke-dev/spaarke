@@ -206,6 +206,11 @@ export interface ICreateMatterWizardProps {
    */
   embedded?: boolean;
   /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 112 (InAppWizardHost).
+   */
+  uiScale?: number;
+  /**
    * Resolves the SPE container ID for file uploads.
    * Called once during the finish handler. If not provided, file uploads
    * will be skipped.
@@ -306,6 +311,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   bffBaseUrl,
   navigationService,
   embedded,
+  uiScale,
   resolveSpeContainerId,
   resolveUserBuDefaults,
   tenantId,
@@ -714,7 +720,14 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   );
 
   return (
-    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
+    <CreateRecordWizard
+      open={open}
+      onClose={onClose}
+      webApi={webApiAdapter}
+      config={config}
+      embedded={embedded}
+      uiScale={uiScale}
+    />
   );
 };
 

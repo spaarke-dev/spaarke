@@ -50,6 +50,16 @@ export * from './Playbook';
 
 // Wizard - Multi-step dialog shell and infrastructure
 export * from './Wizard';
+// InAppWizardHost (task 112, D-26) — exported here, not from the domain-free Wizard barrel,
+// because it mounts the five Create wizards.
+export { InAppWizardHost } from './Wizard/InAppWizardHost';
+export type {
+  IInAppWizardHostProps,
+  IInAppWizardRenderContext,
+  InAppHostedWizardName,
+  InAppWizardRenderer,
+  InAppWizardRenderers,
+} from './Wizard/InAppWizardHost';
 
 // FileUpload - Generic drag-and-drop file upload components
 export * from './FileUpload';
@@ -296,3 +306,14 @@ export type {
 // (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
+
+// StatusBadge - generic status/severity badge (label + tone), no domain
+// vocabulary. The ONE legitimately-new UI primitive added by
+// spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41); `success`
+// tone added by task 057 (D-24).
+export * from './StatusBadge';
+
+// ConsoleKit - Spaarke Console kit pieces with no Fluent/shared equivalent:
+// EvidenceLine, StatusBar, RecordRow, AggregateCard + the console-state to
+// StatusBadge-tone table (spaarke-ontology-platform-r1 task 057, FR-28/D-24).
+export * from './ConsoleKit';

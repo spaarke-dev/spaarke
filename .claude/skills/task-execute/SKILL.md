@@ -79,9 +79,9 @@ IF invoked for multiple tasks:
   2. IDENTIFY current wave (group whose prerequisites are satisfied)
   3. COUNT parallel-safe tasks in this wave
 
-  IF wave has >1 parallel-safe task AND main session context < 60%:
+  IF wave has >1 parallel-safe task:
     → ENTER PARALLEL MODE:
-      a. Cap concurrency at 6 agents
+      a. Cap concurrency at 6 agents (API-overload guard; raise only with evidence — project-pipeline Step 5)
       b. Spawn N sub-agents (one per task) using Agent tool
          - ONE message with MULTIPLE Agent tool calls (critical — must be parallel, not sequential)
          - Each agent runs task-execute for its own task
@@ -100,9 +100,10 @@ IF invoked for multiple tasks:
     → Reason for sequential: check <parallel-reason> metadata
     → Common reason: "touches .claude/ — main-session-only (permission boundary)"
 
-  IF main session context >= 60%:
+  IF the user or harness has reported that context is high, or a compaction notice has appeared:
     → Checkpoint first (context-handoff skill)
     → Then enter parallel mode (each sub-agent gets fresh context window)
+  (Claude cannot measure its own context usage — root CLAUDE.md §5 — so no step here keys on a percentage.)
 
 FAILURE ISOLATION:
   - One agent failing does NOT abort the wave
@@ -186,7 +187,7 @@ override UP to FULL and say so). Never silently override DOWN. If the POML has n
 | Step 6.5: Load Script Context | ✅ Required | ✅ If deploy/test | ⏭️ Skip |
 | Step 7: Review CLAUDE.md Files | ✅ Required | ⏭️ Skip | ⏭️ Skip |
 | Step 8: Execute Steps | ✅ Track all | ✅ Track major | ✅ Execute |
-| Step 8.5: Checkpointing | ✅ Every 3 steps | ✅ If >60% context | ⏭️ Skip |
+| Step 8.5: Checkpointing | ✅ Every 3 steps | ✅ After a deploy, before a risky step, or when context is reported high | ⏭️ Skip |
 | Step 9: Verify Acceptance | ✅ Required | ✅ Required | ✅ Required |
 | Step 9.5: Quality Gates | ✅ Required | ⏭️ Skip | ⏭️ Skip |
 | Step 10: Update Task Status | ✅ Required | ✅ Required | ✅ Required |
@@ -321,17 +322,15 @@ COMMIT mentally: This file is now the source of truth for recovery
 ### Step 3: Context Budget Check
 
 ```
-CHECK current context usage
+Claude cannot measure its own context usage (root CLAUDE.md §5), so this check keys on events:
 
-IF > 70%:
+IF the user or harness has reported that context is high, or a compaction notice has appeared:
   → UPDATE current-task.md with full state (see "Handoff Protocol" below)
-  → REPORT: "Context at {X}%. Handoff saved to current-task.md."
-  → Request new session
-  → STOP until fresh context available
+  → REPORT: "Context reported high. State saved to current-task.md — ready for /compact."
+  → Continue after compaction from current-task.md (the SessionStart hook re-injects it)
 
-IF > 85%:
-  → EMERGENCY: Immediately update current-task.md
-  → STOP work
+IF this task will load a large file set (many knowledge files, big logs, a wide diff):
+  → Checkpoint BEFORE loading it
 ```
 
 ### Step 4: Load Knowledge Files (MANDATORY)
@@ -439,7 +438,7 @@ COMMON SCRIPT MATCHES:
   - API testing → Test-SdapBffApi.ps1
   - Health checks → test-sdap-api-health.js
   - Custom page deploy → Deploy-CustomPage.ps1
-  - Corporate workspace deploy → Deploy-CorporateWorkspace.ps1
+  - LegalWorkspace / Console deploy → Deploy-SpaarkeAi.ps1 (LegalWorkspace ships inside the Console bundle)
   - Events page deploy → Deploy-EventsPage.ps1
   - BFF API deploy → Deploy-BffApi.ps1
   - Ribbon export → Export-EntityRibbon.ps1
@@ -462,12 +461,12 @@ BASED on <context><relevant-files>:
 
 #### Step 8.0: Multi-File Work Decomposition (RECOMMENDED)
 
-**MUST: For multi-file work, decompose tasks into a dependency graph and delegate to subagents in parallel where safe.**
+**Consider delegating** when the work splits into independent, substantial pieces. This is a judgment call, not a rule: coupled or small changes stay in the main session. Record the choice (delegate or not, and why) in one line in `current-task.md`.
 
 ```
 BEFORE starting implementation steps, ANALYZE the work:
 
-IF task involves modifying 4+ files:
+IF task touches 4+ files in INDEPENDENT modules AND the per-module work is substantial:
   1. DECOMPOSE into independent sub-tasks:
      - Group files by module/component
      - Identify which changes depend on others
@@ -520,7 +519,7 @@ WHEN NOT to parallelize:
   - Task has only 1-3 files (overhead not worth it)
   - Files have tight coupling (shared state, imports)
   - Sequential logic required (create then use)
-  - Context usage is already > 50% (subagents add context)
+  - Context has been reported high (checkpoint first; subagents return results into this context)
 ```
 
 ```
@@ -541,8 +540,7 @@ FOR each <step> in <steps>:
       - Add each file touched with purpose
 
   IF step involves PCF:
-    FOLLOW PCF-DEPLOYMENT-GUIDE.md version bumping rules
-    UPDATE version in 4 locations
+    FOLLOW the pcf-deploy skill's version-bump table (every location it lists)
 
   IF step involves deployment:
     FOLLOW dataverse-deploy skill
@@ -567,7 +565,8 @@ FOR each <step> in <steps>:
       • Total files modified this session ≥ 5
       • Made a significant implementation decision
       • About to start a large/complex step
-      • Context usage > 60%
+      • After a deployment or live change
+      • The user or harness reports context is high
 
     IF checkpoint triggered:
       → Invoke context-handoff skill
@@ -575,9 +574,9 @@ FOR each <step> in <steps>:
       → Report: "✅ Checkpoint saved. Continuing..."
       → Continue to next step
 
-    IF context > 70%:
+    IF a compaction notice has appeared, or the user asks to compact:
       → STOP after checkpoint
-      → Report: "Context at {X}%. State saved. Ready for /compact."
+      → Report: "State saved. Ready for /compact."
 ```
 
 ### Step 8.5: Proactive Checkpointing Rules (MANDATORY)
@@ -592,8 +591,8 @@ FOR each <step> in <steps>:
 | After modifying 5+ files | Run context-handoff | Significant work should be preserved |
 | After any deployment operation | Run context-handoff | Deployment state is critical |
 | Before starting a complex step | Run context-handoff | Preserve clean state before risky work |
-| Context usage > 60% | Run context-handoff | Pre-emptive save before threshold |
-| Context usage > 70% | Run context-handoff + STOP | Cannot continue safely |
+| User or harness reports context is high | Run context-handoff | Claude cannot see its own usage (root §5) |
+| Compaction notice, or user asks to compact | Run context-handoff, then stop for /compact | Save state before it is summarized |
 | After significant decision | Update Decisions section | Document rationale for recovery |
 
 #### Checkpoint Behavior
@@ -624,8 +623,8 @@ WHEN checkpointing (REWRITE the file, never prepend a new block; see context-han
 | Checkpoint Type | When | User Notification |
 |-----------------|------|-------------------|
 | **Silent** | After steps 3, 6, 9... | Brief: "✅ Checkpoint." |
-| **Verbose** | Context > 60% | Full report with state summary |
-| **Blocking** | Context > 70% | STOP and request /compact |
+| **Verbose** | Context reported high; after a deployment | Full report with state summary |
+| **Blocking** | Compaction notice, or user asks to compact | STOP and request /compact |
 
 #### Example Checkpoint Flow
 
@@ -639,17 +638,16 @@ Claude:
   4. Report: "✅ Checkpoint saved. Continuing with step 4..."
   5. Begin step 4
 
-[After step 6, context at 65%]
+[After step 6, which deployed to dev]
 
 Claude:
   1. Update current-task.md Completed Steps
   2. Check: Step 6 complete → checkpoint trigger
-  3. Check: Context 65% > 60% → verbose checkpoint
+  3. Check: a deployment happened → verbose checkpoint
   4. Run context-handoff
   5. Report:
      "✅ Checkpoint saved.
-      Task: 013 - Add dark mode, Step 6 of 8
-      Context: 65%
+      Task: 013 - Add dark mode, Step 6 of 8 (deployed to dev)
       Continuing with step 7..."
   6. Begin step 7
 ```
@@ -734,7 +732,7 @@ SKIP quality gates IF:
     → The SKIP block above does NOT apply.
     → Reason: prevents wiring-test antipatterns and KEEP-path violations per ADR-038 + spec FR-B07.
     → This override is binding for ≥6 months from 2026-06-26 (cultural reset window).
-    → Path-check enforcement: any deletion under `tests/integration/{auth,regression,data-mutation,tenant}/**` requires a same-PR replacement (FR-B06).
+    → Path-check enforcement: any deletion under a KEEP path — `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**`, `tests/unit/domain/**`, `tests/Spaarke.ArchTests/**` (ADR-038 §2) — requires a same-PR replacement covering the same scenario (FR-B06), or — for an orphaned test whose subject was deleted — the evidence ADR-038 Amendment A3 lists, which code-review verifies in the diff.
 
 UPDATE current-task.md:
   - Add "Quality Gates" section:
@@ -774,9 +772,10 @@ A K class is for something that is **not a defect on a real path**. A confirmed 
 **Review scope (this is what is limited):**
 1. **Review → fix → re-verify the fix scope → repeat until no F-class finding remains.** There is no round cap on fixing real defects.
 2. **Re-verification scope is the fix diff plus its direct callers and callees,** not the task's whole surface. Including callers and callees catches a fix that breaks adjacent code. Re-running the affected test suites remains mandatory. A fresh full review after every fix is what generated an endless supply of new findings.
-3. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) use the same classes. Allow **one** full verifier pass per task, or two for tasks tagged `auth`, `security` or `tenant-isolation`. Every later re-check is scoped to the fix diff (rule 2) and is not a new full pass.
+3. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) use the same classes. Allow **one** full verifier pass per task, or two for tasks tagged `auth`, `security` or `tenant-isolation`. Every later re-check is scoped to the fix diff (rule 2) and is not a new full pass. A further full pass is allowed when a fix changed the approach or entered a subsystem the scoped re-check would not cover — record the one-line reason in the task notes. This limit is on ceremony; it never stops a fix.
 4. **Escalate when fixes are not converging, not because of a count.** That means the same defect returns after a fix, a fix keeps exposing new F-class defects in the same area, or the right fix needs a decision only the owner can make (root §6). Escalate with the findings and a recommendation. Never stop fixing silently, and never ship the defect.
 5. **Flag diminishing returns proactively.** If a round produced only K-class findings, say so and stop. Don't continue rounds silently.
+6. **Fix the class, not the instance.** When a defect's cause is a repeatable pattern (a misused contract, a wrong field read, a missing guard, a copy-pasted shape), run one Grep for the pattern before closing the task and record the result in the task notes. Then: (a) fix the matches inside the task's own files; (b) list every other match by path for the operator — the Grep output is the list; do not open or verify each one; (c) name the guard that would catch it (type, lint rule or ArchTest — root §16) and build it only when the POML asks for it or an existing guard family makes it a few lines (then with must-fire/must-not-fire controls, and a ratchet baseline if old instances remain). Fixing outside the task's files, or building a new guard, is a scope change: ask (root §6), do not expand the task. *Why: issue #975 fixed 3 error responses with the wrong content type and missed 44 more; the dead `if (!res.ok)` branch after `authenticatedFetch` was found in ~30 files and was being written again the same week.*
 
 ### Step 9.7: UI Testing (PCF/Frontend Tasks)
 
@@ -1113,10 +1112,7 @@ When task has `pcf`, `react`, or `fluent-ui` tags:
 
 - [ ] Read `src/client/pcf/CLAUDE.md`
 - [ ] Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
-- [ ] Version bumped in ControlManifest.Input.xml
-- [ ] Version bumped in Solution.xml
-- [ ] Version bumped in extracted ControlManifest.xml
-- [ ] Version shown in UI footer
+- [ ] Version bumped in every location the `pcf-deploy` skill's version table lists (ControlManifest.Input.xml, UI footer, Solution.xml, Solution ControlManifest.xml, pack.ps1)
 - [ ] Build succeeds via `scripts/Invoke-PcfBuildProd.ps1` (`npm run build:prod` — NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1 — and `pcf-scripts` exits 0 even when the build fails)
 - [ ] If deploying: solution import via the `pcf-deploy` skill (NEVER `pac pcf push`: it rebuilds in development mode)
 - [ ] current-task.md updated with files modified
@@ -1132,9 +1128,9 @@ When task has `bff-api`, `api`, or `minimal-api` tags:
 - [ ] Follow ADR-001 Minimal API patterns
 - [ ] Follow ADR-008 endpoint filter patterns
 - [ ] Build succeeds: `dotnet build`
-- [ ] Tests pass: `dotnet test`
-- [ ] **Publish-size verified (CLAUDE.md §10 / NFR-01)**: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — report absolute compressed size + delta vs prior baseline (~49.63 MB incl. PDBs); **≤60 MB HARD ceiling**; ≥+5 MB single-task delta → justify; ≥55 MB cumulative → flag architecture review
-- [ ] No new HIGH CVE: `dotnet list package --vulnerable --include-transitive`
+- [ ] Tests pass: `dotnet test` (Spaarke.sln) **and** `dotnet test tests/Spaarke.ArchTests/` (not in the solution)
+- [ ] **Publish-size delta reported (CLAUDE.md §10)**: per `.claude/rules/bff-hygiene.md` item 4 — against a fresh master build, never a recorded baseline; thresholds and procedure there
+- [ ] No new HIGH CVE: `dotnet list package --vulnerable --include-transitive` (no upstream fix → `bff-hygiene.md` item 5 escalation)
 - [ ] current-task.md updated with files modified
 
 ---

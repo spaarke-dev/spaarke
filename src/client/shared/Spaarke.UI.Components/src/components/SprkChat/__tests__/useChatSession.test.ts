@@ -12,6 +12,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useChatSession } from '../hooks/useChatSession';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -32,15 +33,17 @@ function createFetchResponse(body: unknown, status = 200): Response {
 
 // Test-only authenticatedFetch impl — wraps the mocked global fetch and
 // attaches a fixed Bearer header, the same surface real authenticatedFetch
-// presents to caller hooks.
-const mockAuthenticatedFetch = (url: string, init?: RequestInit) =>
+// presents to caller hooks: like it, a non-2xx is THROWN (AuthError for 401,
+// ApiError otherwise), never returned.
+const mockAuthenticatedFetch = throwingAuthenticatedFetch((url: string, init?: RequestInit) =>
   mockFetch(url, {
     ...init,
     headers: {
       ...(init?.headers ?? {}),
       Authorization: 'Bearer test-token',
     },
-  });
+  })
+);
 
 const DEFAULT_OPTIONS = {
   apiBaseUrl: 'https://api.example.com',
@@ -211,6 +214,90 @@ describe('useChatSession', () => {
       });
 
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('reports staleSession when the server no longer has the session (404 thrown as ApiError)', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('expired-session'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({ title: 'Not Found', status: 404 }, 404));
+
+      let outcome: { ok: boolean; staleSession?: boolean } | undefined;
+      await act(async () => {
+        outcome = await result.current.loadHistory();
+      });
+
+      expect(outcome).toEqual({ ok: false, staleSession: true });
+      // A stale session is a signal for the host, not an error to show.
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it('reports a non-404 failure as an error, not a stale session', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({ title: 'Server error', status: 500 }, 500));
+
+      let outcome: { ok: boolean; staleSession?: boolean } | undefined;
+      await act(async () => {
+        outcome = await result.current.loadHistory();
+      });
+
+      expect(outcome).toEqual({ ok: false });
+      expect(result.current.error).not.toBeNull();
+      expect(result.current.error!.message).toBe('Failed to load history (500): Server error');
+    });
+  });
+
+  // The `!response.ok` branches build "<action> (<status>): <reason>"; under the throwing
+  // authenticatedFetch that message has to be rebuilt in the catch (before: the bare ApiError text).
+  describe('error messages for thrown failures', () => {
+    it('createSession: "(status): <ProblemDetails detail>"', async () => {
+      mockFetch.mockResolvedValueOnce(
+        createFetchResponse({ title: 'Service Unavailable', status: 503, detail: 'AI is unavailable.' }, 503)
+      );
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      await act(async () => {
+        await result.current.createSession();
+      });
+
+      expect(result.current.error!.message).toBe('Failed to create session (503): AI is unavailable.');
+    });
+
+    it('createSession: an exhausted sign-in is reported as 401', async () => {
+      mockFetch.mockResolvedValueOnce(createFetchResponse('Unauthorized', 401));
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      await act(async () => {
+        await result.current.createSession();
+      });
+
+      expect(result.current.error!.message).toBe(
+        'Failed to create session (401): Authentication failed after all retry attempts'
+      );
+    });
+
+    it('switchContext: "(status): <reason>"', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(
+        createFetchResponse({ title: 'Bad Request', status: 400, detail: 'Too many documents.' }, 400)
+      );
+      await act(async () => {
+        await result.current.switchContext('doc-1');
+      });
+
+      expect(result.current.error!.message).toBe('Failed to switch context (400): Too many documents.');
+    });
+
+    it('deleteSession: "(status): <reason>" and the session is kept', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({}, 500));
+      await act(async () => {
+        await result.current.deleteSession();
+      });
+
+      expect(result.current.error!.message).toBe('Failed to delete session (500): HTTP 500');
+      expect(result.current.session).not.toBeNull();
     });
   });
 

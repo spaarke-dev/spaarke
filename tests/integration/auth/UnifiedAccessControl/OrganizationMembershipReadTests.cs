@@ -924,7 +924,8 @@ public class OrganizationMembershipReadTests
                     .Build(),
                 new StaticTokenCredential(),
                 _accessor,
-                NullLogger<ExternalParticipationService>.Instance);
+                NullLogger<ExternalParticipationService>.Instance,
+                filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
             _evaluator = RealEvaluator(participations, denyList ?? new OrgKeyedDenyList(), StandingReader().Object);
         }
 
@@ -1028,7 +1029,8 @@ public class OrganizationMembershipReadTests
             configuration,
             credential ?? new StaticTokenCredential(),
             accessor.Object,
-            NullLogger<ExternalParticipationService>.Instance);
+            NullLogger<ExternalParticipationService>.Instance,
+            filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
     }
 
     private static AccessibleRecordSetService RealEvaluator(
@@ -1040,6 +1042,7 @@ public class OrganizationMembershipReadTests
             membership.Object, participations, standing, denyList,
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 

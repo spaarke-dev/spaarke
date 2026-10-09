@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="235" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Docs + governance match the dedicated Model 1 stamp: ADR-028 amendment (keyless customer stamps, D13), project spec/design/CLAUDE.md, deployment guide, inventory, topology and packaging docs, root CLAUDE.md pointers, /provision-environment skill (G12, INCOMING §7 DoD)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T235 (G12; INCOMING-D12-D13 §7)</phase>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation and governance; touches an ADR, root CLAUDE.md and a skill (main session). Code comments only, no behaviour change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment and cross-repo governance text.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/adr, .claude/skills and root CLAUDE.md — main-session-only.</parallel-reason>
+    <tags>docs, governance, adr, provisioning, skill-directive, root-claude</tags>
+    <deps>225b, 226, 227, 228, 229, 230, 218</deps>
+  </metadata>
+
+  <prompt>Owner 2026-09-30 (D13, D-12): Model 1 is a per-customer dedicated stamp and customer stamps are keyless. Make every document that governs or describes provisioning say so; amend ADR-028 for D13.</prompt>
+
+  <goal>
+    No current document describes Model 1 as a shared environment or a shared tier (history may stay, marked as
+    history). ADR-028 carries the D13 amendment: customer stamps disable key/local auth on every data-plane resource
+    where Azure allows it, and the BFF uses the stamp identity; Key Vault keeps only secrets with no managed-identity
+    alternative. E-2 (OpenAI) stays until T186's live proof (T230's keyless proof, H13), then is retired. The project's
+    MUST rules and ADR Tensions list reflect the landed state (the time-boxed Document Intelligence key tension closes
+    with this task). Root CLAUDE.md pointer rows and `.claude/CHANGELOG.md` are updated; the /provision-environment
+    skill describes the dedicated stamp.
+  </goal>
+
+  <context>
+    <background>G12 (plan §4) lists the documents; a 2026-10-08 grep found ~30 files with shared-Model-1 wording (design.md 43 lines, spec.md 9, deployment guide 8, CHANGELOG 8, ADR-052 7, inventory 5, INFRASTRUCTURE-PACKAGING-STRATEGY 5, ci-cd-architecture 4, topology 3, infrastructure/README 3, provision-environment skill 2, plus C# comments). Some are legitimate history or legacy-value parsing (TenancyModel parser tests) and stay.</background>
+    <relevant-files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md; docs/adr/ADR-028-*.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/{spec.md,design.md,CLAUDE.md}</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; docs/architecture/{SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY,SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY,INFRASTRUCTURE-PACKAGING-STRATEGY,ci-cd-architecture}.md; infrastructure/README.md</file>
+      <file>CLAUDE.md (root, §17 pointer rows); .claude/CHANGELOG.md; .claude/skills/provision-environment/SKILL.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md §7</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (§2 D1–D29, §4 G12)</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>CLAUDE.md §6.5 (ADR amendment path B), §18 (maintaining CLAUDE.md)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">The ADR-028 amendment is path B, owner-decided in D13 (2026-09-30): concise .claude/adr and full docs/adr change together, with the decision cited.</constraint>
+    <constraint source="code wins">Describe what the code does now; where a doc and the code disagree, fix the doc. No behaviour change in this task (comments only in .cs).</constraint>
+    <constraint source="history">Do not rewrite history sections; mark superseded statements as superseded with the date and decision.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory every shared-Model-1 / shared-tier statement (grep in the context list); classify current-claim vs history vs legacy-value code.</step>
+    <step order="2">ADR-028 amendment (D13) in both ADR files; E-2 status; CHANGELOG entry.</step>
+    <step order="3">Project spec.md, design.md, CLAUDE.md (MUST rules, ADR Tensions — close the Document Intelligence key tension if the code confirms it).</step>
+    <step order="4">Deployment guide, inventory, topology, packaging, ci-cd docs, infrastructure README, C# comments.</step>
+    <step order="5">Root CLAUDE.md pointer rows; /provision-environment skill; INCOMING §7 DoD row; plan G12 closed.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The step-1 grep returns only lines marked as history/superseded or legacy-value code.</criterion>
+    <criterion testable="true">ADR-028 (both files) contains the D13 amendment with its date and decision reference.</criterion>
+    <criterion testable="true">No behaviour change: ControlPlane and ArchTests suites pass unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-08">COMPLETED (SESSION 44). Commits 087d677ed (ADR-028 Amendment A6 + .claude), 642c6de0a (docs + C# comments, helper), 74d2b5e97 (spec/design, helper), 7505ea0d8 (RAG guidance, comments, tenancy column description, G12/DoD closed, ISS-006), 5dc95dcf0 (review fixes).
+    - A6 (path B, owner D13): keyless customer stamps — local auth off on every stamp data-plane resource, documented exclusions (App Insights ingestion, ACS), stamp vault contents, H13 keyless proof; dev/demo key-if-configured window (named: dev Document Intelligence key). Concise-only (no full docs/adr copy exists). Project ADR-028 tension closed.
+    - Root CLAUDE.md deliberately NOT changed (deviation from the POML's step 5): its provisioning/auth pointer rows were already right, and the keyless rule lives where provisioning agents read it (constraints/provisioning.md, cross-linked with A6). Avoids a conflict with PR #1370.
+    - FOUND + FIXED: five guides (BYOK, RAG-TROUBLESHOOTING, AI-DEPLOYMENT, RAG-ARCHITECTURE, auth-AI-azure-resources) told operators to set Analysis:DefaultRagModel=Dedicated; in code that reads {tenantId}-knowledge, which nothing creates (Shared = the stamp's own AiSearch:KnowledgeIndexName). Corrected; the dead mode filed as #1432 (ISS-006, BFF). Two of the wrong texts came from this project (T230b).
+    - Live (dev, under the 218e SpaarkeMaster OK): sprk_tenancymodel column description set to the schema script's D-12 text; options unchanged; SpaarkeMaster source re-exported (the re-export also carries a newer Console bundle another project had deployed to dev — intended: the export mirrors dev).
+    - Answers recorded: Power BI per-customer F-SKU later (no shared pool), Copilot agent per customer, Redis superseded by D12. Plan G12 + INCOMING §7 docs item closed.
+    QUALITY GATES: one full review pass — F1 (three more guides with the Dedicated advice) and four F2 fixed; ArchTests 841/841, ControlPlane 2347/0 (1 skip), BFF build 0/0 (BFF change is comments only; no publish-size effect).
+    KNOWN LIMITS: the sprk_tenancymodel local option-set description still carries pre-D-12 text — an attribute PUT does not update a local option set's description and the Web API has no direct update for it (labels are correct; cosmetic metadata).</note>
+  </notes>
+</task>

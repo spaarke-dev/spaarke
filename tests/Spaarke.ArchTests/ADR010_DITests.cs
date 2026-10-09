@@ -190,7 +190,6 @@ public class ADR010_DITests
         //       indirection — the facade boundary is a binding architecture rule, and removing them
         //       would violate it. 2 impls exist for IPreferenceMemoryCapture.
         //     IProvisioningEnqueuer     -> ServiceBusProvisioningEnqueuer   test seam (2 doubles)
-        //     ITenantContainerResolver  -> OptionsTenantContainerResolver   test seam (1 double)
         //     IAdvisoryCapabilityRunner -> AdvisoryCapabilityRunner         test seam (1 double)
         //       Each is mocked/faked in tests, which is ADR-010's own testing-seam exception.
         //     ITenantBudgetPolicy       -> TenantBudgetPolicy         ⚠️ WEAKEST — see below
@@ -286,7 +285,31 @@ public class ADR010_DITests
         // two implementations and is not counted; this one has one today because only the item search names a container in
         // its body. Registering a concrete would mean the filter naming each request type, so a new container-scoped body
         // would silently skip the rule. It is a request contract, not a service, and never registered in DI.
-        const int knownOneToOneCeiling = 159;
+        //
+        // ───────── Ceiling LOWERED 159 → 158, 2026-10-06 (customer-provisioning-orchestration-r1 task 227f) ─────────
+        // ITenantContainerResolver -> OptionsTenantContainerResolver REMOVED with the I4 diagnostic route it served: no
+        // consumer remained (the L2 probe that called the route was unregistered; H13's I4 reads the deployed app
+        // settings), and SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers (T227d).
+        //
+        // ───────── Ceiling raised 158 → 159, 2026-10-06 (customer-provisioning-orchestration-r1 task 230b) ─────────
+        // IAiKeylessProbe -> AiKeylessProbe. SEAM JUSTIFICATION: it is the Services/Ai/PublicContracts facade (ADR-013) through
+        // which Infrastructure/Diagnostics/KeylessProofService reaches the AI-owned probes, and the module boundary the
+        // keyless-proof contract test substitutes — the real probes call Azure OpenAI, Document Intelligence, AI Search,
+        // Cosmos, Blob and Content Safety. Same category as IFileSummarizeAi / IPreferenceMemoryCapture.
+        //
+        // ───────── Ceiling LOWERED 159 → 157, 2026-10-06 (customer-provisioning-orchestration-r1 task 254) ─────────
+        // The two "⚠️ WEAKEST" seams grandfathered above are gone. ITenantBudgetPolicy is replaced by the concrete
+        // AiSpendLimit; ITenantTokenLedger by IAiSpendLedger, which has TWO implementations (RedisAiSpendLedger — the
+        // "Redis successor" that note anticipated — and InMemoryAiSpendLedger), so it is not a 1:1 mapping.
+        //
+        // ───────── Ceiling raised 157 → 158, 2026-10-09 (unified-access-control-r2 task 176, #1511) ─────────
+        // IRetrievalAccessTrim -> RetrievalAccessTrim. SEAM JUSTIFICATION: it is the Services/Ai/PublicContracts facade
+        // (ADR-013 / CLAUDE.md §10) the task POML requires for the one access trim every AI retrieval path applies, so a
+        // CRUD caller can trim without reaching IRagService. It is also a real test seam: PermitAllRetrievalAccessTrim
+        // (tests/integration/Shared) is its double in the suites that test what retrieval callers do with rows they MAY
+        // see, while the trim itself is tested for real in Issue1511_AiRetrievalAccessTrimTests. Same category as
+        // IRelocatedFileIndexing / IAiKeylessProbe. Verified as the only addition (master measured 157).
+        const int knownOneToOneCeiling = 158;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

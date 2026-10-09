@@ -32,6 +32,7 @@ import type {
   GetDocumentContentOptions,
   EmailComposeContent,
   ComposeEmailResult,
+  EmailIdentityKeys,
 } from './types';
 
 /**
@@ -214,6 +215,19 @@ export interface IHostAdapter {
    * non-fatal: the save itself has already succeeded.
    */
   writeDocumentStamp(documentId: string): Promise<'written' | 'unchanged'>;
+
+  /**
+   * The open email's identity keys — its RFC Message-ID and its Exchange item id (spaarkeai-word-add-in-r1 task 120,
+   * UAT round 12 O6) — for asking Spaarke whether the email is already saved, and (task 121) for the Message-ID the
+   * Save tab sends as `email.internetMessageId`. Only supported when
+   * {@link HostCapabilities.canResolveEmailIdentity} is `true` (Outlook read mode). Callers MUST check it first.
+   *
+   * Optional on the interface: an adapter without the capability need not implement it.
+   *
+   * @returns The keys, or `null` when the item carries no Message-ID (nothing to look up).
+   * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` when called outside read mode.
+   */
+  getEmailIdentityKeys?(): Promise<EmailIdentityKeys | null>;
 
   /**
    * Register a handler that fires when the open document's CONTENT changes (spaarkeai-word-add-in-r1

@@ -315,6 +315,63 @@ export async function completeStampIdentity(outcome: DocumentIdentityOutcome): P
   }
 }
 
+/** Task 120: the saved-email lookup (`POST /api/documents/resolve-email-identity`). */
+const RESOLVE_EMAIL_IDENTITY_ENDPOINT = '/api/documents/resolve-email-identity';
+
+/**
+ * Task 120 (owner UAT round 12 O6): is the email open in Outlook already saved to Spaarke? Asks
+ * `POST /api/documents/resolve-email-identity` with the email's two keys (see `EmailIdentityKeys`) and returns the
+ * saved `.eml` document's identity — the SAME resolved outcome resolve-identity produces, so the Save tab's green box,
+ * the "Filed to" card and the filing picker (task 111) work on it unchanged.
+ *
+ * Returns `null` for EVERY other answer — not saved (200 `not_saved`), 403 (the newest saved copy is not the caller's
+ * to read), 503, 400, network: the pane then shows its ordinary save form, exactly as before this lookup existed. An
+ * email has no duplicate-row hazard to guard (saving it again is allowed), so unlike a Word document an undetermined
+ * answer never blocks Save. Never throws. Keys are sent in the body, never in a URL.
+ */
+export async function resolveEmailIdentity(
+  keys: { internetMessageId: string; exchangeItemId: string | null } | null | undefined
+): Promise<DocumentIdentityOutcome | null> {
+  const internetMessageId = keys?.internetMessageId?.trim();
+  if (!internetMessageId) {
+    return null;
+  }
+  try {
+    const response = await apiClient.post<BffDocumentIdentityResponse>(RESOLVE_EMAIL_IDENTITY_ENDPOINT, {
+      internetMessageId,
+      ...(keys?.exchangeItemId ? { exchangeItemId: keys.exchangeItemId } : {}),
+    });
+    if (!response.resolved || !cleanGuid(response.documentId)) {
+      return null;
+    }
+    return toResolvedOutcome(response);
+  } catch (err) {
+    console.warn('[Spaarke] Email identity lookup failed; showing the save form', err);
+    return null;
+  }
+}
+
+/**
+ * Task 120: the identity of the email document a pane save JUST created — read by its id (task 112's
+ * `GET /api/documents/{id}/identity`, through {@link completeStampIdentity}), so closing and reopening the pane, Find
+ * and To Do all see the saved `.eml`. A failed read keeps the id with the record UNKNOWN (`relatedRecordKnown: false`):
+ * the box then says the filing record is not available here and never offers to file it again. Never throws.
+ */
+export async function identityOfSavedDocument(documentId: string): Promise<DocumentIdentityOutcome | null> {
+  const id = cleanGuid(documentId);
+  if (!id) {
+    return null;
+  }
+  return completeStampIdentity({
+    kind: 'resolved',
+    documentId: id,
+    documentName: '',
+    fileName: '',
+    relatedRecord: null,
+    relatedRecordKnown: false,
+  });
+}
+
 export function applyStampPrecedence(
   urlOutcome: DocumentIdentityOutcome,
   stampDocumentId: string | null

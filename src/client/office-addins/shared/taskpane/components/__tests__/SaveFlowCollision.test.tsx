@@ -384,8 +384,12 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       const windowOpen = jest.spyOn(window, 'open').mockImplementation(() => ({ opener: {} }) as unknown as Window);
       const openBrowserWindow = Office.context.ui.openBrowserWindow as jest.Mock;
       openBrowserWindow.mockClear();
+      // Task 120: the opener follows the host's actual OpenBrowserWindowApi support (the runtime requirement-set
+      // check), not the `canOpenRecord` prop — which is now true on the web too (window.open).
+      const isSetSupported = Office.context.requirements.isSetSupported as jest.Mock;
+      isSetSupported.mockImplementation((name: string) => name !== 'OpenBrowserWindowApi');
       try {
-        await triggerCollision(UNFILED_COLLISION_PROBLEM, { canOpenRecord: false });
+        await triggerCollision(UNFILED_COLLISION_PROBLEM, { canOpenRecord: true });
         mockFetch.mockClear();
         mockFetch.mockImplementation(async () => textResponse(true, 200, OPEN_LINKS));
 
@@ -395,6 +399,8 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
         expect(openBrowserWindow).not.toHaveBeenCalled();
       } finally {
         windowOpen.mockRestore();
+        isSetSupported.mockReset();
+        isSetSupported.mockReturnValue(true);
       }
     },
     TEST_TIMEOUT_MS

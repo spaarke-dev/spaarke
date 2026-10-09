@@ -55,6 +55,7 @@ public sealed class PostUploadIndexingEnqueuerTests
             _fileIndexingMock.Object,
             _jobSubmissionMock.Object,
             _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(),
             Options.Create(_analysisOptions),
             Options.Create(_options),
             _loggerMock.Object);
@@ -82,6 +83,37 @@ public sealed class PostUploadIndexingEnqueuerTests
             CorrelationId: "corr-id-1");
 
     // ===== OBO sync path =====================================================
+
+    /// <summary>
+    /// #1510 (unified-access-control-r2 task 177): the OBO path is where the Compose create-on-save indexes (inline, not
+    /// through the job handler), so it recovers the parent the document row names when the caller sent none. Beyond the
+    /// task's named cases: without it the Compose producer the task lists would not be fixed.
+    /// </summary>
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_NoParentButADocument_IndexesUnderTheParentTheRowNames()
+    {
+        var document = Guid.Parse("4d000000-0000-4000-8000-0000000017d1");
+        var matter = Guid.Parse("4d000000-0000-4000-8000-0000000017d2");
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", document, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", document)
+            {
+                ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter) { Name = "Acme v. Widget" },
+            });
+        FileIndexRequest? captured = null;
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 1, Duration = TimeSpan.FromSeconds(1) });
+        var sut = new PostUploadIndexingEnqueuer(_fileIndexingMock.Object, _jobSubmissionMock.Object, _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(dataverse.Object), Options.Create(_analysisOptions), Options.Create(_options),
+            _loggerMock.Object);
+
+        await sut.EnqueueIfApplicableAsync(ValidRequest() with { DocumentId = document.ToString() }, CreateHttpContext(), CancellationToken.None);
+
+        captured!.ParentEntity.Should().Be(new ParentEntityContext("matter", matter.ToString(), "Acme v. Widget"));
+    }
+
 
     [Fact]
     public async Task EnqueueIfApplicableAsync_HappyPath_CallsFileIndexingService_WithOboContext()

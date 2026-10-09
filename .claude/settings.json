@@ -2,12 +2,17 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "model": "opus",
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "4",
+    "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": "4"
   },
+  "workflowSizeGuideline": "small",
+  "autoCompactWindow": 400000,
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -58,7 +63,23 @@
       "PowerShell(Remove-AzKeyVaultSecret *)",
       "PowerShell(Undo-AzKeyVaultSecretRemoval *)",
       "PowerShell(Set-AzKeyVaultSecret *ClientSecret*)",
-      "PowerShell(Set-AzKeyVaultSecret *client-secret*)"
+      "PowerShell(Set-AzKeyVaultSecret *client-secret*)",
+      "Bash(git stash pop *)",
+      "Bash(git stash apply *)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear *)",
+      "PowerShell(git stash pop *)",
+      "PowerShell(git stash apply *)",
+      "PowerShell(git stash drop *)",
+      "PowerShell(git stash clear *)",
+      "Bash(git *stash pop*)",
+      "Bash(git *stash apply*)",
+      "Bash(git *stash drop*)",
+      "Bash(git *stash clear*)",
+      "PowerShell(git *stash pop*)",
+      "PowerShell(git *stash apply*)",
+      "PowerShell(git *stash drop*)",
+      "PowerShell(git *stash clear*)"
     ],
     "allow": [
       "Read(**)",

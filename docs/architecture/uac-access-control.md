@@ -119,6 +119,88 @@ Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/Cal
 
 ---
 
+## A Filed Child's Access Follows Its Parent (owner round 84, task 174)
+
+**Rule (binding).** A work assignment or project that has a parent is enforced with its EFFECTIVE Secure flag and Access
+Permission: the most restrictive of its own `sprk_issecure` / `sprk_accesspermission` and those of every matter or
+project above it in the filing chain (secure-if-any; Restricted over Limited over Standard). A matter files under nothing
+and is unchanged. Task 175 makes the STORED values cascade and locks them on the child; until a stored value catches up
+(inheritance pending, Refused or Failed, or a cascade in flight) enforcement computes the value from the chain and fails
+closed.
+
+- **One walk.** `SecureRootInheritance.ReadSecureParentsAsync` / `ReadSecureParentsOfManyAsync` (#1410) climbs the chain
+  (bounded by `MaxFilingDepth`, cycle-safe) and reads each ancestor's Access Permission in the same parent read as its
+  Secure flag. `EffectiveRootFlags` folds that answer into the record's own `RootRecordFlags`.
+- **Where it applies.** The read path (`AccessibleRecordSetService`: direct-only cancellation, Restricted, the systemuser
+  plane's Restricted survivor — one walk per composition shared with the No Access veto) and every access caller of the
+  flag read through `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync`: the write-time grant policy, the
+  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the share-link refusal, the
+  Restricted share remover and the Assigned-To materializer. The No Access guard and enforcer treat a record with a secure
+  ancestor as secure (Q4's "secure" is the record or any filing ancestor, round 82).
+- **The contact plane honours a secure parent's No Access list (#1425).** The read-time contact veto and the write-time
+  grantee check ask every secure ancestor's list, each carrying its own referenced organizations, in the same deny-list
+  query.
+- **Fails closed.** An unreadable filing row, pair type or ancestor flag, an EMPTY ancestor flag, or a chain past the bound
+  makes the record `RootRecordFlags.Unreadable` (secure AND Restricted): removed on the read path, refused as "could not be
+  read" at grant time.
+- **Display.** Task 064's per-record read (`GET /api/v1/records/{table}/{id}/no-access`) reports the effective `secure`,
+  `accessPermission` and `inheritedFrom`; Manage Access gates and marks "No effect" from the stricter of those and the
+  record's stored values.
+- **Not routed (own values on purpose).** `/unshare-user`'s last-reader rule (S5) follows the stored ownership.
+- **Readers outside the flag read (#1478, task 175)** — provisioning's external-flagged creator / colleague rule, the
+  secure-child share synchronizer's Restricted read, SPE container membership, Office edit — consult
+  `EffectiveRootFlags.RestrictedThroughFilingAsync` beside the stored column, so they do not fail open while a stored value
+  catches up; the Assigned-To job's Restricted sweep also visits the work assignments and projects filed below a Restricted
+  matter or project.
+
+### The parent sets a floor; a child may be stricter (owner rounds 84 and 87, task 175)
+
+Round 84 REPLACES round 6 item 4 ("parent unsecured → children stay secure") and task 158's "no unsecure cascade"
+constraint. Round 87 refines round 84: the parent is a FLOOR, not an equality.
+
+- **The rule.** A work assignment or project filed under a matter or project stores max(own, floor):
+  - the floor: Secure if any ancestor is (the 174 walk, `MaxFilingDepth`); the most restrictive Access Permission arriving
+    through its DIRECT parents (each folded with what is above it);
+  - own: what was set on the record by hand (Make Secure; a stricter Access Permission on the form), or held while parentless.
+  An inherited value follows the parent both ways; an own value stays when the parent loosens. A re-file never loosens: what
+  the record held beyond the new floor becomes its own. A parentless record keeps and edits its own values.
+- **The access record.** `sprk_accessinheritance` (JSON, BFF-written; `docs/data-model/access-inheritance.md`) keeps the
+  floor last applied, the parents it came from, and the own values — so a user's edit, a parent's change and a re-file are
+  told apart. Existing rows: the backfill rule (equal to the floor = inherited; stricter = own), applied on first sight.
+  An empty record never loosens anything. The column is field-secured (only the BFF application users read or write it),
+  and every BFF writer refuses a caller-supplied write naming it (`sdap.access.access_record_server_only`): a forged
+  "inherited" would otherwise let a parent's un-secure take a hand-set Secure away without F3 (verifier F1-1). No record is
+  trusted while the column is not secured, and an EMPTY one is decided on only once the BFF's read of the column is proven.
+  The generic BFF writers refuse `sprk_issecure` on a work assignment or project (`sdap.access.secure_flag_transition_only`):
+  only Make Secure, Remove Secure and the cascade set it.
+- **One invariant owner:** `SecureRootInheritance.FollowParentsAsync` (`SecureRootInheritance.Cascade.cs`), called by the
+  parent's `/unsecure-project` (everything filed below it, top-down, bounded at 50, the rest left to the job), by the BFF
+  re-file writers (`SecureAfterWriteAsync`), right after a caller's Make Secure on a work assignment or project (records the
+  own secure at once), and by `SecureRootInheritanceJob` (every 5 minutes: every work assignment and project decided over
+  one batched walk; only differing values written; a project changed in the run sends what is filed under it round again;
+  25 un-secures and 500 other writes per run, the rest deferred with a cursor).
+- **Un-secure is the endpoint's own steps.** `UnsecureProjectEndpoint.UnsecureInheritedAsync` runs task 158's sequence with
+  no caller (no F3) and a TEAM owner — the business-unit team the ownership rule (`RecordOwnershipResolver`, record-first,
+  D-11) gives a record filed under its now-ordinary parents; never the Secure Record Owners team. It runs only for an
+  INHERITED Secure. Ownership is moved and read back first, related records leave isolation, the shares are revoked, the
+  flag is cleared LAST. Existing documents stay in the record's former container (as for `/unsecure-project` on a parent);
+  reads are broker-only either way.
+- **Fail closed.** Order inside one record: a STRICTER Access Permission first, then the un-secure, then a LOOSER Access
+  Permission, then the access record. A step that does not complete leaves the record at the more restrictive state (still
+  flagged secure, permission not loosened, the access record still saying "secure applied"), reports it, and the next call
+  or run completes it. An unreadable filing, parent, own flag or access record loosens nothing.
+- **The floor lock.** Tightening is never refused (Make Secure on a child is allowed). `POST /unsecure-project` on a work
+  assignment or project whose floor is secure answers **409 `sdap.access.access_follows_parent`** (extensions
+  `parentRecordType`, `parentRecordId`, `parentName`); one whose secure is its own is un-secured by its F3 holder as a
+  parentless record is. A BFF update of `sprk_accesspermission` below the floor, or of `sprk_issecure` to false under a secure
+  floor, is refused with the same code through `SecureRootFilingGate`; an unreadable filing refuses
+  (`record_owner_parent_undetermined`). `GET /can-manage-access` reports `followsParents`, `parentUnverifiable`,
+  `floorSecure` and `floorAccessPermission`. The ribbon (`access_ribbon.js` 1.8.0) hides Remove Secure when the floor is
+  secure (and both commands when the filing cannot be read). The form library (`sprk_accesspermission_inherited.js` 1.2.0)
+  puts back a looser pick and says "inherited from" / "set on this record". Manage Access shows the parent's floor beside the
+  Restricted / Secure banner and offers no Access Permission below the floor. Grants and shares on a child stay available.
+  `/user-shares` marks a share a secure parent passed on (`inheritedFrom`), shown read-only.
+
 ## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
 
 **The gate is Write.** `DelegationRuleFilter` admits a caller to every `/api/v1/external-access/*` route (grant, invite, share, revoke, `/can-manage-access`) only when the caller holds **Write** on the record, evaluated as the caller over OBO (owner decision B-14, retained). Share is never consulted by the gate, and the record's Access Permission / Secure flags do not change it — they govern WHICH grant types apply, at write time (task 138).
@@ -139,6 +221,7 @@ No level carries Assign. Collaborate and Full Access carry Share so a Write-hold
 - `ExternalAccessLevels.GrantCeilingFor` maps the rights to a ceiling over Read / Write / Delete only: Full Access iff Read+Write+Delete; Collaborate iff Read+Write; View Only iff Read; otherwise none (→ **403** `sdap.access.grant.caller_cannot_grant`). Create, Append, AppendTo and Share are not consulted (RetrievePrincipalAccess need not report CreateAccess on an existing record).
 - A request above the ceiling is **narrowed, not refused**: written at the ceiling, and the response says so (`grantedAccessLevel`, `narrowed: true`). `/share-user` intersects right by right (Dataverse's own rule) and reports its existing `narrowed` flag.
 - **Never silently lower.** When the request was narrowed and the grantee already holds more (a higher active grant row, or share rights the narrowed mask lacks), the write is refused with **409** `sdap.access.grant.would_lower_existing` — the grant upsert updates levels in place and ModifyAccess replaces rights, so without this a "Full Access please" capped to Collaborate would lower someone else's Full Access grant. An explicit request for a lower level (not narrowed) is a deliberate downgrade and is applied.
+- **A re-add over a lapsed grant is a SET (owner round 80, task 113).** On `/grant` and `/invite-and-grant` (the Manage Access re-adds send no date), a request with no expiry over a key on which no row still confers is restored at the PICKED level with today + 90; the 200 reports the level written. The ceiling, the contact-issuer expiry cap and never-lower still apply (a narrowed re-add over a lapsed HIGHER row is still 409 `would_lower_existing`). The Assigned-To rule does not opt in: a dateless request it sends over a lapsed key is refused and writes nothing.
 - **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.CheckGranteeNoAccessAsync` → `ResolveDenyVetoAsync`). The check answers a **tri-state** (task 142 r4, owner round 13 item 4): Allowed, Denied (an entry), or Unverifiable — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or referenced organizations, a fail-closed deny-list read). Unverifiable refuses too (fail closed), but as a fault — **503** `sdap.access.grant.no_access_unverifiable` — never absorbed into `grantee_denied`. The read path removes both (unchanged). The internal-user No Access list on `/share-user` is task 143's.
 
 **Where the checks live (WP-1).** The policy (task 138), ceiling, never-lower and No Access checks run inside the one grant-writing core, `GrantExternalAccessEndpoint.CreateGrantAsync`, which takes a REQUIRED `GrantCeiling`; `/invite-and-grant` runs the same `CheckGrantAsync` BEFORE onboarding (resolving an existing contact by email read-only), so a refusal leaves no Contact or CIAM account behind. The ArchTest `GrantCeilingGuardTests` pins that the core is the only writer of a grant's level and that every call supplies a ceiling. Assigned-To auto-grants (task 142) are uncapped Collaborate (owner rule 5) and supply their own named ceiling.

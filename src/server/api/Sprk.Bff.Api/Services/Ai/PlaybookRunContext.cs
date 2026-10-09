@@ -329,6 +329,7 @@ public class PlaybookRunContext
             TenantId = TenantId,
             UserContext = UserContext,
             UserId = UserId,
+            CallerObjectId = StartedByOid,
             ModelDeploymentId = node.ModelDeploymentId,
             CorrelationId = RunId.ToString()
         };

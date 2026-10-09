@@ -172,7 +172,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES, formatRelativeTime, getXrm } from "@spaarke/ui-components";
+import { formatRelativeTime, navigateToWebResourceSurfaceAsync } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -416,32 +416,18 @@ function formatModifiedOn(iso: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Wizard launch helper — Xrm.Navigation.navigateTo
+// Wizard launch helper — navigateToWebResourceSurfaceAsync (in-app; navigateTo fallback)
 //
-// Replicates the canonical pattern in `LegalWorkspace/src/components/Shell/
-// WorkspaceGrid.tsx` (~lines 720-760). Same shape: `pageType: "webresource"`,
-// webresourceName `sprk_workspacelayoutwizard`, data params encode mode +
+// Same data contract as `LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx`
+// (`handleEditLayout`): webresourceName `sprk_workspacelayoutwizard`, data params encode mode +
 // layoutId + bffBaseUrl + (for saveAs) layoutTemplateId + sectionsJson + name
 // + templateFilter (task 102 — forces SpaarkeAi 6-template subset).
 // ---------------------------------------------------------------------------
-
-// Xrm is resolved via the shared cross-frame `getXrm()` from
-// `@spaarke/ui-components` (task 081 / C-8 — this file previously defined a
-// local `getXrm` with its own window/parent/top `??` chain).
 
 async function launchEditWizard(
   layout: WorkspaceLayoutDto,
   bffBaseUrl: string,
 ): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('navigation') as any;
-  if (!xrm?.Navigation?.navigateTo) {
-    console.warn(
-      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
-    );
-    return;
-  }
-
   const mode: "edit" | "saveAs" = layout.isSystem ? "saveAs" : "edit";
 
   const parts: string[] = [];
@@ -460,26 +446,20 @@ async function launchEditWizard(
   );
   const data = parts.join("&");
 
-  try {
-    await xrm.Navigation.navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_workspacelayoutwizard",
-        data,
-      },
-      {
-        target: 2,
-        width: OOB_MODAL_SIZES.wizard.width,
-        height: OOB_MODAL_SIZES.wizard.height,
-        title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
-      },
+  // Task 113 (ontology-platform-r1 D-26): IN-APP through the shared primitive while the Console's
+  // InAppWizardHost is mounted (always, in the Console); the same navigateTo(webresource) dialog
+  // otherwise. Resolves when the wizard closes.
+  const outcome = await navigateToWebResourceSurfaceAsync({
+    webresourceName: "sprk_workspacelayoutwizard",
+    data,
+    title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
+  });
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
+    console.warn(
+      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
     );
-  } catch (err: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.errorCode;
-    if (code !== 2) {
-      console.warn("[ManageWorkspacesPane] Wizard launch error:", err);
-    }
   }
 }
 
@@ -526,15 +506,6 @@ function consumeWizardDialogResult(): void {
 }
 
 async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('navigation') as any;
-  if (!xrm?.Navigation?.navigateTo) {
-    console.warn(
-      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
-    );
-    return;
-  }
-
   const parts: string[] = [
     "mode=create",
     `bffBaseUrl=${encodeURIComponent(bffBaseUrl ?? "")}`,
@@ -542,26 +513,18 @@ async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
   ];
   const data = parts.join("&");
 
-  try {
-    await xrm.Navigation.navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_workspacelayoutwizard",
-        data,
-      },
-      {
-        target: 2,
-        width: OOB_MODAL_SIZES.wizard.width,
-        height: OOB_MODAL_SIZES.wizard.height,
-        title: "Create New Workspace",
-      },
+  // Task 113 (D-26): in-app while the host is mounted, else the same navigateTo (see launchEditWizard).
+  const outcome = await navigateToWebResourceSurfaceAsync({
+    webresourceName: "sprk_workspacelayoutwizard",
+    data,
+    title: "Create New Workspace",
+  });
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
+    console.warn(
+      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
     );
-  } catch (err: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.errorCode;
-    if (code !== 2) {
-      console.warn("[ManageWorkspacesPane] Create wizard launch error:", err);
-    }
   }
 }
 

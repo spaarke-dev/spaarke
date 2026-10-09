@@ -29,7 +29,7 @@
 
     3 v3 additions (per design.md §6.1 rows 528-530):
       7. sprk_currentrunid          String(40),  Optional  (§4D I5 concurrency guard; ADR-044 canonical string form)
-      8. sprk_tenancymodel          Choice,      Optional  (§3A A1 Model1Shared=0 / Model2Dedicated=1)
+      8. sprk_tenancymodel          Choice,      Optional  (§3A A1 Model1=0 / Model2=1; labels renamed from Model1Shared / Model2Dedicated by T224, values kept)
       9. sprk_tenantid              String(40),  Optional  (D18 Entra tenant; ADR-044 canonical string form)
 
     3 v3.3 additions (per design.md §14A):
@@ -156,7 +156,7 @@ $stringCols = @(
     },
     @{
         N    = "sprk_solutionversion"; D = "Dataverse Solution Version"; L = 50; R = "None"
-        Desc = "32-hex fingerprint of the Dataverse solution set H6 imported (owner D17, version-compatibility-matrix.md v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
+        Desc = "The Dataverse package H6 installed: SpaarkeMaster {version} ({managed|unmanaged}) (T218b, version-compatibility-matrix.md v3; was a 32-hex set fingerprint, owner D17 v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
     },
     @{
         # PascalCase schema name is intentional per project convention — see design.md §7.9

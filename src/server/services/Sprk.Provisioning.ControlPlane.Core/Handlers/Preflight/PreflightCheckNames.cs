@@ -24,9 +24,6 @@ public static class PreflightCheckNames
     /// <summary>Azure OpenAI regional TPM headroom (per-model 150+200+30+350 sum per NFR-12).</summary>
     public const string AzureOpenAiTpmHeadroom = "AzureOpenAiTpmHeadroom";
 
-    /// <summary>Dataverse environment-creation rate slots in the current hourly bucket (~4/hr typical per tenant).</summary>
-    public const string DataverseEnvCreationRate = "DataverseEnvCreationRate";
-
     /// <summary>Subscription vCPU quota headroom per SKU family per region.</summary>
     public const string SubscriptionVCpuQuota = "SubscriptionVCpuQuota";
 

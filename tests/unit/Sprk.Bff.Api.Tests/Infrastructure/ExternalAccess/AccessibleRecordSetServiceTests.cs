@@ -1833,6 +1833,7 @@ public class AccessibleRecordSetServiceTests
         IContactIdentityStore? identityStore = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
                identityStore ?? UnlinkedIdentityStore(), InternalSystemUsers(),
+               Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
@@ -2457,7 +2458,8 @@ public class AccessibleRecordSetServiceTests
             IReadOnlyList<ExternalRootGrant>? matterGrants = null,
             IReadOnlyList<ExternalRootGrant>? workAssignmentGrants = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
             _grantSet = new ExternalGrantSet
             {
@@ -2565,7 +2567,8 @@ public class AccessibleRecordSetServiceTests
 
         public ThrowingFlagParticipationService(IReadOnlyList<ExternalParticipation> participations)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
             _grantSet = new ExternalGrantSet
             {

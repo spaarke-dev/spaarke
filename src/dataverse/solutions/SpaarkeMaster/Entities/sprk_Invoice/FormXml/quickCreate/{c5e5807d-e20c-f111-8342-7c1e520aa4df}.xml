@@ -1,0 +1,143 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{c5e5807d-e20c-f111-8342-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab id="F931FFE2-B873-473F-8F95-9502F0AA3F5E" name="tab_1" showlabel="false" labelid="{7f34b09d-0c0e-453c-9d85-5f8e1ff82e45}">
+          <labels>
+            <label description="New Tab" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="34%">
+              <sections>
+                <section id="0C655D4E-C6E3-424E-9AF5-71E72D30D12E" name="tab_1_column_1_section_overview" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{9de21650-dc1a-4c19-adc7-5e73b02d1fa8}">
+                  <labels>
+                    <label description="OVERVIEW" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{fa213d05-1b71-44e5-a70e-10b8b05987c7}" locklevel="0" colspan="1" rowspan="1" visible="false" labelid="{abc06b71-b2ef-47ec-9ca1-55336da991e3}">
+                        <labels>
+                          <label description="Matter" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_matter" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{4848a16f-0ba2-4049-9e74-1d9ea178d7fd}" locklevel="0" colspan="1" rowspan="1" visible="false" labelid="{1acf31e7-6276-4c06-8a4f-7a5cb0b5b41e}">
+                        <labels>
+                          <label description="Project" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_project" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_project" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{50435560-e404-440c-be65-7c5acdd9e2e5}" locklevel="0" colspan="1" rowspan="1" labelid="{baaaa7e5-d7b4-4792-a7b1-766631a9e74a}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{3acd8d7c-2ca3-4f2a-a81b-283f1b098dc9}" locklevel="0" colspan="1" rowspan="1" labelid="{7eaa7e82-f078-43d2-81ec-fe2bb0c8c508}">
+                        <labels>
+                          <label description="Invoice Number" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoicenumber" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_invoicenumber" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{ee33d738-d729-4253-a6b8-59a73c40d6f8}" locklevel="0" colspan="1" rowspan="1" labelid="{f88c7338-b18b-49f2-9fca-ca48b1f037f5}">
+                        <labels>
+                          <label description="Total Amount" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section id="02DECBA0-3AE2-484D-A19F-C5353AF4F4F2" name="tab_1_column_2_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{8438bfdc-ed7d-48da-81b7-9da8b6c1a2b1}">
+                  <labels>
+                    <label description="STATUS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="266FE48D-4D04-4E9A-8C5A-7DEF9A2F059B" labelid="{68847385-88f8-4ccd-a9f6-6abbdd0d5d3b}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a439b0b8-7b1a-4d65-8ec3-63cbd157d140}" locklevel="0" colspan="1" rowspan="1" labelid="{7e7042d4-26e4-46f1-aa82-5d08a001f77f}">
+                        <labels>
+                          <label description="Invoice Status" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoicestatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_invoicestatus" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{d75fd025-fc6a-49e0-ba7b-af8e2d1bc623}" locklevel="0" colspan="1" rowspan="1" labelid="{b7a94d46-10a1-4b8a-bd5f-c2f32c89b0a9}">
+                        <labels>
+                          <label description="Invoice Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoicedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_invoicedate" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section id="46FD66EA-B686-41D9-AAE0-C565BD78EC1F" name="tab_1_column_3_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{63e5ccb3-dbd2-4aa9-9cdc-917950ea407f}">
+                  <labels>
+                    <label description="JSON FILE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{09e7e214-f47f-4a4a-9ba2-31aa10d238ec}" locklevel="0" colspan="1" rowspan="1" labelid="{1524173e-31fe-4f8d-8b2e-99b26e65348b}">
+                        <labels>
+                          <label description="Extraction Status" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_extractionstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_extractionstatus" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{8fb473a7-fe19-425e-815f-e3bea81b7df2}" locklevel="0" colspan="1" rowspan="1" labelid="{6905a6b5-a0f2-488a-b0c4-189eec50fa21}">
+                        <labels>
+                          <label description="Extracted JSON" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_extractedjson" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_extractedjson" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <DisplayConditions Order="0" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Invoice quick create form" languagecode="1033" />
+    </LocalizedNames>
+  </systemform>
+</forms>

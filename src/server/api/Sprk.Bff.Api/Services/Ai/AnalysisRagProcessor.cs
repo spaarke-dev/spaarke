@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 using AnalysisDocumentResult = Sprk.Bff.Api.Models.Ai.DocumentAnalysisResult;
 
@@ -23,6 +24,7 @@ public class AnalysisRagProcessor
     private readonly RagQueryBuilder _ragQueryBuilder;
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisRagProcessor> _logger;
 
@@ -47,9 +49,11 @@ public class AnalysisRagProcessor
         RagQueryBuilder ragQueryBuilder,
         ITenantCache cache,
         IHttpContextAccessor httpContextAccessor,
+        IRetrievalAccessTrim accessTrim,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisRagProcessor> logger)
     {
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _ragService = ragService;
         _ragQueryBuilder = ragQueryBuilder;
         _cache = cache;
@@ -80,9 +84,15 @@ public class AnalysisRagProcessor
     /// Uses <see cref="RagQueryBuilder"/> to construct metadata-aware queries from the
     /// DocumentAnalysisResult rather than the naive first-500-characters approach.
     /// </summary>
+    /// <remarks>
+    /// Task 176 (#1511): every knowledge-source page is trimmed to the documents <paramref name="callerObjectId"/> can
+    /// read, AFTER the tenant-scoped RAG cache (which therefore holds untrimmed rows and is never returned as is). With
+    /// no verified caller the RAG sources contribute nothing.
+    /// </remarks>
     public async Task<AnalysisKnowledge[]> ProcessRagKnowledgeAsync(
         AnalysisKnowledge[] knowledge,
         AnalysisDocumentResult analysisResult,
+        string? callerObjectId,
         CancellationToken cancellationToken)
     {
         if (knowledge.Length == 0)
@@ -102,6 +112,15 @@ public class AnalysisRagProcessor
         {
             _logger.LogWarning("Cannot process RAG knowledge: TenantId not found in claims");
             return knowledge;
+        }
+
+        if (!_accessTrim.CanEvaluate(callerObjectId))
+        {
+            // Task 176 (#1511): no verified caller, so no document text from the index. The non-RAG sources are kept.
+            _logger.LogWarning(
+                "RAG knowledge withheld for {RagCount} source(s): no verified caller for this analysis (task 176, fail closed)",
+                ragSources.Length);
+            return knowledge.Where(k => k.Type != KnowledgeType.RagIndex).ToArray();
         }
 
         _logger.LogInformation("Processing {RagCount} RAG knowledge sources for tenant {TenantId}",
@@ -124,12 +143,14 @@ public class AnalysisRagProcessor
             {
                 var sourceStopwatch = Stopwatch.StartNew();
 
+                var pageSize = Math.Max(_options.MaxKnowledgeResults, 1);
                 var searchOptions = new RagSearchOptions
                 {
                     TenantId = tenantId,
                     DeploymentId = source.DeploymentId,
                     KnowledgeSourceId = source.Id.ToString(),
-                    TopK = _options.MaxKnowledgeResults,
+                    // 2× candidate pool so the access trim below still fills the page (task 176).
+                    TopK = RetrievalAccessTrim.CandidatePoolSize(pageSize),
                     MinScore = _options.MinRelevanceScore,
                     UseSemanticRanking = true,
                     UseVectorSearch = true,
@@ -140,8 +161,14 @@ public class AnalysisRagProcessor
                     source.Id, source.Name);
 
                 var ragCacheId = ComputeRagCacheId(source.Id.ToString(), ragQuery.SearchText);
-                var searchResult = await GetOrSearchRagCacheAsync(
+                var cached = await GetOrSearchRagCacheAsync(
                     tenantId, ragCacheId, ragQuery.SearchText, searchOptions, cancellationToken);
+
+                // Task 176 (#1511): trim to the caller's readable documents; a withheld check keeps no rows.
+                var trim = await _accessTrim.TrimAsync(
+                    cached.Results, r => r.DocumentId, callerObjectId, cancellationToken);
+                var page = trim.Rows.Take(pageSize).ToList();
+                var searchResult = cached with { Results = page, TotalCount = page.Count };
 
                 sourceStopwatch.Stop();
 

@@ -11,8 +11,8 @@ import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SprkModal } from '../SprkModal';
 import { ConfirmModal } from '../presets/ConfirmModal';
 import { FormModal } from '../presets/FormModal';
-import { WizardModal } from '../presets/WizardModal';
 import { BrowseModal } from '../presets/BrowseModal';
+import { WizardShell } from '../../Wizard/WizardShell';
 
 const noop = () => {};
 
@@ -60,11 +60,16 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     expect(onCloseForm).not.toHaveBeenCalled();
     unmount();
 
+    // The wizard preset is WizardShell (ADR-050 as amended 2026-10-07): explicit dismiss by default.
     const onCloseWiz = jest.fn();
     renderWithProviders(
-      <WizardModal open onClose={onCloseWiz} title="Wiz" steps={['A', 'B']} active={0} onBack={noop} onNext={noop}>
-        <div>w</div>
-      </WizardModal>
+      <WizardShell
+        open
+        onClose={onCloseWiz}
+        title="Wiz"
+        steps={[{ id: 'a', label: 'A', renderContent: () => <div>w</div>, canAdvance: () => true }]}
+        onFinish={() => Promise.resolve()}
+      />
     );
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
     expect(onCloseWiz).not.toHaveBeenCalled();

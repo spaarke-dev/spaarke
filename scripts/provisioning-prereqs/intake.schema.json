@@ -7,6 +7,8 @@
   "required": [
     "customerId",
     "tenantId",
+    "subscriptionId",
+    "dataverseEnvUrl",
     "tenancyModel",
     "controlPlaneEnv",
     "profile",
@@ -14,7 +16,10 @@
     "identityPreset",
     "users",
     "exchangePolicyScopeGroupId",
-    "communicationDefaultMailbox"
+    "communicationDefaultMailbox",
+    "tier",
+    "estimatedMonthlyUsd",
+    "customerWorkforceTenantIds"
   ],
   "additionalProperties": false,
   "properties": {
@@ -36,10 +41,28 @@
       "format": "uuid",
       "description": "Customer Entra tenant ID (Model 2) or Spaarke tenant ID (Model 1). NEVER default — enforces §4D I1 (FR-28) tenant-isolation invariant."
     },
+    "customerWorkforceTenantIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "not": { "const": "00000000-0000-0000-0000-000000000000" }
+      },
+      "description": "T255 (INCOMING-141, unified-access-control-r2 task 141) — REQUIRED for every model. The Entra tenant id(s) of the CUSTOMER whose employees use this stamp (the `tid` in their workforce tokens), 1-10. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — NEVER Spaarke's tenant and never this run's tenantId; Model 2: the customer's tenant (normally the same as tenantId — listed anyway, nothing is inferred). Never the CIAM tenant (spaarkeextid). H4b writes them as WorkforceIdentity__CustomerTenantIds__N on both BFF slots and removes any stale index; the BFF admits a first-sign-in email bind or contact creation only for a member (acct = 0) of a listed tenant, and an empty list denies every customer employee. H13 T7 checks both slots. Sent to POST /api/runs as nonSecretParameters.customerWorkforceTenantIds = the JSON array as a string; refused there (CustomerWorkforceTenantsRule: workforce-tenants-required / -invalid / -ciam-tenant / -spaarke-tenant) before anything is created. Lowercase GUIDs (so uniqueItems catches a repeat). Not expressible here, so checked only by POST /api/runs (and skill Step 1e-bis): a Model 1 value equal to tenantId, Spaarke's tenant, the CIAM tenant. Ask the customer's IT for it, or look it up from one of their domains (prereqs.yaml PRQ-C-13)."
+    },
     "subscriptionId": {
       "type": "string",
       "format": "uuid",
-      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
+      "description": "The customer's OWN Azure subscription, created by the operator before the run (prereqs.yaml PRQ-S-00; ADR-027: one subscription per customer). REQUIRED for every tenancy model (T228) — nothing defaults or shares a subscription. In Spaarke's tenant for Model 1, the customer's for Model 2. The L2 identity must hold Owner on it (PRQ-S-04). H1 refuses a subscription in another tenant or one that already holds another customer's rg-spaarke-* resource group. Same rule as POST /api/runs (subscription-id-required)."
+    },
+    "dataverseEnvUrl": {
+      "type": "string",
+      "pattern": "^https://spaarke-[a-z][a-z0-9]{2,7}(-(dev|staging|prod))?\\.crm[0-9]*\\.dynamics\\.com/?$",
+      "description": "T228 — URL of the Dataverse environment the operator created for this customer (prereqs.yaml PRQ-C-09), e.g. https://spaarke-acme.crm.dynamics.com/. Its domain must be spaarke-{customerId} or spaarke-{customerId}-{environmentName}: POST /api/runs (dataverse-env-url-invalid) and H5 check the customerId itself, which this pattern cannot. H5 adopts the environment and never creates one."
     },
     "tenancyModel": {
       "type": "string",
@@ -73,13 +96,29 @@
     },
     "tier": {
       "type": "string",
-      "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
-      "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
+      "enum": ["smb", "enterprise", "dedicated"],
+      "description": "Required (T229). Budget class for this customer's dedicated stamp — H0 compares estimatedMonthlyUsd with its monthly ceiling: smb=$700, enterprise=$2500, dedicated=$5000 (H0Options.DefaultCeilingsUsd; configurable per tier). Every stamp is dedicated since D-12 (Model 1 paid by Spaarke, Model 2 by the customer); the shared-trial tier is retired. Exact case; POST /api/runs refuses any other value (CostEnvelopeIntake)."
     },
     "estimatedMonthlyUsd": {
       "type": "number",
       "minimum": 0,
-      "description": "COMP-10 (SESSION 17): projected monthly Azure spend in USD for the target stamp. Consumed by H0 preflight cost-envelope gate. When present + tier is set + gate is enabled (H0Options.CostEnvelopeAbortsPreflight=true, default), H0 fails Resumable with rejection code 'quota-cost-overrun' if this value exceeds the tier ceiling AND costEnvelopePolicy is not 'warnAndProceed'. Optional; missing/blank is a LOG-ONLY skip (server-side gate does not fail-close on plumbing gaps — SKILL.md Step 2 BAT-10 is the client-side authoritative check). Default tier ceilings: shared-trial=$430, smb=$700, enterprise=$2500, dedicated=$5000/mo (mirror SKILL Step 2 BAT-10)."
+      "description": "Required (T229). Projected monthly Azure spend of the customer stamp in USD, for every model. An empty stamp costs about $340/month fixed before usage (2026-10-06 list prices, westus2: App Service S1 Linux $58, AI Search S1 $245, Managed Redis B0 with high availability $23, Service Bus Standard $10); add the expected OpenAI, Document Intelligence, Content Safety, Cosmos DB, storage and log volume. H0 fails the run with quota-cost-overrun (Resumable) when it exceeds the tier ceiling — there is no override; choose the tier that covers it. POST /api/runs refuses a missing or negative value (CostEnvelopeIntake)."
+    },
+    "openAiMonthlyLimitUsd": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000,
+      "description": "OPTIONAL (T254, owner G37). Monthly Azure OpenAI spend limit of the stamp in USD. Omit it for no limit — the default; never set it to 0. When present, H4b writes AiSpendLimit__MonthlyLimitUsd on both slots and the BFF refuses model calls with 429 (Retry-After = next UTC month) once its list-price estimate reaches it. Change or remove it later with scripts/Set-AiSpendLimit.ps1. POST /api/runs refuses a value that is not a plain decimal in (0, 1000000] (OpenAiMonthlyLimitRule)."
+    },
+    "solutionPackageType": {
+      "type": "string",
+      "enum": ["managed", "unmanaged"],
+      "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
+    },
+    "secureRecordSetupDryRun": {
+      "type": "boolean",
+      "default": false,
+      "description": "OPTIONAL (T256). true = H7b (Secure Record setup) reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). false or absent = apply. Sent to POST /api/runs as nonSecretParameters.secureRecordSetupDryRun = 'true' | 'false' (exact, lower case; anything else is refused with secure_setup.dry_run_invalid)."
     },
     "skipExternalPrereqs": {
       "type": "boolean",
@@ -124,12 +163,6 @@
       "default": "waitAndExit",
       "description": "Batch policy for skill Step 5 Manual Gate Handling (BAT-08). `waitAndExit` → write runs/{runId}-WAITING.md + runs/{runId}-gate.json + exit code 4 (operator resumes via `--resume` flag after clearing gate). `pollUntilTimeout` → poll GET /api/runs/{id} at 10s cadence until gate clears or configured timeout (currently 30 min hard-cap); exit 0 on clear, exit 4 on timeout. `failFast` → immediately exit code 4 (no wait, no polling). Applies to H0.5 admin consent · H1 quota bump · H8 SPE 24h · any WaitingOnGate transition."
     },
-    "costEnvelopePolicy": {
-      "type": "string",
-      "enum": ["abortOnOverrun", "warnAndProceed"],
-      "default": "abortOnOverrun",
-      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2 + prod). Default `abortOnOverrun` per binding NFR intent."
-    },
     "postmortemFile": {
       "type": "string",
       "description": "Optional path to a pre-authored lessons-learned template (BAT-09). If provided + valid → skill Step 7b uses as base and appends run-specific data. If provided + invalid (missing required sections) → HARD STOP with runs/{runId}-postmortem-invalid.json. If omitted → skill auto-generates minimum lessons-learned.md from run outcome. Path is relative to repo root."
@@ -137,7 +170,14 @@
     "identityPreset": {
       "type": "string",
       "enum": ["B2BGuest", "NativeAccount"],
-      "description": "T245c — H11 identity preset (design.md D6): B2BGuest invites each user as a guest (email required per user, consent gate); NativeAccount creates each user in the stamp's tenant (UPN from first/last name). Exact case. Same rule as POST /api/runs (UserProvisioningIntake) — pinned by IntakeSchemaProfileParityTests."
+      "description": "T245c — H11 identity preset (design.md D6): B2BGuest invites each user as a guest (email required per user, consent gate); NativeAccount creates each user in the stamp's tenant (UPN from first/last name). Exact case. A Model1 run takes only B2BGuest (owner D2, T232 — allOf below). Same rule as POST /api/runs (UserProvisioningIntake) — pinned by IntakeSchemaProfileParityTests."
+    },
+    "environmentSecurityGroupId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "not": { "const": "00000000-0000-0000-0000-000000000000" },
+      "description": "T232 — object id of the customer environment's security group (displayName sprk-{customerId}-users), created by the operator and set as the Dataverse environment's security group before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model1 run — allOf below): H11 adds each guest to it, then makes the guest a Dataverse user. Without it every Model 1 environment would admit any user of Spaarke's tenant."
     },
     "users": {
       "type": "array",
@@ -191,6 +231,18 @@
       }
     },
     {
+      "description": "T232 (owner D2) — Model 1 customer users are B2B guests in Spaarke's tenant: a Model1 run takes only identityPreset B2BGuest (same rule as POST /api/runs: userprov-model1-requires-b2b-guest).",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model1" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "identityPreset": { "const": "B2BGuest" }
+        }
+      }
+    },
+    {
       "description": "tenancyModel × profile invariant — Model2 pairs ONLY with customer-owned-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
       "if": {
         "properties": { "tenancyModel": { "const": "Model2" } },
@@ -200,16 +252,6 @@
         "properties": {
           "profile": { "const": "customer-owned-model2" }
         }
-      }
-    },
-    {
-      "description": "ISH-02 — subscriptionId REQUIRED for Model2 (customer's own subscription per ADR-027 D4). Model1 runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
-      "if": {
-        "properties": { "tenancyModel": { "const": "Model2" } },
-        "required": ["tenancyModel"]
-      },
-      "then": {
-        "required": ["subscriptionId"]
       }
     },
     {
@@ -239,6 +281,16 @@
           "users": { "items": { "required": ["email"] } }
         }
       }
+    },
+    {
+      "description": "T232 — a B2BGuest run names the environment security group H11 adds each guest to (same rule as POST /api/runs: userprov-missing-security-group-id).",
+      "if": {
+        "properties": { "identityPreset": { "const": "B2BGuest" } },
+        "required": ["identityPreset"]
+      },
+      "then": {
+        "required": ["environmentSecurityGroupId"]
+      }
     }
   ],
   "examples": [
@@ -246,12 +298,16 @@
       "customerId": "trial1",
       "displayName": "Spaarke Trial 1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
+      "subscriptionId": "11111111-2222-3333-4444-555555555555",
+      "dataverseEnvUrl": "https://spaarke-trial1.crm.dynamics.com/",
       "tenancyModel": "Model1",
       "controlPlaneEnv": "dev",
       "profile": "spaarke-hosted-model2",
       "region": "westus2",
       "openAiRegion": "westus3",
-      "tier": "shared-trial",
+      "tier": "smb",
+      "estimatedMonthlyUsd": 450,
       "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING).",
       "confirmationAcknowledgment": "proceed with provisioning",
       "mcpDisconnectPolicy": "proceedWithFallback",
@@ -259,9 +315,11 @@
       "onFailedPolicy": "abandon",
       "onQuarantinedPolicy": "failFast",
       "onManualGatePolicy": "waitAndExit",
-      "costEnvelopePolicy": "abortOnOverrun",
-      "identityPreset": "NativeAccount",
-      "users": [{ "firstName": "Trial", "lastName": "Admin", "companyName": "Spaarke" }],
+      "identityPreset": "B2BGuest",
+      "users": [
+        { "firstName": "Trial", "lastName": "Admin", "email": "trial.admin@trial1.example", "companyName": "Trial 1" }
+      ],
+      "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
       "exchangePolicyScopeGroupId": "spaarke-trial1-mail-scope@spaarke.com",
       "communicationGraphResource": "users/trial1-comms@spaarke.com/messages",
       "communicationDefaultMailbox": "trial1-comms@spaarke.com"
@@ -270,20 +328,23 @@
       "customerId": "acme",
       "displayName": "Acme Corporation",
       "tenantId": "12345678-1234-1234-1234-123456789012",
+      "customerWorkforceTenantIds": ["12345678-1234-1234-1234-123456789012"],
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
+      "dataverseEnvUrl": "https://spaarke-acme.crm.dynamics.com/",
       "tenancyModel": "Model2",
       "controlPlaneEnv": "prod",
       "profile": "customer-owned-model2",
       "region": "westus2",
       "openAiRegion": "westus3",
       "tier": "dedicated",
+      "estimatedMonthlyUsd": 900,
       "confirmationAcknowledgment": "proceed with provisioning",
       "acknowledgeUpgradeMode": false,
       "onFailedPolicy": "abandon",
       "onManualGatePolicy": "waitAndExit",
-      "costEnvelopePolicy": "abortOnOverrun",
       "identityPreset": "B2BGuest",
       "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
+      "environmentSecurityGroupId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
       "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
       "communicationGraphResource": "users/legal-comms@acme.example/messages",
       "emailGraphResource": "users/legal-intake@acme.example/messages",

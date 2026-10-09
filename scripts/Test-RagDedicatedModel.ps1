@@ -1,12 +1,17 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Integration tests for RAG Dedicated and CustomerOwned Deployment Models
+    Integration tests for the RAG Dedicated Deployment Model
 
 .DESCRIPTION
-    Tests the RAG infrastructure for Dedicated and CustomerOwned deployment models:
-    - Dedicated: Per-customer index in our Azure subscription
-    - CustomerOwned: Customer's own Azure AI Search with Key Vault stored credentials
+    Tests the RAG infrastructure for the Dedicated deployment model:
+    - Dedicated: Per-customer index in the customer's stamp, reached with the BFF's managed identity
+
+    The CustomerOwned model (an index in another subscription reached with an API key) was removed by
+    customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure
+    subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its
+    managed identity - no key (owner D13). Analysis:DefaultRagModel accepts Shared or Dedicated; any other
+    value fails at startup. The former -Action CustomerOwned has been removed with it.
 
     Task 007: Test Dedicated Deployment Model
 
@@ -14,14 +19,14 @@
     - POST /api/ai/rag/index and DELETE /api/ai/rag/{id} are operator surfaces: run this script with a
       token whose user holds the BFF app's Admin / SystemAdmin role, or every index and delete is 403.
     - The tenant partition is the TOKEN's tenant (its tid claim). The script derives the Dedicated tenant
-      from the token; requests naming the generated CustomerOwned / Shared / "different" tenants are
+      from the token; requests naming the generated Shared / "different" tenants are
       rejected 403, and the isolation steps now assert that rejection.
     - POST /api/ai/rag/search returns only chunks whose documentId is a sprk_document the caller can Read.
       The synthetic chunks are therefore stamped with -DocumentId (mandatory): a real sprk_document the
       operator can Read in the target environment.
 
 .PARAMETER Action
-    Test action to run: All, Dedicated, CustomerOwned, Isolation
+    Test action to run: All, Dedicated, Isolation
 
 .PARAMETER ApiBaseUrl
     Base URL for the SDAP BFF API
@@ -36,12 +41,12 @@
 .EXAMPLE
     .\Test-RagDedicatedModel.ps1 -Action All -DocumentId "00000000-0000-0000-0000-000000000000"
     .\Test-RagDedicatedModel.ps1 -Action Dedicated -DocumentId "00000000-0000-0000-0000-000000000000"
-    .\Test-RagDedicatedModel.ps1 -Action CustomerOwned -DocumentId "00000000-0000-0000-0000-000000000000"
+    .\Test-RagDedicatedModel.ps1 -Action Isolation -DocumentId "00000000-0000-0000-0000-000000000000"
 #>
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('All', 'Dedicated', 'CustomerOwned', 'Isolation')]
+    [ValidateSet('All', 'Dedicated', 'Isolation')]
     [string]$Action = 'All',
 
     [Parameter(Mandatory=$false)]
@@ -70,17 +75,15 @@ function Get-TokenTenantId {
     $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
     return $claims.tid
 }
-$CustomerOwnedTenantId = "customerowned-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
 $SharedTenantId = "shared-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " RAG Dedicated/CustomerOwned Tests" -ForegroundColor Cyan
+Write-Host " RAG Dedicated Model Tests" -ForegroundColor Cyan
 Write-Host " Task 007 - AI Document Intelligence R3" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "API URL: $ApiBaseUrl" -ForegroundColor Gray
 Write-Host "Dedicated Tenant: $TenantId" -ForegroundColor Gray
-Write-Host "CustomerOwned Tenant: $CustomerOwnedTenantId" -ForegroundColor Gray
 Write-Host "Shared Tenant: $SharedTenantId" -ForegroundColor Gray
 Write-Host ""
 
@@ -272,55 +275,6 @@ function Test-DedicatedDeploymentModel {
     }
 }
 
-function Test-CustomerOwnedDeploymentModel {
-    Write-Host "`n--- CustomerOwned Deployment Model Tests ---" -ForegroundColor Yellow
-
-    Write-Host "  Note: CustomerOwned tests validate configuration, not actual customer indexes" -ForegroundColor Gray
-    Write-Host "  (Requires customer's Azure AI Search credentials in Key Vault)" -ForegroundColor Gray
-
-    # Test 1: CustomerOwned config requires SearchEndpoint
-    $invalidConfig1 = @{
-        tenantId = $CustomerOwnedTenantId
-        deploymentModel = "CustomerOwned"
-        # Missing searchEndpoint
-        apiKeySecretName = "test-secret"
-    }
-
-    # This would typically go through a deployment config endpoint
-    # For now, we test the RAG search with CustomerOwned tenant which should fail gracefully
-    $searchRequest = @{
-        query = "test query"
-        options = @{
-            tenantId = $CustomerOwnedTenantId
-            topK = 5
-            minScore = 0.3
-        }
-    }
-
-    $response = Invoke-ApiRequest -Url "$ApiBaseUrl/api/ai/rag/search" -Method POST -Body $searchRequest
-
-    # CustomerOwned without proper configuration should either:
-    # - Return empty results (if it falls back to shared)
-    # - Return an error (if validation is strict)
-    if ($response) {
-        Add-TestResult -TestName "CustomerOwned Graceful Handling" -Passed $true `
-            -Message "System handled unconfigured CustomerOwned tenant gracefully"
-    } else {
-        # An error response is also acceptable for misconfigured CustomerOwned
-        Add-TestResult -TestName "CustomerOwned Configuration Validation" -Passed $true `
-            -Message "CustomerOwned tenant correctly rejected (needs configuration)"
-    }
-
-    # Test 2: Document validation requirements
-    Write-Host "  CustomerOwned Model Requirements:" -ForegroundColor Yellow
-    Write-Host "    - SearchEndpoint: https://{customer-search}.search.windows.net" -ForegroundColor Gray
-    Write-Host "    - IndexName: customer's index name" -ForegroundColor Gray
-    Write-Host "    - ApiKeySecretName: Key Vault secret name for API key" -ForegroundColor Gray
-
-    Add-TestResult -TestName "CustomerOwned Requirements Documented" -Passed $true `
-        -Message "Configuration requirements verified"
-}
-
 function Test-CrossModelIsolation {
     Write-Host "`n--- Cross-Model Isolation Tests ---" -ForegroundColor Yellow
 
@@ -421,14 +375,10 @@ if (-not $apiHealthy) {
 switch ($Action) {
     'All' {
         Test-DedicatedDeploymentModel
-        Test-CustomerOwnedDeploymentModel
         Test-CrossModelIsolation
     }
     'Dedicated' {
         Test-DedicatedDeploymentModel
-    }
-    'CustomerOwned' {
-        Test-CustomerOwnedDeploymentModel
     }
     'Isolation' {
         Test-CrossModelIsolation
@@ -464,7 +414,6 @@ $testReport = @{
     TestRun = Get-Date -Format "o"
     ApiUrl = $ApiBaseUrl
     DedicatedTenantId = $TenantId
-    CustomerOwnedTenantId = $CustomerOwnedTenantId
     SharedTenantId = $SharedTenantId
     TotalTests = $totalCount
     Passed = $passedCount

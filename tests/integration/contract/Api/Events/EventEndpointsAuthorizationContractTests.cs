@@ -292,7 +292,7 @@ public class EventEndpointsAuthorizationContractTests
         var eventId = Guid.NewGuid();
         host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write);
         host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Events.Setup(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+        host.Events.Setup(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         host.Events.Setup(e => e.CreateEventLogAsync(eventId, logAction, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
@@ -300,7 +300,7 @@ public class EventEndpointsAuthorizationContractTests
         var response = await host.SendAsync(IdRequest(route, eventId));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.Events.Verify(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        host.Events.Verify(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -320,7 +320,7 @@ public class EventEndpointsAuthorizationContractTests
         forWriter.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         forStranger.StatusCode.Should().Be(HttpStatusCode.NotFound, "the transition check must not disclose the state of an event the caller cannot see");
         host.Events.Verify(e => e.GetEventAsync(unreadable, It.IsAny<CancellationToken>()), Times.Never);
-        host.Events.Verify(e => e.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Events.Verify(e => e.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =========================================================================================
@@ -415,6 +415,47 @@ public class EventEndpointsAuthorizationContractTests
         payload["sprk_RegardingAnalysis@odata.bind"].Should().Be($"/{AnalysesSet}({analysis:D})");
         payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/{MattersSet}({matter:D})", "FR-26: the analysis's core ancestor is stamped");
         payload.Keys.Should().NotContain("sprk_RegardingRecordType@odata.bind", "this environment double has no record-type row for analysis");
+    }
+
+    /// <summary>
+    /// Task 173 (owner round 81): an event filed under an analysis of a RESTRICTED matter is created showing Restricted —
+    /// the value comes from <c>DeriveForHostAsync</c> and rides the same create body as the stamps.
+    /// </summary>
+    [Fact]
+    public async Task Create_EventFiledUnderAnAnalysisOfARestrictedMatter_CarriesRestrictedInTheCreateBody()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var analysis = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
+        var analysisRow = new Entity("sprk_analysis", analysis) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) };
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_analysis", analysis, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(analysisRow);
+        var rows = new Dictionary<string, Entity>
+        {
+            ["sprk_analysis"] = analysisRow,
+            ["sprk_matter"] = new Entity("sprk_matter", matter) { ["sprk_accesspermission"] = new OptionSetValue(100000002) },
+        };
+        host.Entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => rows.ContainsKey(q.EntityName)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) => new EntityCollection(new List<Entity> { rows[q.EntityName] }));
+        host.ColumnProbe = (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+            CoreAncestorResolver.CoreAncestorLookups.Select(c => c.LookupAttribute).Append("sprk_accesspermission"),
+            StringComparer.OrdinalIgnoreCase));
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Review", regardingRecordType = 3, regardingRecordId = analysis }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = creates.Should().ContainSingle().Subject;
+        created.AccessPermission.Should().Be(100000002);
+        DataverseWebApiService.BuildCreateEventPayload(created)["sprk_accesspermission"].Should().Be(100000002,
+            "the event shows the matter at the top of its filing, from the moment it exists");
     }
 
     /// <summary>

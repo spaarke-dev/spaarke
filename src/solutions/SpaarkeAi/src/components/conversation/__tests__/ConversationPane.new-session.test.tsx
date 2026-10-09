@@ -53,6 +53,7 @@ jest.mock("@spaarke/ui-components", () => {
 
 const TEST_SESSION_ID = "00000000-0000-0000-0000-000000000001";
 const clearChatSessionMock = jest.fn();
+const clearPlaybookIdMock = jest.fn();
 const setChatSessionIdMock = jest.fn();
 
 jest.mock("@spaarke/ai-widgets", () => {
@@ -71,6 +72,7 @@ jest.mock("@spaarke/ai-widgets", () => {
       clearChatSession: clearChatSessionMock,
       playbookId: undefined,
       setPlaybookId: jest.fn(),
+      clearPlaybookId: clearPlaybookIdMock,
       entityContext: null,
       contextMapping: null,
       isLoadingContextMapping: false,
@@ -137,6 +139,17 @@ describe("ConversationPane — New session header affordance (R4-5)", () => {
     // 2. SprkChat REMOUNTED (remount-key bump) — with the cleared id the real
     //    component mounts sessionId=undefined and creates a fresh session.
     expect(sprkChatMounts).toBe(2);
+  });
+
+  it("New session clears the persisted playbook so Quick Start welcome cards can return", () => {
+    // R4 UAT 2026-10-08: a playbook picked while SprkChat's discovery dropdown was briefly
+    // visible persisted in localStorage forever — suppressing the Quick Start welcome cards
+    // (showWelcomeCards requires playbookId === undefined) with no way to clear it.
+    renderPane();
+
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+
+    expect(clearPlaybookIdMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not fire the header collapse when clicking New session (stopPropagation)", () => {

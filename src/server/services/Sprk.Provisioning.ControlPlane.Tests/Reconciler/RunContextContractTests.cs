@@ -77,6 +77,7 @@ public sealed class RunContextContractTests
         ["DataverseEnvCreation"] = HandlerIds.H5,
         ["SolutionImport"] = HandlerIds.H6,
         ["EnvVarValues"] = HandlerIds.H7,
+        ["SecureRecordSetup"] = HandlerIds.H7b,
         ["SpeContainer"] = HandlerIds.H8,
         ["BffDeploy"] = HandlerIds.H9,
         ["DataverseAppUserGraphParity"] = HandlerIds.H10,
@@ -499,12 +500,10 @@ public sealed class RunContextContractTests
     private static readonly string[] PinnedManifestGaps =
     [
         // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output). T225b (owner D18): the
-        // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. ContentSafety-ApiKey is NOT a
-        // Spaarke vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
-        // alternative (plan G26).
-        "ContentSafety-ApiKey→T246",
-        "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
-        "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
+        // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. T246 (plan G26): ContentSafety-ApiKey
+        // left too — each stamp has its own keyless Content Safety account, reached with the UAMI.
+        // T227c (G18): SPE-DefaultContainerId / SPE-CommunicationArchiveContainerId left the catalog — the container id is
+        // a plain H4b setting from H8's output (from-h8-output:spe_container_id). No manifest gaps remain.
         // T225b (G21): Dataverse-ClientSecret / BFF-API-ClientSecret are no longer gaps — new stamps are secret-free
         // by default (KvSecretsPopulationOptions.RequireSecretFreeIdentity), so H4 omits both and never needs a value.
     ];
@@ -575,15 +574,16 @@ public sealed class RunContextContractTests
             new("Generated-One", KvSecretOperation.Upsert, KvSecretValueSource.Generated),
             new("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter),
             new(GraphAppRegistrationProvisioner.ClientIdSecretName, KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg),
-            new("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters),   // a pinned, owned gap
+            new("Pinned-Gap", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),   // a pinned, owned gap
         ];
         var intakeMap = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = IntakeParameterCatalog.TenantId };
         var bicepWrites = new HashSet<string>(StringComparer.Ordinal) { "From-Bicep" };
+        var pinnedOwners = new Dictionary<string, string>(StringComparer.Ordinal) { ["Pinned-Gap"] = "T999" };
 
-        var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, PinnedManifestGapOwners());
+        var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, pinnedOwners);
 
         problems.Should().BeEmpty();
-        gaps.Should().BeEquivalentTo(["ContentSafety-ApiKey→T246"]);
+        gaps.Should().BeEquivalentTo(["Pinned-Gap→T999"]);
     }
 
     /// <summary>The KV secrets H3's provisioner commits itself; H4 skips their <c>written-by-h3</c> entries.</summary>
@@ -599,7 +599,7 @@ public sealed class RunContextContractTests
     /// <summary>
     /// Rule (g). H4 runs after H2a (Bicep) and before H3. A secret is reachable when customer.bicep
     /// actually writes it (from-bicep-output AND in <paramref name="bicepWrittenNames"/>), H4 generates
-    /// it, H4 takes it from an intake value it maps (from-topology-constants / from-intake-parameter),
+    /// it, H4 takes it from an intake value it maps (from-intake-parameter),
     /// or H3 writes it itself and H4 skips it. Anything else has no producer — it is a gap, named with
     /// its pinned owner (or UNOWNED). customer.bicep writing a name the manifest does not label
     /// from-bicep-output is a problem (the two disagree about who writes it).
@@ -626,7 +626,6 @@ public sealed class RunContextContractTests
                 case KvSecretValueSource.FromBicepOutput when bicepWrittenNames.Contains(entry.CanonicalName):
                 case KvSecretValueSource.Generated:
                     break;
-                case KvSecretValueSource.FromTopologyConstants:
                 case KvSecretValueSource.FromIntakeParameter:
                     if (!intakeValueParameterKeys.TryGetValue(entry.CanonicalName, out var intakeKey)
                         || !IntakeParameterCatalog.IsKnown(intakeKey))
@@ -692,9 +691,10 @@ public sealed class RunContextContractTests
     private static readonly IReadOnlyDictionary<string, string> RunSecretsReaders = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         // Hands the whole map to the KV writer, which consults it only for manifest entries that still
-        // need a ref (FromRunParameters / FromExistingKvSecret) — each pinned with an owner in
-        // PinnedManifestGaps (rule g). Retires with those gaps (T246 / T227 / T225b).
-        [HandlerIds.H4] = "manifest secrets pinned in PinnedManifestGaps",
+        // need a ref (FromRunParameters / FromExistingKvSecret). Since T246 no manifest entry is
+        // FromRunParameters; the two FromExistingKvSecret client secrets are omitted on secret-free stamps
+        // (the default) and read a ref only under SecretFreeIdentityRollback (T225b).
+        [HandlerIds.H4] = "client secrets under SecretFreeIdentityRollback only",
     };
 
     private static readonly IReadOnlySet<string> InterStepStatePropertyNames =

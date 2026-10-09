@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { authenticatedFetch, buildBffApiUrl } from '@spaarke/auth';
+import { authenticatedFetch, buildBffApiUrl, isApiError, isAuthFailure } from '@spaarke/auth';
 import type { MiniGraphNode, MiniGraphEdge } from '@spaarke/ui-components/dist/types/MiniGraphTypes';
 
 /** Maximum nodes to include in the mini preview (source + related). */
@@ -83,13 +83,11 @@ export interface UseRelatedDocumentGraphDataResult {
  * Returns count (from metadata) and graph preview data (nodes + edges).
  *
  * @param documentId - Source document GUID
- * @param tenantId - Azure AD tenant ID
  * @param apiBaseUrl - BFF API base URL
  * @param enabled - Only fetch when true (typically after auth is ready)
  */
 export function useRelatedDocumentGraphData(
   documentId: string,
-  tenantId: string | undefined,
   apiBaseUrl: string | undefined,
   enabled: boolean
 ): UseRelatedDocumentGraphDataResult {
@@ -132,7 +130,8 @@ export function useRelatedDocumentGraphData(
       }
       // Use buildBffApiUrl helper — idempotent and guarantees correct /api/ prefix.
       // See .claude/patterns/auth/bff-url-normalization.md
-      const query = `${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
+      // No tenantId param: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
+      const query = 'limit=20';
       const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {
@@ -219,6 +218,25 @@ export function useRelatedDocumentGraphData(
         return;
       }
 
+      // authenticatedFetch THROWS for a non-OK response (the `!response.ok` branch above is for a
+      // fetch that returns it): ApiError(status), or AuthError once its 401 retries are spent.
+      if (isApiError(err, 404)) {
+        // No relationship data for this document yet — an empty graph, not an error.
+        setCount(0);
+        setNodes([]);
+        setEdges([]);
+        setLastUpdated(new Date());
+        return;
+      }
+      if (isAuthFailure(err) || isApiError(err, 403)) {
+        setError("You don't have permission to view related documents.");
+        return;
+      }
+      if (isApiError(err)) {
+        setError('Failed to load related document count.');
+        return;
+      }
+
       console.error('[useRelatedDocumentGraphData] Error:', err);
 
       if (err instanceof Error && err.message.includes('auth')) {
@@ -231,7 +249,7 @@ export function useRelatedDocumentGraphData(
         setIsLoading(false);
       }
     }
-  }, [documentId, tenantId, apiBaseUrl, enabled]);
+  }, [documentId, apiBaseUrl, enabled]);
 
   useEffect(() => {
     if (enabled) {

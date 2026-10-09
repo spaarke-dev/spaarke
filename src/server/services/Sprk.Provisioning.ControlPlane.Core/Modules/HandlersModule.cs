@@ -29,9 +29,8 @@
 //
 // TASK 120 UPDATE (Wave G-2, Option D hybrid per DS-1b §1 H0 row):
 //   The four probes are now pure .NET SDK/REST implementations
-//   (ArmCognitiveServicesTpmProbe, BapRestEnvironmentRateProbe,
-//   ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe — task 248 replaced the last
-//   with SpeOwnerCredentialProbe) — the shell-out
+//   (ArmCognitiveServicesTpmProbe, ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe — task 248 replaced the last
+//   with SpeOwnerCredentialProbe; T228 removed the BAP environment-creation-rate probe with environment creation) — the shell-out
 //   PowerShellPreflightProbe + its Preflight:{PwshExecutable,
 //   ScriptsDirectory, Timeout} options binding are RETIRED (grep-verified
 //   zero remaining callers). The TPM + vCPU probes share ONE platform
@@ -39,10 +38,7 @@
 //   TryAddSingleton so task 121's ArmSubscriptionReadinessProbe can reuse
 //   the same instance rather than constructing a second one — CLAUDE.md
 //   §11); the SPE owner probe (task 248) resolves SpeConfidentialClientGraphFactory
-//   (registered by the Worker's Program.cs next to H8, which shares it); the
-//   BAP REST probe is a typed HttpClient (AddHttpClient<IPreflightQuotaProbe,
-//   BapRestEnvironmentRateProbe>) since it scopes DefaultAzureCredential
-//   per-tenant internally (§4D I5).
+//   (registered by the Worker's Program.cs next to H8, which shares it).
 //
 // WAVE C5 UPDATE (task 103):
 //   H0's keyed + concrete registrations now live alongside the other 18
@@ -101,7 +97,6 @@ public static class HandlersModule
         // AddHttpClient<TInterface, TImplementation>() convention. Additive:
         // IPreflightQuotaProbe already has 3 other registrations below: all 4
         // resolve via the IEnumerable<IPreflightQuotaProbe> H0 injects.
-        services.AddHttpClient<IPreflightQuotaProbe, BapRestEnvironmentRateProbe>();
 
         // Remaining three probe registrations (task 120 — SDK ports; Option D
         // hybrid per DS-1b §1 H0 row). Order does not matter; H0 orchestrates
@@ -146,11 +141,20 @@ public static class HandlersModule
         // COMP-10 (SESSION 17): H0Options — cost-envelope gate configuration.
         // Bound to the "H0" section (H0Options.SectionName). Absent-config
         // yields the built-in defaults (CostEnvelopeAbortsPreflight=true;
-        // shared-trial/smb/enterprise/dedicated ceilings per SKILL Step 2
-        // BAT-10). Operator overrides via appsettings / env:
+        // smb/enterprise/dedicated ceilings per SKILL Step 2 BAT-10; task 229
+        // retired shared-trial). Operator overrides via appsettings / env:
         //   "H0": { "CostEnvelopeAbortsPreflight": false }
         //   "H0__CostEnvelopeAbortsPreflight": "false"
-        services.Configure<H0Options>(configuration.GetSection(H0Options.SectionName));
+        // Task 229: validated when the host starts — a ceiling for a tier intake refuses (e.g. a leftover
+        // shared-trial setting) is a misconfiguration, not something to ignore (ADR-010 ValidateOnStart).
+        services.AddOptions<H0Options>()
+            .Bind(configuration.GetSection(H0Options.SectionName))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "H0Options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the

@@ -57,7 +57,12 @@ names in `skippedPrincipals` — the creator on the record's No Access list, tha
 failed — the script shows a per-person warning after the success notification (`SKIPPED_PRINCIPAL_COPY`; an unknown
 reason gets the generic warning and is logged — never silent, round 33 item 5; a person whose name cannot be read is
 "Someone", round 40 item 3). Remove Secure confirms first too (round
-33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
+33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing. A work assignment or project filed under a matter or
+project gets a FLOOR from it (task 175, owner round 87): it inherits Secure and may never be looser, but may be made
+stricter. Make Secure follows its normal rules on it. Remove Secure is hidden when the same can-manage-access answer says
+`floorSecure: true` (its Secure comes from the parent; the server refuses it with 409
+`sdap.access.access_follows_parent`, whose message is shown), and both are hidden when `parentUnverifiable: true` (fail
+closed). An answer without these fields (an older BFF) means no floor (`access_ribbon.js` 1.8.0).
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in
@@ -154,7 +159,7 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    relocations, registered with its writes on — round 46 item 2) in the same release.
 1a. **Task 144's migration, its DEFAULT-TEAM part, before the ribbon ships** (task 150 round 53 item 2; release order
    round 60 item 2 — a LIVE GATE): a secure record still owned by the retired default team (another team inside the
-   Secure Record business unit) is isolated already, so `access_ribbon.js` 1.5.0 hides Make Secure on it, and only task
+   Secure Record business unit) is isolated already, so `access_ribbon.js` (since 1.5.0) hides Make Secure on it, and only task
    144's migration moves it onto the named team. The ribbon ships once that part is complete: **(i)** the dry run's plan
    has **no MIGRATE rows**, and **(ii)** the retired default team **no longer holds the Secure Record Owner role** (guide
    §4.3 step 4). The full `-Verify` exit 0 is **not** a precondition of the ribbon: `-Verify` also fails on the
@@ -180,7 +185,7 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
 4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150,
    the wired relocation and its backstop for `-SecureTransitionDeployed`, step 1a's default-team part must be complete (no
    MIGRATE rows; the default team no longer holds the role), and the
-   web resources must be `access_ribbon.js` 1.5.0 — task 150 round 40: Make Secure offered on an unfinished secure
+   web resources must be `access_ribbon.js` 1.8.0 or later (task 175 round 87: the floor rule) — task 150 round 40: Make Secure offered on an unfinished secure
    transition, and its in-place retry; round 46 item 4: a flagged record owned by a team in another business unit is
    unfinished too; round 53: one owned by another team inside the Secure Record business unit is isolated already
    (hidden), and `caller_rights_unverifiable` in the script's words — which needs the BFF's `can-manage-access`

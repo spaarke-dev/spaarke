@@ -50,6 +50,11 @@ const _driftGuard = {
 } satisfies Partial<typeof import('@spaarke/auth')>;
 void _driftGuard;
 
+// The real error classes and guards — `briefingService` classifies what `authenticatedFetch` THROWS
+// (ApiError with `.status`, AuthError for an exhausted 401) through them. Dependency-free source.
+export { ApiError, AuthError } from '../../../Spaarke.Auth/src/errors';
+export { isApiError, problemOf, isAuthFailure } from '../../../Spaarke.Auth/src/errorGuards';
+
 export const authenticatedFetch: jest.Mock = jest.fn(() =>
   Promise.resolve(
     new Response(

@@ -73,6 +73,13 @@ export function getBffOAuthScope(): string {
 }
 
 /**
+ * The environment's tenant (sprk_TenantId) resolved from Dataverse Environment Variables at runtime.
+ */
+export function getTenantId(): string {
+  return getConfig().tenantId;
+}
+
+/**
  * MSAL client ID resolved from Dataverse Environment Variables at runtime.
  */
 export function getMsalClientId(): string {

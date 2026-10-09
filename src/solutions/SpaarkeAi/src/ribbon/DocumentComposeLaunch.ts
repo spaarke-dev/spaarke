@@ -53,7 +53,8 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAiCompose } from "../utils/launch-resolver";
-import { cleanGuid } from "@spaarke/ui-components";
+// Leaf deep import, not the barrel (ISS-014 / #1412): see scripts/build-ribbon.mjs.
+import { cleanGuid } from "@spaarke/ui-components/utils/guid";
 
 // ---------------------------------------------------------------------------
 // `sprk_document` field constants

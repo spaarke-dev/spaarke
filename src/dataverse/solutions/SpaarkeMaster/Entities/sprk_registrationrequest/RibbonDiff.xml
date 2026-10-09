@@ -1,0 +1,97 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="Sprk.Registration.Approve.Form.CustomAction" Location="Mscrm.Form.sprk_registrationrequest.MainTab.Actions.Controls._children" Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="Sprk.Registration.Approve.Form.Button" Command="Sprk.Registration.Approve.Form.Command" LabelText="Approve Demo Access" Alt="Approve Demo Access" ToolTipTitle="Approve Demo Access" ToolTipDescription="Approve this request and provision a demo account." TemplateAlias="o1" Image16by16="/_imgs/ribbon/Approve_16.png" Image32by32="/_imgs/ribbon/Approve_32.png" ModernImage="Accept" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="Sprk.Registration.Approve.Grid.CustomAction" Location="Mscrm.HomepageGrid.sprk_registrationrequest.MainTab.Actions.Controls._children" Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="Sprk.Registration.Approve.Grid.Button" Command="Sprk.Registration.Approve.Grid.Command" LabelText="Approve Demo Access" Alt="Approve Demo Access" ToolTipTitle="Approve Demo Access" ToolTipDescription="Approve selected request(s) and provision demo accounts." TemplateAlias="o1" Image16by16="/_imgs/ribbon/Approve_16.png" Image32by32="/_imgs/ribbon/Approve_32.png" ModernImage="Accept" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="Sprk.Registration.Reject.Form.CustomAction" Location="Mscrm.Form.sprk_registrationrequest.MainTab.Actions.Controls._children" Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="Sprk.Registration.Reject.Form.Button" Command="Sprk.Registration.Reject.Form.Command" LabelText="Reject Request" Alt="Reject Request" ToolTipTitle="Reject Request" ToolTipDescription="Reject this registration request with a reason." TemplateAlias="o1" Image16by16="/_imgs/ribbon/Cancel_16.png" Image32by32="/_imgs/ribbon/Cancel_32.png" ModernImage="Cancel" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="Sprk.Registration.Reject.Grid.CustomAction" Location="Mscrm.HomepageGrid.sprk_registrationrequest.MainTab.Actions.Controls._children" Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="Sprk.Registration.Reject.Grid.Button" Command="Sprk.Registration.Reject.Grid.Command" LabelText="Reject Request" Alt="Reject Request" ToolTipTitle="Reject Request" ToolTipDescription="Reject selected registration request(s) with a reason." TemplateAlias="o1" Image16by16="/_imgs/ribbon/Cancel_16.png" Image32by32="/_imgs/ribbon/Cancel_32.png" ModernImage="Cancel" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Sprk.Registration.Approve.Form.Command">
+      <EnableRules>
+        <EnableRule Id="Sprk.Registration.Approve.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.approveRequestFromForm">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Sprk.Registration.Approve.Grid.Command">
+      <EnableRules>
+        <EnableRule Id="Sprk.Registration.Approve.Grid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.approveRequest">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Sprk.Registration.Reject.Form.Command">
+      <EnableRules>
+        <EnableRule Id="Sprk.Registration.Reject.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.rejectRequestFromForm">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Sprk.Registration.Reject.Grid.Command">
+      <EnableRules>
+        <EnableRule Id="Sprk.Registration.Reject.Grid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.rejectRequest">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="Sprk.Registration.Approve.Form.EnableRule">
+        <CustomRule Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.enableApproveButtonForm" Default="true">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="Sprk.Registration.Approve.Grid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+      </EnableRule>
+      <EnableRule Id="Sprk.Registration.Reject.Form.EnableRule">
+        <CustomRule Library="$webresource:sprk_/js/registrationribbon.js" FunctionName="Sprk.RegistrationRibbon.enableRejectButtonForm" Default="true">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="Sprk.Registration.Reject.Grid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels />
+</RibbonDiffXml>

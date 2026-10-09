@@ -4,7 +4,7 @@
     <title>Restore master branch protection with CI / Router as required check + document admin-bypass policy</title>
     <phase>Post-Live-Fire remediation — repo governance</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Ops task — modifies GitHub repo settings via `gh api` PATCH, no code files. But repo-governance-critical: without this, ALL required-status-check work is advisory.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -59,4 +59,8 @@ The task itself is small — the value is in getting the enforcement teeth back 
     <criterion>A test PR attempting to merge WITHOUT `CI / Router` green is actually blocked by the protection.</criterion>
     <criterion>Audit-trail plan documented for admin bypass (if bypass allowed): git-note pattern, PR comment convention, or Slack channel notification.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-09">COMPLETED — SUPERSEDED by the repository ruleset (SESSION 45, read-only verification). Since 2026-08-29 master is governed by ruleset 21824191 (enforcement active), not classic branch protection — that endpoint returns 404 by design ("Branch protection has been disabled"), which is what this task originally read as "unprotected". `gh api repos/spaarke-dev/spaarke/rules/branches/master` → pull_request (PR required), required_status_checks [Router] (exactly one, FR-A01; strict=false), non_fast_forward, deletion. Admin-bypass posture: BLOCKED — `bypass_actors` = [] and `current_user_can_bypass` = never, so no audit-trail convention is needed. Documented in .claude/skills/merge-to-master/SKILL.md (Step 3) and worktree-sync Step 3; docs/procedures/ci-cd-workflow.md names Router as the only required check. AC1's literal "classic endpoint returns 200" is obsolete (rulesets replace it); its intent — merge blocked unless Router is green — holds and has been exercised on every PR since (e.g. PR #1365, 2026-10-08).</note>
+  </notes>
 </task>

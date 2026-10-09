@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -235,7 +236,7 @@ public static class ContainerTypeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 traceId: context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -361,7 +362,7 @@ public static class ContainerTypeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 traceId: context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -564,7 +565,7 @@ public static class ContainerTypeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 traceId: context.TraceIdentifier);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,
@@ -789,7 +790,7 @@ public static class ContainerTypeEndpoints
                     ["traceId"] = context.TraceIdentifier
                 });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(
                 ex,

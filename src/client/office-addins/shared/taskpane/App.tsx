@@ -29,6 +29,8 @@ import {
   type ResolvedRelatedRecord,
   applyStampPrecedence,
   completeStampIdentity,
+  resolveEmailIdentity,
+  identityOfSavedDocument,
   type DocumentIdentityContext,
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
@@ -39,6 +41,7 @@ import {
   type SendEmailRelatedRecordInput,
 } from './services/sendEmailService';
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
+import { canOpenSpaarkeRecords } from './services/openRecordLauncher';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from './utils/errorMessages';
 
@@ -248,10 +251,14 @@ export const App: React.FC<AppProps> = ({
 
   // FR-11 (task 024): the open document's identity as the Save tab consumes it. Seeded 'checking' for a
   // host that CAN resolve identity, so Save can never be pressed in the window before resolution starts —
-  // a create in that window could mint a duplicate record. `undefined` = identity does not apply (Outlook).
+  // a create in that window could mint a duplicate record. `undefined` = identity does not apply (or, for an
+  // email, the lookup found nothing / failed — the ordinary save form).
+  // Task 120: an Outlook email in read mode (`canResolveEmailIdentity`) is looked up too, so the pane can say it is
+  // already saved; it is seeded 'checking' for the same reason (the Save tab shows the brief "checking" line).
   const [documentIdentity, setDocumentIdentity] = useState<DocumentIdentityState | undefined>(() => {
     try {
-      return hostAdapter.getCapabilities().canGetDocumentUrl ? 'checking' : undefined;
+      const capabilities = hostAdapter.getCapabilities();
+      return capabilities.canGetDocumentUrl || capabilities.canResolveEmailIdentity ? 'checking' : undefined;
     } catch {
       return undefined;
     }
@@ -394,18 +401,64 @@ export const App: React.FC<AppProps> = ({
     }
   }, [hostAdapter]);
 
+  // Task 120 (owner UAT round 12 O6): is the email open in Outlook already saved? Capability-gated (NFR-10 —
+  // `canResolveEmailIdentity`, Outlook read mode), never `hostType`. A saved copy the caller may read becomes an
+  // ordinary resolved identity, so task 111's machinery shows the green "Saved to Spaarke" box, the "Filed to" card or
+  // the filing picker, and Find / To Do / Send Email see the saved `.eml`. EVERY other answer (not saved, 403, 503,
+  // network, no Message-ID) leaves NO identity — the ordinary save form, exactly as before this lookup existed. An
+  // email may legitimately be saved again, so an undetermined answer never blocks Save the way it does for Word.
+  // Shares the attempt counter with the document path, so a stale answer never overwrites a newer one.
+  const resolveOpenEmailIdentity = useCallback(async () => {
+    const attempt = ++identityAttemptRef.current;
+    setDocumentIdentity('checking');
+    let outcome: DocumentIdentityOutcome | null = null;
+    try {
+      const keys = hostAdapter.getEmailIdentityKeys ? await hostAdapter.getEmailIdentityKeys() : null;
+      outcome = await resolveEmailIdentity(keys);
+    } catch (err) {
+      console.warn('[Spaarke] Email identity lookup failed; showing the save form', err);
+    }
+    if (attempt !== identityAttemptRef.current) {
+      return;
+    }
+    const settled = outcome;
+    setDocumentIdentity(settled ?? undefined);
+    if (settled) {
+      setSavedContext(prev => applyDocumentIdentityOutcome(prev, settled, toFriendlyRegardingType));
+    }
+  }, [hostAdapter]);
+
+  // Task 120: after a pane save of an email, the identity becomes the saved `.eml` — read by its id (task 112's route),
+  // so a later Cancel / "Don't save again", Find and To Do all see it, and reopening the pane finds it by message id.
+  // A failed read keeps the id with the record unknown; the saved context then keeps what the save itself reported
+  // (`handleSaved`), so it is only updated from a fully read identity.
+  const adoptSavedEmailIdentity = useCallback(async (documentId: string) => {
+    const attempt = ++identityAttemptRef.current;
+    const outcome = await identityOfSavedDocument(documentId);
+    if (!outcome || attempt !== identityAttemptRef.current) {
+      return;
+    }
+    setDocumentIdentity(outcome);
+    if (outcome.kind === 'resolved' && outcome.relatedRecordKnown !== false) {
+      setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
+    }
+  }, []);
+
   // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
   // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
   useEffect(() => {
     if (!isAuthenticated || identityResolutionAttempted.current) {
       return;
     }
-    if (!hostAdapter.getCapabilities().canGetDocumentUrl) {
-      return;
+    const capabilities = hostAdapter.getCapabilities();
+    if (capabilities.canGetDocumentUrl) {
+      identityResolutionAttempted.current = true;
+      void resolveOpenDocumentIdentity();
+    } else if (capabilities.canResolveEmailIdentity) {
+      identityResolutionAttempted.current = true;
+      void resolveOpenEmailIdentity();
     }
-    identityResolutionAttempted.current = true;
-    void resolveOpenDocumentIdentity();
-  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity]);
+  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity, resolveOpenEmailIdentity]);
 
   // Task 111: the Save tab filed the open document to a record. The identity (which the card and the green box read)
   // and the saved context (Create To Do's regarding) take the record at once — no reload, no re-resolve.
@@ -429,9 +482,18 @@ export const App: React.FC<AppProps> = ({
   }, []);
 
   // "Check again" / "Try again" in the Save tab (task 024).
+  // Task 116: gated like the automatic run above. Outlook has no open document (`canGetDocumentUrl` false), so a
+  // "Try again" there must not call `getDocumentUrl()` — it threw CAPABILITY_NOT_SUPPORTED and Find showed
+  // "Document identity resolution failed" (B2B guest UAT, 2026-10-08).
+  // Task 120: in Outlook read mode the same actions (and the return-from-Spaarke refresh) re-run the email lookup.
   const retryDocumentIdentity = useCallback(() => {
-    void resolveOpenDocumentIdentity();
-  }, [resolveOpenDocumentIdentity]);
+    const capabilities = hostAdapter.getCapabilities();
+    if (capabilities.canGetDocumentUrl) {
+      void resolveOpenDocumentIdentity();
+    } else if (capabilities.canResolveEmailIdentity) {
+      void resolveOpenEmailIdentity();
+    }
+  }, [hostAdapter, resolveOpenDocumentIdentity, resolveOpenEmailIdentity]);
 
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
@@ -658,6 +720,11 @@ export const App: React.FC<AppProps> = ({
   // WordAdapter always reports `canGetSender: false`; OutlookAdapter reports it in read AND compose mode.
   const findItemNoun: FindItemNoun = hostAdapter.getCapabilities().canGetSender ? 'email' : 'document';
 
+  // Task 120: ONE gate for every "Open in Spaarke" affordance the tabs render (To Do, Find, Email; SaveView applies the
+  // same helper) — ORG_URL set and the pane can open a browser tab somehow (`openBrowserWindow`, or `window.open` on
+  // Office on the web, where task 119 found the affordances hidden). Capabilities only (NFR-10).
+  const canOpenRecords = canOpenSpaarkeRecords(hostAdapter.getCapabilities());
+
   // `CreateTodoView.savedContext` expects the narrower `SavedTodoContext` shape (regardingEntity +
   // regardingRecordId required). `App.savedContext` (AppSavedContext) widens those to optional so a
   // resolved-but-unassociated FR-01 document can still carry documentId/documentName/fileName with
@@ -794,7 +861,7 @@ export const App: React.FC<AppProps> = ({
             // Task 091 (UAT-2, NFR-10): same pattern as FindView.canOpenRecord / SaveView.canOpenRecord —
             // decided from the live adapter's capabilities, never a hostType check. Gates the created-To-Do
             // confirmation's "Open in Spaarke" link.
-            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
+            canOpenRecord={canOpenRecords}
           />
         )}
 
@@ -839,6 +906,11 @@ export const App: React.FC<AppProps> = ({
                   documentId: cleanGuid(docId),
                   ...(savedFileName ? { fileName: savedFileName } : {}),
                 }));
+                // Task 120: an email's identity becomes the saved `.eml` (capability-gated, NFR-10; Word unchanged —
+                // its identity already is the document it just saved).
+                if (hostAdapter.getCapabilities().canResolveEmailIdentity) {
+                  void adoptSavedEmailIdentity(docId);
+                }
               }
             }}
             onSaved={handleSaved}
@@ -889,7 +961,7 @@ export const App: React.FC<AppProps> = ({
             // task 092 (UAT-3, NFR-10): same pattern as SaveView's canOpenRecord — decided from the
             // live adapter's capabilities, never a hostType check. Gates whether Find's document,
             // parent-record and matching-record rows open in Spaarke or render as plain text.
-            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
+            canOpenRecord={canOpenRecords}
           />
         )}
 
@@ -924,7 +996,7 @@ export const App: React.FC<AppProps> = ({
               getAccessToken={getPaneAccessToken}
               clearTokenCache={clearPaneTokenCache}
               onSearchContacts={handleSearchContacts}
-              canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
+              canOpenRecord={canOpenRecords}
               onGoToSave={() => setCurrentTab('save')}
             />
           </Suspense>

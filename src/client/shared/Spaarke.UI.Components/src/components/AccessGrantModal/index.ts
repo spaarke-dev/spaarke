@@ -12,6 +12,8 @@ export type { IAssignedAccessEntry } from './AccessGrantModal';
 // Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).
 export { resolveAccessPermissionState } from './accessPermissionState';
 export type { IAccessPermissionValues } from './accessPermissionState';
+// Task 153: the ONE builder of task 064's per-record No Access route, reused by the TrackingFieldTrio host's status read.
+export { buildNoAccessPath } from './noAccess';
 export type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
@@ -28,5 +30,21 @@ export type {
   ExternalGrantRootType,
   IAccessLevelOption,
   AccessPermissionState,
+  // Task 067: the No Access List entry (064's contract) and the host's organization-membership answer.
+  IRecordNoAccessEntry,
+  IContactOrganizationMembership,
+  // Task 175 (owner round 87): a record's direct filing parents and the floor they set.
+  IFollowsParent,
+  IAccessFloor,
 } from './types';
+// Task 175: the host's parsers for `can-manage-access` and the Access Permission pill's floor rules.
+export {
+  parseFollowsParents,
+  parseAccessFloor,
+  resolveAccessPermissionPill,
+  isLooserThanFloor,
+  accessPermissionStateOf,
+  describeEffectiveAccess,
+} from './followsParent';
+export type { AccessValueOrigin } from './followsParent';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';

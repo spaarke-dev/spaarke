@@ -1593,6 +1593,7 @@ public sealed class UnifiedEvaluatorSeamTests
             // unlinked default every other construction site uses.
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
@@ -1736,6 +1737,7 @@ public sealed class UnifiedEvaluatorSeamTests
             denyReader ?? new SeamNoAccessListReader(),
             identityStore ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             systemUsers ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
@@ -1894,7 +1896,8 @@ public sealed class UnifiedEvaluatorSeamTests
 
         public ParticipationWorld()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

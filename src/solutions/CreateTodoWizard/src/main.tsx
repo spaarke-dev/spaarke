@@ -7,78 +7,16 @@ import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { withBffChildWrites } from "@spaarke/ui-components/utils/adapters/bffChildWriteAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
-import { CreateTodoWizard } from "@spaarke/ui-components/components/CreateTodoWizard";
-import type { IDataService } from "@spaarke/ui-components/types/serviceInterfaces";
+import {
+  CreateTodoWizard,
+  withTodoCreatedBroadcast,
+  resolveCurrentUserContact,
+} from "@spaarke/ui-components/components/CreateTodoWizard";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
-// ---------------------------------------------------------------------------
-// R4 task 100 (W-2) — post-wizard-close refetch BroadcastChannel contract.
-//
-// After a successful `sprk_todo` create we post a `{ type: SPRK_TODO_CREATED }`
-// message on the SPRK_TODO_CHANNEL_NAME channel. The LegalWorkspace SmartTodo
-// widget shim (`src/solutions/LegalWorkspace/src/sections/todo.registration.ts`)
-// subscribes and invokes its captured `refetch` ref so the list refreshes
-// without a page reload — closes UAT issue 1 from the 2026-06-18 widget-parity
-// audit.
-//
-// Contract: constants MUST stay in lockstep with the shim's matching constants.
-// They are intentionally inlined on both sides because the wizard Code Page
-// does not depend on `@spaarke/smart-todo-components`; introducing a shared
-// constants module just to share two strings would couple the wizard's
-// minimal build graph to a peer package it otherwise doesn't need.
-//
-// Defensive: BroadcastChannel is widely supported in modern Chromium-based MDA
-// runtimes; on the rare hostile sandbox where it isn't, the wrapper silently
-// no-ops (the create still succeeds; only the cross-iframe refetch is missed,
-// and a manual refresh recovers).
-// ---------------------------------------------------------------------------
-
-const SPRK_TODO_ENTITY = "sprk_todo";
-const SPRK_TODO_CHANNEL_NAME = "sprk_todo:lifecycle";
-const SPRK_TODO_CREATED = "sprk_todo:created";
-
-/**
- * Wrap an `IDataService` so successful `sprk_todo` creates broadcast a
- * `sprk_todo:created` message on the shared BroadcastChannel. All other
- * operations pass through unmodified.
- *
- * @param inner - The underlying IDataService (e.g., XrmDataServiceAdapter).
- * @returns A wrapped IDataService instance.
- */
-function wrapDataServiceForCreateBroadcast(inner: IDataService): IDataService {
-  if (typeof BroadcastChannel === "undefined") {
-    // No-op wrapper — host environment doesn't support BroadcastChannel.
-    return inner;
-  }
-
-  // UAC-r2 task 147 r1c: the wrapper INHERITS from `inner` (Object.create) rather than spreading it, so a BFF-routed
-  // `inner` (withBffChildWrites, below) stays recognised as routed — `TodoService` then calls THIS createRecord instead
-  // of re-wrapping `inner` and sending the create to the BFF past the broadcast (which lost the cross-iframe refetch).
-  return Object.assign(Object.create(inner) as IDataService, {
-    createRecord: async (entityName: string, data: Record<string, unknown>) => {
-      const result = await inner.createRecord(entityName, data);
-      if (entityName === SPRK_TODO_ENTITY && result) {
-        try {
-          const channel = new BroadcastChannel(SPRK_TODO_CHANNEL_NAME);
-          try {
-            channel.postMessage({ type: SPRK_TODO_CREATED, todoId: result });
-          } finally {
-            channel.close();
-          }
-        } catch (err) {
-          // Non-fatal — the create succeeded; only the cross-iframe refetch
-          // signal failed. Log + continue so the user still sees the success
-          // screen.
-          console.warn(
-            "[CreateTodoWizard] Failed to broadcast sprk_todo:created — widget will need manual refresh",
-            err,
-          );
-        }
-      }
-      return result;
-    },
-  });
-}
+// R4 task 100 (W-2) post-create refetch broadcast and the smart-todo-r5 default assignee now live in
+// `@spaarke/ui-components` CreateTodoWizard/todoWizardHostSupport.ts, shared with the in-app
+// InAppWizardHost (spaarke-ontology-platform-r1 task 112) so the two hosts cannot drift.
 
 function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -124,7 +62,7 @@ function App() {
   // child create is refused with a message, never sent to Xrm.WebApi.
   const dataService = React.useMemo(
     () =>
-      wrapDataServiceForCreateBroadcast(
+      withTodoCreatedBroadcast(
         withBffChildWrites(createXrmDataService(), authenticatedFetch, resolvedBffBaseUrl || undefined),
       ),
     [resolvedBffBaseUrl],
@@ -155,26 +93,9 @@ function App() {
   >(undefined);
   React.useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        // Shared cross-frame walker (task 081 / C-8).
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any = getXrm('utility');
-        const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
-        const userId = rawUserId ? rawUserId.replace(/[{}]/g, "") : "";
-        if (!userId) return;
-        const res = await dataService.retrieveMultipleRecords(
-          "contact",
-          `?$select=contactid,fullname&$filter=_sprk_systemuser_value eq ${userId}&$top=2`,
-        );
-        const first = (res.entities ?? [])[0] as { contactid?: string; fullname?: string } | undefined;
-        if (!cancelled && first?.contactid) {
-          setDefaultAssignedTo({ contactId: first.contactid, contactName: first.fullname });
-        }
-      } catch (err) {
-        console.warn("[CreateTodoWizard] current-user contact resolve failed:", err);
-      }
-    })();
+    void resolveCurrentUserContact(dataService).then((contact) => {
+      if (!cancelled && contact) setDefaultAssignedTo(contact);
+    });
     return () => {
       cancelled = true;
     };

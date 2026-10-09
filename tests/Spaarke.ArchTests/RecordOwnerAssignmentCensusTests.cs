@@ -405,7 +405,7 @@ public class RecordOwnerAssignmentCensusTests
             "Office invoice quick-create — the resolver's team (task 080)."),
         new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
             "Office to-do — secure-if-any over regarding, stamps and carriers."),
-        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureAsync", 1, OwnerWriteKind.Routed,
+        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
             "Upload capture — the team the evaluated filing resolved."),
         new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
             "Inbound email — the team the evaluated filing resolved."),
@@ -1804,7 +1804,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("CommunicationService.cs", "SendMessageAsync", "message sender (HTTP caller)"),
         new PersonBearingWriter("CommunicationService.cs", "ArchiveExistingAsync", "the caller asking for an archive"),
         new PersonBearingWriter("CommunicationEndpoints.cs", "ArchiveCommunicationAsync", "hands the HTTP caller to the archive"),
-        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureAsync", "the Office user who saved the email"),
+        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", "the Office user who saved the email"), // task 121: the body moved
         new PersonBearingWriter("MessageAttachmentMaterializer.cs", "MaterializeAsync", "the message's sender, when the caller knows them"),
         new PersonBearingWriter("ThreadResolver.cs", "CreateRecordThreadAsync", "the caller creating a record thread"),
         new PersonBearingWriter("CommunicationProposalApplyService.cs", "ResolveAuditRowOwnerAsync", "the confirming user"),

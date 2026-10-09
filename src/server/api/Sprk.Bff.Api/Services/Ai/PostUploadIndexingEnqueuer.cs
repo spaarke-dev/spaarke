@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -73,6 +74,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
     private readonly IFileIndexingService _fileIndexingService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IDocumentDataverseService _documentService;
+    private readonly DocumentIndexParentResolver _parentResolver;
     private readonly AnalysisOptions _analysisOptions;
     private readonly IOptions<PostUploadIndexingOptions> _options;
     private readonly ILogger<PostUploadIndexingEnqueuer> _logger;
@@ -81,6 +83,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         IFileIndexingService fileIndexingService,
         JobSubmissionService jobSubmissionService,
         IDocumentDataverseService documentService,
+        DocumentIndexParentResolver parentResolver,
         IOptions<AnalysisOptions> analysisOptions,
         IOptions<PostUploadIndexingOptions> options,
         ILogger<PostUploadIndexingEnqueuer> logger)
@@ -88,6 +91,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _parentResolver = parentResolver ?? throw new ArgumentNullException(nameof(parentResolver));
         _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -169,6 +173,16 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         //    RAG indexing must NEVER fail the upload contract with the caller.
         try
         {
+            // #1510 (unified-access-control-r2 task 177): a caller that knows the document but sent no parent (the
+            // Compose create-on-save) gets the parent the document row names — the same derivation the app-only job
+            // handler and Send-to-Index use — so its chunks stay findable in record search. A parent the caller sent
+            // is used as is; an unreadable row indexes without one, as before.
+            var parentEntity = request.ParentEntity;
+            if (parentEntity is null && !string.IsNullOrEmpty(request.DocumentId))
+            {
+                parentEntity = await _parentResolver.ResolveAsync(request.DocumentId, ct);
+            }
+
             var fileIndexRequest = new FileIndexRequest
             {
                 TenantId = request.TenantId,
@@ -176,7 +190,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 ItemId = request.ItemId,
                 FileName = request.FileName,
                 DocumentId = request.DocumentId,
-                ParentEntity = request.ParentEntity,
+                ParentEntity = parentEntity,
                 SearchIndexName = request.SearchIndexName,
                 // Task 048 (spaarkeai-word-add-in-r1): this is the single seam every OBO upload/re-index
                 // caller converges on (Compose save-back, the Create* wizards, SprkChat persist, the

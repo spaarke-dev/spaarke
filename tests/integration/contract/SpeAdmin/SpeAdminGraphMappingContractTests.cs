@@ -399,7 +399,7 @@ public class SpeAdminGraphMappingContractTests
     /// </summary>
     /// <remarks>
     /// The Key Vault and Dataverse dependencies are constructor-required but unreachable from these
-    /// methods — they serve <c>GetClientForConfigAsync</c>, which the tests bypass by supplying the
+    /// methods — they serve <c>GetClientForContainerAsync</c>, which the tests bypass by supplying the
     /// client directly. Both are wired to credentials that throw if anything ever calls them, so a
     /// future change that makes one of these paths reach outward fails loudly instead of quietly
     /// trying to authenticate.

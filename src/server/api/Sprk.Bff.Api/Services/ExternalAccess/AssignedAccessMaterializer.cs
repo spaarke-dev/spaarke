@@ -655,8 +655,14 @@ public sealed class AssignedAccessMaterializer
     {
         try
         {
-            var flags = await _participations
+            // Task 174 (owner round 84): the EFFECTIVE flags — Restricted, Limited or Secure through a parent governs what an
+            // assignee is given (suggest vs share, convert), exactly as the read path cancels it. The S5 keep follows the
+            // record's OWN stored flag (main-session ruling on verifier F1-c), as /unshare-user does: a not-yet-flagged child
+            // is still owned by its business unit, so ending its assignment share leaves readers.
+            var own = await _participations
                 .GetRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
+            run.OwnIsSecure = !own.TryGetValue(run.RootId, out var ownFlags) || ownFlags.IsUnreadable || ownFlags.IsSecure;
+            var flags = await _participations.FoldEffectiveAsync(run.Logical, own, ct).ConfigureAwait(false);
             // Absent = unreadable at write time (task 138's rule), never "no veto".
             return flags.TryGetValue(run.RootId, out var f) && !f.IsUnreadable ? f : null;
         }
@@ -757,7 +763,20 @@ public sealed class AssignedAccessMaterializer
             var modified = IsModified(ours, row);
 
             // ── Task 141 link appeared: the contact is an internal user — convert grant → share ──
-            if (target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive)
+            // GitHub #1410 / owner round 82 ("the parent permissions control"): the record is not flagged secure, but it may be
+            // filed under a secure matter or project whose No Access list governs it. A walled user is NOT converted (the
+            // grant is left exactly as it is, and converts once the wall lifts); a check that cannot be completed is a fault
+            // (reported, the run red) and nothing is converted this pass.
+            var convertWall = target.Kind == TargetKind.Share && !modified && !flags.IsSecure && !flags.IsInactive
+                ? await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    run.Logical, run.RootId, target.SystemUserId!.Value, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false)
+                : null;
+            if (convertWall?.Outcome == SecureShareWallOutcome.Unverifiable)
+            {
+                DenyListFault(run, subject, "the conversion of its grant to a share", detail: convertWall.Fault);
+            }
+
+            if (convertWall is not null && !convertWall.RefusesShare)
             {
                 var written = await WriteShareAsync(run, subject, target.SystemUserId!.Value, ct).ConfigureAwait(false);
                 if (written is not { } mask)
@@ -839,8 +858,9 @@ public sealed class AssignedAccessMaterializer
             // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks. Task 158
             // final round (main-session round 58 item 1): on a work assignment or project filed under a secure record the
             // enforcer also removes it for a person on that PARENT's list, so the parents' lists are asked too — the guard's
-            // one entry point, as the suggestion below asks it.
-            if (flags.IsSecure)
+            // one entry point, as the suggestion below asks it. GitHub #1410 / owner round 82: asked WHATEVER the record's flag
+            // — the enforcer also removes it on a not-yet-secure record filed under a walled secure parent (the guard answers
+            // NotSecure for a record with no secure parent, which falls through to the operator's removal as before).
             {
                 var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                     run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
@@ -1082,19 +1102,21 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        run.Writes++;
         if (outcome.Warning is { } warning)
         {
-            // ADR-003: the core wrote, but the grant does not confer access (a row lapsed between this read and the
-            // core's). Never reported as Granted: a failure, and nothing in the ledger changes, so the next pass decides
-            // again from fresh reads.
+            // ADR-003: the grant does not confer access (a row lapsed between this read and the core's). This call sends
+            // no date then (a date is sent only when nothing conferred), so since task 113 the core refused before
+            // writing: nothing changed. Never reported as Granted: a failure, and nothing in the ledger changes, so the
+            // next pass decides again from fresh reads (and, seeing nothing conferring, sends a date).
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was written but confers no access ({Warning}); " +
-                "not recorded as granted.", run.Logical, run.RootId, subject, warning);
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was not written — the existing grant has lapsed " +
+                "and confers no access ({Warning}); not recorded as granted.", run.Logical, run.RootId, subject, warning);
             run.Fail(subject, "grant-not-conferring",
-                $"Access for {subject} on this record was written but does not take effect yet. The next update will try again.");
+                $"Access for {subject} on this record was not put in place yet: their existing grant has lapsed. The next update will try again.");
             return;
         }
+
+        run.Writes++;
 
         var survivorExpiry = expiry
             ?? (active.Count > 0
@@ -1125,11 +1147,12 @@ public sealed class AssignedAccessMaterializer
 
         var restoring = live.Any(r => r.State == AssignedAccessState.Skipped && r.Reason == AssignedAccessReason.RemovedByNoAccess);
 
-        if (flags.IsSecure)
         {
             // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
             // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
-            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            // parent's No Access list too — the guard's one entry point for the record and its parents. GitHub #1410 / owner
+            // round 82: asked WHATEVER the record's flag (a not-yet-secure record filed under a walled secure parent is
+            // governed by that parent's list); the guard answers NotSecure for a record with no secure parent.
             var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
                 run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
@@ -1144,15 +1167,15 @@ public sealed class AssignedAccessMaterializer
                 // Task 142 r4 (owner round 13 item 5): a fault, not a wall — nothing shared or suggested (fail closed), and
                 // the run FAILS like the deny-list fault (counted, logged, the job red). The ledger keeps what it said, so a
                 // share 143's enforcer removed is still restored once the check reads again.
-                DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault);
+                DenyListFault(run, subject, restoring || !flags.IsSecure ? "its share" : "its suggestion", detail: wall.Fault);
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccessUnverifiable, user)
                     .ConfigureAwait(false);
                 return;
             }
 
-            if (!restoring)
+            if (flags.IsSecure && !restoring)
             {
-                // Owner answer A3: suggest, do not share.
+                // Owner answer A3: suggest, do not share (secure records only).
                 await EnsureRowsAsync(run, subject, byField,
                     new AssignedAccessLedgerWrite(AssignedAccessState.PendingConfirmation, null, null, user), ct).ConfigureAwait(false);
                 run.Entry(subject, fields, user, AssignedAccessState.PendingConfirmation, null, AssignedAccessAction.Ledger);
@@ -1318,9 +1341,10 @@ public sealed class AssignedAccessMaterializer
                         return;
                     }
 
-                    if (flags.IsSecure)
+                    if (run.OwnIsSecure)
                     {
                         // Owner S5: a secure record always keeps someone who can see it — this rule never removes a share there.
+                        // Task 174 (F1-c ruling): the record's OWN stored flag, as /unshare-user's S5 — not the effective one.
                         await EndAsync(AssignedAccessReason.KeptSecureRecord, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
@@ -1988,7 +2012,8 @@ public sealed class AssignedAccessMaterializer
         try
         {
             var logical = ExternalGrantRoot.LogicalNameFor(rootType);
-            var flags = await _participations.GetRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
+            // Task 174: the composition's gates use the EFFECTIVE flags, so this mirror does too.
+            var flags = await _participations.GetEffectiveRootRecordFlagsAsync(logical, new[] { rootId }, ct).ConfigureAwait(false);
             if (!flags.TryGetValue(rootId, out var f) || f.IsUnreadable)
                 return new[] { ResidualTerm.Unknown };
             if (f.IsDirectOnly || f.IsRestricted || f.IsInactive)
@@ -2120,6 +2145,9 @@ public sealed class AssignedAccessMaterializer
 
         /// <summary>Task 149: this run made at least one CONFIRMED system-user share write on the root.</summary>
         public bool RootShareWritten { get; set; }
+
+        /// <summary>Task 174 (F1-c): the record's OWN stored Secure flag (unreadable counts as secure), for the S5 keep only.</summary>
+        public bool OwnIsSecure { get; set; } = true;
 
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();

@@ -303,6 +303,14 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
     </EmbeddedResource>
 
+    <!-- T256 (H7b, unified-access-control-r2 INCOMING-145 §2.1): config/secure-record-owner-role.json is the ONE list of
+         tables the "Secure Record Owner" role reads at Basic depth. Linked from the repository root (never copied), the way
+         Sprk.Bff.Api.csproj links the same file for its NFR-05 census — so H7b grants exactly what the census checks. -->
+    <EmbeddedResource Include="..\..\..\..\config\secure-record-owner-role.json"
+                       Link="Handlers\SecureRecordSetup\secure-record-owner-role.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordOwnerRole.json</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 150 (Wave G-5 Batch G-5A) — H12a YamlDotNet manifest engine +
          DV-REST seed writes. task-069's manifest.yaml (single source of
          truth per its own header) + the 4 flat-JSON content files
@@ -315,14 +323,11 @@
          immediately above) so YamlSeedManifestEngine's read is self-
          contained at runtime (no repo-checkout dependency in the L2 publish
          output, same "content files in the payload" rationale the POML
-         names). FileSeedManifestReader (the H12a handler's ISeedManifestReader
-         collaborator — SHA-256 hash + defense-in-depth retired-artifact
-         scan) intentionally keeps its existing on-disk Content-copy read
-         path (AiSeedChainOptions.ManifestPath) — unchanged by this task,
-         out of the declared file-modify scope; the writer's embedded copy
-         and the reader's on-disk copy are both sourced from the SAME
-         scripts/seed-data/manifest.yaml file at build time, so there is no
-         drift risk despite the two read mechanisms. -->
+         names). Task 253 (G38): EmbeddedSeedManifestReader (H12a + H12b's
+         ISeedManifestReader — SHA-256 hash + defense-in-depth retired-
+         artifact scan) reads THIS embedded manifest too; its former on-disk
+         read (AiSeedChainOptions.ManifestPath) failed on the Worker host,
+         whose publish has no scripts/ folder. -->
     <EmbeddedResource Include="..\..\..\..\scripts\seed-data\manifest.yaml"
                        Link="Handlers\AiSeedChain\SeedContent\manifest.yaml">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.manifest.yaml</LogicalName>
@@ -407,6 +412,8 @@
        Spaarke.Core) — see that file's header. `internal` in each assembly. -->
   <ItemGroup>
     <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+    <Compile Include="..\..\shared\Contracts\SpeContainerCustomerMarker.cs" Link="Shared\SpeContainerCustomerMarker.cs" />
+    <Compile Include="..\..\shared\Contracts\KeylessProofContract.cs" Link="Shared\KeylessProofContract.cs" />
   </ItemGroup>
 
   <!-- Expose internal seams to the L2 test project (parity with the pre-split
