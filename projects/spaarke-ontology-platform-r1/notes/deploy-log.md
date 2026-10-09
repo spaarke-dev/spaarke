@@ -138,3 +138,11 @@ Per-user errors (App Insights, run window): 14 users x 4 playbooks "Create Notif
 Delivered (appnotification, all to operator 1d02f31c only): Due Soon 7 (6 real + "Due soon: zz-120-due-soon task", regardingId 448e45bd, viaMatter.name "zz-120-matter (ISS-018 live proof)"), WA 1 ("New assignment: zz-120-work assignment", regardingId 01af6abc, viaMatter.name zz-120-matter). No zz-120 notification for any other user. Overdue and MA zz-120 not delivered (priority defect).
 
 Cleanup 02:36Z: deleted 2 zz-120 notifications, 2 events, 1 work assignment, 1 matter; confirmed 0 zz-120 matters/events/work assignments/notifications. The 6 real Due Soon notifications stay (product output).
+
+### D-91 pause (2026-10-09, spaarkedev1)
+- Mechanism verified in code before the change: `PlaybookSchedulerJob.QueryNotificationPlaybooksAsync` (deployed master e9f08b764, lines 389-392) selects `sprk_playbooktype = 2 AND statecode = 0`; no `sprk_enabled` exists on that path. So `statecode` is the switch. sprk_analysisplaybook status pairs: Active 0/1, Inactive 1/2.
+- Before (02:42:37Z): all 7 statecode=0 statuscode=1. Overdue/MA lastrun null (cleared for the D-89 proof, not advanced by D-78); Docs 2026-10-08 18:00:10; Emails 11:00:08; Events 18:00:19; Due Soon 2026-10-09 02:34:08; WA 02:34:30.
+- Change (PATCH statecode=1, statuscode=2 only; names + type checked first), 02:42:39-02:42:40Z: Tasks Overdue 4369cab2, Matter/Project Activity Summary 24051c80, New Documents 29051c80, New Emails 2f46208e, New Events a4bc529c. No node edit, no publish (data row, nothing to publish).
+- Read back (02:42:40Z): the five statecode=1 statuscode=2; Due Soon and WA unchanged (0/1). lastrundate values untouched.
+- Next tick 03:00:00Z (run 99196f19, trigger Scheduled, Succeeded, 0.36 s): children = Tasks Due Soon (Skipped - not due) and New Work Assignments (Skipped - not due) ONLY; the five paused playbooks are absent (not queried). Due Soon / WA last ran 02:34Z and are daily, so their next real run is the first tick after ~02:34Z 2026-10-10.
+- To resume a playbook: PATCH statecode=0, statuscode=1 (its sprk_lastrundate decides when it is next due).
