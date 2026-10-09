@@ -18,7 +18,8 @@
     "exchangePolicyScopeGroupId",
     "communicationDefaultMailbox",
     "tier",
-    "estimatedMonthlyUsd"
+    "estimatedMonthlyUsd",
+    "customerWorkforceTenantIds"
   ],
   "additionalProperties": false,
   "properties": {
@@ -39,6 +40,19 @@
       "type": "string",
       "format": "uuid",
       "description": "Customer Entra tenant ID (Model 2) or Spaarke tenant ID (Model 1). NEVER default — enforces §4D I1 (FR-28) tenant-isolation invariant."
+    },
+    "customerWorkforceTenantIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "not": { "const": "00000000-0000-0000-0000-000000000000" }
+      },
+      "description": "T255 (INCOMING-141, unified-access-control-r2 task 141) — REQUIRED for every model. The Entra tenant id(s) of the CUSTOMER whose employees use this stamp (the `tid` in their workforce tokens), 1-10. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — NEVER Spaarke's tenant and never this run's tenantId; Model 2: the customer's tenant (normally the same as tenantId — listed anyway, nothing is inferred). Never the CIAM tenant (spaarkeextid). H4b writes them as WorkforceIdentity__CustomerTenantIds__N on both BFF slots and removes any stale index; the BFF admits a first-sign-in email bind or contact creation only for a member (acct = 0) of a listed tenant, and an empty list denies every customer employee. H13 T7 checks both slots. Sent to POST /api/runs as nonSecretParameters.customerWorkforceTenantIds = the JSON array as a string; refused there (CustomerWorkforceTenantsRule: workforce-tenants-required / -invalid / -ciam-tenant / -spaarke-tenant) before anything is created. Lowercase GUIDs (so uniqueItems catches a repeat). Not expressible here, so checked only by POST /api/runs (and skill Step 1e-bis): a Model 1 value equal to tenantId, Spaarke's tenant, the CIAM tenant. Ask the customer's IT for it, or look it up from one of their domains (prereqs.yaml PRQ-C-13)."
     },
     "subscriptionId": {
       "type": "string",
@@ -100,6 +114,11 @@
       "type": "string",
       "enum": ["managed", "unmanaged"],
       "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
+    },
+    "secureRecordSetupDryRun": {
+      "type": "boolean",
+      "default": false,
+      "description": "OPTIONAL (T256). true = H7b (Secure Record setup) reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). false or absent = apply. Sent to POST /api/runs as nonSecretParameters.secureRecordSetupDryRun = 'true' | 'false' (exact, lower case; anything else is refused with secure_setup.dry_run_invalid)."
     },
     "skipExternalPrereqs": {
       "type": "boolean",
@@ -279,6 +298,7 @@
       "customerId": "trial1",
       "displayName": "Spaarke Trial 1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
       "subscriptionId": "11111111-2222-3333-4444-555555555555",
       "dataverseEnvUrl": "https://spaarke-trial1.crm.dynamics.com/",
       "tenancyModel": "Model1",
@@ -308,6 +328,7 @@
       "customerId": "acme",
       "displayName": "Acme Corporation",
       "tenantId": "12345678-1234-1234-1234-123456789012",
+      "customerWorkforceTenantIds": ["12345678-1234-1234-1234-123456789012"],
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
       "dataverseEnvUrl": "https://spaarke-acme.crm.dynamics.com/",
       "tenancyModel": "Model2",

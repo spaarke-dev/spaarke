@@ -1195,11 +1195,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         webApi={webApiAdapter!}
         config={config}
         embedded={false}
-        // UAT #2: match the Dataverse Create-wizard modal footprint (60% × 70%),
-        // instead of WizardShell's 95vw default which read as oversized next to
-        // "Create New Matter".
-        maxWidth="60vw"
-        height="70vh"
+        // Default `wizard` size (62vw × min(74vh, 760px)) — replaces the former raw 60vw / 70vh
+        // override (ontology task 111; ADR-050).
       />
     );
   }

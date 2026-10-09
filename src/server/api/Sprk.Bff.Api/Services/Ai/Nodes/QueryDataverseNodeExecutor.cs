@@ -169,6 +169,23 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
             if (userId is not null)
                 resolvedFetchXml = ReplaceEqUserIdOperator(resolvedFetchXml, userId);
 
+            // ISS-018 (#1452, D-77): refuse a query Dataverse would mis-read — a list operator with a `value`
+            // attribute (e.g. `in value="a,b"`), the wrong number of <value> children, or an unrendered template.
+            // Fail loud, naming the node and the condition; never rewrite the authored query.
+            var shapeProblems = FetchXmlShapeValidator.Validate(resolvedFetchXml);
+            if (shapeProblems.Count > 0)
+            {
+                var message = $"QueryDataverse node '{context.Node.Name}' ({context.Node.Id}) has an invalid FetchXML shape: "
+                    + string.Join(" | ", shapeProblems);
+                _logger.LogError("{Message}", message);
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    message,
+                    NodeErrorCodes.InvalidConfiguration,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
+
             _logger.LogDebug(
                 "QueryDataverse node {NodeId} -- entity: {Entity}, fetchXml length: {FetchXmlLength}",
                 context.Node.Id,

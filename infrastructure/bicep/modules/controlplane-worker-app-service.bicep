@@ -198,8 +198,21 @@ param preAuthorizedClientAppIds array = [
   '1958aec2-0218-495e-8e3c-37133e9b8357'
 ]
 
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 255: the tenants that are never a customer's workforce tenant — Spaarke's own (the control plane is deployed in
+// it; the same value as EntraAppRegOptions__SpaarkeTenantId) and the CIAM tenant(s).
+var reservedTenantSettings = concat([
+  { name: 'ReservedTenants__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(ciamTenantIds)), i => {
+  name: 'ReservedTenants__CiamTenantIds__${i}'
+  value: ciamTenantIds[i]
+}))
 
 // Task 245b: flatten speContainerTypeOwners into indexed app settings (the .NET
 // configuration binder's list syntax: SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId ...).
@@ -454,7 +467,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
           name: 'ExchangeSidecar__SharedSecret'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
         }
-      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings, entraAppRegSettings)
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings, entraAppRegSettings, reservedTenantSettings)
     }
   }
 }

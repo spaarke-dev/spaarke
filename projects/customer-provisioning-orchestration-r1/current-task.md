@@ -2,18 +2,19 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 (context-handoff before /compact) — this session: 218e ✅, T235 ✅, 218d ✅, 218f code complete, control plane deployed, master merged into the branch. **In progress: merging PR #1365 (owner OK) — CI was still running at handoff.**
+> **Last Updated**: 2026-10-09 SESSION 45 — parallel waves (owner: "get through this project"). Wave 1 merged: T253, T256, T206, T207, 204e, punch list 203b/204a/204f/204g; T208 + T209 done; T250 superseded. Wave 2 running: T258 + T255 (background agents).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Merge PR #1365** (owner: "yes merge", 2026-10-08), then **218f**'s last acceptance check. |
-| **Step** | Branch updated from master (`c7e3d719b`, 0 behind, conflicts resolved: CHANGELOG both sides; ArchTests ledger count 118). Head `946033583` pushed; at handoff 6 PR checks were still pending (a background watcher was waiting). |
-| **Status** | in-progress (waiting for CI). |
-| **Next Action** | (1) `gh pr checks 1365` — wait until 0 pending AND 0 fail on head `946033583` (or later). Any fail → read the log, fix, push, re-wait — never merge on `Router` alone. (2) `gh pr merge 1365 --merge` (merge commit, not squash). (3) Verify on master: `git fetch`; grep the BFF for `.ForApp(` (31 known sites: the guard + mail/Graph-subscription/registration services); `dotnet test tests/Spaarke.ArchTests` (SpeAppOnlyContainerGuardTests inside). (4) Sync the main repo (`C:\code_files\spaarke`, `git pull --ff-only` on master — only if clean). (5) Tell the owner it merged; ask for owner items 2 and 3. (6) After the publish: 218f AC2 (below), close 218f, sync the board. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean, 0 behind master at `c7e3d719b`. |
-| **Order after the merge** | first SpaarkeMaster publish (owner OK) → 218f close → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
+| **Task** | **Wave 2** — agents running in isolated worktrees: **T258** (stamp BFF startup settings, 204e F5–F8; T186 blocker) and **T255** (workforce tenant list + H3 `acct`; INCOMING-141). Main session merges each as it reports. |
+| **Step** | Wave 1 all merged + verified on the branch (solution build 0 errors / 0 warnings in touched projects; ControlPlane 2423/2424; ArchTests 888; LoadTests 5/5; recipe Pester 39/39; validate.ps1 OK; catalog -Verify OK). Applied every agent-proposed `.claude/` edit (provisioning.md: H7b + no-shell-Worker sections, handler count 21, DAG; bff-extensions §F.5; provision-environment skill: Step 0.5b `Invoke-PrereqPass`, NEW Step 1e-ter customer pass, H7b dry-run intake; manifest-driven-secret-catalog pattern). Follow-ups done here: PRQ-T-05/T-06 retired; bash-resolution bug (WSL stub in WindowsApps) fixed; H9 dead Deploy-Release.ps1 scan removed; CA2024 fixed. Filed: ISS-008 #1484 (run guard off), ISS-009 #1485 (E11 bind-by-email), ISS-010 #1486 (guests in root BU read secure records), ISS-011 #1487 (BFF gate asymmetries). |
+| **Status** | in-progress — waiting for T258 + T255 agent reports (notifications arrive automatically; do NOT relaunch). |
+| **Next Action** | For each report: `git merge <agent-branch>`; resolve (both touch manifest.yaml + generated/); apply proposed `.claude/` edits; build + ControlPlane + ArchTests (WITH build — `--no-build` ran a stale ArchTests dll twice) + LoadTests + `Invoke-CatalogGenerator.ps1 -Verify` + validate.ps1; mark POML/TASK-INDEX; commit + push. Then: PR to master (its CI runs the new router `prereqs` job). Owner-blocked: T240b re-test → T240c; T240d + T257 design notes (review); ISS-010 placement decision (customer BU — recommend H10); ISS-008 live step (run guard); T242c / T252 live. Then T186. |
+| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed; 0 behind master; carries the 218f close-out + checkpoints not yet on master (next PR). |
+| **Main repo** | `C:\code_files\spaarke` master NOT fast-forwarded (still `b0a78f880`): another session's uncommitted researcher-memory edits (`.claude/agent-memory/researcher/MEMORY.md` + 2 files) block it. Left untouched — the owner decides. |
+| **Order** | T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
 
 ### Files changed this session (all committed and pushed)
 - Package: `src/dataverse/solutions/SpaarkeMaster/**` (1.2.0.0 export), `docs/data-model/package-scope.json`, `docs/data-model/spaarke-components-inventory.json`.
@@ -23,15 +24,12 @@
 - Governance/docs: ADR-028 A6, ADR-027 MUSTs, skills `provision-environment` + `deploy-new-release`, constraints `provisioning.md`, CHANGELOG, many docs (T235 sweep, RAG guidance).
 
 ### Critical context
-- **218f AC2 (the only open check):** after the first publish, run `./scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged -WhatIf` → must print "Update SpaarkeMaster 1.0.0.0 -> 1.2.0.0 (unmanaged …)" and the pac command. Then mark 218f ✅ (POML + TASK-INDEX + drift check) and close #1401 (move ISS-005 to Resolved).
-- **The store today** (`sprkcpartifactsdev/provisioning-artifacts`): only the hand-made 2026-08-21 `dataverse-solutions-latest.json` (SpaarkeMaster 1.1.0.0, old shape) + `dataverse-solutions/2026.08.21-h3-manual-1/SpaarkeMaster.zip`. H6 and the import script both refuse it until the CI publish.
+- **The store** (`sprkcpartifactsdev/provisioning-artifacts`): `dataverse-solutions-latest.json` → SpaarkeMaster 1.2.0.0 (managed + unmanaged, SHA-256); `latest.previous` = the hand-made 2026-08-21 manifest (rollback pointer). H6 and `Import-SpaarkeMasterPackage.ps1` now accept it.
 - **Demo:** SpaarkeMaster 1.0.0.0 **unmanaged** + hand-installed dev-team solutions → `solutionPackageType` unmanaged (switch = rebuild, owner decision). Dev: `none` (authoring).
 
 ## Owner items
 
-1. **PR #1365 merge — APPROVED** (in progress, see Quick Recovery). Merging deploys the Console to DEV (deploy-spaarke-ai push trigger, T254's SprkChat change) and publishes ARM artifacts to `sprkcpartifactsdev`; production only by manual dispatch.
-2. **First real SpaarkeMaster publish** (after the merge): `publish-dataverse-solutions-manifest.yml` on master with `publish: true` — uploads 1.2.0.0 + manifest, keeps the hand-made manifest as `latest.previous`. Needed by T186 and 218f AC2. **Ask for OK.**
-3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — verified 2026-10-08 that no workflow signs in on pull requests. Entra write. **Ask for OK.**
+1. **Done 2026-10-08:** PR #1365 merged; first SpaarkeMaster publish; #1446 FIC deleted.
 4. **T240b live re-test** with add-in package 1.1.2 (owner, test tenant Dewey Cheatham `deweycheatham.onmicrosoft.com`; guest `ralph@deweycheatham.onmicrosoft.com`; Diagnostics view should show `acct` 1).
 5. **G36** (ADR-027 management group), **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
 6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
@@ -60,7 +58,7 @@
 
 ## T186 (first live E2E) — open questions + live checks
 
-- Target customer undefined after D-12/T228: needs its own subscription, Dataverse environment `spaarke-{customerId}`, container type id. Do NOT use `runs/trial1-intake.json`.
+- Target customer (owner 2026-10-09): run 1 is a MOCK customer whose home tenant is Dewey Cheatham (`deweycheatham.onmicrosoft.com`, paid M365 Business — not a trial); its users are B2B guests from there. The stamp itself (subscription, Dataverse environment `spaarke-{customerId}`, BFF app registration, `sprk-{customerId}-users`) is in Spaarke's tenant; container type id still needed. A second customer tenant is created only for run 2 (cross-customer isolation: ISS-003 #1376, ISS-004 #1377, T255's per-stamp tenant list). Do NOT use `runs/trial1-intake.json`.
 - H12a seeds 4 of 12 artifacts (playbooks + consumers pending — task 150).
 - Live checks: (T228) H5 WhoAmI as the Worker; H1 RG listing under Owner; H6 sign-in right after H10. (T218b) async import + poll against a real environment; managed import over a fresh environment. (T227e/g/d) env-var definitions read; marker PATCHes; `businessunit.sprk_containerid` PATCH. (T251) W1 group Name vs DisplayName. (T230b) keyless proof all `proved`, E-2 measurement. (T240a) H3 client-access PATCH + adoption check; stamp BFF CORS literals.
 

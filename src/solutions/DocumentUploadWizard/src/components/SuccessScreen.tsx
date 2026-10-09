@@ -49,6 +49,12 @@ export interface IBuildSuccessConfigParams {
     uploadResults: OrchestratorResult | null;
     /** Callback to close the wizard dialog. */
     onClose: () => void;
+    /**
+     * Also try `window.close()` after `onClose` (default `true`: the code-page behaviour, where the
+     * wizard owns its window). The in-app host passes `false` — `window.close()` there would target
+     * the Console's own window.
+     */
+    closeWindow?: boolean;
 }
 
 /**
@@ -63,10 +69,13 @@ export interface IBuildSuccessConfigParams {
 export function buildSuccessConfig({
     uploadResults,
     onClose,
+    closeWindow = true,
 }: IBuildSuccessConfigParams): IWizardSuccessConfig {
     const handleDone = (): void => {
         try { onClose(); } catch { /* */ }
-        try { window.close(); } catch { /* */ }
+        if (closeWindow) {
+            try { window.close(); } catch { /* */ }
+        }
     };
 
     // Handle case where upload didn't complete
