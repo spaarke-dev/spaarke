@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8034886676849951773"
+      "templateHash": "18121218555684438485"
     }
   },
   "parameters": {
@@ -124,6 +124,13 @@
       ],
       "metadata": {
         "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c)."
+      }
+    },
+    "copilotAgentClientAppId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Client id of the shared Spaarke Copilot Agent app (T257): a secret-free public client in Spaarke tenant (PKCE, redirect https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect) that each customer Copilot agent auth config signs users in with. Threaded to modules/controlplane-worker-app-service.bicep, which adds it to the PreAuthorizedClientAppIds list, so H3 pre-authorizes it on every customer BFF app (user_impersonation) and no user sees a consent prompt. Empty (default) until the operator creates the app (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); H3 then pre-authorizes only preAuthorizedClientAppIds."
       }
     },
     "ciamTenantIds": {
@@ -1561,6 +1568,9 @@
           "preAuthorizedClientAppIds": {
             "value": "[parameters('preAuthorizedClientAppIds')]"
           },
+          "copilotAgentClientAppId": {
+            "value": "[parameters('copilotAgentClientAppId')]"
+          },
           "ciamTenantIds": {
             "value": "[parameters('ciamTenantIds')]"
           },
@@ -1590,7 +1600,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11669241497465723003"
+              "templateHash": "11825084772047313616"
             }
           },
           "parameters": {
@@ -1765,6 +1775,13 @@
                 "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c)."
               }
             },
+            "copilotAgentClientAppId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Client id of the shared Spaarke Copilot Agent app (T257; secret-free public client, PKCE). When set it is appended to preAuthorizedClientAppIds, so H3 pre-authorizes it on every customer BFF app for user_impersonation. Empty (default): not added -- the app does not exist until the operator creates it. Must be a GUID: H3 rejects every run on a malformed entry (appreg-preauthorized-client-invalid)."
+              }
+            },
             "ciamTenantIds": {
               "type": "array",
               "minLength": 1,
@@ -1811,7 +1828,8 @@
             ],
             "reservedTenantSettings": "[concat(createArray(createObject('name', 'ReservedTenants__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('ciamTenantIds'))), lambda('i', createObject('name', format('ReservedTenants__CiamTenantIds__{0}', lambdaVariables('i')), 'value', parameters('ciamTenantIds')[lambdaVariables('i')]))))]",
             "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]",
-            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('preAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', parameters('preAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
+            "effectivePreAuthorizedClientAppIds": "[concat(parameters('preAuthorizedClientAppIds'), if(empty(parameters('copilotAgentClientAppId')), createArray(), createArray(parameters('copilotAgentClientAppId'))))]",
+            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(variables('effectivePreAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', variables('effectivePreAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
           },
           "resources": [
             {

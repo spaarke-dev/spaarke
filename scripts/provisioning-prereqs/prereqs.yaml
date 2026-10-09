@@ -629,11 +629,11 @@ prereqs:
     related_findings: [T251-G30, D24, D25, D26]
 
   - id: PRQ-E-14
-    name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b)
+    name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257)
     scope: once_per_env
     frequency: once per registry env; re-run the (idempotent) script after it gains a column
     owner: Spaarke platform admin (via `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`)
-    consequence_of_absence: H4 writes the customer vault, then fails Resumable `kvsecrets-secret-free-marker-apply-failed` (HTTP 400 naming `sprk_credentialmode`) — every new stamp is secret-free by default since T225b, so H4 always records the marker. Missing v3.3 columns fail H13's registry write the same way.
+    consequence_of_absence: H4 writes the customer vault, then fails Resumable `kvsecrets-secret-free-marker-apply-failed` (HTTP 400 naming `sprk_credentialmode`) — every new stamp is secret-free by default since T225b, so H4 always records the marker. Missing v3.3 columns, or the T257 `sprk_bffappid` H13 now promotes, make Dataverse reject H13's whole promoted-columns PATCH (the registry goes stale); a missing `sprk_copilotauthconfigid` stops the post-Ready Copilot gate from recording the auth config.
     check_recipe:
       cli: |
         set -o pipefail
@@ -642,12 +642,14 @@ prereqs:
         tok=$(az account get-access-token --resource "$res" --query accessToken -o tsv | tr -d '\r') || exit 1
         [ -n "$tok" ] || { echo "no Dataverse token for $res"; exit 1; }
 
-        body=$(curl -sS -f -H "Authorization: Bearer $tok" -H "Accept: application/json" "$res/api/data/v9.2/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='sprk_credentialmode')?\$select=LogicalName") || { echo "column sprk_credentialmode not found on sprk_dataverseenvironment @ $res - run Extend-DataverseEnvironmentSchema-v3.3.ps1"; exit 1; }
-        echo "$body" | grep -q '"LogicalName": *"sprk_credentialmode"' || { echo "unexpected response: $body"; exit 1; }
+        for col in sprk_credentialmode sprk_bffappid sprk_copilotauthconfigid; do
+          body=$(curl -sS -f -H "Authorization: Bearer $tok" -H "Accept: application/json" "$res/api/data/v9.2/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='$col')?\$select=LogicalName") || { echo "column $col not found on sprk_dataverseenvironment @ $res - run Extend-DataverseEnvironmentSchema-v3.3.ps1"; exit 1; }
+          echo "$body" | grep -q "\"LogicalName\": *\"$col\"" || { echo "unexpected response for $col: $body"; exit 1; }
+        done
         echo ok
-      expect: '`ok` - the attribute `sprk_credentialmode` exists on `sprk_dataverseenvironment`'
+      expect: '`ok` - the attributes `sprk_credentialmode`, `sprk_bffappid` and `sprk_copilotauthconfigid` exist on `sprk_dataverseenvironment`'
     remediation: '`scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain <admin env host>` — additive and idempotent (skips existing columns, never modifies one).'
-    related_findings: [A38a-secret-free-marker, T225b-G21]
+    related_findings: [A38a-secret-free-marker, T225b-G21, T257-registry-columns]
 
   - id: PRQ-E-13
     name: "`sprk_dataverseenvironment` placeholder record exists for the customer (its record id is the run's `environmentId`)"

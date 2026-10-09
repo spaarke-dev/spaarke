@@ -3,7 +3,7 @@
   <metadata>
     <title>Per-customer M365 Copilot agent (§9 Q2) — design and provisioning step</title>
     <phase>Model 1 dedicated-stamp remediation — §9 Q2 (owner 2026-09-28: per-customer agent); split from T218 (t218-plan.md F13, design 8)</phase>
-    <status>pending</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>New provisioning surface (M365 app package per customer) with auth implications.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -51,8 +51,47 @@
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="false">Design note accepted by the owner.</criterion>
+    <criterion testable="false">Design note accepted by the owner. MET 2026-10-09 (design note §5.1).</criterion>
+    <criterion testable="true">The alignment with ADR-028 and auth.md is checked and recorded (design note §5.2).</criterion>
+    <criterion testable="true">CI builds one template (manifest v1.30 with no permissions, webApplicationInfo or bot; DA v1.8 with no
+      capabilities; plugin v2.4) and publishes it the way SpaarkeMaster is published.</criterion>
+    <criterion testable="true">The render is deterministic and places the manifest id (UUIDv5 of customerId), servers[0].url, the
+      scope api://{bffAppId}/user_impersonation, Spaarke's tenant authority and auth.reference_id. Negative cases are
+      refused (tests/scripts/CopilotAgentPackage.Tests.ps1).</criterion>
+    <criterion testable="true">H3 pre-authorizes the shared client through the existing PreAuthorizedClientAppIds, set from the Bicep
+      parameter copilotAgentClientAppId, which is empty by default (CopilotAgentClientPreAuthorizationTests).</criterion>
+    <criterion testable="true">The registry columns are in the repo only, with no Dataverse write: sprk_copilotauthconfigid (Q5) and
+      sprk_bffappid (H13 promotes it).</criterion>
+    <criterion testable="false">The live test (design §3, steps 1-8) passes. OPEN: owner-gated.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-09" kind="owner-acceptance">The owner ACCEPTED the §3 design and all seven §4 recommended answers on
+      2026-10-09: "if these align with Copilot use and our access then ok". The alignment was checked against ADR-028 and
+      .claude/constraints/auth.md (design note §5.2) and holds, with one corrected value: the scope is
+      api://{customerBffAppId}/user_impersonation, not access_as_user. H3 exposes and pre-authorizes only
+      user_impersonation, and auth.md requires that format. The dependency on 240c is waived for the code, because §3
+      does not need the T240c directory.</note>
+    <note date="2026-10-09" kind="step-2">Built (no new L2 handler):
+      - Template source src/solutions/CopilotAgent: manifest v1.30 with no permissions, webApplicationInfo or bot; DA
+        v1.8 with no capabilities; plugin v2.4; five tokens; real icons.
+      - scripts/copilot-agent/CopilotAgentPackage.psm1: UUIDv5 manifest id, template checks, deterministic render.
+      - scripts/copilot-agent/Render-CopilotAgentPackage.ps1: explicit, registry, or -AllActive mode.
+      - scripts/copilot-agent/test_rendered_package.py: validates against Microsoft's schemas.
+      - .github/workflows/publish-copilot-agent-template.yml: the SpaarkeMaster publish pattern; PR dry run.
+      - Bicep param copilotAgentClientAppId, appended to the PreAuthorizedClientAppIds H3 already sets.
+      - Registry columns sprk_bffappid and sprk_copilotauthconfigid (Extend-DataverseEnvironmentSchema-v3.3.ps1;
+        PRQ-E-14), with H13 promoting sprk_bffappid. The BFF app id was not on the registry row (design §5.3).
+      - scripts/Deploy-CopilotAgent.ps1 (Spaarke's own environments) now packages through the same renderer.
+      - Docs: deployment guide §7.12 and docs/guides/COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md.
+      Schema versions were re-checked 2026-10-09. A DA v1.9 schema file exists, but Learn documents v1.8, so v1.8 is
+      pinned.</note>
+    <note date="2026-10-09" kind="open">Owner-gated live steps, each needing an OK, in order:
+      (1) create the "Spaarke Copilot Agent" client app and grant admin consent for openid profile offline_access;
+      (2) run Extend-DataverseEnvironmentSchema-v3.3.ps1 on the admin environment;
+      (3) set copilotAgentClientAppId in the bicepparam and redeploy the control plane;
+      (4) publish the template (workflow, publish=true on master);
+      (5) the live test, design §3 steps 1-8 (Dewey Cheatham).
+      The skill's post-Ready gate text is returned as a proposed .claude edit. No live action was taken.</note>
+  </notes>
 </task>

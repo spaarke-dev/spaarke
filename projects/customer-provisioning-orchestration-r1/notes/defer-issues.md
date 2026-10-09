@@ -301,6 +301,45 @@ run) and either rebuild the callback there or remove the BFF endpoint, `HmacSign
 
 ---
 
+### ISS-017 — `AgentToken:*` / `AgentTokenService` are registered but on no request path; a comment claims token validation that nothing does
+
+| Field | Value |
+|---|---|
+| **Status** | Open (latent; nothing breaks today) |
+| **Urgency** | low. Decide before the first per-customer Copilot agent live test (T257), so nobody configures `AgentToken__*` on a stamp believing it gates the agent |
+| **Filed** | 2026-10-09 (T257) |
+| **Source** | T257 step 2, the alignment check (design note §5.2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1523 |
+
+**Description**
+
+`AgentModule` registers `AgentTokenService` (a singleton OBO client for "M365 Copilot → Graph/Dataverse") and binds
+`AgentTokenOptions`. No endpoint or handler resolves either of them:
+- `SpaarkeAgentHandler` has `// TODO: Inject AgentTokenService when MCI-014 is implemented`;
+- the `/api/agent/*` endpoints and every endpoint the Copilot agent's OpenAPI calls use the normal OBO path.
+
+`AgentTokenOptions.AgentAppId` is documented as "used to validate that incoming tokens were issued to the expected
+agent", but no code validates `azp`/`appid` against it. It is only logged. `AgentTokenOptionsValidator` requires
+`TenantId`, `ClientId`, `AgentAppId` and `DataverseEnvironmentUrl`. There is no `ValidateOnStart` and no resolver, so
+the validator never runs. The canonical secret catalog still emits `AgentToken__ClientId` / `AgentToken__TenantId` app
+settings.
+
+Concrete risk: an operator or a later task reads the comment, sets `AgentToken__AgentAppId` to the "Spaarke Copilot
+Agent" client, and believes the BFF now only accepts that client. It does not. Per-customer isolation comes from the
+token audience and the stamp's Dataverse roles (T257 design §3), not from this setting.
+
+**Suggested fix**
+
+Needed → build, else remove. T257 does not need an agent-specific token path, so remove these:
+- `AgentTokenService`;
+- `AgentTokenOptions` and its validator;
+- the `AgentToken__*` catalog app settings;
+- the stale `SpaarkeAgentHandler` TODO.
+If MCI-014 is ever revived, it re-adds them with a real consumer. This is BFF work (§10 hygiene, publish-size delta) for
+the BFF's owning project.
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->

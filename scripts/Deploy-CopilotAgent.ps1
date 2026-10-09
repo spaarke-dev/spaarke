@@ -9,7 +9,7 @@
     to any Spaarke environment. It orchestrates:
     1. Dataverse entity descriptions - teaches Copilot the data model
     2. Copilot glossary terms and synonyms - maps user vocabulary
-    3. Teams app package generation - ready for upload to org catalog
+    3. App package generation - rendered from the T257 template (scripts/copilot-agent), ready for upload
 
     Include this in the deployment runbook for every new environment.
 
@@ -22,16 +22,28 @@
     Default: https://spaarke-bff-dev.azurewebsites.net
 
 .PARAMETER BotAppId
-    Entra app registration ID for the Copilot Bot in this environment.
-    Default: f257a0a9-1061-4f9b-8918-3ad056fe90db
+    The app manifest id of this environment's existing catalog app (kept so an upload updates it).
+    Default: f257a0a9-1061-4f9b-8918-3ad056fe90db (dev). Customer packages derive theirs from the customerId instead
+    (scripts/copilot-agent/Render-CopilotAgentPackage.ps1).
 
 .PARAMETER BffAppId
     BFF API Entra app registration ID.
     Default: 1e40baad-e065-4aea-a8d4-4b7ab273458c
 
+.PARAMETER AuthConfigId
+    The auth config (OAuth registration) id the plugin's auth.reference_id points to. Default: dev's existing one.
+
+.PARAMETER TenantId
+    Spaarke's Entra tenant id: the OAuth authorize/token authority. Required, no default
+    (§4D I1: a script never defaults a tenant). Spaarke's tenant is a221a95e-6abc-4434-aecc-e48338a1b2f2.
+
+.PARAMETER BffScopeName
+    The BFF app's delegated scope the agent requests. Default access_as_user: the dev app 1e40baad exposes it and dev's
+    auth config was registered with it. Customer BFF apps expose only user_impersonation (H3).
+
 .PARAMETER Version
-    App version for the Teams manifest. Must be incremented for updates.
-    Default: 1.0.0
+    App version for the manifest. Empty (default) = the template version in src/solutions/CopilotAgent. Must be
+    higher than the uploaded one for an update.
 
 .PARAMETER OutputPath
     Path for the generated Teams app package ZIP.
@@ -41,17 +53,21 @@
     Skip Dataverse configuration steps - useful when repackaging only.
 
 .EXAMPLE
-    .\Deploy-CopilotAgent.ps1
-    .\Deploy-CopilotAgent.ps1 -EnvironmentUrl "https://customer.crm.dynamics.com" -Version "1.0.5"
-    .\Deploy-CopilotAgent.ps1 -SkipDataverse -Version "1.0.6"
+    .\Deploy-CopilotAgent.ps1 -TenantId <Spaarke tenant id>
+    .\Deploy-CopilotAgent.ps1 -TenantId <Spaarke tenant id> -SkipDataverse -Version "1.0.11"
+    # Spaarke's own environments only. Customer packages: scripts/copilot-agent/Render-CopilotAgentPackage.ps1
 #>
 
+#Requires -Version 7.3
 param(
     [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
     [string]$BffApiUrl = "https://spaarke-bff-dev.azurewebsites.net",
     [string]$BotAppId = "f257a0a9-1061-4f9b-8918-3ad056fe90db",
     [string]$BffAppId = "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    [string]$Version = "1.0.0",
+    [string]$AuthConfigId = "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyM3ZmFjM2E2Zi1mZDYwLTQ4MTQtYTEzNC1kMTlkNzIwN2E1ZGY=",
+    [Parameter(Mandatory = $true)] [string]$TenantId,
+    [string]$BffScopeName = "access_as_user",
+    [string]$Version = "",
     [string]$OutputPath = "./spaarke-copilot-agent.zip",
     [switch]$SkipDataverse
 )
@@ -68,7 +84,7 @@ Write-Host "  Environment:  $EnvironmentUrl"
 Write-Host "  BFF API:      $BffApiUrl"
 Write-Host "  Bot App ID:   $BotAppId"
 Write-Host "  BFF App ID:   $BffAppId"
-Write-Host "  Version:      $Version"
+Write-Host "  Version:      $(if ($Version) { $Version } else { '(template version)' })"
 Write-Host "  Output:       $OutputPath"
 Write-Host "================================================================`n"
 
@@ -99,84 +115,28 @@ if (-not $SkipDataverse) {
 }
 
 # ============================================================================
-# STEP 2: Generate Teams App Package
+# STEP 2: Generate the app package (T257: the same template + renderer customer packages use)
 # ============================================================================
 
-Write-Host "`n[3/4] Building Teams app package..." -ForegroundColor Cyan
+Write-Host "`n[3/4] Building the app package..." -ForegroundColor Cyan
 
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "copilot-package-$(Get-Date -Format 'yyyyMMddHHmmss')"
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-
-# Copy manifest and update placeholders
-$manifest = Get-Content (Join-Path $copilotDir "appPackage/manifest.json") -Raw | ConvertFrom-Json
-$manifest.id = $BotAppId
-$manifest.version = $Version
-$manifest.validDomains = @(
-    ($BffApiUrl -replace "https://", ""),
-    ($EnvironmentUrl -replace "https://", "")
-)
-if ($manifest.webApplicationInfo) {
-    $manifest.webApplicationInfo.id = $BffAppId
-    $manifest.webApplicationInfo.resource = "api://$BffAppId"
+# This path serves Spaarke's OWN environments (dev/demo/internal; design note t257 Q4). It keeps their existing catalog
+# app id (-BotAppId) and auth config; customer packages come from scripts/copilot-agent/Render-CopilotAgentPackage.ps1.
+Import-Module (Join-Path $scriptDir "copilot-agent/CopilotAgentPackage.psm1") -Force
+$templateDir = Join-Path ([System.IO.Path]::GetTempPath()) "copilot-template-$(Get-Date -Format 'yyyyMMddHHmmss')"
+try {
+    $template = New-CopilotAgentTemplate -SourceFolder $copilotDir -OutputFolder $templateDir
+    $values = Get-CopilotAgentRenderValues -ManifestId $BotAppId -BffBaseUrl $BffApiUrl -BffAppId $BffAppId `
+        -AuthConfigId $AuthConfigId -SpaarkeTenantId $TenantId -BffScopeName $BffScopeName
+    $rendered = Invoke-CopilotAgentRender -Template $template.ZipPath -Values $values -OutputPath $OutputPath -Version $Version
+} finally {
+    Remove-Item $templateDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-# Write without BOM — Teams Admin Center rejects BOM-prefixed JSON
-$utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText((Join-Path $tempDir "manifest.json"), ($manifest | ConvertTo-Json -Depth 10), $utf8NoBom)
+$resolvedOutput = $rendered.ZipPath
+$Version = $rendered.Version
 
-# Copy agent files
-Copy-Item (Join-Path $copilotDir "declarativeAgent.json") $tempDir
-Copy-Item (Join-Path $copilotDir "spaarke-api-plugin.json") $tempDir
-
-# Update OpenAPI spec server URL
-$openapiContent = Get-Content (Join-Path $copilotDir "spaarke-bff-openapi.yaml") -Raw
-$openapiContent = $openapiContent -replace "https://spaarke-bff-dev\.azurewebsites\.net", $BffApiUrl
-Set-Content (Join-Path $tempDir "spaarke-bff-openapi.yaml") $openapiContent -Encoding UTF8
-
-# Generate icons if not present
-$colorIconPath = Join-Path $tempDir "color.png"
-$outlineIconPath = Join-Path $tempDir "outline.png"
-
-if (-not (Test-Path (Join-Path $copilotDir "appPackage/color.png"))) {
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap 192, 192
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.Clear([System.Drawing.Color]::FromArgb(79,107,237))
-    $font = New-Object System.Drawing.Font 'Arial', 72, ([System.Drawing.FontStyle]::Bold)
-    $g.DrawString('S', $font, [System.Drawing.Brushes]::White, 50, 45)
-    $g.Dispose(); $font.Dispose()
-    $bmp.Save($colorIconPath, [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-} else {
-    Copy-Item (Join-Path $copilotDir "appPackage/color.png") $colorIconPath
-}
-
-if (-not (Test-Path (Join-Path $copilotDir "appPackage/outline.png"))) {
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap 32, 32, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    for ($x = 0; $x -lt 32; $x++) { for ($y = 0; $y -lt 32; $y++) { $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(0,0,0,0)) } }
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 2
-    $g.DrawRectangle($pen, 2, 2, 27, 27)
-    $font = New-Object System.Drawing.Font 'Arial', 16, ([System.Drawing.FontStyle]::Bold)
-    $g.DrawString('S', $font, [System.Drawing.Brushes]::White, 6, 3)
-    $g.Dispose(); $pen.Dispose(); $font.Dispose()
-    $bmp.Save($outlineIconPath, [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-} else {
-    Copy-Item (Join-Path $copilotDir "appPackage/outline.png") $outlineIconPath
-}
-
-# Create ZIP
-$resolvedOutput = [System.IO.Path]::GetFullPath($OutputPath)
-if (Test-Path $resolvedOutput) { Remove-Item $resolvedOutput -Force }
-Compress-Archive -Path "$tempDir/*" -DestinationPath $resolvedOutput -Force
-
-# Cleanup
-Remove-Item $tempDir -Recurse -Force
-
-$fileCount = (Get-ChildItem $tempDir -ErrorAction SilentlyContinue).Count
 Write-Host "  Package created: $resolvedOutput" -ForegroundColor Green
-Write-Host "  Version: $Version"
+Write-Host "  Version: $Version (template $($template.Version))"
 
 # ============================================================================
 # STEP 3: Instructions
@@ -184,11 +144,11 @@ Write-Host "  Version: $Version"
 
 Write-Host "`n[4/4] Next steps..." -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Upload the package to Teams Admin Center:"
-Write-Host "    https://admin.teams.microsoft.com/policies/manage-apps"
+Write-Host "  Upload the package in Spaarke's tenant (this environment's agent only - never a customer's):"
+Write-Host "    Microsoft 365 admin center > Agents > All agents > Upload custom agent (assign to Spaarke staff)"
 Write-Host ""
-Write-Host "  For updates: find 'Spaarke AI' > Upload file > select $resolvedOutput"
-Write-Host "  For new installs: Upload new app > select $resolvedOutput"
+Write-Host "  For updates: Integrated apps > 'Spaarke AI' > Update > select $resolvedOutput"
+Write-Host "  Customer agents: docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12 (installed by the customer's IT)"
 Write-Host ""
 Write-Host "  After upload, configure in Copilot Studio:"
 Write-Host "    1. Open MDA app in App Designer"

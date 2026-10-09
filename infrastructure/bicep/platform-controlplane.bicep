@@ -189,6 +189,9 @@ param preAuthorizedClientAppIds array = [
   '1958aec2-0218-495e-8e3c-37133e9b8357'
 ]
 
+@description('Client id of the shared Spaarke Copilot Agent app (T257): a secret-free public client in Spaarke tenant (PKCE, redirect https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect) that each customer Copilot agent auth config signs users in with. Threaded to modules/controlplane-worker-app-service.bicep, which adds it to the PreAuthorizedClientAppIds list, so H3 pre-authorizes it on every customer BFF app (user_impersonation) and no user sees a consent prompt. Empty (default) until the operator creates the app (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); H3 then pre-authorizes only preAuthorizedClientAppIds.')
+param copilotAgentClientAppId string = ''
+
 
 @description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts (config/spaarke-resources.yaml external_identity.ciam_tenant) -- threaded to BOTH control-plane modules as ReservedTenants__CiamTenantIds__N, next to ReservedTenants__SpaarkeTenantId (the deployment tenant). Task 255 (INCOMING-141): POST /api/runs, H4b and H13 refuse either as a customer workforce tenant -- a stamp BFF refuses to start with its CIAM tenant listed, and the Spaarke tenant would bind Spaarke staff into a customer environment. REQUIRED, no default: ReservedTenantsOptions.Validate() fails Api and Worker startup without it.')
 @minLength(1)
@@ -498,6 +501,8 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     controlPlanePrincipalId: uami.outputs.principalId
     speContainerTypeOwners: speContainerTypeOwners
     preAuthorizedClientAppIds: preAuthorizedClientAppIds
+    // T257: the shared Copilot agent client joins the pre-authorized list when set.
+    copilotAgentClientAppId: copilotAgentClientAppId
     // Task 255: the CIAM tenant(s) H4b and H13 refuse as a customer workforce tenant (same list as the Api).
     ciamTenantIds: ciamTenantIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27

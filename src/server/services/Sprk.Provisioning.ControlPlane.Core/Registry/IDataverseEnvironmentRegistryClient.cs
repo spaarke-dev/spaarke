@@ -166,15 +166,15 @@ public interface IDataverseEnvironmentRegistryClient
     /// the terminal Ready-transition write to promote run-derived values
     /// (sprk_provisionedon, sprk_bffversion, sprk_solutionversion,
     /// sprk_azuresubscriptionid, sprk_resourcegroupname, sprk_appservicename,
-    /// sprk_keyvaultname, sprk_containertypeid, sprk_clientcachebusttoken)
+    /// sprk_keyvaultname, sprk_containertypeid, sprk_clientcachebusttoken, and sprk_bffappid — T257)
     /// so the row reflects reality rather than the Step-1f placeholder values.
     ///
-    /// FAIL-FIRST DESIGN: if this PATCH fails, H13 keeps status=InProgress
-    /// (Resumable failure) instead of silently marking Ready with stale mirror
-    /// data. Downstream consumers reading the registry (H0 upgrade-mode
-    /// detection, operator dashboards) depend on the promoted columns being
-    /// truthful — a Ready row with placeholder columns is a §14A upgrade-model
-    /// break: upgrade mode NEVER triggers, H0 always runs as fresh-provision.
+    /// BEST-EFFORT SINCE MED#10 (SESSION 19, Cosmos-first): H13 writes Cosmos Completed FIRST, then this PATCH. A
+    /// failure logs REGISTRY-STALE and H13 still returns Success; /provision-environment Step 6a reconciles the row.
+    /// (The original fail-first design — keep InProgress on failure — was retired by that refactor.) The promoted
+    /// columns still matter: a Ready row with placeholder columns breaks §14A upgrade mode (H0 always runs as
+    /// fresh-provision). Every column written here must exist on the admin environment's registry table
+    /// (scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1; prereq PRQ-E-14), or Dataverse rejects the whole PATCH.
     ///
     /// DEFAULT IMPLEMENTATION NOTE (§11 minimal-churn): fails loud so any
     /// test fake accidentally hit at runtime surfaces immediately. The real
