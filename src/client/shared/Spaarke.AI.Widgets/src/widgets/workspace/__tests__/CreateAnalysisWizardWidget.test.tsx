@@ -38,6 +38,7 @@ class ResizeObserverStub {
 (global as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
 
 import type { IDataService, INavigationService, LookupResult } from '@spaarke/ui-components';
+import { EntityCreationService } from '@spaarke/ui-components';
 
 const mockApplyFieldMappings = jest.fn().mockResolvedValue({ profileFound: false, fieldsMapped: [], warnings: [] });
 
@@ -409,6 +410,57 @@ describe('CreateAnalysisWizardWidget', () => {
     const sentBody = JSON.parse(sendCall[1].body as string);
     expect(sentBody.subject).toBe('Mapped subject from profile');
     expect(sentBody.body).toBe('Mapped body from profile');
+  });
+
+  it('task 136: a Finish retried after a failed analysis create reuses the uploaded document (no second upload or sprk_document)', async () => {
+    const uploadSpy = jest.spyOn(EntityCreationService.prototype, 'uploadFilesWithoutRecord').mockResolvedValue({
+      uploadedFiles: [{ id: 'drive-item-1', driveId: 'drive-1', name: 'nda.pdf' }],
+      errors: [],
+    } as unknown as Awaited<ReturnType<EntityCreationService['uploadFilesWithoutRecord']>>);
+    const documentsSpy = jest.spyOn(EntityCreationService.prototype, 'createDocumentRecords').mockResolvedValue({
+      createdDocumentIds: ['uploaded-doc-id'],
+      warnings: [],
+    } as unknown as Awaited<ReturnType<EntityCreationService['createDocumentRecords']>>);
+    try {
+      const dataService = buildDataService();
+      // The owner's checklist r1 failure (spaarkedev1, 2026-10-08) on the first Finish; the retry succeeds.
+      (dataService.createRecord as jest.Mock)
+        .mockRejectedValueOnce(
+          new Error('A record this analysis is filed under was not found. The analysis was not saved.')
+        )
+        .mockResolvedValue('new-analysis-id');
+      const { container } = renderWidget(buildData({ dataService }));
+
+      skipAssociateTo();
+      const fileInput = container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: { files: [new File(['%PDF-1.4'], 'nda.pdf', { type: 'application/pdf' })] },
+      });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'NDA Review' } });
+      clickPrimary('Next');
+
+      await act(async () => {
+        clickPrimary('Finish');
+      });
+      await screen.findByText('A record this analysis is filed under was not found. The analysis was not saved.');
+
+      await act(async () => {
+        clickPrimary('Finish');
+      });
+      await waitFor(() => expect(dataService.createRecord).toHaveBeenCalledTimes(2));
+
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      expect(documentsSpy).toHaveBeenCalledTimes(1);
+      for (const [table, payload] of (dataService.createRecord as jest.Mock).mock.calls) {
+        expect(table).toBe('sprk_analysis');
+        expect(payload).toMatchObject({ 'sprk_documentid@odata.bind': '/sprk_documents(uploaded-doc-id)' });
+      }
+    } finally {
+      uploadSpy.mockRestore();
+      documentsSpy.mockRestore();
+    }
   });
 
   it('ADR-021: renders correctly under both light and dark Fluent themes', () => {

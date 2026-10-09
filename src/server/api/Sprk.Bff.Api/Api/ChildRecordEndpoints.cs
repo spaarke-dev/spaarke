@@ -202,11 +202,13 @@ public static class ChildRecordEndpoints
 
         if (owned.CreatedId is not { } id)
         {
+            // The reason names the table a refused lookup targets (never a record id): the uniform not-found hides it from
+            // the caller by design, so this log is the only place a "filed under ... not found" can be traced (task 136).
             logger.LogWarning(
                 "[CHILD-RECORD] create of {Entity} refused: denied={Denied} parentUnavailable={ParentUnavailable} " +
-                "owner={OwnerCode} secureFiling={SecureFiling} clientStatus={ClientStatus}",
+                "owner={OwnerCode} secureFiling={SecureFiling} clientStatus={ClientStatus} reason={Reason}",
                 entity, owned.Denied is not null, owned.ParentUnavailable, owned.OwnerRefusal?.RefusalCode,
-                owned.SecureFilingRefused is not null, owned.ClientFailure?.StatusCode);
+                owned.SecureFilingRefused is not null, owned.ClientFailure?.StatusCode, owned.Denied);
             return owned switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
@@ -336,8 +338,8 @@ public static class ChildRecordEndpoints
         {
             logger.LogWarning(
                 "[CHILD-RECORD] re-file of {Entity} {Id} refused: denied={Denied} forbidden={Forbidden} owner={OwnerCode} " +
-                "clientStatus={ClientStatus}", entity, id, outcome.Denied is not null, outcome.Forbidden is not null,
-                outcome.OwnerRefusal?.RefusalCode, outcome.ClientFailure?.StatusCode);
+                "clientStatus={ClientStatus} reason={Reason}", entity, id, outcome.Denied is not null, outcome.Forbidden is not null,
+                outcome.OwnerRefusal?.RefusalCode, outcome.ClientFailure?.StatusCode, outcome.Denied);
             return outcome switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
