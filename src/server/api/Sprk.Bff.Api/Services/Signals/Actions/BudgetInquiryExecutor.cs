@@ -16,7 +16,9 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 /// <param name="Subject">Email subject; also the service request's name.</param>
 /// <param name="Body">Email body, as the human edited and confirmed it in the wizard.</param>
 /// <param name="Confirmed">True only when the wizard's Confirm step ran (D-52). Anything else makes the executor do nothing.</param>
-public sealed record BudgetInquiryRequest(Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed);
+/// <param name="OutsideFirmId">The outside firm (<c>sprk_organization</c>) the inquiry is to. Only the caller knows which of the matter's two firm slots it is; it is written to <c>sprk_regardingorganization</c> so the disposition is queryable per outside firm.</param>
+public sealed record BudgetInquiryRequest(
+    Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed, Guid? OutsideFirmId = null);
 
 /// <summary>How an Inquiry execution ended. The commit route records this in the Decision Record's step list.</summary>
 public enum BudgetInquiryOutcome
@@ -59,23 +61,38 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
         var context = http.HttpContext
             ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
 
-        var response = await communication.SendAsync(
-            new SendCommunicationRequest
-            {
-                To = [.. request.To],
-                Subject = request.Subject,
-                Body = request.Body,
-                SendMode = SendMode.User,
-                Associations =
-                [
-                    new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId },
-                    new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = serviceRequestId },
-                ],
-            },
-            context,
-            ct).ConfigureAwait(false);
-
+        var response = await communication.SendAsync(Build(request, serviceRequestId), context, ct).ConfigureAwait(false);
         return response.CommunicationId;
+    }
+
+    /// <summary>
+    /// The send request. The service request is the FIRST (primary) association because
+    /// <c>CommunicationService</c> maps only <c>associations[0]</c> to <c>sprk_regarding*</c>: that sets
+    /// <c>sprk_communication.sprk_regardingservicerequest</c>, so a reply links to the inquiry through the association
+    /// ladder and the footer names the inquiry. Chosen over a follow-up PATCH of
+    /// <c>sprk_servicerequest.sprk_regardingcommunication</c> because that is a second write that could fail AFTER the
+    /// email went out. The matter stays reachable through <c>sprk_servicerequest.sprk_regardingmatter</c> and is still the
+    /// second association (counted, not mapped). Plain text: the wizard's body is plain text.
+    /// </summary>
+    internal static SendCommunicationRequest Build(BudgetInquiryRequest request, Guid serviceRequestId)
+    {
+        var to = request.To?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToArray() ?? [];
+        if (to.Length == 0)
+            throw new ArgumentException("An inquiry email needs at least one recipient.", nameof(request));
+
+        return new SendCommunicationRequest
+        {
+            To = to,
+            Subject = request.Subject,
+            Body = request.Body,
+            BodyFormat = BodyFormat.PlainText,
+            SendMode = SendMode.User,
+            Associations =
+            [
+                new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = serviceRequestId },
+                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId },
+            ],
+        };
     }
 }
 
@@ -104,25 +121,86 @@ public sealed class BudgetInquiryExecutor(
     internal const int DirectionOutbound = 100000001;
     private const int NameMax = 850;
 
-    private static readonly string[] Columns =
+    private static readonly string[] BaseColumns =
         ["sprk_name", "sprk_direction", "sprk_regardingmatter", "sprk_regardingrecordid", "sprk_regardingrecordtypelogicalname"];
 
-    public async Task<BudgetInquiryResult> ExecuteAsync(BudgetInquiryRequest request, CancellationToken ct)
+    /// <summary>
+    /// Everything that can refuse the inquiry, WITHOUT writing or sending: confirmation, shape, the caller's Create on the
+    /// table and AppendTo on the matter (and firm), and the secure-matter decision. Returns the refusal
+    /// (<see cref="BudgetInquiryOutcome.NotConfirmed"/>, <see cref="BudgetInquiryOutcome.Invalid"/> or
+    /// <see cref="BudgetInquiryOutcome.Refused"/>, the same outcomes <see cref="ExecuteAsync"/> gives), or <c>null</c> when
+    /// the inquiry would proceed. The commit route calls it before its first write so a refusal leaves nothing behind.
+    /// </summary>
+    /// <remarks>The secure-matter test mirrors <see cref="OwnedChildWrite.CreateAsync"/> for this table (a non-child table
+    /// cannot be created under a secure record); if that core changes, change it here (pinned by a parity test).</remarks>
+    public async Task<BudgetInquiryResult?> PreflightAsync(BudgetInquiryRequest request, CancellationToken ct)
+    {
+        if (Validate(request) is { } invalid)
+            return invalid;
+
+        var item = BuildItem(request);
+        var me = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        if (me.Failure is not null)
+            return new(BudgetInquiryOutcome.Refused, Error: me.Failure.ErrorMessage ?? "The calling user could not be identified.");
+
+        var check = await OwnedChildWrite.CheckCallerMayCreateAsync(user, me.SystemUserId, Table, item, null, ct).ConfigureAwait(false);
+        if (!check.Succeeded)
+            return new(BudgetInquiryOutcome.Refused,
+                Error: check.Denied ?? check.ClientFailure?.ErrorMessage ?? "You do not have permission to send this inquiry.");
+
+        var owner = await ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(OwnedChildWrite.ParentsOf(item), CallerObjectId(), me.SystemUserId) with
+            {
+                RequestedBy = RecordRequester.Of(me.SystemUserId),
+            },
+            ct).ConfigureAwait(false);
+
+        if (!owner.IsOwned)
+            return new(BudgetInquiryOutcome.Refused, Error: owner.Reason ?? "no owner was resolved for the inquiry");
+        if (owner.IsSecureOwner)
+            return new(BudgetInquiryOutcome.Refused,
+                Error: "A service request cannot be created under a secure matter here. It was NOT created.");
+
+        return null;
+    }
+
+    private static BudgetInquiryResult? Validate(BudgetInquiryRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         if (!request.Confirmed)
             return new(BudgetInquiryOutcome.NotConfirmed, Error: "The inquiry was not confirmed; nothing was created or sent.");
 
-        if (request.MatterId == Guid.Empty
+        if (request.MatterId == Guid.Empty || request.OutsideFirmId == Guid.Empty
             || request.To is not { Count: > 0 } || request.To.Any(string.IsNullOrWhiteSpace)
             || string.IsNullOrWhiteSpace(request.Subject) || string.IsNullOrWhiteSpace(request.Body))
             return new(BudgetInquiryOutcome.Invalid, Error: "An inquiry needs a matter, at least one recipient, a subject and a message.");
 
-        var item = new DataverseWriteItemMapper.MappedItem(BuildBody(request), Columns)
+        return null;
+    }
+
+    private static DataverseWriteItemMapper.MappedItem BuildItem(BudgetInquiryRequest request)
+    {
+        var lookups = new List<DataverseWriteItemMapper.MappedLookup>
         {
-            Lookups = [new("sprk_regardingmatter", "sprk_matter", "sprk_matters", request.MatterId)],
+            new("sprk_regardingmatter", "sprk_matter", "sprk_matters", request.MatterId),
         };
+        var columns = BaseColumns.ToList();
+        if (request.OutsideFirmId is { } firm)
+        {
+            lookups.Add(new("sprk_regardingorganization", "sprk_organization", "sprk_organizations", firm));
+            columns.Add("sprk_regardingorganization");
+        }
+
+        return new DataverseWriteItemMapper.MappedItem(BuildBody(request), columns) { Lookups = lookups };
+    }
+
+    public async Task<BudgetInquiryResult> ExecuteAsync(BudgetInquiryRequest request, CancellationToken ct)
+    {
+        if (Validate(request) is { } invalid)
+            return invalid;
+
+        var item = BuildItem(request);
 
         OwnedChildWrite.Outcome owned;
         try
@@ -144,13 +222,14 @@ public sealed class BudgetInquiryExecutor(
             return new(BudgetInquiryOutcome.Refused, Error: reason ?? "The inquiry was not sent.");
         }
 
-        // Email last: the row exists, so a failed send is reported WITH its id.
+        // Email last: the row exists, so the outcome from here on ALWAYS carries its id. The send is deliberately not
+        // cancellable: a cancelled caller must not leave an email that may or may not have gone out and no id to list.
         try
         {
-            var communicationId = await email.SendAsync(request, serviceRequestId, ct).ConfigureAwait(false);
+            var communicationId = await email.SendAsync(request, serviceRequestId, CancellationToken.None).ConfigureAwait(false);
             return new(BudgetInquiryOutcome.Sent, serviceRequestId, communicationId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             logger.LogWarning(ex, "Budget inquiry email not sent | ServiceRequestId: {ServiceRequestId}", serviceRequestId);
             return new(BudgetInquiryOutcome.SendFailed, serviceRequestId, Error: "The service request was created but the email was not sent.");
@@ -169,6 +248,8 @@ public sealed class BudgetInquiryExecutor(
             ["sprk_regardingrecordid"] = request.MatterId.ToString("D"),
             ["sprk_regardingrecordtypelogicalname"] = "sprk_matter",
         };
+        if (request.OutsideFirmId is { } firm)
+            fields["sprk_RegardingOrganization@odata.bind"] = $"/sprk_organizations({firm:D})";
         return JsonSerializer.Serialize(fields);
     }
 
