@@ -106,6 +106,35 @@ Trigger 2 was not fired on dev. The reference KB is in `spaarke-rag-references` 
 
 **Publish size:** see §10.
 
-## 10. Publish-size delta
+## 10. Publish-size delta, quality gates and test runs
 
-(filled in after measurement)
+**Publish size.** `dotnet publish -c Release` of master `8a9ecaac1` (fresh detached worktree) against this branch merged on it; both outputs zipped with Deflate.
+
+| | master | branch | delta |
+|---|---|---|---|
+| Compressed publish | 37,199,213 B (37.20 MB) | 37,208,675 B (37.21 MB) | **+9,462 B (+0.01 MB)** |
+| Raw publish folder | 127,552,920 B | 127,577,160 B | +24,240 B |
+| `Sprk.Bff.Api.dll` | 16,801,792 B | 16,822,784 B | +20,992 B |
+
+No package was added, so there is no new CVE surface.
+
+**ADR-010 ratchet.** `IRetrievalAccessTrim → RetrievalAccessTrim` is a new 1:1 interface. The ceiling was raised 157 → 158 in `tests/Spaarke.ArchTests/ADR010_DITests.cs`, with the seam justification: a PublicContracts facade plus a real test seam. The ArchTests suite passes: 889/889.
+
+**Test runs.**
+
+| Run | Result |
+|---|---|
+| Full `Sprk.Bff.Api.Tests` (before merging master) | 19,080 passed, 13 failed, 54 skipped |
+| The 13 failing tests, re-run alone | 165/165 passed |
+| Affected AI suites + new tests, after merging master | 883 passed, 2 skipped |
+| `Spe.Integration.Tests` `ToolFrameworkIntegrationTests` (real DI resolves the handlers with the trim) | 16/16 |
+
+The 13 failures each took 3–5 minutes. They are Office save, document identity, Insights endpoint and spend-limit contract tests that start `WebApplicationFactory`, and they timed out under machine load.
+
+**Step 9.5 self-review.** Findings fixed in the task:
+- F2: a stale comment in `PlaybookChatContextProvider` still said SearchDocuments runs tenant-wide.
+- F2: `AnalysisRagProcessor` still set `TotalCount` to the untrimmed count.
+
+Known limits (K):
+- K4: the `SemanticScopeProviderSeamTests` "no caller" test uses the permit-all double, so it still describes `RagService`'s public-only filter, not the provider's new no-caller behaviour. The provider has no consumer yet.
+- K2: chat pages may come back short (§8.4).
