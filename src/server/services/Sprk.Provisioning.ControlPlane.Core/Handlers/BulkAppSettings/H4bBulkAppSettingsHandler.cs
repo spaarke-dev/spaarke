@@ -29,7 +29,11 @@
 //       InterStepState output or intake value); required-and-missing =
 //       Resumable Failure BEFORE any write. An optional (`required: false`)
 //       entry without a value is not written, and a value already on the site
-//       is left alone (T254).
+//       is left alone (T254). An indexed entry (task 255) is written as
+//       {key}__0..{key}__{n-1}, and every other {key}__* setting is removed.
+//       The customer workforce tenant list (task 255, INCOMING-141) is
+//       re-validated with CustomerWorkforceTenantsRule in step (2) — the rule
+//       POST /api/runs applied — before anything is written.
 //   (6) Merge the settings into the production site and the staging slot
 //       (IAppServiceSettingsWriter — merge, never replace; no write when a slot
 //       already matches). An ARM refusal = Resumable.
@@ -49,6 +53,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -96,6 +101,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     private readonly IHealthzProbe _healthzProbe;
     private readonly IContainerLogFetcher _logFetcher;
     private readonly BulkAppSettingsOptions _options;
+    private readonly IOptions<ReservedTenantsOptions> _reservedTenants;
     private readonly ILogger<H4bBulkAppSettingsHandler> _logger;
 
     /// <inheritdoc/>
@@ -109,6 +115,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         IHealthzProbe healthzProbe,
         IContainerLogFetcher logFetcher,
         IOptions<BulkAppSettingsOptions> options,
+        IOptions<ReservedTenantsOptions> reservedTenants,
         ILogger<H4bBulkAppSettingsHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
@@ -117,6 +124,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(healthzProbe);
         ArgumentNullException.ThrowIfNull(logFetcher);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(reservedTenants);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
@@ -125,6 +133,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         _healthzProbe = healthzProbe;
         _logFetcher = logFetcher;
         _options = options.Value;
+        _reservedTenants = reservedTenants;   // read per run: validated at Worker start (ValidateOnStart)
         _logger = logger;
     }
 
@@ -165,7 +174,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         var parameters = run.Parameters.NonSecret;
 
         // (2) Parameter guards.
-        if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var _))
+        if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingTenantId,
@@ -179,6 +188,20 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H4b.",
                 cancellationToken).ConfigureAwait(false);
         }
+        // T255 (INCOMING-141): the customer workforce tenant list, checked with the rule POST /api/runs applied
+        // (defence in depth — a run document written before T255, or edited, must not put a CIAM tenant (the BFF
+        // would not start) or Spaarke's own tenant (it would admit Spaarke's staff) on a slot).
+        parameters.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var workforceTenantsValue);
+        if (CustomerWorkforceTenantsRule.Validate(run.TenancyModel, tenantId, workforceTenantsValue, _reservedTenants.Value.Parsed())
+            is CustomerWorkforceTenantsOutcome.Invalid workforceTenants)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                workforceTenants.RejectionCode,
+                $"H4b will not write {CustomerWorkforceTenantsRule.AppSettingBaseName}__N: {workforceTenants.Diagnostic} " +
+                "Intake is fixed per run — start a new run with a valid value.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // Customer-stamp identifiers are H2a outputs (task 245a): H2a persists them from the
         // ARM deployment; nothing ever wrote them as run parameters.
         var keyVaultName = run.InterStepState.KeyVaultName;
@@ -256,6 +279,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         //     source, e.g. Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
         //     both use uami_client_id).
         var resolvedPerEnv = new Dictionary<string, string>(StringComparer.Ordinal);
+        var resolvedLists = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
             if (entry.PerEnvSource == PerEnvSettingSource.Literal)
@@ -265,8 +289,6 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             }
 
             var sourceKey = entry.ParameterKey!;
-            if (resolvedPerEnv.ContainsKey(sourceKey)) continue;  // dedup
-
             if (!PerEnvSourceCatalog.BySourceKey.TryGetValue(sourceKey, out var source))
             {
                 // FilePerEnvSettingsManifest rejects unknown sources at load; this guards a
@@ -275,6 +297,35 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                     BulkAppSettingsRejectionCodes.ManifestReadFailed,
                     $"per_env_settings entry '{entry.Key}' uses source '{sourceKey}', which is not in PerEnvSourceCatalog.",
                     cancellationToken).ConfigureAwait(false);
+            }
+
+            if (entry.Indexed != source.IsList)
+            {
+                // FilePerEnvSettingsManifest refuses this at load; this guards a hand-built manifest.
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BulkAppSettingsRejectionCodes.ManifestReadFailed,
+                    $"per_env_settings entry '{entry.Key}' is {(entry.Indexed ? "indexed" : "not indexed")} but source " +
+                    $"'{sourceKey}' is {(source.IsList ? "a list" : "a single value")}.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // Dedup AFTER the per-entry checks above: every entry is checked, each source resolved once.
+            if (resolvedPerEnv.ContainsKey(sourceKey) || resolvedLists.ContainsKey(sourceKey)) continue;
+
+            if (source.IsList)
+            {
+                // Task 255: an indexed entry is always required (the manifest reader refuses `required: false`).
+                var list = source.ResolveList!(run);
+                if (list is null || list.Count == 0 || list.Any(string.IsNullOrWhiteSpace))
+                {
+                    return await FailAsync(run, etag, FailureClass.Resumable,
+                        BulkAppSettingsRejectionCodes.PerEnvInputMissing,
+                        $"per_env_settings entry '{entry.Key}' (BFF module '{entry.IOptionsModuleName}') requires the " +
+                        $"list '{sourceKey}' from {source.Location}, which is absent or empty — supply it at intake.",
+                        cancellationToken).ConfigureAwait(false);
+                }
+                resolvedLists[sourceKey] = list;
+                continue;
             }
 
             var value = source.Resolve(run);
@@ -302,13 +353,14 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
         // (6) Build the full settings set — exactly what the generated Configure script wrote — and merge it
         //     into the production site and the staging slot (task 253: ARM SDK, no process).
-        var settings = BuildDesiredSettings(manifest, keyVaultName, resolvedPerEnv);
+        var settings = BuildDesiredSettings(manifest, keyVaultName, resolvedPerEnv, resolvedLists);
+        var exclusiveListKeys = ExclusiveListKeys(manifest, resolvedLists);
 
         AppServiceSettingsWriteResult writeResult;
         try
         {
             writeResult = await _settingsWriter.MergeAsync(
-                new AppServiceSettingsWriteRequest(subscriptionId, resourceGroupName, appServiceName, settings),
+                new AppServiceSettingsWriteRequest(subscriptionId, resourceGroupName, appServiceName, settings, exclusiveListKeys),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -420,15 +472,19 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     ///   value. A per-env entry overrides a Key Vault reference with the same key (the script emitted per-env lines
     ///   last and <c>az</c> keeps the last value), e.g. <c>AzureAd__TenantId</c>;</item>
     /// <item>an optional (<c>required: false</c>) entry whose source has no value is left out — and so is never
-    ///   written over a value already on the site (T254).</item>
+    ///   written over a value already on the site (T254);</item>
+    /// <item>an indexed entry (task 255) becomes <c>{key}__0</c> … <c>{key}__{n-1}</c> from its list source, in list
+    ///   order — the generated script's <c>for</c> loop.</item>
     /// </list>
     /// <paramref name="resolvedBySource"/> holds the resolved value per source key; a non-literal entry whose source
-    /// is absent from it is an optional one H4b skipped. Internal so the parity test can compare it with the script.
+    /// is absent from it is an optional one H4b skipped. <paramref name="resolvedListsBySource"/> holds each list
+    /// source's values. Internal so the parity test can compare it with the script.
     /// </summary>
     internal static IReadOnlyDictionary<string, string> BuildDesiredSettings(
         PerEnvSettingsManifestReadResult.Success manifest,
         string keyVaultName,
-        IReadOnlyDictionary<string, string> resolvedBySource)
+        IReadOnlyDictionary<string, string> resolvedBySource,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? resolvedListsBySource = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyVaultName);
@@ -446,6 +502,17 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             {
                 settings[entry.Key] = entry.LiteralValue ?? string.Empty;
             }
+            else if (entry.Indexed)
+            {
+                if (entry.ParameterKey is not null && resolvedListsBySource is not null
+                    && resolvedListsBySource.TryGetValue(entry.ParameterKey, out var values))
+                {
+                    for (var i = 0; i < values.Count; i++)
+                    {
+                        settings[$"{entry.Key}__{i}"] = values[i];
+                    }
+                }
+            }
             else if (entry.ParameterKey is not null && resolvedBySource.TryGetValue(entry.ParameterKey, out var value))
             {
                 settings[entry.Key] = value;
@@ -453,6 +520,23 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         }
 
         return settings;
+    }
+
+    /// <summary>
+    /// Task 255: the indexed entries H4b writes in full this run — the writer removes every other setting under them
+    /// on both slots (<see cref="AppServiceSettingsWriteRequest.ExclusiveListKeys"/>). Internal for the parity test.
+    /// </summary>
+    internal static IReadOnlyList<string> ExclusiveListKeys(
+        PerEnvSettingsManifestReadResult.Success manifest,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> resolvedListsBySource)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(resolvedListsBySource);
+        return manifest.Entries
+            .Where(e => e.Indexed && e.ParameterKey is not null && resolvedListsBySource.ContainsKey(e.ParameterKey))
+            .Select(e => e.Key)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
     }
 
     /// <summary>

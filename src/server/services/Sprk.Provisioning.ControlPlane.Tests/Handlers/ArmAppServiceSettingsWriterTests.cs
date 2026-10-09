@@ -86,6 +86,83 @@ public sealed class ArmAppServiceSettingsWriterTests
         arm.Writes.Should().ContainSingle().Which.Settings["Customer__Id"].Should().Be("acme");
     }
 
+    // ---------- task 255: an exclusive list key — stale indices are removed ----------
+
+    [Fact]
+    public void MergeAppSettings_ExclusiveListKey_RemovesEveryOtherChildOfTheList_AndKeepsTheRest()
+    {
+        var current = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["WorkforceIdentity__CustomerTenantIds__0"] = "tenant-a",
+            ["WorkforceIdentity__CustomerTenantIds__1"] = "tenant-dropped",
+            ["workforceidentity__customertenantids__5"] = "case-variant",   // .NET binds it too
+            ["WorkforceIdentity:CustomerTenantIds:2"] = "colon-form",       // and this
+            ["WorkforceIdentity__CustomerTenantIds"] = "bare",              // and the bare key
+            ["WorkforceIdentity__Other"] = "kept",                          // a sibling, not under the list
+            ["WorkforceIdentity__CustomerTenantIdsExtra"] = "kept",         // a prefix match, not a child
+            ["Unrelated"] = "kept",
+        };
+        var requested = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["WorkforceIdentity__CustomerTenantIds__0"] = "tenant-a",
+        };
+
+        var (settings, changed) = ArmAppServiceSettingsWriter.MergeAppSettings(
+            current, requested, ["WorkforceIdentity__CustomerTenantIds"]);
+
+        settings.Should().BeEquivalentTo(new Dictionary<string, string>
+        {
+            ["WorkforceIdentity__CustomerTenantIds__0"] = "tenant-a",
+            ["WorkforceIdentity__Other"] = "kept",
+            ["WorkforceIdentity__CustomerTenantIdsExtra"] = "kept",
+            ["Unrelated"] = "kept",
+        }, "a tenant dropped from the list must not keep admitting its employees from a stale index");
+        changed.Should().BeEquivalentTo(
+            "WorkforceIdentity__CustomerTenantIds__1", "workforceidentity__customertenantids__5",
+            "WorkforceIdentity:CustomerTenantIds:2", "WorkforceIdentity__CustomerTenantIds");
+    }
+
+    [Fact]
+    public void MergeAppSettings_ExclusiveListAlreadyExact_ChangesNothing()
+    {
+        var current = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["WorkforceIdentity__CustomerTenantIds__0"] = "tenant-a",
+            ["Unrelated"] = "kept",
+        };
+
+        var (_, changed) = ArmAppServiceSettingsWriter.MergeAppSettings(
+            current, new Dictionary<string, string> { ["WorkforceIdentity__CustomerTenantIds__0"] = "tenant-a" },
+            ["WorkforceIdentity__CustomerTenantIds"]);
+
+        changed.Should().BeEmpty("a re-run with the same list writes nothing — no restart");
+    }
+
+    [Fact]
+    public void MergeAppSettings_NoExclusiveListKeys_NeverRemovesAnything()
+    {
+        var current = new Dictionary<string, string> { ["WorkforceIdentity__CustomerTenantIds__1"] = "x" };
+
+        var (settings, changed) = ArmAppServiceSettingsWriter.MergeAppSettings(current, new Dictionary<string, string>());
+
+        settings.Should().ContainKey("WorkforceIdentity__CustomerTenantIds__1");
+        changed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MergeAsync_ExclusiveListKey_RemovesStaleIndicesOnBothSlots()
+    {
+        var arm = new FakeAppServiceArm(
+            production: new(Requested) { ["WorkforceIdentity__CustomerTenantIds__1"] = "dropped" },
+            staging: new(Requested) { ["WorkforceIdentity__CustomerTenantIds__1"] = "dropped" });
+
+        var result = await NewWriter(arm).MergeAsync(
+            NewRequest() with { ExclusiveListKeys = ["WorkforceIdentity__CustomerTenantIds"] }, CancellationToken.None);
+
+        result.Should().BeEquivalentTo(new AppServiceSettingsWriteResult.Success(new[] { "production", "staging" }));
+        arm.Writes.Should().HaveCount(2).And.OnlyContain(w => !w.Settings.ContainsKey("WorkforceIdentity__CustomerTenantIds__1"));
+    }
+
     [Fact]
     public async Task MergeAsync_BothSlotsAlreadyMatch_WritesNothing()
     {

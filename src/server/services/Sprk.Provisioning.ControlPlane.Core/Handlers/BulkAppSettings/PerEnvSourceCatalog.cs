@@ -22,8 +22,15 @@
 // Configure-AppServiceSettings script parameter (PascalCase — the operator
 // artifact H4b's settings are parity-tested against, task 253), so it must
 // stay stable once used in the manifest.
+//
+// LIST SOURCES (task 255): a source whose value is a list (ResolveList set) feeds
+// only an `indexed: true` manifest entry — H4b writes {key}__0..{key}__{n-1} and
+// removes every other {key}__* setting, so a value dropped from the list cannot
+// linger on a slot. A scalar source never feeds an indexed entry, nor a list
+// source a scalar one (FilePerEnvSettingsManifest refuses both).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
@@ -33,13 +40,21 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 /// <param name="SourceKey">The part after the colon — also the generated script parameter's base name.</param>
 /// <param name="ProducerHandlerId">The handler whose output this is, or <c>null</c> for an intake value.</param>
 /// <param name="Location">Where the value lives, for diagnostics (e.g. <c>InterStepState.KeyVaultUri</c>).</param>
-/// <param name="Resolve">Reads the value from the run; null/blank when not (yet) present.</param>
+/// <param name="Resolve">Reads the value from the run; null/blank when not (yet) present. For a list source it returns
+/// null — read <paramref name="ResolveList"/> instead.</param>
+/// <param name="ResolveList">Task 255: set only for a LIST source (feeds an <c>indexed: true</c> entry) — the values in
+/// order, or null/empty when not present.</param>
 public sealed record PerEnvSource(
     string Expression,
     string SourceKey,
     string? ProducerHandlerId,
     string Location,
-    Func<ProvisioningRun, string?> Resolve);
+    Func<ProvisioningRun, string?> Resolve,
+    Func<ProvisioningRun, IReadOnlyList<string>?>? ResolveList = null)
+{
+    /// <summary>True for a list source (task 255).</summary>
+    public bool IsList => ResolveList is not null;
+}
 
 /// <summary>
 /// The closed set of non-literal <c>per_env_source</c> values H4b can resolve.
@@ -73,6 +88,14 @@ public static class PerEnvSourceCatalog
         // RUNTIME-IDENTITY §1.1 — a second derivation is how two components end up with two spellings).
         new("from-intake-parameter:customer_id", "customer_id", null,
             "intake customerId (POST /api/runs body — run.CustomerId)", r => r.CustomerId),
+        // T255 (INCOMING-141): the customer's workforce tenant ids — a LIST source (indexed entry
+        // WorkforceIdentity__CustomerTenantIds). POST /api/runs stored the canonical JSON array; H4b re-applies
+        // CustomerWorkforceTenantsRule before it resolves this, so a malformed stored value never reaches a slot.
+        new("from-intake-parameter:customer_workforce_tenant_ids", "customer_workforce_tenant_ids", null,
+            $"intake parameter '{IntakeParameterCatalog.CustomerWorkforceTenantIds}' (JSON array)",
+            _ => null,
+            r => CustomerWorkforceTenantsRule.ParseStored(
+                r.Parameters.NonSecret.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var v) ? v : null)),
     ];
 
     /// <summary>Accepted sources, by source key (the part after the colon; ordinal).</summary>

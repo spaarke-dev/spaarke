@@ -60,6 +60,9 @@ param(
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]
+    [string[]]$CustomerWorkforceTenantIds,
+
+    [Parameter(Mandatory = $true)]
     [string]$DataverseEnvUrl,
 
     [Parameter(Mandatory = $true)]
@@ -153,6 +156,30 @@ $settings = @(
 
 if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
 
+for ($i = 0; $i -lt $CustomerWorkforceTenantIds.Count; $i++) { $settings += "WorkforceIdentity__CustomerTenantIds__$i=$($CustomerWorkforceTenantIds[$i])" }
+
+$exclusiveListKeys = @('WorkforceIdentity__CustomerTenantIds')
+
+function Remove-StaleListSettings {
+    # Task 255: removes every setting under an exclusive list key that $settings does not name — the bare key or
+    # any {key}__* child, case-insensitive, ':' read as '__' (how .NET configuration binds it).
+    param([string[]]$SlotArgs = @())
+    $desired = @($settings | ForEach-Object { ($_ -split '=', 2)[0] })
+    $current = @(az webapp config appsettings list --resource-group $ResourceGroupName --name $AppServiceName @SlotArgs --query '[].name' --output json | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to list app settings for the stale-list check.' }
+    $stale = @($current | Where-Object {
+            $name = $_ -replace ':', '__'
+            $listed = $desired -ccontains $_
+            $under = @($exclusiveListKeys | Where-Object { $name -ieq $_ -or $name.StartsWith("${_}__", [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            $under -and -not $listed
+        })
+    if ($stale.Count -gt 0) {
+        az webapp config appsettings delete --resource-group $ResourceGroupName --name $AppServiceName @SlotArgs --setting-names @stale --output none 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to remove stale list settings.' }
+        Write-Host "  Removed $($stale.Count) stale list setting(s): $($stale -join ', ')" -ForegroundColor Yellow
+    }
+}
+
 Write-Host ''
 Write-Host '=================================================================='
 Write-Host '  Configure App Service Settings — GENERATED from manifest.yaml'
@@ -169,6 +196,7 @@ az webapp config appsettings set `
     --settings @settings `
     --output none 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Failed to set production-slot app settings.' }
+Remove-StaleListSettings
 Write-Host "  Production slot: $($settings.Count) settings configured." -ForegroundColor Green
 
 if ($IncludeSlots) {
@@ -179,6 +207,7 @@ if ($IncludeSlots) {
         --settings @settings `
         --output none 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to set staging-slot app settings.' }
+    Remove-StaleListSettings -SlotArgs @('--slot', 'staging')
     Write-Host "  Staging slot:    $($settings.Count) settings configured." -ForegroundColor Green
 }
 

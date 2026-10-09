@@ -111,6 +111,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
@@ -372,6 +373,7 @@ public static class RunsEndpoints
         IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
         Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient registryClient,
+        IOptions<ReservedTenantsOptions> reservedTenants,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
@@ -380,6 +382,7 @@ public static class RunsEndpoints
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(runGuard);
         ArgumentNullException.ThrowIfNull(registryClient);
+        ArgumentNullException.ThrowIfNull(reservedTenants);
 
         if (request is null)
         {
@@ -561,6 +564,20 @@ public static class RunsEndpoints
             return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
         }
 
+        // T255 (INCOMING-141): the customer's workforce tenant list — the rule H4b and H13 apply
+        // (CustomerWorkforceTenantsRule): required for every model, never a CIAM tenant, never Spaarke's own tenant
+        // (nor, on Model 1, the run's tenantId). The stamp BFF refuses to start on a CIAM tenant and would admit
+        // Spaarke's staff on Spaarke's — so both are refused here, before anything is written.
+        request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var workforceTenantsValue);
+        var workforceTenants = CustomerWorkforceTenantsRule.Validate(
+            request.TenancyModel, tenantIdValue, workforceTenantsValue, reservedTenants.Value.Parsed());
+        if (workforceTenants is CustomerWorkforceTenantsOutcome.Invalid workforceTenantsViolation)
+        {
+            return BadRequest(httpContext, workforceTenantsViolation.RejectionCode,
+                $"nonSecretParameters: {workforceTenantsViolation.Diagnostic}");
+        }
+        var canonicalWorkforceTenants = ((CustomerWorkforceTenantsOutcome.Valid)workforceTenants).CanonicalValue;
+
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 
@@ -735,6 +752,8 @@ public static class RunsEndpoints
         run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = normalizedDataverseEnvUrl;
         run.Parameters.NonSecret[IntakeParameterCatalog.SubscriptionId] = subscriptionGuid.ToString("D");
         run.Parameters.NonSecret[IntakeParameterCatalog.ContainerTypeId] = containerTypeGuid.ToString("D");
+        // T255: the canonical workforce tenant list (lowercase "D" GUIDs, JSON array) — what H4b writes and H13 expects.
+        run.Parameters.NonSecret[IntakeParameterCatalog.CustomerWorkforceTenantIds] = canonicalWorkforceTenants;
 
         try
         {

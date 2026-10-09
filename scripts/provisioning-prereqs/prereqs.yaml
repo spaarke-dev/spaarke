@@ -930,3 +930,30 @@ prereqs:
         az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictguestuseraccess": false}' --headers "Content-Type=application/json"
       then re-run the check. L2 never changes it (an environment-wide access decision).
     related_findings: [T232, D2, G10]
+
+  - id: PRQ-C-13
+    name: The customer's workforce tenant id(s) are known (intake customerWorkforceTenantIds — every run)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (again after an acquisition adds a tenant)
+    owner: Spaarke platform admin, with the customer's IT (the tenant id of the tenant the customer's staff sign in from)
+    consequence_of_absence: "POST /api/runs refuses a run without customerWorkforceTenantIds (400 workforce-tenants-required), and one naming the CIAM tenant, Spaarke's own tenant or (Model 1) the run's tenantId (workforce-tenants-ciam-tenant / workforce-tenants-spaarke-tenant). A WRONG but valid tenant id is not caught: the stamp's BFF then denies every first sign-in of the customer's employees (workforce_tenant_not_customer), or admits another organisation's members. H4b writes the list as WorkforceIdentity__CustomerTenantIds__N on both slots; H13 T7 checks it (T255, INCOMING-141)."
+    check_recipe:
+      cli: |
+        set -o pipefail
+        n=0
+        for tid in {customerWorkforceTenantIds}; do
+          n=$((n+1))
+          curl -sf "https://login.microsoftonline.com/$tid/v2.0/.well-known/openid-configuration" > /dev/null || { echo "tenant $tid does not exist (no OpenID metadata)"; exit 1; }
+        done
+        [ "$n" -gt 0 ] || { echo "no customerWorkforceTenantIds given"; exit 1; }
+        echo ok
+      expect: "`ok` - every listed tenant exists (anonymous OpenID metadata). NOT asserted here: that it is the CUSTOMER's tenant - confirm it with the customer's IT (Entra admin center -> Overview -> Tenant ID). POST /api/runs refuses the CIAM tenant and Spaarke's own"
+    remediation: |
+      1. Ask the customer's IT for the Entra tenant ID their staff sign in with (Entra admin center → Overview →
+         Tenant ID), or look it up from one of their domains:
+           curl -s https://login.microsoftonline.com/<customer-domain>/v2.0/.well-known/openid-configuration
+         (the GUID in "issuer"). Model 1: this is the customer's HOME tenant — never Spaarke's (its staff are B2B
+         guests from there). Model 2: the customer's tenant (normally the run's tenantId).
+      2. A customer with several workforce tenants (e.g. after an acquisition) lists each.
+      3. Enter them as the intake array `customerWorkforceTenantIds`.
+    related_findings: [T255, INCOMING-141]

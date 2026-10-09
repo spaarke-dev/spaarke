@@ -14,6 +14,12 @@
 //     requested value.
 //   - One write per slot, and none when the slot already holds every
 //     requested value — so a re-run does not restart the BFF.
+//   - EXCEPTION to merge (task 255): an "exclusive list" key names a .NET
+//     configuration list H4b owns whole (WorkforceIdentity__CustomerTenantIds).
+//     Every existing setting under it ({key}__*, or the bare {key}; matched
+//     case-insensitively, ':' read as '__', as .NET configuration binds it)
+//     that the request does not name is REMOVED — a tenant dropped from the
+//     list must not keep admitting its employees from a stale index.
 //
 // Production impl: ArmAppServiceSettingsWriter (Azure.ResourceManager.AppService).
 // -----------------------------------------------------------------------------
@@ -39,11 +45,14 @@ public interface IAppServiceSettingsWriter
 /// <param name="ResourceGroupName">The stamp's resource group (H2a output).</param>
 /// <param name="AppServiceName">The stamp's BFF App Service (H2a output).</param>
 /// <param name="Settings">The settings to set — name → value (ordinal names, as App Service compares them).</param>
+/// <param name="ExclusiveListKeys">Task 255: base names of .NET configuration lists the request owns whole — every
+/// existing <c>{key}__*</c> (or bare <c>{key}</c>) setting not in <paramref name="Settings"/> is removed. Null = none.</param>
 public sealed record AppServiceSettingsWriteRequest(
     string SubscriptionId,
     string ResourceGroupName,
     string AppServiceName,
-    IReadOnlyDictionary<string, string> Settings);
+    IReadOnlyDictionary<string, string> Settings,
+    IReadOnlyList<string>? ExclusiveListKeys = null);
 
 /// <summary>Discriminated result of <see cref="IAppServiceSettingsWriter.MergeAsync"/>.</summary>
 public abstract record AppServiceSettingsWriteResult

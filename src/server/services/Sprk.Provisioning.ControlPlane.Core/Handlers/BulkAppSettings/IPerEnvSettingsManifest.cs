@@ -93,13 +93,19 @@ public interface IPerEnvSettingsManifest
 /// H4b includes this in its diagnostic on missing-input failures so operators
 /// can trace fail-fast root cause immediately.
 /// </param>
+/// <param name="Indexed">
+/// Task 255: the entry is a .NET configuration LIST (manifest <c>indexed: true</c>) fed by a list source
+/// (<see cref="PerEnvSource.IsList"/>). <see cref="Key"/> is the base name; H4b writes <c>{Key}__0</c> …
+/// <c>{Key}__{n-1}</c> and removes every other <c>{Key}__*</c> setting on both slots. Always required.
+/// </param>
 public sealed record PerEnvSettingEntry(
     string Key,
     PerEnvSettingSource PerEnvSource,
     string? LiteralValue,
     string? ParameterKey,
     bool Required,
-    string IOptionsModuleName);
+    string IOptionsModuleName,
+    bool Indexed = false);
 
 /// <summary>
 /// One App Service setting whose value is a Key Vault reference to a catalog secret — a manifest

@@ -141,6 +141,7 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),
@@ -266,6 +267,9 @@ public static class HandlerRunInputs
                 // T227c: I4 compares the BFF's container settings with it (absent → I4 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
+                // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
+                // first sign-in of a customer employee).
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
             ],
             [HandlerIds.H14] =
             [

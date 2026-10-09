@@ -39,6 +39,7 @@
 using Azure.Core;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Dispatch;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
@@ -222,6 +223,10 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 // Task 249: the L2 control plane's own identity — ONE validated Worker option shared by H2a (sent as
 // customer.bicep's controlPlaneUamiPrincipalId, Model 1 stamps) and H4 (Key Vault Secrets Officer on each
 // customer vault). An L2-owned value (run-context contract): validated when the host starts.
+// T255 (INCOMING-141): the tenants that are never a customer's workforce tenant (Spaarke's own + the CIAM tenant[s]).
+// H4b re-applies CustomerWorkforceTenantsRule before writing WorkforceIdentity__CustomerTenantIds__N, and H13's T7
+// reads the expected list through it. Dual-hosted with the Api (POST /api/runs applies the same rule). ValidateOnStart.
+builder.Services.AddReservedTenants(builder.Configuration);
 builder.Services.AddOptions<ControlPlaneIdentityOptions>()
     .Bind(builder.Configuration.GetSection(ControlPlaneIdentityOptions.SectionName))
     .Validate(o =>

@@ -53,6 +53,11 @@
 //         constructed by BuildA39Entries) carries Required=true on all 7 new
 //         entries (metadata assertion; the real-manifest.yaml equivalent
 //         lives in FilePerEnvSettingsManifestTests).
+//   Task 255 (INCOMING-141): customer workforce tenant list.
+//   AC-20 The indexed entry writes {key}__0..__{n-1} in list order and names the base key in ExclusiveListKeys.
+//   AC-21 A run whose stored list breaks CustomerWorkforceTenantsRule (missing, CIAM, Spaarke, Model 1 run tenant)
+//         fails Resumable with the rule's code BEFORE any write.
+//   AC-22 An indexed entry fed by a scalar source (hand-built manifest) fails before any write.
 //   AC-19 FIC-flap tolerance budget guard — HttpHealthzProbe's shipped
 //         DefaultBackoffSchedule total budget must stay comfortably above
 //         the measured ~130s AADSTS70025 propagation-flap window (regression
@@ -64,6 +69,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
@@ -84,6 +90,13 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string AppServiceName = "sprk-prod-api";
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
+
+    // T255: the Worker's reserved tenants and the run's customer workforce tenants.
+    private const string SpaarkeTenantId = "5a5a5a5a-0000-4000-8000-000000000001";
+    private const string CiamTenantId = "c1a0c1a0-0000-4000-8000-000000000002";
+    private const string WorkforceTenantA = "d0e0c0a0-0000-4000-8000-000000000003";
+    private const string WorkforceTenantB = "e1e1e1e1-0000-4000-8000-000000000004";
+    private const string WorkforceTenantsJson = "[\"" + WorkforceTenantA + "\",\"" + WorkforceTenantB + "\"]";
 
     // ---------- AC-1 happy path ----------
 
@@ -165,13 +178,19 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
-        expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
+        // T255: list sources write {key}__0..__{n-1}.
+        var expectedLists = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["customer_workforce_tenant_ids"] = [WorkforceTenantA, WorkforceTenantB],
+        };
+        expected.Keys.Concat(expectedLists.Keys).Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
 
         IReadOnlyList<PerEnvSettingEntry> oneEntryPerSource = PerEnvSourceCatalog.All
             .Select(s => new PerEnvSettingEntry($"Setting__For__{s.SourceKey}",
                 s.ProducerHandlerId is null ? PerEnvSettingSource.FromHandlerParameter : PerEnvSettingSource.FromHandlerOutput,
-                LiteralValue: null, ParameterKey: s.SourceKey, Required: true, IOptionsModuleName: "AnyModule"))
+                LiteralValue: null, ParameterKey: s.SourceKey, Required: true, IOptionsModuleName: "AnyModule",
+                Indexed: s.IsList))
             .ToList();
         var writer = FakeSettingsWriter.Succeeds();
         var handler = Build(new FakeRepository(BuildRun(), "etag-1b"), FakePerEnvManifest.Success(oneEntryPerSource),
@@ -185,6 +204,14 @@ public sealed class H4bBulkAppSettingsHandlerTests
         {
             settings.Should().ContainKey($"Setting__For__{sourceKey}")
                 .WhoseValue.Should().Be(value, $"source '{sourceKey}' must carry its own run value");
+        }
+        foreach (var (sourceKey, values) in expectedLists)
+        {
+            settings.Should().NotContainKey($"Setting__For__{sourceKey}", "a list is never written as one setting");
+            for (var i = 0; i < values.Length; i++)
+            {
+                settings[$"Setting__For__{sourceKey}__{i}"].Should().Be(values[i], $"list source '{sourceKey}' index {i}");
+            }
         }
     }
 
@@ -830,6 +857,74 @@ public sealed class H4bBulkAppSettingsHandlerTests
             "allowance choice to hold");
     }
 
+    // ---------- task 255: the customer workforce tenant list ----------
+
+    private static PerEnvSettingEntry WorkforceEntry() =>
+        new("WorkforceIdentity__CustomerTenantIds", PerEnvSettingSource.FromHandlerParameter,
+            LiteralValue: null, ParameterKey: "customer_workforce_tenant_ids", Required: true,
+            IOptionsModuleName: "ExternalAccessModule (WorkforceIdentityOptions)", Indexed: true);
+
+    [Fact]
+    public async Task AC20_IndexedEntry_WritesEveryTenantInOrder_AndOwnsTheListKey()
+    {
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-20"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), WorkforceEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var request = writer.LastRequest!;
+        request.Settings["WorkforceIdentity__CustomerTenantIds__0"].Should().Be(WorkforceTenantA);
+        request.Settings["WorkforceIdentity__CustomerTenantIds__1"].Should().Be(WorkforceTenantB);
+        request.Settings.Keys.Where(k => k.StartsWith("WorkforceIdentity", StringComparison.OrdinalIgnoreCase))
+            .Should().HaveCount(2, "one setting per tenant, no bare key");
+        request.ExclusiveListKeys.Should().Equal(["WorkforceIdentity__CustomerTenantIds"],
+            "the writer removes any other WorkforceIdentity__CustomerTenantIds__* on both slots");
+    }
+
+    [Theory]
+    [InlineData(null, "Model1", "workforce-tenants-required")]
+    [InlineData("[\"" + CiamTenantId + "\"]", "Model1", "workforce-tenants-ciam-tenant")]
+    [InlineData("[\"" + SpaarkeTenantId + "\"]", "Model2", "workforce-tenants-spaarke-tenant")]
+    [InlineData("[\"" + TenantId + "\"]", "Model1", "workforce-tenants-spaarke-tenant")]   // a Model 1 run's tenantId
+    [InlineData("[\"not-a-guid\"]", "Model1", "workforce-tenants-invalid")]
+    public async Task AC21_StoredWorkforceTenantsBreakTheRule_FailResumable_BeforeAnyWrite(
+        string? stored, string tenancyModel, string expectedCode)
+    {
+        var run = BuildRun();
+        run.TenancyModel = tenancyModel;
+        if (stored is null) run.Parameters.NonSecret.Remove(IntakeParameterCatalog.CustomerWorkforceTenantIds);
+        else run.Parameters.NonSecret[IntakeParameterCatalog.CustomerWorkforceTenantIds] = stored;
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-21"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), WorkforceEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedCode);
+        writer.CallCount.Should().Be(0, "a list the BFF would refuse, or that admits Spaarke's staff, never reaches a slot");
+    }
+
+    [Fact]
+    public async Task AC22_IndexedEntryOnAScalarSource_FailsBeforeAnyWrite()
+    {
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-22"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(),
+                new PerEnvSettingEntry("Bad__List", PerEnvSettingSource.FromHandlerParameter, null, "tenant_id", true, "X", Indexed: true)]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.ManifestReadFailed);
+        writer.CallCount.Should().Be(0);
+    }
+
     // ---------- task 253: parity with the generated Configure-AppServiceSettings script ----------
     //
     // H4b used to run scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1. It now
@@ -857,6 +952,12 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["OpenaiMonthlyLimitUsd"] = "500",
     };
 
+    /// <summary>T255: the generated script's [string[]] parameters → BuildRun()'s lists.</summary>
+    private static readonly IReadOnlyDictionary<string, string[]> ScriptListArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["CustomerWorkforceTenantIds"] = [WorkforceTenantA, WorkforceTenantB],
+    };
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -877,10 +978,15 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        var scriptSettings = EvaluateGeneratedConfigureScript(KeyVaultName, arguments);
+        var (scriptSettings, scriptListKeys) = EvaluateGeneratedConfigureScript(KeyVaultName, arguments);
         writer.LastRequest!.Settings.Should().BeEquivalentTo(scriptSettings,
             "H4b must write exactly what Configure-AppServiceSettings.generated.ps1 wrote — same names, same values, " +
             "same Key Vault references (re-run Invoke-CatalogGenerator.ps1 if the manifest changed)");
+        // T255: and own (remove stale indices of) exactly the lists the script owns.
+        writer.LastRequest.ExclusiveListKeys.Should().BeEquivalentTo(scriptListKeys);
+        scriptListKeys.Should().Equal(["WorkforceIdentity__CustomerTenantIds"]);
+        scriptSettings["WorkforceIdentity__CustomerTenantIds__0"].Should().Be(WorkforceTenantA);
+        scriptSettings["WorkforceIdentity__CustomerTenantIds__1"].Should().Be(WorkforceTenantB);
 
         // The cases the parity rests on, stated explicitly.
         scriptSettings.Count.Should().BeGreaterThan(40, "the evaluator must have read the whole $settings array");
@@ -892,10 +998,11 @@ public sealed class H4bBulkAppSettingsHandlerTests
 
     /// <summary>
     /// Evaluates the generated script's settings the way PowerShell + az did: every line of the <c>$settings = @( … )</c>
-    /// array, then each conditional <c>$settings += …</c> line whose parameter is not blank; <c>$(Format-KvRef 'S')</c>
-    /// becomes the Key Vault reference, <c>$Var</c> the argument; a later duplicate key wins.
+    /// array, then each conditional <c>$settings += …</c> line whose parameter is not blank, then (T255) each indexed
+    /// <c>for</c> line over its <c>[string[]]</c> parameter; <c>$(Format-KvRef 'S')</c> becomes the Key Vault reference,
+    /// <c>$Var</c> the argument; a later duplicate key wins. Also returns the script's <c>$exclusiveListKeys</c>.
     /// </summary>
-    private static IReadOnlyDictionary<string, string> EvaluateGeneratedConfigureScript(
+    private static (IReadOnlyDictionary<string, string> Settings, IReadOnlyList<string> ListKeys) EvaluateGeneratedConfigureScript(
         string vaultName, IReadOnlyDictionary<string, string> arguments)
     {
         var path = LocateRepoFile(Path.Combine(
@@ -907,6 +1014,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             "^if \\(-not \\[string\\]::IsNullOrWhiteSpace\\(\\$(?<var>\\w+)\\)\\) \\{ \\$settings \\+= \"(?<key>[^=\"]+)=(?<value>[^\"]*)\" \\}$");
         var kvRef = new System.Text.RegularExpressions.Regex("\\$\\(Format-KvRef '(?<secret>[^']+)'\\)");
         var variable = new System.Text.RegularExpressions.Regex("\\$(?<var>[A-Za-z]\\w*)");
+        var listLine = new System.Text.RegularExpressions.Regex(
+            "^for \\(\\$i = 0; \\$i -lt \\$(?<var>\\w+)\\.Count; \\$i\\+\\+\\) \\{ \\$settings \\+= \"(?<key>[^\"$]+)__\\$i=\\$\\(\\$\\k<var>\\[\\$i\\]\\)\" \\}$");
+        var listKeysLine = new System.Text.RegularExpressions.Regex("^\\$exclusiveListKeys = @\\((?<keys>[^)]*)\\)$");
 
         string Expand(string value)
         {
@@ -927,6 +1037,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             match.Success.Should().BeTrue($"every $settings line is \"key=value\" (line {i + 1}: {lines[i]})");
             settings[match.Groups["key"].Value] = Expand(match.Groups["value"].Value);
         }
+        var listKeys = new List<string>();
         for (; i < lines.Count; i++)
         {
             var match = optionalLine.Match(lines[i]);
@@ -934,8 +1045,27 @@ public sealed class H4bBulkAppSettingsHandlerTests
             {
                 settings[match.Groups["key"].Value] = Expand(match.Groups["value"].Value);
             }
+            var list = listLine.Match(lines[i]);
+            if (list.Success)
+            {
+                var values = ScriptListArguments.TryGetValue(list.Groups["var"].Value, out var listArgument)
+                    ? listArgument
+                    : throw new InvalidOperationException(
+                        $"The generated script loops over ${list.Groups["var"].Value}, which this test has no list for — add it to ScriptListArguments.");
+                for (var index = 0; index < values.Length; index++)
+                {
+                    settings[$"{list.Groups["key"].Value}__{index}"] = values[index];
+                }
+            }
+            var keysLine = listKeysLine.Match(lines[i]);
+            if (keysLine.Success)
+            {
+                listKeys.AddRange(keysLine.Groups["keys"].Value.Split(',')
+                    .Select(k => k.Trim().Trim('\''))
+                    .Where(k => k.Length > 0));
+            }
         }
-        return settings;
+        return (settings, listKeys);
     }
 
     private static string LocateRepoFile(string relativePath)
@@ -963,6 +1093,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         return new H4bBulkAppSettingsHandler(
             repo, manifest, writer, probe, fetcher,
             Options.Create(new BulkAppSettingsOptions()),
+            Options.Create(new ReservedTenantsOptions { SpaarkeTenantId = SpaarkeTenantId, CiamTenantIds = [CiamTenantId] }),
             NullLogger<H4bBulkAppSettingsHandler>.Instance);
     }
 
@@ -993,6 +1124,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         p[IntakeParameterCatalog.EnvironmentName] = EnvironmentName;
         p[IntakeParameterCatalog.ContainerTypeId] = "00000000-dead-beef-0000-000000000001";
         p[IntakeParameterCatalog.OpenAiMonthlyLimitUsd] = "500";   // T254 (optional)
+        p[IntakeParameterCatalog.CustomerWorkforceTenantIds] = WorkforceTenantsJson;   // T255 (required, canonical)
         // Upstream handler outputs (task 245a) — H2a's and H3's typed InterStepState.
         var s = run.InterStepState;
         s.KeyVaultName = KeyVaultName;
