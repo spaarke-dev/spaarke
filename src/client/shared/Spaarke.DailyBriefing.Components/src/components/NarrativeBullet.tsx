@@ -79,12 +79,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Badge,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Badge } from '@fluentui/react-components';
 import {
   MoreVerticalRegular,
   CheckmarkRegular,
@@ -102,13 +97,7 @@ import { NarrativeCitedText, hasInlineRegardingMention } from './NarrativeCitedT
 
 /** Keys of the overflow-menu actions (see `menuActions` in the component). */
 type NarrativeMenuAction =
-  | 'previewDocument'
-  | 'markAsRead'
-  | 'remove'
-  | 'keep'
-  | 'addToTodo'
-  | 'dismiss'
-  | 'openRecord';
+  'previewDocument' | 'markAsRead' | 'remove' | 'keep' | 'addToTodo' | 'dismiss' | 'openRecord';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -403,11 +392,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // both the inline regarding-name link and the fallback "Open record"
   // overflow-menu handler.
   const resolveXrm = ():
-    | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
-    | undefined =>
+    { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined =>
     getXrm('navigation') as
-      | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
-      | undefined;
+      { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined;
 
   const openRecordViaXrm = (entityType: string, entityId: string): void => {
     if (!entityType || !entityId) return;

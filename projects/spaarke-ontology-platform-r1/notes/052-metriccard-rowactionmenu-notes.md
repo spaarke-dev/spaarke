@@ -9,8 +9,8 @@ Branch `task/ontology-052-metriccard` (worktree `C:\wts-052`), cut from origin/d
 - `Worklist/laneCountFilters.ts`: pure data for `MetricCardRow` (no new card component): `bucketLaneItems`, `buildLaneCountCards`,
   `filterLaneItems`, `resolveLaneFilterKey`. Decide = Ask outside counsel / Approve or rebudget / Chase a reply; Do = Finish or reschedule /
   Coming due / Chase a response. The type cards sum to the lane total; an item with no valid work type for its lane lands in "Other" so the
-  sum holds on bad data. Notes: Decide "oldest N days", Do "N past due". `WorklistItem.workType` added (additive, optional) - the route
-  (050/059) must supply it from `sprk_policy.sprk_worktype`; until then every item shows under "Other".
+  sum holds on bad data. Notes: Decide "oldest N days", Do "N past due". `WorklistItem.workType` added (additive, optional) - task 038 (the
+  route) returns `workType` mapped from `sprk_policy.sprk_worktype` and task 050 (the FetchXML) selects it; until they land every item shows under "Other".
 - C-9: `RowActionMenu` (`UI.Components/src/components/RowActionMenu/`), extracted from `DocumentRowMenu` (now a thin wrapper). Migrated:
   `NarrativeBullet`, `HighPrioritySection` (DailyBriefing), `EmailConnectionsReview` (Communication, two menus), `ManageWorkspacesPane` (SpaarkeAi).
 - D-46: `DocumentRowMenu` has no Work Item descriptors; `OutcomeCard` untouched.

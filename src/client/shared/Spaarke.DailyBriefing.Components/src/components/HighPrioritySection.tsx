@@ -25,15 +25,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Link,
-  Badge,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Link, Badge, Button, Tooltip } from '@fluentui/react-components';
 import { AlertUrgentRegular, MailRegular, MoreVerticalRegular, OpenRegular } from '@fluentui/react-icons';
 
 import { RowActionMenu } from '@spaarke/ui-components';

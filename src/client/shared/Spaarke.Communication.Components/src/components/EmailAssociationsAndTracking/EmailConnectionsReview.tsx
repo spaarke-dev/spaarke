@@ -29,13 +29,7 @@
  * dark-mode correct). No `as React.ComponentType` cast (NFR-05).
  */
 import * as React from 'react';
-import {
-  MessageBar,
-  MessageBarBody,
-  MessageBarActions,
-  Button,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { MessageBar, MessageBarBody, MessageBarActions, Button, mergeClasses } from '@fluentui/react-components';
 import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { getXrmForPicker, SprkModal, cleanGuid, RowActionMenu } from '@spaarke/ui-components';
 import {
