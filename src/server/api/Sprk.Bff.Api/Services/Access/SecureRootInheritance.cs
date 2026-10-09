@@ -195,7 +195,19 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
     /// sharee rule's one-level climb reports the direct parents' value, the walls' climb every ancestor's.
     /// </summary>
     public FilingPermission? StrictestPermission { get; init; }
+
+    /// <summary>
+    /// Task 174 (verifier F1-d): the records this one is filed under DIRECTLY, each with the effective Secure flag and
+    /// Access Permission rank that arrive through it (its own values, folded with everything above it that the climb read).
+    /// Display names only these: a direct parent is already visible on the record's own lookup, a grandparent is not.
+    /// </summary>
+    public IReadOnlyList<FilingParentState> DirectParents { get; init; } = Array.Empty<FilingParentState>();
 }
+
+/// <summary>Task 174: one DIRECT filing parent and what arrives through it — <see cref="EffectiveSecure"/> (it or anything
+/// above it is secure) and <see cref="EffectiveRank"/> (<see cref="FilingPermission.Rank"/> of the strictest Access
+/// Permission on it or above it).</summary>
+public sealed record FilingParentState(SecureFilingParent Parent, bool EffectiveSecure, int EffectiveRank);
 
 /// <summary>
 /// Task 174 (owner round 84): an Access Permission a record inherits from a record it is filed under — the option value
@@ -2401,6 +2413,9 @@ public sealed class SecureRootInheritance
     /// <summary>One matter or project as the parent read returns it.</summary>
     private readonly record struct ParentRow(bool? Flag, string? Name, int? Permission);
 
+    /// <summary>Task 174: a record a row is filed under that exists, with its own flag and Access Permission as read.</summary>
+    private readonly record struct FiledParent(string Table, Guid Id, string? Name, bool? Flag, int? Permission);
+
     /// <summary>
     /// The climb behind <see cref="ReadSecureParentsAsync"/> and <see cref="ReadSecureParentsOfManyAsync"/> (round 61 item
     /// 1): level by level, each record's frontier is read, decided and climbed with its own visited set (a cycle ends the
@@ -2415,7 +2430,7 @@ public sealed class SecureRootInheritance
     {
         var climbs = starts.Select(id => new ParentClimb((table, id))).ToList();
         var facts = new Dictionary<(string Table, Guid Id), FactsRead>();
-        var decisions = new Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)>();
+        var decisions = new Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)>();
         var faultedTypes = new HashSet<Guid>(); // #1410 F3: a pair type that could not be read is not read again in this call
         for (var level = 1; climbs.Any(c => c.Frontier.Count > 0); level++)
         {
@@ -2468,10 +2483,10 @@ public sealed class SecureRootInheritance
 
                     // The direct question (maxDepth 1, the sharee rule) stops here. The walls climb on: only a work assignment or
                     // project is itself filed under something; a matter ends the chain.
-                    foreach (var parent in maxDepth > 1 ? filedUnder : Array.Empty<(string Table, Guid Id)>())
+                    foreach (var parent in maxDepth > 1 ? filedUnder : Array.Empty<FiledParent>())
                     {
                         if (Inherits(parent.Table) && climb.Visited.Add((parent.Table, parent.Id)))
-                            next.Add(parent);
+                            next.Add((parent.Table, parent.Id));
                     }
                 }
 
@@ -2479,9 +2494,91 @@ public sealed class SecureRootInheritance
             }
         }
 
+        // Task 174 (verifier F1-a): a work assignment or project above the record that is not flagged secure itself but sits
+        // below a secure ancestor IS secure (round 84), so its No Access list binds what is filed below it too. Decided over
+        // the decisions already read (no extra query), memoised; only the walls' climb (maxDepth > 1) adds them — the
+        // one-level questions (inheritance, the sharee rule) are unchanged.
+        var effective = new EffectiveOverDecisions(decisions);
+        foreach (var climb in climbs)
+        {
+            if (maxDepth > 1)
+            {
+                foreach (var node in effective.Ancestors(climb.Start, climb.Visited))
+                {
+                    if (node.Flag != true && Inherits(node.Table) && (node.Table, node.Id) != climb.Start && effective.IsSecure(node)
+                        && !climb.Secure.Any(x => string.Equals(x.Table, node.Table, StringComparison.OrdinalIgnoreCase) && x.Id == node.Id))
+                        climb.Secure.Add(new SecureFilingParent(node.Table, node.Id, node.Name));
+                }
+            }
+        }
+
         return climbs.ToDictionary(
             c => c.Start.Id,
-            c => new SecureParentsAnswer(c.Secure, c.Unknown) { StrictestPermission = c.Strictest });
+            c => new SecureParentsAnswer(c.Secure, c.Unknown)
+            {
+                StrictestPermission = c.Strictest,
+                DirectParents = decisions.TryGetValue(c.Start, out var own)
+                    ? own.FiledUnder.Select(p => new FilingParentState(
+                        new SecureFilingParent(p.Table, p.Id, p.Name), effective.IsSecure(p), effective.Rank(p))).ToList()
+                    : Array.Empty<FilingParentState>(),
+            });
+    }
+
+    /// <summary>
+    /// Task 174: the effective Secure flag and Access Permission rank of each record the climb read, over its decisions —
+    /// a record's own values folded with every record above it that was decided. A plain reachability walk per question
+    /// (no memo, so a filing cycle can never cache a partial "not secure"); the graph above one record is a handful of rows.
+    /// A record not decided (a matter, or past the bound — which already makes the answer unverifiable) has its own values.
+    /// </summary>
+    private sealed class EffectiveOverDecisions(
+        IReadOnlyDictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> decisions)
+    {
+        private IReadOnlyList<FiledParent> Above((string Table, Guid Id) key) =>
+            Inherits(key.Table) && decisions.TryGetValue(key, out var d) ? d.FiledUnder : Array.Empty<FiledParent>();
+
+        /// <summary><paramref name="node"/> and every record above it, each once.</summary>
+        private IEnumerable<FiledParent> SelfAndAbove(FiledParent node)
+        {
+            var seen = new HashSet<(string, Guid)> { (node.Table, node.Id) };
+            var stack = new Stack<FiledParent>();
+            stack.Push(node);
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                yield return current;
+                foreach (var parent in Above((current.Table, current.Id)))
+                {
+                    if (seen.Add((parent.Table, parent.Id)))
+                        stack.Push(parent);
+                }
+            }
+        }
+
+        public bool IsSecure(FiledParent node) => SelfAndAbove(node).Any(n => n.Flag == true);
+
+        public int Rank(FiledParent node) => SelfAndAbove(node).Max(n => FilingPermission.Rank(n.Permission));
+
+        /// <summary>Every record above <paramref name="start"/> that the climb visited and read (its FiledUnder entries).</summary>
+        public IEnumerable<FiledParent> Ancestors((string Table, Guid Id) start, IReadOnlySet<(string, Guid)> visited)
+        {
+            var seen = new HashSet<(string, Guid)>();
+            var queue = new Queue<(string Table, Guid Id)>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var row = queue.Dequeue();
+                if (!decisions.TryGetValue(row, out var d))
+                    continue;
+                foreach (var parent in d.FiledUnder)
+                {
+                    if (!seen.Add((parent.Table, parent.Id)))
+                        continue;
+                    yield return parent;
+                    if (visited.Contains((parent.Table, parent.Id)))
+                        queue.Enqueue((parent.Table, parent.Id));
+                }
+            }
+        }
     }
 
     /// <summary>Reads the filing of every row in <paramref name="rows"/> into <paramref name="into"/>. Never throws a read
@@ -2536,7 +2633,7 @@ public sealed class SecureRootInheritance
     private static async Task DecideParentsIntoAsync(
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<FilingFacts> rows,
         ConcurrentDictionary<Guid, string?> recordTypes, HashSet<Guid> faultedTypes,
-        Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)> into,
+        Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> into,
         bool batched, CancellationToken ct)
     {
         if (!batched)
@@ -2872,7 +2969,7 @@ public sealed class SecureRootInheritance
 
     /// <summary>The direct decision, and every record the row is filed under that exists (secure or not) — what the
     /// level-by-level climb (round 61 item 1) continues from.</summary>
-    private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)> DecideParentsCoreAsync(
+    private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> DecideParentsCoreAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
         CancellationToken ct)
     {
@@ -2955,12 +3052,12 @@ public sealed class SecureRootInheritance
     /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
     /// reason wins): a faulted read or an EMPTY flag is unverifiable, a missing record confers nothing, a true flag is a
     /// secure parent. Also every named record that exists (secure or not) — what the climb continues from.</summary>
-    private static (SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder) DecideNamedParents(
+    private static (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder) DecideNamedParents(
         IReadOnlyList<(string Table, Guid Id)> named, string? unknown,
         IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads)
     {
         var secure = new List<SecureFilingParent>();
-        var existing = new List<(string Table, Guid Id)>();
+        var existing = new List<FiledParent>();
         FilingPermission? strictest = null;
         foreach (var (table, id) in named.Distinct())
         {
@@ -2973,7 +3070,7 @@ public sealed class SecureRootInheritance
 
             if (read.Row is not { } parent)
                 continue; // a record that does not exist confers nothing
-            existing.Add((table, id));
+            existing.Add(new FiledParent(table, id, parent.Name, parent.Flag, parent.Permission));
 
             // Task 174 (owner round 84): the parent's Access Permission, from the same row (a null value is Standard).
             if (FilingPermission.Rank(parent.Permission) > 0)

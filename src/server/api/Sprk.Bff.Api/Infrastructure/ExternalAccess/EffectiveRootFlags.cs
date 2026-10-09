@@ -57,21 +57,26 @@ internal static class EffectiveRootFlags
         {
             IsSecure = own.IsSecure || ancestry.HasSecureParent,
             IsRestricted = restricted,
-            IsLimited = !restricted && (own.IsLimited || inherited == 1),
+            // Verifier F1-b: the record's OWN Limited is never dropped — an own-Limited record under a Restricted parent is
+            // both (the existing handled state: Restricted runs last, direct-only still applies where Restricted is read).
+            IsLimited = own.IsLimited || (!restricted && inherited == 1),
         };
     }
 
-    /// <summary>Folds every record of a batch. An id without an ancestry answer keeps its own flags (the walk answers every
-    /// id it is asked about; <c>null</c> ancestry means the table files under nothing).</summary>
+    /// <summary>Folds every record of a batch. <c>null</c> ancestry means the table files under nothing (every record keeps
+    /// its own flags). Otherwise an id the walk gave no answer for is UNREADABLE (fail closed) — the walk answers every id it
+    /// is asked about, so a missing answer is a defect, never "nothing above it".</summary>
     internal static IReadOnlyDictionary<Guid, RootRecordFlags> Fold(
         IReadOnlyDictionary<Guid, RootRecordFlags> own, IReadOnlyDictionary<Guid, SecureParentsAnswer>? ancestry)
     {
-        if (ancestry is null || ancestry.Count == 0)
+        if (ancestry is null)
         {
             return own;
         }
 
-        return own.ToDictionary(kv => kv.Key, kv => Fold(kv.Value, ancestry.GetValueOrDefault(kv.Key)));
+        return own.ToDictionary(kv => kv.Key, kv => ancestry.TryGetValue(kv.Key, out var answer)
+            ? Fold(kv.Value, answer)
+            : kv.Value.IsUnreadable ? kv.Value : RootRecordFlags.Unreadable);
     }
 
     /// <summary>
@@ -147,9 +152,11 @@ internal static class EffectiveRootFlags
         ids.ToDictionary(id => id, _ => new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), why));
 
     /// <summary>
-    /// The record a filed child's effective access comes from, for display (task 174 / 067 amendment): the ancestor that
-    /// raises the Access Permission above the record's own, else the first secure ancestor when the record itself is not
-    /// flagged secure; <c>null</c> when the record's own flags already govern (or the ancestry is unknown).
+    /// The record a filed child's effective access comes from, for display (task 174 / 067 amendment; verifier F1-d): the
+    /// DIRECT filing parent through which the stricter Access Permission arrives, else the direct parent through which
+    /// Secure arrives when the record itself is not flagged secure; <c>null</c> when the record's own flags already govern
+    /// (or the ancestry is unknown). Never a grandparent: a direct parent is visible on the record's own lookup to anyone
+    /// who can read the record; a record further up may not be, so its id and name are not disclosed.
     /// </summary>
     internal static SecureFilingParent? InheritedFrom(RootRecordFlags own, SecureParentsAnswer? ancestry)
     {
@@ -159,12 +166,13 @@ internal static class EffectiveRootFlags
         }
 
         var ownRank = own.IsRestricted ? 2 : own.IsLimited ? 1 : 0;
-        if (ancestry.StrictestPermission is { } permission && FilingPermission.Rank(permission.Value) > ownRank)
+        var strictest = ancestry.DirectParents.Select(p => p.EffectiveRank).DefaultIfEmpty(0).Max();
+        if (strictest > ownRank)
         {
-            return permission.From;
+            return ancestry.DirectParents.First(p => p.EffectiveRank == strictest).Parent;
         }
 
-        return !own.IsSecure && ancestry.HasSecureParent ? ancestry.SecureParents[0] : null;
+        return !own.IsSecure ? ancestry.DirectParents.FirstOrDefault(p => p.EffectiveSecure)?.Parent : null;
     }
 }
 
@@ -173,5 +181,6 @@ internal static class EffectiveRootFlags
 /// inherited from when an ancestor makes them stricter than the record's own.
 /// </summary>
 /// <param name="Flags">The effective flags (<see cref="EffectiveRootFlags.Fold(RootRecordFlags, SecureParentsAnswer?)"/>).</param>
-/// <param name="InheritedFrom">The ancestor that governs, or <c>null</c> when the record's own flags do.</param>
+/// <param name="InheritedFrom">The DIRECT filing parent the stricter values arrive through, or <c>null</c> when the record's own
+/// flags govern.</param>
 public sealed record EffectiveRootAccess(RootRecordFlags Flags, SecureFilingParent? InheritedFrom);

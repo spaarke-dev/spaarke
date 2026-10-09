@@ -102,18 +102,52 @@ MDA share, container membership and Office edit unless the record is visited by 
   flags a systemuser-subject entry on a not-yet-secure child of a secure parent now binds internal users on the read path,
   in the share guard, in the enforcer and in 064's `inForce` — consistently. #1419 had left that one case on the child's own
   flag; no existing test covered it (the Q4 test uses a non-secure parent and still passes).
-- **The Assigned-To materializer treats a child of a secure parent as secure in every rule** (round 84: its effective
-  Secure is the parent's): an assignee is suggested, not shared (A3); a grant is not converted to a share by the non-secure
-  path; and an ended assignment's share is kept under S5 (`KeptSecureRecord`), as on a flagged secure record. That last one
-  keeps a share the non-secure path would have removed while the child is still BU-owned; it is what applies once the
-  stored flag catches up (inheritance, task 175), and an operator can still remove it (`/unshare-user`'s S5 follows the
-  stored ownership). Not routed differently: one flag set per run, and the owner's rule is that the child IS secure.
-- **Cost (goal 6).** A matter composition reads nothing extra (pinned). A parentless work assignment or project costs the
+- **The Assigned-To materializer** reads the EFFECTIVE flags for suggest-vs-share (A3), the Restricted and direct-only rules
+  and the grant-to-share conversion; the **S5 keep follows the record's OWN stored flag** (main-session ruling on verifier
+  F1-c), exactly as `/unshare-user` does: a not-yet-flagged child is still owned by its business unit, so the share of an
+  ended assignment is revoked there.
+- **Cost (goal 6) — main-session ruling: ACCEPTED as bounded.** A matter composition reads nothing extra (pinned). A parentless work assignment or project costs the
   walk's ONE batched row read per 200 rows (pinned), nothing else: whether a record has a parent cannot be known without
   reading its filing, and the POML forbids a second filing reader. The systemuser plane already walked every WA/project
   candidate (#1410), so it pays nothing new; the contact plane and grant time pay that row read (plus parent and
   ancestor-organization reads only when parents exist). Single-record callers skip the walk when the own flags are
-  unreadable or already Secure AND Restricted.
+  unreadable or already Secure AND Restricted. The POML's "no extra reads" is met in spirit: the one row read per 200 on
+  the contact plane (a point read at grant time) is the walk itself, and a second filing reader is forbidden.
+
+## Verifier pass 1 (main session, 2026-10-08) — fixed in this PR
+
+- **F1-a: a non-flagged middle project's No Access list never reached what is filed under it.** WA -> P (not flagged; secure
+  through M) -> secure M: a contact or user walled on P kept WA at read and grant time, the guard allowed it while the
+  enforcer (treating P as secure) removed it — #1419's F2 loop. Fix: in the walls' climb (`maxDepth > 1`), every visited
+  work assignment or project that sits below a secure ancestor counts as a secure parent too, decided over the decisions
+  already read (`EffectiveOverDecisions`, memoised; no extra query). The one-level callers (inheritance, the sharee rule) are
+  unchanged. The read veto, the grantee check, the share guard and 064's coverage all read the same answer. Tests: contact
+  plane (secure / non-secure matter), grant time, guard.
+- **F1-b: an own-Limited record under a Restricted parent lost Limited.** `IsLimited = own.IsLimited || (!restricted &&
+  inherited Limited)`. Test on the fold.
+- **F1-c: the materializer kept an ended assignment's share on a not-yet-flagged child (S5 on the effective flag).** S5 now
+  reads the record's own stored flag (`Run.OwnIsSecure`); the effective flags still drive suggest-vs-share and convert.
+  `ExternalParticipationService.FoldEffectiveAsync` folds flags the caller already read, so the materializer reads its own
+  row once. Test: the ended assignment is revoked.
+- **F1-d: `inheritedFrom` disclosed a grandparent's id and name to Read-only callers.** It now names only the DIRECT filing
+  parent through which the stricter value arrives (`SecureParentsAnswer.DirectParents`, each with the effective Secure and
+  Access Permission arriving through it); never a record further up. Contract note updated; the modal banner already reads
+  "It follows the {table} it is filed under: {name}", which is now always the direct parent. Test: Read-only caller,
+  grandparent governance, the matter's id and name absent from the body.
+- **F2: switched behaviours now covered** — the guard's Q4 own-list switch, the guard's own fold, the enforcer's fold for the
+  entry's own record, the internal-user composition (an external-flagged user loses a child of a Restricted matter), the 064
+  endpoint's effective mapping (endpoint level), the materializer's effective read (suggest, not share). Seeding proofs below.
+- **K3/K4 done:** the batch fold treats an id with no walk answer as unreadable (fail closed). `GetEffectiveRootRecordFlagsAsync`
+  folds only the ids it walked and keeps the rest as read.
+- **Pre-existing defect fixed in scope:** `ExternalGrantLifecycle.ReadContactHeldGrantsAsync` did not count Restricted as
+  direct-only, so a firm's organization-wide row capped (or kept alive) a contact-issued row on a Restricted record, where the
+  read path lets no organization row confer. Restricted now counts as direct-only (not "nothing": the contact's own rows are
+  kept, so the reconciliation job does not end a contact-issued row merely because the record is Restricted for now). Test in
+  `ExternalAccessReconciliationTests`.
+- **Two 064 tests updated to round 84:** a user wall over an organization only a not-yet-flagged child of a secure matter
+  references is now IN FORCE (the child is secure through its parent), and `secure` reads `applies` for such a child.
+- **Not in this PR (routed by the main session):** the create / re-file plan climbing only above secure parents (task 175 /
+  #1478); the `/unshare-user` Restricted carve-out (new issue); `ExternalDataService` showing the own `sprk_issecure` (#1478).
 
 ## Tests
 
@@ -129,7 +163,7 @@ in-memory world, real deny-list matching, real grant policy):
 - grant time: walled contact Denied / unrelated Allowed / unreadable chain Unverifiable; contact grant under Restricted
   refused with the Restricted refusal; org grant under secure or Limited refused, Standard allowed; unreadable chain
   Unreadable;
-- display: the effective access read names the governing parent.
+- display: the effective access read names the governing DIRECT parent (never a grandparent, F1-d).
 
 `InternalUserShareTests`: an external-flagged user's share on a child of a Restricted matter is refused 422
 `user_not_internal`. Modal (`AccessGrantModal.noAccess.test.tsx`): cancellation inherited from a secure / Restricted parent,
@@ -142,8 +176,31 @@ never-less-strict, an older BFF's answer, and the parse/fold helpers. The defaul
   parent, Restricted parent, through a non-secure project); the rest pass.
 - **Grant-time contact check:** `CheckGranteeNoAccessAsync` passing no ancestry — 2 fail (walled on the secure parent,
   unreadable chain).
+- **Verifier pass 1 (one per item; each restored after):**
 
-### Runs (2026-10-08)
+  | Mutation | Fails |
+  |---|---|
+  | Guard: own list of a record with a secure ancestor asked on its own flag (`AsFlagged` switch off) | the guard's Q4 own-list test |
+  | Guard: no fold in `CheckCoreAsync` | the guard's single-record fold test |
+  | Enforcer: no fold for the entry's own record | `Enforce_AnEntryOnANotYetFlaggedChildOfASecureMatter_RemovesTheWalledShare` |
+  | Systemuser plane composed on own flags | the external-flagged user / Restricted parent test |
+  | 064 on own flags | 3 endpoint tests (grandparent governance, both round-84 in-force tests) |
+  | Materializer on own flags | the suggest-not-share test |
+  | F1-a: non-flagged middle ancestors not counted | 3 (read path, grant time, guard) |
+  | F1-c: S5 on the effective flag | the ended-assignment revoke test |
+
+### Runs after verifier pass 1 (2026-10-08, final code)
+
+- `tests/unit/Sprk.Bff.Api.Tests`: 18,808 passed, 0 failed, 54 skipped. Focused classes (effective access, Assigned-To,
+  enforcer, 064, reconciliation, guard, share, inheritance, accessible set, grantor ceiling, contact grants, contract):
+  1,240 passed.
+- `tests/Spaarke.ArchTests`: 811 passed. `tests/integration/Sprk.Bff.Api.IntegrationTests`: 87 passed, 4 skipped.
+- Jest (`AccessGrantModal`, `TrackingFieldTrio`, `accessStatusBanner`): 287 of 288 on a loaded machine; the one
+  (`AccessGrantModal.userShare`) passes 29/29 on rerun. `TrackingFieldTrio.emailMembers` still does not load in a fresh
+  worktree (`@spaarke/sdap-client` not built). No client file changed in this round.
+- Publish: fresh master `65177354f` 127,317,868 bytes; this branch 127,357,808 bytes; **delta +39,940 bytes**.
+
+### Runs (2026-10-08, first cut)
 
 - `tests/unit/Sprk.Bff.Api.Tests` (includes `tests/integration/{auth,contract,regression,seam,data-mutation}`): 18,770
   passed, 2 failed, 54 skipped, on the build before the new tests. The 2 (`CorsAndAuthTests.Cors_Preflight_AllowsConfiguredOrigin`,
@@ -152,8 +209,7 @@ never-less-strict, an older BFF's answer, and the parse/fold helpers. The defaul
 - `tests/Spaarke.ArchTests`: 811 passed. `tests/integration/Sprk.Bff.Api.IntegrationTests`: 87 passed, 4 skipped.
 - `Spaarke.UI.Components` jest, `AccessGrantModal` + `TrackingFieldTrio`: 199 passed; the `TrackingFieldTrio.emailMembers`
   suite does not load in a fresh worktree (`@spaarke/sdap-client` not built; unrelated to this change).
-- Publish (Release, `dotnet publish src/server/api/Sprk.Bff.Api`): fresh master `65177354f` 127,317,868 bytes; this branch
-  127,342,280 bytes; **delta +24,412 bytes**. No package added.
+- Publish (first cut): +24,412 bytes. No package added.
 
 ## Known limits
 

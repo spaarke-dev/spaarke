@@ -656,9 +656,13 @@ public sealed class AssignedAccessMaterializer
         try
         {
             // Task 174 (owner round 84): the EFFECTIVE flags — Restricted, Limited or Secure through a parent governs what an
-            // assignee is given, exactly as the read path cancels it.
-            var flags = await _participations
-                .GetEffectiveRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
+            // assignee is given (suggest vs share, convert), exactly as the read path cancels it. The S5 keep follows the
+            // record's OWN stored flag (main-session ruling on verifier F1-c), as /unshare-user does: a not-yet-flagged child
+            // is still owned by its business unit, so ending its assignment share leaves readers.
+            var own = await _participations
+                .GetRootRecordFlagsAsync(run.Logical, new[] { run.RootId }, ct).ConfigureAwait(false);
+            run.OwnIsSecure = !own.TryGetValue(run.RootId, out var ownFlags) || ownFlags.IsUnreadable || ownFlags.IsSecure;
+            var flags = await _participations.FoldEffectiveAsync(run.Logical, own, ct).ConfigureAwait(false);
             // Absent = unreadable at write time (task 138's rule), never "no veto".
             return flags.TryGetValue(run.RootId, out var f) && !f.IsUnreadable ? f : null;
         }
@@ -1337,9 +1341,10 @@ public sealed class AssignedAccessMaterializer
                         return;
                     }
 
-                    if (flags.IsSecure)
+                    if (run.OwnIsSecure)
                     {
                         // Owner S5: a secure record always keeps someone who can see it — this rule never removes a share there.
+                        // Task 174 (F1-c ruling): the record's OWN stored flag, as /unshare-user's S5 — not the effective one.
                         await EndAsync(AssignedAccessReason.KeptSecureRecord, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
@@ -2140,6 +2145,9 @@ public sealed class AssignedAccessMaterializer
 
         /// <summary>Task 149: this run made at least one CONFIRMED system-user share write on the root.</summary>
         public bool RootShareWritten { get; set; }
+
+        /// <summary>Task 174 (F1-c): the record's OWN stored Secure flag (unreadable counts as secure), for the S5 keep only.</summary>
+        public bool OwnIsSecure { get; set; } = true;
 
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();

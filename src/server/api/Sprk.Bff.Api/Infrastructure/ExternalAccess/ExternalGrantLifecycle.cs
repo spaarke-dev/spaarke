@@ -861,7 +861,8 @@ internal static class ExternalGrantLifecycle
     /// </summary>
     /// <remarks>
     /// <para><b>Which rows</b> — exactly the rows the read path lets confer (<c>ExternalParticipationService</c>): the
-    /// contact's own active rows on the record; and, unless the record is Secure or Limited (direct grants only, FR-22),
+    /// contact's own active rows on the record; and, unless the record is Secure, Limited or Restricted (direct grants only, FR-22;
+    /// Restricted lets no organization row confer at all),
     /// the active organization-wide rows of its CONFERRING organizations (<paramref name="conferringOrganizationIds"/> —
     /// task 109's conferring set). Flags that are absent or unreadable read as direct-only: the fail-closed reading, with
     /// fewer sources and so an earlier date. Only rows at <paramref name="minimumLevel"/> or above count, and only rows
@@ -887,7 +888,11 @@ internal static class ExternalGrantLifecycle
 
         // Task 174: the EFFECTIVE flags, as the read path folds them — the rows that count are the rows the read path lets confer.
         var flags = await participations.GetEffectiveRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct);
-        var directOnly = !flags.TryGetValue(rootId, out var f) || f.IsUnreadable || f.IsDirectOnly;
+        // Restricted counts as direct-only too (pre-existing defect found by the task 174 verifier): on a Restricted record the
+        // read path lets NO organization-wide row confer (it removes every contact-sourced contribution), so an organization
+        // row must never lengthen what a contact holds there. Direct-only, not "nothing": a contact's own rows are kept, so the
+        // reconciliation job does not end a contact-issued row merely because the record is Restricted for now.
+        var directOnly = !flags.TryGetValue(rootId, out var f) || f.IsUnreadable || f.IsDirectOnly || f.IsRestricted;
 
         var rows = new List<ExternalGrantRow>(
             await QueryActiveRowsAsync(dataverseClient, ExternalGrantKey.ForContact(rootType, rootId, contactId), ct));
@@ -935,8 +940,8 @@ internal static class ExternalGrantLifecycle
 internal sealed record ConditionalDeactivation(IReadOnlyList<Guid> Deactivated, IReadOnlyList<Guid> ChangedSinceRead);
 
 /// <summary>What <see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/> found.</summary>
-/// <param name="DirectOnly">The record admits only direct grants for contacts (Secure, Limited, or flags that could not be
-/// read), so organization-wide rows were not read.</param>
+/// <param name="DirectOnly">The record admits only direct grants for contacts (Secure, Limited, Restricted, or flags that could
+/// not be read), so organization-wide rows were not read.</param>
 /// <param name="Rows">The rows that can carry the contact's access, as read — each with its own expiry, possibly none.</param>
 internal sealed record ContactHeldGrants(bool DirectOnly, IReadOnlyList<ExternalGrantRow> Rows);
 

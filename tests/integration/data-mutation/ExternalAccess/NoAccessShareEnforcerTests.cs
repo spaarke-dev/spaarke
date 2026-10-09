@@ -834,6 +834,26 @@ public class NoAccessShareEnforcerTests
         _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().Be(CollaborateMask, "nothing is removed on a guess");
     }
 
+    /// <summary>
+    /// Task 174 (owner rounds 82/84; verifier F2): an entry whose OWN object record is a not-yet-flagged work assignment filed
+    /// under a secure matter — the record is secure through its parent (Q4's "secure"), so the walled user's direct share on
+    /// it is removed, not reported NotSecure.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnEntryOnANotYetFlaggedChildOfASecureMatter_RemovesTheWalledShare()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Participations.Flags[FiledWorkAssignment] = RootRecordFlags.None;
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (WorkAssignment, FiledWorkAssignment), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.NotEnforced.Should().NotContain(n => n.RecordId == FiledWorkAssignment && n.Reason == NoAccessEnforcementReason.NotSecure);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("secure through the matter");
+    }
+
     /// <summary>Round 82, N5 still holds: an author without Write on the not-yet-secure filed record removes nothing there.</summary>
     [Fact]
     public async Task Enforce_ANotYetSecureFiledRecord_WhenTheAuthorLacksWriteOnIt_KeepsTheShare()

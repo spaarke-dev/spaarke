@@ -5,7 +5,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
@@ -39,6 +42,7 @@ public class EffectiveAccessFollowsParentTests
     private static readonly Guid Firm = Guid.Parse("17417417-0000-0000-0000-0000000000e1");
     private static readonly Guid ProjectType = Guid.Parse("17417417-0000-0000-0000-0000000000f1");
     private static readonly Guid MatterType = Guid.Parse("17417417-0000-0000-0000-0000000000f2");
+    private static readonly Guid InternalUser = Guid.Parse("17417417-0000-0000-0000-0000000000a2");
 
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard()
         .Add("sprk_recordtype_ref", MatterType, ("sprk_recordlogicalname", Matter))
@@ -131,6 +135,9 @@ public class EffectiveAccessFollowsParentTests
             });
         return entities.Object;
     }
+
+    private SecureShareNoAccessGuard Guard() => new(
+        _participations, _denyList, UnlinkedIdentityStore(), Entities(), NullLogger<SecureShareNoAccessGuard>.Instance);
 
     private AccessibleRecordSetService Service() => new(
         Mock.Of<IMembershipResolverService>(), _participations, Mock.Of<ISubjectStandingGrantReader>(), _denyList,
@@ -389,6 +396,149 @@ public class EffectiveAccessFollowsParentTests
             NullLogger.Instance, CancellationToken.None);
 
         decision.Should().Be(GrantPolicyDecision.Unreadable);
+    }
+
+    // ── Verifier F1-a: a non-flagged middle project's list binds what is filed below it ──────────────────────────────
+
+    [Theory(DisplayName = "174 F1-a: a contact walled on a non-flagged project under a SECURE matter is denied the work assignment below it")]
+    [InlineData(true, false)]  // the project is secure through the matter: its list binds the grandchild
+    [InlineData(false, true)]  // the matter is not secure: neither is the project, its list does not reach below
+    public async Task F1a_ReadPath_WallOnANonFlaggedMiddleProject_FollowsItsEffectiveSecure(bool matterSecure, bool admitted)
+    {
+        MatterRow(ParentMatter, secure: matterSecure);
+        OpenProjectUnderMatter(MiddleProject, ParentMatter);
+        OpenWaUnder(ByDirectGrant, Project, MiddleProject);
+        ContactGrants();
+        _denyList.DenyContactOnRecord(Contact, MiddleProject);
+
+        var set = await ComposeAsync();
+
+        set.Rights.ContainsKey(ByDirectGrant).Should().Be(admitted);
+    }
+
+    [Fact(DisplayName = "174 F1-a: a grant to a contact walled on a non-flagged project under a secure matter is refused")]
+    public async Task F1a_GrantTime_WallOnANonFlaggedMiddleProject_IsDenied()
+    {
+        MatterRow(ParentMatter, secure: true);
+        OpenProjectUnderMatter(MiddleProject, ParentMatter);
+        OpenWaUnder(ByDirectGrant, Project, MiddleProject);
+        _denyList.DenyContactOnRecord(Contact, MiddleProject);
+
+        var answer = await Service().CheckGranteeNoAccessAsync(WorkAssignment, ByDirectGrant, Contact, Array.Empty<Guid>(), CancellationToken.None);
+
+        answer.Should().Be(NoAccessCheckAnswer.Denied);
+    }
+
+    [Fact(DisplayName = "174 F1-a: the share guard refuses a user walled on a non-flagged project under a secure matter")]
+    public async Task F1a_Guard_WallOnANonFlaggedMiddleProject_IsWalled()
+    {
+        MatterRow(ParentMatter, secure: true);
+        OpenProjectUnderMatter(MiddleProject, ParentMatter);
+        OpenWaUnder(ByDirectGrant, Project, MiddleProject);
+        _denyList.DenySystemUserOnRecord(InternalUser, MiddleProject);
+
+        var decision = await Guard().CheckRecordAndSecureParentsAsync(
+            WorkAssignment, ByDirectGrant, InternalUser, SecureWallRecordScope.AsFlagged, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SecureShareWallOutcome.Walled, "the project is secure through the matter (round 84)");
+    }
+
+    // ── Verifier F2: the guard's Q4 own-list change and its own fold ───────────────────────────────────────────────
+
+    [Fact(DisplayName = "174 F2: the guard asks a NON-flagged child of a secure matter as the secure record it is (its own list binds)")]
+    public async Task F2_Guard_OwnListOfANonFlaggedChildOfASecureMatter_Binds()
+    {
+        MatterRow(ParentMatter, secure: true);
+        OpenWaUnder(ByDirectGrant, Matter, ParentMatter);
+        _denyList.DenySystemUserOnRecord(InternalUser, ByDirectGrant);
+
+        var decision = await Guard().CheckRecordAndSecureParentsAsync(
+            WorkAssignment, ByDirectGrant, InternalUser, SecureWallRecordScope.AsFlagged, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SecureShareWallOutcome.Walled, "Q4's secure is the record or any filing ancestor (round 82)");
+    }
+
+    [Fact(DisplayName = "174 F2: the guard's single-record check folds the filing (a non-flagged child of a secure matter is secure)")]
+    public async Task F2_Guard_CheckAsync_FoldsTheFiling()
+    {
+        MatterRow(ParentMatter, secure: true);
+        OpenWaUnder(ByDirectGrant, Matter, ParentMatter);
+        _denyList.DenySystemUserOnRecord(InternalUser, ByDirectGrant);
+
+        var decision = await Guard().CheckAsync(WorkAssignment, ByDirectGrant, InternalUser, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SecureShareWallOutcome.Walled);
+    }
+
+    // ── Verifier F2: the internal-user (Teams/SPA) composition folds the effective flags ───────────────────────────
+
+    [Fact(DisplayName = "174 F2: an external-flagged user keeps no membership access to a work assignment under a RESTRICTED matter")]
+    public async Task F2_SystemUserPlane_ExternalFlaggedUser_LosesAChildOfARestrictedMatter()
+    {
+        MatterRow(ParentMatter, secure: false, permission: Restricted);
+        OpenWaUnder(ByDirectGrant, Matter, ParentMatter);
+        ParentlessWa(Sibling);
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(InternalUser, WorkAssignment, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MembershipResponse(
+                WorkAssignment, new PersonIdentity(Guid.Empty, ContactId: null),
+                new[] { ByDirectGrant, Sibling }, new Dictionary<string, IReadOnlyList<Guid>>(), 2, DateTimeOffset.UtcNow.AddMinutes(5)));
+        var sut = new AccessibleRecordSetService(
+            membership.Object, _participations, Mock.Of<ISubjectStandingGrantReader>(), _denyList,
+            UnlinkedIdentityStore(), InternalSystemUsers(InternalUser), Entities(), NullLogger<AccessibleRecordSetService>.Instance);
+
+        var set = await sut.ComposeAsync(new WorkforcePrincipal
+        {
+            Kind = WorkforcePrincipalKind.SystemUser,
+            SystemUserId = InternalUser,
+            Oid = Guid.NewGuid().ToString("D"),
+            TenantId = "17417417-0000-0000-0000-000000000000",
+        }, WorkAssignment, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(ByDirectGrant, "Restricted through the parent: internal use only (round 67, round 84)");
+        set.Rights.Should().ContainKey(Sibling, "a parentless Standard record keeps the membership term");
+    }
+
+    // ── Verifier F1-b and the fail-closed batch fold ────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "174 F1-b: an own-Limited record under a Restricted parent stays Limited (direct-only) as well as Restricted")]
+    public void F1b_OwnLimited_UnderARestrictedParent_KeepsLimited()
+    {
+        var ancestry = new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null)
+        {
+            StrictestPermission = new FilingPermission(Restricted, new SecureFilingParent(Matter, ParentMatter)),
+        };
+
+        var folded = EffectiveRootFlags.Fold(new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true), ancestry);
+
+        folded.IsRestricted.Should().BeTrue();
+        folded.IsLimited.Should().BeTrue();
+        folded.IsDirectOnly.Should().BeTrue("the record's own Limited is never dropped");
+    }
+
+    [Fact(DisplayName = "174: a batch fold with no walk answer for an id fails closed (unreadable), never 'own flags'")]
+    public void BatchFold_MissingWalkAnswer_IsUnreadable()
+    {
+        var own = new Dictionary<Guid, RootRecordFlags> { [ByDirectGrant] = RootRecordFlags.None };
+
+        var folded = EffectiveRootFlags.Fold(own, new Dictionary<Guid, SecureParentsAnswer>());
+
+        folded[ByDirectGrant].IsUnreadable.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "174 F1-d: governed by a GRANDPARENT, the display names only the direct parent the rule arrives through")]
+    public async Task F1d_Display_GrandparentGovernance_NamesTheDirectParentOnly()
+    {
+        MatterRow(ParentMatter, secure: true, permission: Restricted);
+        OpenProjectUnderMatter(MiddleProject, ParentMatter);
+        OpenWaUnder(ByDirectGrant, Project, MiddleProject);
+
+        var access = await _participations.GetEffectiveRootAccessAsync(WorkAssignment, ByDirectGrant, CancellationToken.None);
+
+        access.Flags.IsRestricted.Should().BeTrue();
+        access.InheritedFrom!.Id.Should().Be(MiddleProject, "the direct parent is on the record's own lookup; the matter is not");
+        access.InheritedFrom.Table.Should().Be(Project);
     }
 
     // ── Display contract (goal 5) ──────────────────────────────────────────────────────────────────────────────────

@@ -64,9 +64,13 @@ an unreadable flag). An older BFF omits the field; a client then keeps the host'
 
 ### `inheritedFrom` (task 174, additive)
 
-The matter or project the effective `secure` / `accessPermission` comes from when an ancestor makes them stricter than the
-record's own (the ancestor that raises the Access Permission, else the first secure ancestor); `null` when the record's own
-values govern, for a matter, and when `secure` is `unknown`. Display only (Manage Access names it in its banner).
+The DIRECT filing parent (a matter or project on the record's own lookup) through which the stricter effective `secure` /
+`accessPermission` arrives when an ancestor makes them stricter than the record's own: the direct parent the stricter
+Access Permission arrives through, else the one Secure arrives through. **Never a record further up** (verifier F1-d): a
+direct parent is already visible on the record's own lookup to anyone who can read the record; a grandparent may not be, so
+its id and name are never sent — when the rule comes from above, the direct parent it arrives through is named.
+`null` when the record's own values govern, for a matter, and when `secure` is `unknown`. Display only (Manage Access
+names it in its banner: "It follows the {matter|project} it is filed under: {name}.").
 
 ### `noAccess`
 

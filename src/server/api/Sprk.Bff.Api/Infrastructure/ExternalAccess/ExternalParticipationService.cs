@@ -1022,6 +1022,18 @@ public class ExternalParticipationService
         string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
     {
         var own = await GetRootRecordFlagsAsync(entityType, recordIds, ct).ConfigureAwait(false);
+        return await FoldEffectiveAsync(entityType, own, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 174: folds flags the caller already read (<see cref="GetRootRecordFlagsAsync"/>) with what each record is filed
+    /// under — for a caller that needs BOTH the record's own flags and its effective ones (the Assigned-To materializer's S5
+    /// rule follows the stored ownership, its other rules the effective values). A record whose own flags are unreadable, or
+    /// already Secure AND Restricted, is not walked: nothing above it can make it stricter.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> FoldEffectiveAsync(
+        string entityType, IReadOnlyDictionary<Guid, RootRecordFlags> own, CancellationToken ct = default)
+    {
         var walk = own.Where(kv => !kv.Value.IsUnreadable && !(kv.Value.IsSecure && kv.Value.IsRestricted))
             .Select(kv => kv.Key).ToList();
         if (walk.Count == 0)
@@ -1030,7 +1042,8 @@ public class ExternalParticipationService
         }
 
         var ancestry = await EffectiveRootFlags.ReadAncestryAsync(_filing, _logger, entityType, walk, ct).ConfigureAwait(false);
-        return EffectiveRootFlags.Fold(own, ancestry);
+        var folded = EffectiveRootFlags.Fold(walk.ToDictionary(id => id, id => own[id]), ancestry);
+        return own.ToDictionary(kv => kv.Key, kv => folded.TryGetValue(kv.Key, out var f) ? f : kv.Value);
     }
 
     /// <summary>
