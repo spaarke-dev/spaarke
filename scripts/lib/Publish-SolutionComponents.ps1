@@ -35,7 +35,7 @@
       app modules    published modifiedon equals the unpublished one
       app settings   published value and modifiedon equal the unpublished ones
       entities       no system form, saved query or chart of the entity differs from its RetrieveUnpublished copy
-      dashboards     system form (type 0): published formxml and modifiedon equal the unpublished ones
+      dashboards     system form (type 0): published formxml equals the unpublished one (systemform has no modifiedon column)
       site maps      published modifiedon and sitemapxml equal the unpublished ones. Microsoft Learn says the <sitemap> value in
                      ParameterXml "is not used", so a site map that failed to publish would otherwise pass silently
     PENDING COLLATERAL (owner decision D-103): PublishXml has no per-view or per-form element, so publishing an entity also publishes
@@ -291,7 +291,23 @@ function Get-SolutionComponentRows {
     $sol = @((Invoke-RestMethod -Method Get -Headers $h -Uri "$api/solutions?`$select=solutionid&`$filter=uniquename eq '$SolutionUniqueName'").value | Where-Object { $_ })
     if ($sol.Count -eq 0) { return $null }
     if ($sol.Count -gt 1) { throw "Solution '$SolutionUniqueName' is ambiguous in $api." }
-    return @(Get-DvPages "$api/solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($sol[0].solutionid)" $h)
+    return @(Get-DvPages "$api/solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=_solutionid_value eq $($sol[0].solutionid)" $h)
+}
+
+function Get-FullyOwnedEntityNames {
+<#
+.SYNOPSIS  F2 (round 9). Logical names of the entities the solution includes WITH ALL their subcomponents (rootcomponentbehavior 0).
+           Their forms, views and charts have no solutioncomponents rows of their own, so ExcludeIds cannot recognise them as the
+           solution's own; every subcomponent of such an entity is the solution's own. Read-only.
+#>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Context, [object[]]$Rows = @())
+    $names = @()
+    foreach ($r in @($Rows | Where-Object { $_ -and [int]$_.componenttype -eq 1 -and $null -ne $_.rootcomponentbehavior -and "$($_.rootcomponentbehavior)" -ne '' -and [int]$_.rootcomponentbehavior -eq 0 })) {
+        $n = (Invoke-RestMethod -Method Get -Headers $Context.Headers -Uri "$($Context.Api)/EntityDefinitions($("$($r.objectid)".Trim('{', '}')))?`$select=LogicalName").LogicalName
+        if ($n) { $names += "$n".ToLowerInvariant() }
+    }
+    return @($names | Select-Object -Unique)
 }
 
 # What a solution ZIP carries besides its root components (K3). customizations.xml top-level elements and the ZIP's top-level
@@ -366,6 +382,7 @@ function Get-ZipSolutionInfo {
         UnknownParts = $unknown
         AppSettingParents = @($settingParents | Sort-Object -Unique)
         RootEntities = @($roots | Where-Object { [int]$_.type -eq 1 } | ForEach-Object { "$($_.schemaName)".ToLowerInvariant() } | Sort-Object -Unique)
+        FullEntities = @($roots | Where-Object { [int]$_.type -eq 1 -and (-not $_.behavior -or [int]$_.behavior -eq 0) } | ForEach-Object { "$($_.schemaName)".ToLowerInvariant() } | Sort-Object -Unique)
     }
 }
 
@@ -378,11 +395,13 @@ function Resolve-PendingCollateral {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][hashtable]$Context,
-        [string[]]$Entities = @(), [string[]]$ParentApps = @(), [string[]]$OwnIds = @(), [string[]]$InSolutionApps = @(),
+        [string[]]$Entities = @(), [string[]]$ParentApps = @(), [string[]]$OwnIds = @(), [string[]]$InSolutionApps = @(), [string[]]$OwnedEntities = @(),
         [switch]$Allow, [Parameter(Mandatory)][string]$RerunCommand
     )
     $items = @()
+    $owned = @($OwnedEntities | ForEach-Object { "$_".ToLowerInvariant() })
     foreach ($ent in @($Entities | Where-Object { $_ } | Select-Object -Unique)) {
+        if ($owned -contains "$ent".ToLowerInvariant()) { continue }   # included with all subcomponents: its forms, views and charts are the solution's own
         foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent -ExcludeIds $OwnIds)) { $items += "entity ${ent}: $c" }
     }
     $inApps = @($InSolutionApps | ForEach-Object { "$_".Trim('{', '}').ToLowerInvariant() })
@@ -431,7 +450,8 @@ function Invoke-ImportPreflight {
     }
     $parents += @($zipInfo.AppSettingParents)
     # D-103: stop (before the import) unless the caller opted in.
-    Resolve-PendingCollateral -Context $Context -Entities (@($zipInfo.RootEntities) + $ExtraEntities) -ParentApps $parents -OwnIds $own `
+    $ownedEntities = @(Get-FullyOwnedEntityNames -Context $Context -Rows $installed) + @($zipInfo.FullEntities)
+    Resolve-PendingCollateral -Context $Context -Entities (@($zipInfo.RootEntities) + $ExtraEntities) -ParentApps $parents -OwnIds $own -OwnedEntities $ownedEntities `
         -InSolutionApps $inSolutionApps -Allow:$AllowPendingCollateral -RerunCommand $RerunCommand | Out-Null
     return $zipInfo
 }
@@ -496,9 +516,20 @@ function Get-EntityPublishCollateral {
     param([Parameter(Mandatory)][hashtable]$Context, [Parameter(Mandatory)][string]$Entity, [string[]]$ExcludeIds = @())
     $api = $Context.Api; $h = $Context.Headers; $out = @()
     $skipIds = @($ExcludeIds | Where-Object { $_ } | ForEach-Object { $_.Trim('{', '}').ToLowerInvariant() })
-    foreach ($spec in @(@{ Set = 'savedqueries'; Id = 'savedqueryid'; Filter = "returnedtypecode eq '$Entity'" }, @{ Set = 'systemforms'; Id = 'formid'; Filter = "objecttypecode eq '$Entity'" }, @{ Set = 'savedqueryvisualizations'; Id = 'savedqueryvisualizationid'; Filter = "primaryentitytypecode eq '$Entity'" })) {
-        $sel = "`$select=$($spec.Id),name,modifiedon&`$filter=$($spec.Filter)"
-        $map = { param($rows) @(@($rows) | Where-Object { $_ } | ForEach-Object { @{ id = $_.($spec.Id); modifiedon = $_.modifiedon; name = $_.name } }) }
+    # Columns are per table (round 9, F1): systemform has NO modifiedon (it exposes formxml, overwritetime, versionnumber), so a form is
+    # compared by a hash of its formxml; savedquery and savedqueryvisualization do have modifiedon. Pinned by a test.
+    foreach ($spec in @(
+            @{ Set = 'savedqueries'; Id = 'savedqueryid'; Stamp = 'modifiedon'; Filter = "returnedtypecode eq '$Entity'" },
+            @{ Set = 'systemforms'; Id = 'formid'; Stamp = 'formxml'; Filter = "objecttypecode eq '$Entity'" },
+            @{ Set = 'savedqueryvisualizations'; Id = 'savedqueryvisualizationid'; Stamp = 'modifiedon'; Filter = "primaryentitytypecode eq '$Entity'" })) {
+        $sel = "`$select=$($spec.Id),name,$($spec.Stamp)&`$filter=$($spec.Filter)"
+        $map = {
+            param($rows)
+            @(@($rows) | Where-Object { $_ } | ForEach-Object {
+                    $stamp = "$($_.($spec.Stamp))"
+                    if ($spec.Stamp -eq 'formxml') { $stamp = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($stamp))) }
+                    @{ id = $_.($spec.Id); modifiedon = $stamp; name = $_.name } })
+        }
         $published = & $map (Get-DvPages "$api/$($spec.Set)?$sel" $h)
         $unpublished = & $map (Get-DvPages "$api/$($spec.Set)/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$sel" $h)
         foreach ($d in @(Compare-UnpublishedArtifacts -Published $published -Unpublished $unpublished)) {
@@ -578,16 +609,17 @@ function Test-PublishedReadBack {
     }
     foreach ($id in @($Plan.SiteMaps | Where-Object { $_ })) {
         $g = $id.Trim('{', '}')
-        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps($g)?`$select=sitemapxml,modifiedon"
-        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=sitemapxml,modifiedon"
-        if ($pub.sitemapxml -ne $unp.sitemapxml -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "sitemap $g" }
+        # RetrieveUnpublished (single record) is NOT supported for sitemap (0x80040800, verified on spaarkedev1, round 9): use the Multiple form with a filter.
+        $pub = @((Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps?`$select=sitemapxml,modifiedon&`$filter=sitemapid eq $g").value | Where-Object { $_ }) | Select-Object -First 1
+        $unp = @((Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?`$select=sitemapxml,modifiedon&`$filter=sitemapid eq $g").value | Where-Object { $_ }) | Select-Object -First 1
+        if ($unp -and ($pub.sitemapxml -ne $unp.sitemapxml -or $pub.modifiedon -ne $unp.modifiedon)) { $pending += "sitemap $g" }
     }
     foreach ($id in @($Plan.Dashboards | Where-Object { $_ })) {
         # Dashboards are system forms of type 0: same unpublished-copy comparison as forms.
         $g = $id.Trim('{', '}')
-        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)?`$select=formxml,modifiedon"
-        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml,modifiedon"
-        if ($pub.formxml -ne $unp.formxml -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "dashboard $g" }
+        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)?`$select=formxml"
+        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
+        if ($pub.formxml -ne $unp.formxml) { $pending += "dashboard $g" }
     }
     foreach ($ent in @($Plan.Entities | Where-Object { $_ })) {
         foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent)) { $pending += "entity ${ent}: $c" }
@@ -686,7 +718,8 @@ function Publish-SolutionComponents {
         $own = @($rows | Where-Object { $_ } | ForEach-Object { $_.objectid })
         $inApps = @($rows | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)" })
         $parents = @($plan.AppSettings | Where-Object { $_ } | ForEach-Object { Get-AppSettingParent -Context $Context -AppSettingId $_ })
-        Resolve-PendingCollateral -Context $Context -Entities (@($plan.Entities) + $ExtraEntities) -ParentApps $parents -OwnIds $own -InSolutionApps $inApps `
+        $ownedEntities = @(Get-FullyOwnedEntityNames -Context $Context -Rows $rows)
+        Resolve-PendingCollateral -Context $Context -Entities (@($plan.Entities) + $ExtraEntities) -ParentApps $parents -OwnIds $own -OwnedEntities $ownedEntities -InSolutionApps $inApps `
             -Allow:$AllowPendingCollateral -RerunCommand $resumeBase | Out-Null
     }
     $n = 0

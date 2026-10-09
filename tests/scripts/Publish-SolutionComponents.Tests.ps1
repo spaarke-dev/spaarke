@@ -331,14 +331,14 @@ Describe 'read-back covers entities and site maps (round-4 fix-now)' {
     }
     It 'reports a site map whose published copy differs from the unpublished one' {
         Mock Invoke-RestMethod {
-            if ("$Uri" -match 'RetrieveUnpublished') { return [pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' } }
-            return [pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' }
+            if ("$Uri" -match 'RetrieveUnpublishedMultiple') { return [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' }) } }
+            return [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' }) }
         }
         $r = @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ SiteMaps = @('{11111111-1111-1111-1111-111111111111}') }))
         $r | Should -Be @('sitemap 11111111-1111-1111-1111-111111111111')
     }
     It 'reports nothing for a published site map' {
-        Mock Invoke-RestMethod { [pscustomobject]@{ sitemapxml = '<same/>'; modifiedon = '1' } }
+        Mock Invoke-RestMethod { [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<same/>'; modifiedon = '1' }) } }
         @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ SiteMaps = @('{11111111-1111-1111-1111-111111111111}') })).Count | Should -Be 0
     }
     It 'Publish-SolutionComponents fails when a site map is still unpublished after the request' {
@@ -346,8 +346,8 @@ Describe 'read-back covers entities and site maps (round-4 fix-now)' {
             switch -Wildcard ("$Uri") {
                 '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
                 '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 62; objectid = '11111111-1111-1111-1111-111111111111' }) } }
-                '*RetrieveUnpublished*' { return [pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' } }
-                '*/sitemaps(*' { return [pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' } }
+                '*sitemaps/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple*' { return [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<new/>'; modifiedon = '2' }) } }
+                '*/sitemaps?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<old/>'; modifiedon = '1' }) } }
                 default { return $null }
             }
         }
@@ -577,6 +577,104 @@ Describe 'pending collateral stops unless flagged (D-103)' {
         $without | Should -Match 'PublishOnly'
         $without | Should -Not -Match 'AllowPendingCollateral'
         $with | Should -Match 'PublishOnly -AllowPendingCollateral'
+    }
+}
+
+Describe 'query columns are pinned (round-9 F1)' {
+    It 'Get-EntityPublishCollateral selects only columns the tables have: systemform has NO modifiedon' {
+        $script:Uris = @()
+        Mock Invoke-RestMethod { $script:Uris += "$Uri"; [pscustomobject]@{ value = @() } }
+        Get-EntityPublishCollateral -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Entity sprk_event | Out-Null
+        $api = 'https://x/api/data/v9.2'
+        $script:Uris | Should -Contain "$api/savedqueries?`$select=savedqueryid,name,modifiedon&`$filter=returnedtypecode eq 'sprk_event'"
+        $script:Uris | Should -Contain "$api/savedqueries/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?`$select=savedqueryid,name,modifiedon&`$filter=returnedtypecode eq 'sprk_event'"
+        $script:Uris | Should -Contain "$api/systemforms?`$select=formid,name,formxml&`$filter=objecttypecode eq 'sprk_event'"
+        $script:Uris | Should -Contain "$api/systemforms/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?`$select=formid,name,formxml&`$filter=objecttypecode eq 'sprk_event'"
+        $script:Uris | Should -Contain "$api/savedqueryvisualizations?`$select=savedqueryvisualizationid,name,modifiedon&`$filter=primaryentitytypecode eq 'sprk_event'"
+        $script:Uris | Should -Contain "$api/savedqueryvisualizations/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?`$select=savedqueryvisualizationid,name,modifiedon&`$filter=primaryentitytypecode eq 'sprk_event'"
+        @($script:Uris | Where-Object { $_ -match 'systemforms' -and $_ -match 'modifiedon' }).Count | Should -Be 0
+    }
+    It 'the site map read-back uses the filtered Multiple form (single-record RetrieveUnpublished is not supported for sitemap)' {
+        $script:Uris = @()
+        Mock Invoke-RestMethod { $script:Uris += "$Uri"; [pscustomobject]@{ value = @([pscustomobject]@{ sitemapxml = '<x/>'; modifiedon = '1' }) } }
+        Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ SiteMaps = @('{11111111-1111-1111-1111-111111111111}') }) | Out-Null
+        $script:Uris | Should -Contain 'https://x/api/data/v9.2/sitemaps?$select=sitemapxml,modifiedon&$filter=sitemapid eq 11111111-1111-1111-1111-111111111111'
+        $script:Uris | Should -Contain 'https://x/api/data/v9.2/sitemaps/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$select=sitemapxml,modifiedon&$filter=sitemapid eq 11111111-1111-1111-1111-111111111111'
+        @($script:Uris | Where-Object { $_ -match 'sitemaps\(' }).Count | Should -Be 0
+    }
+    It 'the dashboard read-back selects formxml only' {
+        $script:Uris = @()
+        Mock Invoke-RestMethod { $script:Uris += "$Uri"; [pscustomobject]@{ formxml = '<x/>' } }
+        Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ Dashboards = @('{11111111-1111-1111-1111-111111111111}') }) | Out-Null
+        $script:Uris | Should -Contain 'https://x/api/data/v9.2/systemforms(11111111-1111-1111-1111-111111111111)?$select=formxml'
+        $script:Uris | Should -Contain 'https://x/api/data/v9.2/systemforms(11111111-1111-1111-1111-111111111111)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?$select=formxml'
+    }
+    It 'a form is compared by its formxml (changed formxml is reported, same formxml is not)' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'systemforms.*RetrieveUnpublishedMultiple') { return [pscustomobject]@{ value = @([pscustomobject]@{ formid = 'F1'; name = 'Main'; formxml = '<new/>' }) } }
+            if ("$Uri" -match 'systemforms') { return [pscustomobject]@{ value = @([pscustomobject]@{ formid = 'F1'; name = 'Main'; formxml = '<old/>' }) } }
+            return [pscustomobject]@{ value = @() }
+        }
+        @(Get-EntityPublishCollateral -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Entity sprk_event).Count | Should -Be 1
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'systemforms') { return [pscustomobject]@{ value = @([pscustomobject]@{ formid = 'F1'; name = 'Main'; formxml = '<same/>' }) } }
+            return [pscustomobject]@{ value = @() }
+        }
+        @(Get-EntityPublishCollateral -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Entity sprk_event).Count | Should -Be 0
+    }
+}
+
+Describe 'entities included with all subcomponents are the solution''s own (round-9 F2)' {
+    It 'Get-FullyOwnedEntityNames returns the entities with rootcomponentbehavior 0 only' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ LogicalName = 'sprk_event' } }
+        $rows = @(
+            [pscustomobject]@{ componenttype = 1; objectid = 'e0'; rootcomponentbehavior = 0 },
+            [pscustomobject]@{ componenttype = 1; objectid = 'e1'; rootcomponentbehavior = 1 },
+            [pscustomobject]@{ componenttype = 1; objectid = 'e2'; rootcomponentbehavior = 2 },
+            [pscustomobject]@{ componenttype = 1; objectid = 'e3' })
+        @(Get-FullyOwnedEntityNames -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Rows $rows) | Should -Be @('sprk_event')
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly
+    }
+    It 'a fully-owned entity''s forms and views do not stop a re-import or resume; a shell entity''s do' {
+        Mock Get-EntityPublishCollateral { @('systemforms: Own form (f1)') }
+        $ctx = @{ Api = 'https://x/api/data/v9.2'; Headers = @{} }
+        { Resolve-PendingCollateral -Context $ctx -Entities @('sprk_event') -OwnedEntities @('sprk_event') -RerunCommand 'x' | Out-Null } | Should -Not -Throw
+        Should -Invoke Get-EntityPublishCollateral -Times 0 -Exactly
+        { Resolve-PendingCollateral -Context $ctx -Entities @('sprk_event') -RerunCommand 'x' | Out-Null } | Should -Throw '*Stopping BEFORE*'
+    }
+    It 'Publish-SolutionComponents does not stop on the solution''s own just-imported forms (123 of 129 entities case)' {
+        # Pending items exist only BEFORE the publish: a pre-check (if it is made) sees them, the read-back after the POST does not.
+        $script:Published = $false
+        Mock Get-EntityPublishCollateral { if (-not $script:Published) { @('systemforms: Own form (f1)') } else { @() } }
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { $script:Published = $true; return $null }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 1; objectid = 'e1'; rootcomponentbehavior = 0 }) } }
+                '*/EntityDefinitions(*' { return [pscustomobject]@{ LogicalName = 'sprk_event' } }
+                default { return [pscustomobject]@{ value = @() } }
+            }
+        }
+        { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S | Out-Null } | Should -Not -Throw
+    }
+    It 'the import pre-flight treats the ZIP''s behavior-0 root entities as the solution''s own' {
+        Mock Get-ZipSolutionInfo { [pscustomobject]@{ UniqueName = 'S'; Managed = $false; RootTypes = @(1); AllTypes = @(1); UnknownParts = @(); RootEntities = @('sprk_event', 'sprk_shell'); FullEntities = @('sprk_event'); AppSettingParents = @() } }
+        Mock Get-SolutionComponentRows { $null }
+        Mock Get-EntityPublishCollateral { @("forms of $Entity") }
+        $err = $null
+        try { Invoke-ImportPreflight -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -ZipPath 'a.zip' -SolutionUniqueName S | Out-Null } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'entity sprk_shell'
+        $err | Should -Not -Match 'entity sprk_event'
+    }
+    It 'Get-ZipSolutionInfo reads the behavior attribute of root entities' {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zp = Join-Path ([IO.Path]::GetTempPath()) ("pscz-" + [guid]::NewGuid() + ".zip")
+        $z = [IO.Compression.ZipFile]::Open($zp, 'Create')
+        try {
+            $w = New-Object IO.StreamWriter($z.CreateEntry('solution.xml').Open())
+            $w.Write('<ImportExportXml><SolutionManifest><UniqueName>S</UniqueName><Managed>0</Managed><RootComponents><RootComponent type="1" schemaName="Sprk_A" behavior="0" /><RootComponent type="1" schemaName="sprk_b" behavior="1" /><RootComponent type="1" schemaName="sprk_c" behavior="2" /></RootComponents></SolutionManifest></ImportExportXml>'); $w.Dispose()
+        } finally { $z.Dispose() }
+        try { @((Get-ZipSolutionInfo -ZipPath $zp).FullEntities) | Should -Be @('sprk_a') } finally { Remove-Item $zp -Force }
     }
 }
 
