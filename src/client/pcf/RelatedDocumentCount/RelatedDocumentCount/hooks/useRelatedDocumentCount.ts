@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { authenticatedFetch, buildBffApiUrl } from '@spaarke/auth';
+import { authenticatedFetch, buildBffApiUrl, isApiError, isAuthFailure } from '@spaarke/auth';
 
 /**
  * API response shape for countOnly=true calls.
@@ -49,13 +49,11 @@ export interface UseRelatedDocumentCountResult {
  * Hook to fetch the count of semantically related documents.
  *
  * @param documentId - Source document GUID
- * @param tenantId - Azure AD tenant ID for multi-tenant routing
  * @param apiBaseUrl - BFF API base URL (defaults to dev endpoint)
  * @returns State object with count, loading, error, lastUpdated, and refetch
  */
 export function useRelatedDocumentCount(
   documentId: string,
-  tenantId: string | undefined,
   apiBaseUrl: string | undefined
 ): UseRelatedDocumentCountResult {
   const [count, setCount] = useState(0);
@@ -97,7 +95,8 @@ export function useRelatedDocumentCount(
         setIsLoading(false);
         return;
       }
-      const query = `countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
+      // No tenantId param: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
+      const query = 'countOnly=true';
       const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentCount] Fetching count:', {
@@ -145,6 +144,23 @@ export function useRelatedDocumentCount(
         return;
       }
 
+      // authenticatedFetch THROWS for a non-OK response (the `!response.ok` branch above is for a
+      // fetch that returns it): ApiError(status), or AuthError once its 401 retries are spent.
+      if (isApiError(err, 404)) {
+        // No relationship data for this document yet — zero, not an error.
+        setCount(0);
+        setLastUpdated(new Date());
+        return;
+      }
+      if (isAuthFailure(err) || isApiError(err, 403)) {
+        setError("You don't have permission to view related documents.");
+        return;
+      }
+      if (isApiError(err)) {
+        setError('Failed to load related document count.');
+        return;
+      }
+
       console.error('[useRelatedDocumentCount] Error fetching count:', err);
 
       if (err instanceof Error && err.message.includes('auth')) {
@@ -157,7 +173,7 @@ export function useRelatedDocumentCount(
         setIsLoading(false);
       }
     }
-  }, [documentId, tenantId, apiBaseUrl]);
+  }, [documentId, apiBaseUrl]);
 
   // Fetch on mount and when documentId changes (record navigation)
   useEffect(() => {

@@ -1,2 +1,12 @@
 export { TrackingFieldTrio } from './TrackingFieldTrio';
-export type { ITrackingFieldTrioProps, IAccessPermissionOption } from './types';
+export type { ITrackingFieldTrioProps, IAccessPermissionOption, GrantModalSection } from './types';
+// Task 153: the record's access status (064's per-record read) — the host's fail-closed parse and the indicator rule.
+export {
+  parseAccessStatusResponse,
+  readAccessStatus,
+  resolveAccessIndicator,
+  ACCESS_STATUS_UNAVAILABLE,
+  ACCESS_STATUS_TIMEOUT_MS,
+  INDICATOR_SHOWS_SECURE,
+} from './accessStatus';
+export type { AccessSignalState, ITrackingAccessStatus, AccessIndicatorView } from './accessStatus';

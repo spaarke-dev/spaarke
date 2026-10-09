@@ -21,7 +21,7 @@
  * Then use authenticatedFetch() from '@spaarke/auth' for all BFF API calls.
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 
 /**
@@ -50,9 +50,11 @@ export async function initializeAuth(
   // Derive redirect URI from Dataverse org URL (no hardcoded environment URLs)
   const redirectUri = dataverseUrl.replace(/\/+$/, '');
 
+  // Never build `https://login.microsoftonline.com/` + '' (or '/undefined'): an invalid tenant is not
+  // passed, and @spaarke/auth's discovery decides (it fails closed in a Dataverse host — #1453).
   const config: IAuthConfig = {
     clientId: clientAppId,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     // Redirect URI derived from Dataverse org URL at runtime
     redirectUri,
     // Named scope: api://<BFF_APP_ID>/user_impersonation

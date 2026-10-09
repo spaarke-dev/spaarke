@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
+import { buildBffApiUrl, isApiError, type AuthenticatedFetchFn } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Restore response types (mirrors BFF SessionRestoreResponse)
@@ -155,6 +155,14 @@ export function useSessionRestore(
           }
         }
       } catch (err) {
+        // authenticatedFetch THROWS for a non-OK response, so the 404 branch above is reached here:
+        // a missing session is the "Session not found. Starting a new session." warning, not an error.
+        if (!cancelled && isApiError(err, 404)) {
+          setIsNotFound(true);
+          setRestoreError("Session not found");
+          console.warn(`[SessionRestore] Session ${sessionId} not found (404)`);
+          return;
+        }
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : String(err);
           setRestoreError(msg);

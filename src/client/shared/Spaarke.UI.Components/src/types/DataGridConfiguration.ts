@@ -288,6 +288,7 @@ export type ColumnRendererKind =
   | 'badge'
   | 'link'
   | 'date'
+  | 'dateonly' // task 098: a Date Only BEHAVIOUR column — a calendar date "YYYY-MM-DD", never a UTC instant
   | 'datetime'
   | 'avatar'
   | 'icon'

@@ -1,0 +1,109 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{57ee2319-3c21-f111-88b4-7c1e525abd8b}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab id="F931FFE2-B873-473F-8F95-9502F0AA3F5E" name="tab_1" showlabel="false" labelid="{73edaefa-5c28-47cb-9cd3-ff9c7a2e7952}">
+          <labels>
+            <label description="New Tab" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="34%">
+              <sections>
+                <section id="0C655D4E-C6E3-424E-9AF5-71E72D30D12E" name="tab_1_column_1_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{ce1688a6-8405-42df-9aac-2d507f6d7ae3}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="542FBFBE-0E4C-496C-8012-555DE6581923" labelid="{25cb52df-2b16-419d-ac8b-f59ea4ac6722}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{86d1690b-a304-4dbb-90a5-d4df6c4f8922}" locklevel="0" colspan="1" rowspan="1" labelid="{d01d60f3-3b91-4895-be3f-cae552a4b43a}">
+                        <labels>
+                          <label description="Matter Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mattername" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_mattername" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b32468d5-499c-4561-aff8-eac5c23c92ca}" locklevel="0" colspan="1" rowspan="1" labelid="{d4b2fa7c-c960-416b-9d0d-10017848bab0}">
+                        <labels>
+                          <label description="Matter Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matterdescription" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_matterdescription" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{53d713fc-af85-4d90-ba9a-d0885b9d706f}" locklevel="0" colspan="1" rowspan="1" labelid="{ef8b3468-cb68-4177-bbcb-45ddd55a23c4}">
+                        <labels>
+                          <label description="Matter Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mattertype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_mattertype" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section id="02DECBA0-3AE2-484D-A19F-C5353AF4F4F2" name="tab_1_column_2_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{10604ac3-2db9-4024-987c-72271ffeb4ee}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="266FE48D-4D04-4E9A-8C5A-7DEF9A2F059B" labelid="{f17ceb3d-2e32-4d32-b36b-7bb0d8175c68}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section id="46FD66EA-B686-41D9-AAE0-C565BD78EC1F" name="tab_1_column_3_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{b9a21566-47ed-4ff6-b705-2216ba246cef}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="07C04A4E-A482-45CC-BAB7-7FCA3CD02938" labelid="{8f9cd7cd-b6ac-4bdb-8e87-385cbdfbb84a}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <DisplayConditions Order="0" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Matter quick create" languagecode="1033" />
+    </LocalizedNames>
+  </systemform>
+</forms>

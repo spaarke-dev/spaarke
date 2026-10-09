@@ -1,0 +1,15 @@
+<aiskillconfig uniquename="ais_FormFillFieldOptOut_sprk_decisionrecord_sprk_actioncode">
+  <aiskill>FormFillFieldOptOut</aiskill>
+  <attribute>
+    <entityid.logicalname>sprk_decisionrecord</entityid.logicalname>
+    <logicalname>sprk_actioncode</logicalname>
+  </attribute>
+  <description>sprk_decisionrecord - Action Code Form fill opt out</description>
+  <entity>
+    <logicalname>sprk_decisionrecord</logicalname>
+  </entity>
+  <iscustomizable>1</iscustomizable>
+  <scope>1</scope>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+</aiskillconfig>

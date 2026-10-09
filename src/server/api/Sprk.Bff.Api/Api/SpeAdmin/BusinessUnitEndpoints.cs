@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
@@ -97,7 +98,7 @@ public static class BusinessUnitEndpoints
 
             return TypedResults.Ok(dtos);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex, "Failed to query Dataverse business units");
             return Results.Problem(

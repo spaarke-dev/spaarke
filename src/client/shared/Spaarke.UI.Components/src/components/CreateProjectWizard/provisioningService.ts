@@ -49,6 +49,8 @@
  * Returns result object — never throws.
  */
 
+import { isApiError, problemOf } from '../../utils/thrownFetchError';
+
 // ---------------------------------------------------------------------------
 // Request / Response types (mirror BFF Dtos)
 // ---------------------------------------------------------------------------
@@ -867,6 +869,48 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
 // ---------------------------------------------------------------------------
 
 /**
+ * The failed result for a non-2xx answer, from its status and (parsed) ProblemDetails body — whichever
+ * way the injected fetch delivered it: returned (the body read here) or thrown as `@spaarke/auth`'s
+ * `ApiError` (the body already parsed onto it). One function so the two cannot classify differently.
+ */
+function failureFromProblem(status: number, problemBody: unknown): IProvisionProjectResult {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const problem: any = problemBody && typeof problemBody === 'object' ? problemBody : null;
+  const reasonCode: string | undefined = typeof problem?.reasonCode === 'string' ? problem.reasonCode : undefined;
+  const serverDetail: string | undefined = problem?.detail ?? problem?.title;
+  const extensions: IProvisioningFailureExtensions = {};
+  if (typeof problem?.creatorShareConfirmed === 'boolean') {
+    extensions.creatorShareConfirmed = problem.creatorShareConfirmed;
+  }
+  if (typeof problem?.creatorState === 'string') {
+    extensions.creatorState = problem.creatorState;
+  }
+  if (typeof problem?.containerKept === 'boolean') {
+    extensions.containerKept = problem.containerKept;
+  }
+  if (typeof problem?.cascadeChildState === 'string') {
+    extensions.cascadeChildState = problem.cascadeChildState;
+  }
+  if (typeof problem?.containerOwnershipState === 'string') {
+    extensions.containerOwnershipState = problem.containerOwnershipState;
+  }
+
+  const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(reasonCode, extensions, status);
+
+  // The server's detail goes to the console for support, and ONLY there. It is written for an
+  // operator reading a log; putting it in front of the user is the raw-ProblemDetails failure
+  // this classification exists to prevent.
+  console.error('[ProvisioningService] Provisioning failed:', {
+    status,
+    reasonCode,
+    failureKind,
+    serverDetail,
+  });
+
+  return { success: false, errorMessage, failureKind, retryable, reasonCode };
+}
+
+/**
  * Calls the BFF /api/v1/external-access/provision-project endpoint.
  *
  * Dependencies are injected as parameters to avoid solution-specific imports.
@@ -895,51 +939,15 @@ export async function provisionSecureProject(
       body: JSON.stringify(request),
     });
 
+    // A fetch that RETURNS failures arrives here; `@spaarke/auth`'s THROWS them (see the catch below).
     if (!response.ok) {
-      let reasonCode: string | undefined;
-      let serverDetail: string | undefined;
-      const extensions: IProvisioningFailureExtensions = {};
+      let problem: unknown = null;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const problem: any = await response.json();
-        reasonCode = typeof problem?.reasonCode === 'string' ? problem.reasonCode : undefined;
-        serverDetail = problem?.detail ?? problem?.title;
-        if (typeof problem?.creatorShareConfirmed === 'boolean') {
-          extensions.creatorShareConfirmed = problem.creatorShareConfirmed;
-        }
-        if (typeof problem?.creatorState === 'string') {
-          extensions.creatorState = problem.creatorState;
-        }
-        if (typeof problem?.containerKept === 'boolean') {
-          extensions.containerKept = problem.containerKept;
-        }
-        if (typeof problem?.cascadeChildState === 'string') {
-          extensions.cascadeChildState = problem.cascadeChildState;
-        }
-        if (typeof problem?.containerOwnershipState === 'string') {
-          extensions.containerOwnershipState = problem.containerOwnershipState;
-        }
+        problem = await response.json();
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */
       }
-
-      const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(
-        reasonCode,
-        extensions,
-        response.status
-      );
-
-      // The server's detail goes to the console for support, and ONLY there. It is written for an
-      // operator reading a log; putting it in front of the user is the raw-ProblemDetails failure
-      // this classification exists to prevent.
-      console.error('[ProvisioningService] Provisioning failed:', {
-        status: response.status,
-        reasonCode,
-        failureKind,
-        serverDetail,
-      });
-
-      return { success: false, errorMessage, failureKind, retryable, reasonCode };
+      return failureFromProblem(response.status, problem);
     }
 
     const data: IProvisionProjectResponse = await response.json();
@@ -992,6 +1000,13 @@ export async function provisionSecureProject(
 
     return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data };
   } catch (err) {
+    // `@spaarke/auth`'s authenticatedFetch — what every host injects — THROWS an ApiError for a non-2xx
+    // instead of returning it, with the ProblemDetails already parsed. Route it through the SAME
+    // classification the returned-response branch uses, or every authored failure state (most of them
+    // retryable) collapses into the generic non-retryable one below.
+    if (isApiError(err)) {
+      return failureFromProblem(err.status, problemOf(err));
+    }
     // Transport failure — no reason code exists, so this is an unclassified 'error'. The exception
     // message stays in the console for the same reason the server's detail does.
     console.error('[ProvisioningService] Provisioning error:', err);

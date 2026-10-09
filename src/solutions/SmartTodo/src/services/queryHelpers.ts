@@ -8,6 +8,7 @@
  * parameter, which is appended to the entity collection URL as-is.
  */
 
+import { formatDateOnly } from '@spaarke/ui-components';
 import { EventFilterCategory } from '../types/enums';
 
 // ---------------------------------------------------------------------------
@@ -217,10 +218,10 @@ export function buildEventCategoryFilter(category: EventFilterCategory): string 
       return 'sprk_priorityscore gt 70';
 
     case EventFilterCategory.Overdue: {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-      const todayIso = today.toISOString();
-      return `sprk_duedate lt ${todayIso} and statuscode eq 1`;
+      // sprk_event.sprk_duedate is Date Only (task 098): overdue = due before the user's LOCAL today. A timestamp
+      // literal is compared by its UTC date (probed live, task 106), so the former UTC-midnight ISO counted an event
+      // due today as overdue from 20:00 Eastern.
+      return `sprk_duedate lt ${formatDateOnly(new Date())} and statuscode eq 1`;
     }
 
     // Type-based categories — filtered client-side using lookup display name

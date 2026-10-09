@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Contract.SpeAdmin;
 /// <b>The seam.</b> No production change was needed. 47 methods on <c>SpeAdminGraphService</c> already
 /// take <c>GraphServiceClient graphClient</c> as their first parameter (the DI-held client is built by
 /// private <c>CreateGraphClient*</c> helpers that hardcode <c>https://graph.microsoft.com/beta</c>, but
-/// those are only used by the <c>GetClientForConfigAsync</c> path). A test constructs the client here
+/// those are only used by the <c>GetClientForContainerAsync</c> path). A test constructs the client here
 /// and passes it straight in. Whether the production base address should become configurable is
 /// task 021's decision, deliberately not pre-empted here.
 /// </para>

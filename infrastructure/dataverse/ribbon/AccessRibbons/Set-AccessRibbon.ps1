@@ -124,6 +124,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..' '..' '..' '..' 'scripts' 'lib' 'Publish-SolutionComponents.ps1')
 
 if ($Apply -and $Verify) { throw 'Use -Apply OR -Verify (-Apply runs -Verify itself).' }
 if (($Apply -or $Verify) -and -not $EnvironmentUrl) { throw '-EnvironmentUrl is required for -Apply and -Verify.' }
@@ -492,9 +493,15 @@ Write-Host "Recorded the live before-list: $beforePath"
 
 $exportZip = Join-Path $WorkDir "$SolutionName.zip"
 $unpacked = Join-Path $WorkDir 'unpacked'
-& pac solution export --environment $EnvironmentUrl --name $SolutionName --path $exportZip --overwrite
+# `pac` must resolve to the Power Platform CLI executable. Under Git Bash the PATH can put a bash shim named `pac`
+# first; PowerShell cannot run it and leaves $LASTEXITCODE untouched, so a pack/import that never ran looked successful
+# (task 154 dev apply, 2026-10-08).
+$pacExe = (Get-Command pac -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in '.cmd', '.exe', '.bat' } | Select-Object -First 1).Source
+if (-not $pacExe) { throw 'pac CLI not found: need pac.cmd or pac.exe on PATH.' }
+& $pacExe solution export --environment $EnvironmentUrl --name $SolutionName --path $exportZip --overwrite
 if ($LASTEXITCODE -ne 0) { throw "pac solution export failed ($LASTEXITCODE)." }
-& pac solution unpack --zipfile $exportZip --folder $unpacked --packagetype Unmanaged --allowDelete true
+& $pacExe solution unpack --zipfile $exportZip --folder $unpacked --packagetype Unmanaged --allowDelete true
 if ($LASTEXITCODE -ne 0) { throw "pac solution unpack failed ($LASTEXITCODE)." }
 
 foreach ($e in $entities) {
@@ -515,10 +522,11 @@ foreach ($e in $entities) {
 }
 
 $packed = Join-Path $WorkDir "$SolutionName.merged.zip"
-& pac solution pack --zipfile $packed --folder $unpacked --packagetype Unmanaged
+& $pacExe solution pack --zipfile $packed --folder $unpacked --packagetype Unmanaged
 if ($LASTEXITCODE -ne 0) { throw "pac solution pack failed ($LASTEXITCODE)." }
-& pac solution import --environment $EnvironmentUrl --path $packed --publish-changes
-if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
+# Task 130 (D-83): import without a tenant-wide publish, then publish only this ribbon solution's components.
+Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $packed -SolutionUniqueName $SolutionName -PacExe $pacExe -ImportArgs @() `
+    -Context (Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl) | Out-Null
 
 # The effective ribbon (RetrieveEntityRibbon) lags the publish by up to a minute or more, so a verify run straight after
 # the import can fail on rules that are in fact applied (see the header). Retry with a bounded backoff; only the last

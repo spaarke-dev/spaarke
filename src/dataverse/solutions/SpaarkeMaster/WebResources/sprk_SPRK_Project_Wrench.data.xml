@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{24902949-6574-f011-b4cb-6045bdd8b757}</WebResourceId>
+  <Name>sprk_SPRK_Project_Wrench</Name>
+  <DisplayName>SPRK Project Wrench</DisplayName>
+  <Description>Icon used for Project entity</Description>
+  <LanguageCode>0</LanguageCode>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_SPRK_Project_Wrench24902949-6574-F011-B4CB-6045BDD8B757</FileName>
+</WebResource>

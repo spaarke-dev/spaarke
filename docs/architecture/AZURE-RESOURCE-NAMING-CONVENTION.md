@@ -484,7 +484,10 @@ resource name**.
    template, seeder, IaC, and tokens doc. Canonical casing for **new** KV secrets is **kebab-case**
    (`communication-webhook-signing-key`); existing PascalCase live secrets (`BFF-API-ClientSecret`) are
    grandfathered but MUST NOT gain a second casing. Never two casings for one value simultaneously.
-3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`). **Codified legacy exception
+3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`) for platform environments, and
+   `sprk-{customerId}-{env}-kv` (e.g. `sprk-acme-prod-kv`, at most 24 characters) for a customer stamp — the form
+   `customer.bicep` composes (T230a, 2026-10-06). The customerId segment may not be a reserved id (`platform`, `shared`,
+   `byok`) or an env token, so `sprk-platform-prod-kv` / `sprk-demo-prod-kv` remain drift. **Codified legacy exception
    (DO-NOT-RENAME): `spaarke-spekvcert`** — the only live dev vault; bicep accepts the vault name as a
    parameter rather than hardcoding a divergent form. `kv-sdap-{env}`, `spaarke-kv-dev`,
    `sprkshareddev-kv`, and `sprk-{workload}-{env}-kv` are drift.
@@ -502,7 +505,9 @@ KV references use the Key Vault-reference form with an env-parameterized vault n
 
 `scripts/naming-conformance-check.ps1` implements rules R1–R3 (read-only; renames nothing). It runs
 `-SelfTest` (a seeded env-token/casing violation MUST fail, conformant names MUST pass) and scans the
-canonical secret-name sources. **Activation is per-surface + advisory-until-remediated**: because the
+canonical secret-name sources. **Since 2026-10-06 (customer-provisioning-orchestration-r1 T230a) it is a
+merge-blocking job in `.github/workflows/ci-tier1-blocking.yml`** (self-test, then the scan) — the repository is at zero
+violations, and H13 no longer re-runs it per customer. *History:* **activation was per-surface + advisory-until-remediated**: because the
 live environments still carry the 017-census drift (r1's remediation backlog), the gate runs
 **advisory** (reports, does not block) until `customer-provisioning-orchestration-r1` applies the
 current→canonical rename map; it flips to **blocking** per-surface as each surface reaches zero

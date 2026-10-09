@@ -492,18 +492,22 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     expect(openBrowserWindow()).toHaveBeenCalledWith(recordUrl(existing));
   });
 
+  // Task 117: Copy Link copies the record link, so it needs ORG_URL (not the open capability) — without ORG_URL it
+  // is hidden too; with ORG_URL on a host that cannot open a tab, it stays.
   it.each([
-    ['canOpenBrowserWindow is false', { canOpenRecord: false }, ORG],
-    ['ORG_URL is empty', {}, ''],
-  ])('AC4: when %s, View Document is not rendered (not rendered-and-disabled)', async (_case, props, orgUrl) => {
-    process.env.ORG_URL = orgUrl;
-    renderWord(props);
-    await saveAndWaitForSavedState();
+    ['canOpenBrowserWindow is false', { canOpenRecord: false }, ORG, 1],
+    ['ORG_URL is empty', {}, '', 0],
+  ])(
+    'AC4: when %s, View Document is not rendered (not rendered-and-disabled)',
+    async (_case, props, orgUrl, copyLinkCount) => {
+      process.env.ORG_URL = orgUrl;
+      renderWord(props);
+      await saveAndWaitForSavedState();
 
-    expect(screen.queryByRole('button', { name: 'View Document' })).not.toBeInTheDocument();
-    // The rest of the saved state is unaffected.
-    expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
-  });
+      expect(screen.queryByRole('button', { name: 'View Document' })).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('button', { name: 'Copy Link' })).toHaveLength(copyLinkCount);
+    }
+  );
 
   it('AC4: the duplicate card hides View Existing Document when the host cannot open a browser window', async () => {
     saveResponses.push(json(true, 200, { duplicate: true, documentId: SAVED_ID, message: 'Already saved.' }));

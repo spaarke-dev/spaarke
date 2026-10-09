@@ -18,6 +18,7 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { ApiError, AuthError } from '@spaarke/auth';
 import {
   useWorkspaceLayouts,
   invalidateLayoutCache,
@@ -388,6 +389,77 @@ describe('useWorkspaceLayouts — 401/403 paths', () => {
     expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
     expect(warnSpy).toHaveBeenCalled();
 
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Failures as @spaarke/auth's authenticatedFetch delivers them: THROWN (ApiError / AuthError), never a
+// returned non-OK Response. Each request must soft-fail on its own — before the fix a throw from one
+// rejected the Promise.all and discarded the other's result (error state / fallback).
+// ---------------------------------------------------------------------------
+
+describe('useWorkspaceLayouts — thrown failures soft-fail per request', () => {
+  function throwingFetch(outcomes: Record<string, Response | Error>): jest.MockedFunction<AuthenticatedFetch> {
+    return jest.fn(async (url: string) => {
+      for (const [pathSuffix, outcome] of Object.entries(outcomes)) {
+        if (url.endsWith(pathSuffix)) {
+          if (outcome instanceof Error) throw outcome;
+          return outcome;
+        }
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+  }
+
+  it('a thrown 503 on the list keeps the default layout', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': new ApiError('HTTP 503', 503, null),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
+    expect(result.current.error).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  it('a thrown 500 on the default keeps the list and resolves the active layout from it', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]),
+      '/workspace/layouts/default': new ApiError('HTTP 500', 500, null),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.layouts).toEqual([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]);
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
+    expect(result.current.error).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  it('an exhausted 401 (AuthError) on the default is soft too', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': new AuthError('Authentication failed after all retry attempts', 'auth_exhausted'),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
     warnSpy.mockRestore();
   });
 });

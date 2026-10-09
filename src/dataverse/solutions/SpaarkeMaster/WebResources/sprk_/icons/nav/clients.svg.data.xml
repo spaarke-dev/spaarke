@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{e434728e-c00b-f111-8342-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_/icons/nav/clients.svg</Name>
+  <DisplayName>Clients Icon</DisplayName>
+  <Description>Fluent UI icon: PersonAccounts20Regular - Client entity navigation (sprk_client)</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsnavclientssvgE434728E-C00B-F111-8342-7C1E520AA4DF</FileName>
+</WebResource>

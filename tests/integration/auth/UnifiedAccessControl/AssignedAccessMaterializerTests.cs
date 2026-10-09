@@ -1148,7 +1148,8 @@ public class AssignedAccessMaterializerTests
         var manual = _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today); // confers today
         _h.Store.Assign(Matter, _matter, Attorney1, contact);
         // Read 1 is the rule's (it sees a conferring View Only and asks to raise it, keeping its date); read 2 is the
-        // grant core's — by then the row has lapsed, so the core writes and answers expired_not_restored.
+        // grant core's — by then the row has lapsed, so the core answers expired_not_restored. The rule sent no date, so
+        // since task 113 the core refuses BEFORE writing: the lapsed row keeps its level.
         _h.Grants.BeforeGrantQuery = n =>
         {
             if (n == 2)
@@ -1161,6 +1162,7 @@ public class AssignedAccessMaterializerTests
         outcome.Failures.Should().ContainSingle().Which.Kind.Should().Be("grant-not-conferring");
         outcome.Entries.Should().NotContain(e => e.Action == AssignedAccessAction.Raised || e.Action == AssignedAccessAction.Granted);
         _h.Store.RowsOf(_matter, contact).Should().NotContain(r => r.State == AssignedAccessState.Granted);
+        manual.AccessLevel.Should().Be(ViewOnly, "a refused grant writes nothing — the lapsed row is not raised (task 113)");
 
         _h.Grants.BeforeGrantQuery = null;
         var next = await Sync(trigger: AssignedAccessTrigger.Job);

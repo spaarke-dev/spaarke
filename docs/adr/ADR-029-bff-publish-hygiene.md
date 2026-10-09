@@ -81,7 +81,7 @@ Constraints on the pattern:
 
 ### 4. Publish-Size Baseline Ratchet (FR-A4 / FR-A5 / FR-C5)
 
-**Current baseline (measured 2026-07-08 by `spaarke-ai-architecture-redesign-r1` task 055, project close)** — downstream projects diff against THIS row. Measurement method: fresh `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` **including the 4 PDBs** (the same content `Deploy-BffApi.ps1` ships); sizes in MiB (`bytes / 1MB` in PowerShell):
+**Current baseline (measured 2026-07-08 by `spaarke-ai-architecture-redesign-r1` task 055, project close)** — historical: downstream projects do NOT diff against this row; they measure against a fresh master build (root CLAUDE.md §10, `.claude/rules/bff-hygiene.md` item 4). Measurement method: fresh `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` **including the 4 PDBs** (the same content `Deploy-BffApi.ps1` ships); sizes in MiB (`bytes / 1MB` in PowerShell):
 
 | Metric | Measured (2026-07-08) | Governing threshold |
 |---|---:|---:|

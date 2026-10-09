@@ -146,8 +146,8 @@ export interface CreateTodoViewProps {
   /** Navigate to the Save tab (offered when the email isn't filed yet). */
   onGoToSave?: () => void;
   /**
-   * Task 091 (UAT-2, NFR-10): whether this host can open a browser tab
-   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `App` from the live adapter — never a
+   * Task 091 (UAT-2, NFR-10): whether this host can open a browser tab — task 120: `canOpenSpaarkeRecords`
+   * (ORG_URL + `openBrowserWindow` or `window.open`), decided by `App` from the live adapter — never a
    * `hostType` check here, same pattern as `FindView.canOpenRecord` / `SaveView.canOpenRecord`). Gates the
    * created-To-Do confirmation's "Open in Spaarke" link; also requires `ORG_URL` to be configured.
    * Defaults to `false`.

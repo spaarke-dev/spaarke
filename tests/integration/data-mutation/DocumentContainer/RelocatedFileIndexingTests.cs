@@ -7,16 +7,27 @@
 //     enqueue fails or indexing is switched off; only this document's chunks while the old item is another record's file.
 //
 // Doubles are module boundaries only: IPostUploadIndexingEnqueuer (the existing indexing seam) and IRagService (the index).
+// The #1510 probe (task 177) runs the real enqueuer into the real RagIndexingJobHandler; its doubles are Service Bus
+// (JobSubmissionService), Dataverse (IDataverseService), the idempotency store and the file pipeline (IFileIndexingService).
 
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Telemetry;
 using Xunit;
+using JobStatus = Sprk.Bff.Api.Services.Jobs.JobStatus;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.DocumentContainer;
 
@@ -145,6 +156,63 @@ public class RelocatedFileIndexingTests
         var outcome = await Facade().ReindexRelocatedFileAsync(Request());
 
         outcome.Settled.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// #1510 probe (unified-access-control-r2 task 177): the relocation sends no parent, so the JOB HANDLER — not the
+    /// enqueue — must recover it from the document row, or the moved file's new chunks carry no parent and it drops out
+    /// of record-scoped search and parent-scoped RAG. Runs the REAL enqueuer (its job captured where Service Bus would
+    /// take it) into the REAL handler; the doubles are Dataverse, the idempotency store and the file pipeline.
+    /// </summary>
+    [Fact]
+    public async Task Issue1510_TheRelocatedFile_IsIndexedByTheJobHandler_UnderTheDocumentsParent()
+    {
+        var matter = Guid.Parse("4d000000-0000-4000-8000-0000000017a1");
+        var submitted = new List<JobContract>();
+        var jobs = new Mock<JobSubmissionService>(MockBehavior.Loose,
+            Options.Create(new ServiceBusOptions { QueueName = "test-jobs" }),
+            NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);
+        jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback<JobContract, CancellationToken>((job, _) => submitted.Add(job))
+            .Returns(Task.CompletedTask);
+        var enqueuer = new PostUploadIndexingEnqueuer(
+            Mock.Of<IFileIndexingService>(), jobs.Object, Mock.Of<IDocumentDataverseService>(), TestDocumentIndexParentResolver.Over(),
+            Options.Create(new AnalysisOptions()), Options.Create(new PostUploadIndexingOptions()),
+            NullLogger<PostUploadIndexingEnqueuer>.Instance);
+        Deletes();
+
+        var outcome = await new RelocatedFileIndexing(enqueuer, _rag.Object,
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["AzureAd:TenantId"] = Tenant }).Build(),
+                NullLogger<RelocatedFileIndexing>.Instance)
+            .ReindexRelocatedFileAsync(Request());
+
+        outcome.Settled.Should().BeTrue();
+        var job = submitted.Should().ContainSingle().Subject;
+
+        // The document row still names its matter: the relocation moved the file, not the filing.
+        var dataverse = new Mock<IDataverseService>();
+        var row = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", matter) { Name = "Acme v. Widget" } };
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", Document, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        var idempotency = new Mock<IIdempotencyService>();
+        idempotency.Setup(i => i.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        FileIndexRequest? indexed = null;
+        var files = new Mock<IFileIndexingService>();
+        files.Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((r, _) => indexed = r)
+            .ReturnsAsync(FileIndexingResult.Succeeded(3, TimeSpan.FromSeconds(1), Document.ToString("D")));
+        var names = new Mock<ISearchIndexNameResolver>();
+        names.Setup(n => n.GetDefaultIndexName()).Returns("spaarke-files-index");
+
+        var result = await new RagIndexingJobHandler(files.Object, idempotency.Object, dataverse.Object, names.Object,
+                TestDocumentIndexParentResolver.Over(dataverse.Object), new RagTelemetry(), NullLogger<RagIndexingJobHandler>.Instance)
+            .ProcessAsync(job, CancellationToken.None);
+
+        result.Status.Should().Be(JobStatus.Completed);
+        indexed.Should().NotBeNull();
+        indexed!.ParentEntity.Should().Be(new ParentEntityContext("matter", matter.ToString(), "Acme v. Widget"),
+            "the moved file's chunks must stay under the record the document is filed to");
+        names.Verify(n => n.ResolveAsync(Document.ToString("D"), "matter", matter.ToString(), It.IsAny<CancellationToken>()), Times.Once,
+            "the index routing sees the recovered parent too");
     }
 
     [Fact]

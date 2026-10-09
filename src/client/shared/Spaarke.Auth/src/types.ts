@@ -1,18 +1,21 @@
 /** Configuration options for @spaarke/auth initialization. */
 export interface IAuthConfig {
-  /** Azure AD client ID. Defaults to window.__SPAARKE_MSAL_CLIENT_ID__ or built-in dev ID. */
+  /** Azure AD client ID. Defaults to window.__SPAARKE_MSAL_CLIENT_ID__; there is no built-in default (throws if absent). */
   clientId?: string;
   /**
    * Azure AD authority URL.
    *
-   * If both `authority` and `tenantId` are provided, `authority` wins.
+   * If both `authority` and `tenantId` are provided, `authority` wins — but
+   * only when its tenant segment is a valid single tenant (a GUID or a dotted
+   * domain; `/organizations`, `/common`, `/consumers`, `/undefined`, `/null`
+   * and malformed URLs are rejected and skipped).
    * If only `tenantId` is provided, authority is built as
    * `https://login.microsoftonline.com/{tenantId}`.
-   * If neither is provided, falls back to `resolveDefaultAuthority()` which
-   * tries `Xrm.organizationSettings.tenantId` via frame-walk and finally to
-   * `https://login.microsoftonline.com/organizations` (degraded — triggers
-   * popup-on-first-acquire because AAD can't disambiguate which tenant cookie
-   * to use).
+   * If neither yields a tenant, the library looks for one in
+   * `Xrm.organizationSettings.tenantId` (frame-walk), `window.__SPAARKE_TENANT_ID__`
+   * and the persisted runtime config; `initAuth()` then also tries the
+   * `sprk_TenantId` env var and the BFF's `/api/config/client`. If all fail,
+   * see `requireTenantAuthority`.
    */
   authority?: string;
   /**
@@ -20,13 +23,14 @@ export interface IAuthConfig {
    * have a tenant ID (e.g., from `resolveRuntimeConfig().tenantId`); the
    * library constructs the authority URL for them. Avoids leaking the
    * `login.microsoftonline.com/{tenant}` URL convention into every consumer.
+   * Invalid values ('undefined', 'null', 'organizations', …) are ignored.
    */
   tenantId?: string;
   /** Redirect URI for MSAL. Defaults to window.location.origin. */
   redirectUri?: string;
-  /** BFF API scope. Defaults to 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'. */
+  /** BFF API scope, e.g. 'api://{BFF app id}/user_impersonation'. No default — supply it from runtime config (sprk_BffApiAppId). */
   bffApiScope?: string;
-  /** BFF API base URL. Defaults to window.__SPAARKE_BFF_URL__ or '/api'. */
+  /** BFF API base URL. Defaults to window.__SPAARKE_BFF_URL__, else '' (relative URLs are then sent as-is). */
   bffBaseUrl?: string;
   /** If true, start a proactive 4-minute token refresh interval. */
   proactiveRefresh?: boolean;
@@ -36,8 +40,9 @@ export interface IAuthConfig {
    * If true, `BrowserMsalStrategy.acquire()` skips the interactive
    * `acquireTokenPopup` fallback (step 3) and returns an empty token result
    * when both silent paths fail. The caller is then expected to surface the
-   * unauthenticated state gracefully (e.g. via `authenticatedFetch`'s 401
-   * retry, or by showing a "Please reload" UI).
+   * unauthenticated state gracefully (`authenticatedFetch` throws an
+   * `AuthError` with code `no_token` instead of sending the request, or the
+   * host shows a "Please reload" UI).
    *
    * Use case: hosts that launch in a popup / child window with their own
    * isolated MSAL cache (e.g. `WorkspaceLayoutWizard` opened via
@@ -51,6 +56,20 @@ export interface IAuthConfig {
    * Default: false (existing behavior — popup fallback is enabled).
    */
   requireSilentOnly?: boolean;
+  /**
+   * If true, refuse to fall back to the multi-tenant `/organizations`
+   * authority: when no tenant can be resolved, `resolveConfig()` / `initAuth()`
+   * throw an `AuthError` with code `tenant_unresolved`.
+   *
+   * Why (#1453): `/organizations` signs a B2B guest in to their HOME tenant,
+   * where Spaarke's single-tenant app does not exist (AADSTS700016), so every
+   * BFF call fails. Members never noticed because their home tenant is Spaarke's.
+   *
+   * Default: true inside a Dataverse host (Xrm reachable, or the page is served
+   * from a Dataverse domain); false elsewhere, where the fallback is kept but
+   * logged with `console.error`.
+   */
+  requireTenantAuthority?: boolean;
 }
 
 /**
@@ -93,5 +112,7 @@ declare global {
     __SPAARKE_MSAL_CLIENT_ID__?: string;
     __SPAARKE_BFF_URL__?: string;
     __SPAARKE_BFF_API_SCOPE__?: string;
+    /** Environment tenant, published by `createRuntimeConfigStore().setRuntimeConfig` (#1453). */
+    __SPAARKE_TENANT_ID__?: string;
   }
 }

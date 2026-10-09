@@ -31,7 +31,14 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 /// The D6 preset that produced this entry — <c>"B2BGuest"</c> or
 /// <c>"NativeAccount"</c>.
 /// </param>
+/// <param name="DataverseSystemUserId">
+/// Task 232: B2BGuest — the guest's systemuser id in the customer's environment, once H11 has made it a user with
+/// its role(s); <c>null</c> while the guest has not redeemed the invitation, and for NativeAccount.
+/// </param>
 public sealed record ProvisionedUserRecord(
     [property: JsonPropertyName("userId")] string UserId,
     [property: JsonPropertyName("upnOrEmail")] string UpnOrEmail,
-    [property: JsonPropertyName("identityPreset")] string IdentityPreset);
+    [property: JsonPropertyName("identityPreset")] string IdentityPreset,
+    [property: JsonPropertyName("dataverseSystemUserId")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? DataverseSystemUserId = null);

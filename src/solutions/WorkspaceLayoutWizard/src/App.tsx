@@ -19,10 +19,11 @@
 
 import * as React from "react";
 import { FluentProvider } from "@fluentui/react-components";
-import { tokens, Text, Button } from "@fluentui/react-components";
+import { tokens, Text, Button, makeStyles } from "@fluentui/react-components";
 import { CheckmarkCircle24Regular, DeleteRegular } from "@fluentui/react-icons";
 import {
   WizardShell,
+  SprkModal,
   getLayoutTemplate,
   SECTION_METADATA_CATALOG,
 } from "@spaarke/ui-components";
@@ -36,7 +37,7 @@ import type {
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
 import type { SectionCatalogItem, SlotAssignments, SectionInstance } from "./steps";
-import type { WizardMode } from "./main";
+import type { WizardMode } from "./launchParams";
 
 /**
  * Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing.
@@ -107,6 +108,18 @@ interface AppProps {
    * @since R2 UAT §3.1 + §4.1 (2026-07-03)
    */
   startAtStep?: string;
+  /**
+   * Task 113 (ontology-platform-r1 D-26). Present = IN-APP: the wizard renders non-embedded inside
+   * `SprkModal` (named size, explicit dismiss, title) under the host's own `FluentProvider`, and
+   * closes ONLY through `onClose` — the parent-document close-button hack and `window.close()` (both
+   * would act on the Console's own window/dialog) never run. Absent = the code-page layout under the
+   * Dataverse `navigateTo` dialog's chrome, unchanged.
+   */
+  inApp?: {
+    readonly onClose: () => void;
+    /** App-shell `--sprk-ui-scale`. */
+    readonly uiScale?: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -442,11 +455,65 @@ export function buildSectionsJson(
   return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
 }
 
+/** R4 task 054 (B-5): the If-Match save lost to a concurrent edit (HTTP 412). */
+export const LAYOUT_EDITED_ELSEWHERE_MESSAGE =
+  "This workspace was edited in another tab or session since you opened the wizard. Close this dialog, reopen Manage Workspaces to refresh, then retry your edits.";
+
+/**
+ * The error the wizard shows for a failed layout save. `authenticatedFetch` THROWS ApiError (`status`)
+ * for a non-OK response, so the status cases — including the 412 concurrent-edit case, which the
+ * `response.status === 412` check only caught for a returned response — are decided here.
+ */
+export function layoutSaveError(err: unknown): Error {
+  const apiErr = err as { status?: number; message?: string };
+  if (apiErr.status === 409) {
+    return new Error("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
+  } else if (apiErr.status === 412) {
+    return new Error(LAYOUT_EDITED_ELSEWHERE_MESSAGE);
+  } else if (apiErr.status === 400) {
+    return new Error(apiErr.message ?? "Validation error. Please check your inputs and try again.");
+  } else if (apiErr.status === 403) {
+    return new Error("This layout cannot be modified.");
+  } else if (apiErr.status === 404) {
+    return new Error("The layout was not found. It may have been deleted.");
+  }
+  return new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
+}
+
+const useStyles = makeStyles({
+  // ADR-050: no inline colour inside SprkModal - a token class.
+  loadError: { color: tokens.colorPaletteRedForeground1 },
+});
+
+// ---------------------------------------------------------------------------
+// Code-page close (navigateTo path ONLY)
+// ---------------------------------------------------------------------------
+
+/**
+ * Close the `navigateTo` dialog this code page runs in by clicking the platform's close button
+ * (proven pattern from DocumentUploadWizard — `window.close()` is blocked in iframes), falling back
+ * to `window.close()`. Never called in-app (`App`'s `inApp` prop): there it would click the close
+ * button of whatever platform dialog the Console itself is running in.
+ */
+function closeCodePageDialog(): void {
+  const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
+  for (const frame of frames) {
+    try {
+      const closeBtn =
+        (frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement | null) ??
+        (frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement | null);
+      if (closeBtn) { closeBtn.click(); return; }
+    } catch { /* cross-origin */ }
+  }
+  try { window.close(); } catch { /* blocked */ }
+}
+
 // ---------------------------------------------------------------------------
 // App Component
 // ---------------------------------------------------------------------------
 
-export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter, startAtStep }) => {
+export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter, startAtStep, inApp }) => {
+  const styles = useStyles();
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
@@ -713,9 +780,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
       // R4 task 054 (B-5): 412 = concurrent edit — bubble a clear error.
       if (response.status === 412) {
-        throw new Error(
-          "This workspace was edited in another tab or session since you opened the wizard. Close this dialog, reopen Manage Workspaces to refresh, then retry your edits.",
-        );
+        throw new Error(LAYOUT_EDITED_ELSEWHERE_MESSAGE);
       }
 
       // Parse the created/updated layout to extract the ID
@@ -750,7 +815,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       // `window.__dialogResult` doesn't survive. sessionStorage IS shared
       // per-origin per-tab-set, so the host can read the same value.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
+      // Never written in-app: it would land on the Console window's globals.
+      if (!inApp) (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
       try {
         window.sessionStorage?.setItem(
           "spaarke:workspace-wizard:last-result",
@@ -773,37 +839,17 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         ),
         actions: (
           <Button appearance="primary" onClick={() => {
-            const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
-            for (const frame of frames) {
-              try {
-                const closeBtn =
-                  frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
-                  ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
-                if (closeBtn) { closeBtn.click(); return; }
-              } catch { /* cross-origin */ }
-            }
-            try { window.close(); } catch { /* blocked */ }
+            if (inApp) { inApp.onClose(); return; }
+            closeCodePageDialog();
           }}>
             Done
           </Button>
         ),
       };
     } catch (err: unknown) {
-      // Handle typed errors from authenticatedFetch (ApiError with status)
-      const apiErr = err as { status?: number; message?: string };
-      if (apiErr.status === 409) {
-        throw new Error("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
-      } else if (apiErr.status === 400) {
-        throw new Error(apiErr.message ?? "Validation error. Please check your inputs and try again.");
-      } else if (apiErr.status === 403) {
-        throw new Error("This layout cannot be modified.");
-      } else if (apiErr.status === 404) {
-        throw new Error("The layout was not found. It may have been deleted.");
-      } else {
-        throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
-      }
+      throw layoutSaveError(err);
     }
-  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, rowHeights, sectionInstances, authenticatedFetch]);
+  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, rowHeights, sectionInstances, authenticatedFetch, inApp]);
 
   // ---------------------------------------------------------------------------
   // WizardShell step configurations
@@ -915,10 +961,85 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   // Render
   // ---------------------------------------------------------------------------
 
+  const renderWizard = (): React.ReactElement => (
+    <WizardShell
+        ref={wizardRef}
+        open={true}
+        embedded={!inApp}
+        hideTitle={!inApp}
+        title={wizardTitle}
+        {...(inApp?.uiScale !== undefined ? { uiScale: inApp.uiScale } : {})}
+        ariaLabel={wizardTitle}
+        steps={steps}
+        initialStepId={initialStepIdRef.current}
+        onClose={() => {
+          if (inApp) {
+            inApp.onClose();
+            return;
+          }
+          (window as any).__dialogResult = { confirmed: false };
+          closeCodePageDialog();
+        }}
+        onFinish={handleFinish}
+        finishLabel="Save Layout"
+        finishingLabel="Saving..."
+        footerLeftExtra={
+          mode === "edit" && layoutId ? (
+            <Button
+              appearance="subtle"
+              icon={<DeleteRegular />}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+              onClick={async () => {
+                if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
+                try {
+                  const response = await authenticatedFetch(
+                    `/api/workspace/layouts/${layoutId}`,
+                    { method: "DELETE" },
+                  );
+                  if (response.ok) {
+                    if (inApp) {
+                      inApp.onClose();
+                    } else {
+                      (window as any).__dialogResult = { confirmed: true, deleted: true };
+                      window.close();
+                    }
+                  } else {
+                    alert("Failed to delete workspace.");
+                  }
+                } catch {
+                  alert("Failed to delete workspace.");
+                }
+              }}
+            >
+              Delete
+            </Button>
+          ) : undefined
+        }
+      />
+  );
+
   // R2 UAT §3.1 follow-up (2026-07-03): show a loading indicator while the
   // edit-mode layout fetch is in flight. Prevents the wizard from opening
   // at Arrange Sections with empty state (which rendered as a blank screen
   // because ArrangeStep returns null when the template isn't set yet).
+  //
+  // In-app the wizard (and its loading / error states) must sit inside SprkModal, under the host's
+  // FluentProvider — never inline in the host's tree and never behind a second theme provider.
+  if (inApp) {
+    if (isLoadingLayout || loadLayoutError) {
+      return (
+        <SprkModal open onClose={inApp.onClose} title={wizardTitle} size="wizard" dismiss="explicit" uiScale={inApp.uiScale}>
+          {isLoadingLayout ? (
+            <span>Loading workspace…</span>
+          ) : (
+            <span className={styles.loadError}>Could not load workspace: {loadLayoutError}</span>
+          )}
+        </SprkModal>
+      );
+    }
+    return renderWizard();
+  }
+
   if (isLoadingLayout) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -941,61 +1062,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <WizardShell
-        ref={wizardRef}
-        open={true}
-        embedded={true}
-        hideTitle={true}
-        ariaLabel={wizardTitle}
-        steps={steps}
-        initialStepId={initialStepIdRef.current}
-        onClose={() => {
-          (window as any).__dialogResult = { confirmed: false };
-          // Close the navigateTo dialog by clicking the platform's close button
-          // (proven pattern from DocumentUploadWizard — window.close() is blocked in iframes)
-          const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
-          for (const frame of frames) {
-            try {
-              const closeBtn =
-                frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
-                ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
-              if (closeBtn) { closeBtn.click(); return; }
-            } catch { /* cross-origin */ }
-          }
-          try { window.close(); } catch { /* blocked */ }
-        }}
-        onFinish={handleFinish}
-        finishLabel="Save Layout"
-        finishingLabel="Saving..."
-        footerLeftExtra={
-          mode === "edit" && layoutId ? (
-            <Button
-              appearance="subtle"
-              icon={<DeleteRegular />}
-              style={{ color: tokens.colorPaletteRedForeground1 }}
-              onClick={async () => {
-                if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
-                try {
-                  const response = await authenticatedFetch(
-                    `/api/workspace/layouts/${layoutId}`,
-                    { method: "DELETE" },
-                  );
-                  if (response.ok) {
-                    (window as any).__dialogResult = { confirmed: true, deleted: true };
-                    window.close();
-                  } else {
-                    alert("Failed to delete workspace.");
-                  }
-                } catch {
-                  alert("Failed to delete workspace.");
-                }
-              }}
-            >
-              Delete
-            </Button>
-          ) : undefined
-        }
-      />
+      {renderWizard()}
     </FluentProvider>
   );
 };

@@ -235,8 +235,8 @@ public class ExternalTodoDtoTests
     public void UpdateExternalTodoRequest_Statuscode_AcceptsAllFourValues(int statuscode, string label)
     {
         // Per entity-schema.md, sprk_todo has exactly four statuscode values mapped to Graph
-        // todoTask.status. These tests document the contract; the handler does no further
-        // validation — Dataverse rejects unknown statuscode values.
+        // todoTask.status. These tests document the DTO contract; the PATCH route refuses any other
+        // value with 400 and writes the matching statecode with it (task 106 — ExternalTodoWritePathTests).
         var request = new UpdateExternalTodoRequest { Statuscode = statuscode };
         request.Statuscode.Should().Be(statuscode, $"the {label} status value must be accepted");
     }

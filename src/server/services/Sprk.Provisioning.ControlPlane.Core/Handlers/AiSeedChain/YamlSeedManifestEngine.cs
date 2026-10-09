@@ -14,9 +14,9 @@
 // SCOPE:
 //   This engine owns manifest STRUCTURE (parse + dependency-order
 //   resolution) only. It does NOT perform retired-artifact enforcement
-//   (that stays FileSeedManifestReader's line-oriented defense-in-depth
-//   scan, run by the HANDLER before the runner is ever invoked — task 150
-//   does not touch that file, per the POML's declared file-modify scope)
+//   (that stays EmbeddedSeedManifestReader's line-oriented defense-in-depth
+//   scan over the same embedded resource, run by the HANDLER before the
+//   runner is ever invoked)
 //   and does NOT perform any Dataverse write (that is
 //   <see cref="DataverseWebApiSeedWriter"/>'s job, which calls this engine
 //   to learn WHAT to seed and in WHAT ORDER).

@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.36"
+$version = "1.0.37"
 $solutionName = "SpaarkeDocumentRelationshipViewer"
 $zipPath = "bin\${solutionName}_v$version.zip"
 
@@ -53,4 +53,4 @@ Write-Host ""
 Write-Host "Created: $zipPath" -ForegroundColor Green
 Write-Host ""
 Write-Host "To import, run:" -ForegroundColor Cyan
-Write-Host "  pac solution import --path `"$((Resolve-Path $zipPath).Path)`" --publish-changes"
+Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath `"$((Resolve-Path $zipPath).Path)`" -SolutionUniqueName <name>"

@@ -291,6 +291,27 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+### `Set-AiSpendLimit.ps1`
+**Purpose:** Add, change or remove a customer stamp's OPTIONAL monthly Azure OpenAI spend limit (`AiSpendLimit__MonthlyLimitUsd`) on the BFF's production AND staging slots — customer-provisioning-orchestration-r1 task 254, owner G37 (no limit is the default)
+**Usage:** 🟡 Occasional - when a customer's agreement calls for a cap, or to lift one
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login` as the operator); write access to the stamp's App Service
+**Owner:** DevOps Team
+**Last Used:** October 2026 (new)
+
+**Command:**
+```powershell
+# Set or change (idempotent — writes only a slot whose value differs)
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -MonthlyLimitUsd 500
+
+# Remove (back to no limit); -WhatIf previews either
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -Remove -WhatIf
+```
+
+**Notes:** same value rule as intake (`OpenAiMonthlyLimitRule`: plain decimal in (0, 1,000,000]); `--subscription` on every az call; an app-setting change restarts the site. Behaviour of the limit: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §3.2b. Tests: `tests/scripts/Set-AiSpendLimit.Tests.ps1` (Pester 3.4).
+
+---
+
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
@@ -320,28 +341,18 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
 - Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
 
-**SPE topology mode** (added 2026-08-30, task 213.4 — creates the container-type OWNING and BFF app-regs per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)):
+**SPE topology mode** (added 2026-08-30, task 213.4; trimmed by task 227a — creates the Model 1 container-type OWNING app-reg per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)). Per-customer BFF app-regs are created by H3 (`spaarke-bff-api-{customerId}`) and granted container-type access by H8 — there is no shared-tier BFF app (D-12/D-13):
 
 ```powershell
 # ONE-TIME operator setup (NOT per-customer). Follow the 8-step runbook:
 #   docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
 
-# Owning app-reg (permanent 1:1 with a container-type; SS3A rows 1-3)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1
+# Owning app-reg (permanent 1:1 with the "Spaarke Model 1" container type)
 .\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model2
-
-# BFF app-reg — shared per tier (Trial 1 + Model 1); per-customer for Model 2 (SS3A rows 4-6)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Trial1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model2 -CustomerName Acme
-
-# Both in one invocation:
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1 -CreateBffApp Trial1
 ```
 
 Topology-mode behavior (idempotent; safe to re-run):
-- Model 2 owning app is the ONLY multi-tenant app-reg (`AzureADMultipleOrgs`); all others single-tenant (`AzureADMyOrg`).
+- The owning app is single-tenant (`AzureADMyOrg`).
 - **NO client secret minted** on any topology app-reg (ADR-028 A4 + KV credential-lifecycle rule 1).
 - **NO Key Vault writes** (H4 handler owns per-customer KV wiring at provisioning time).
 - Not combinable with `-CreateFederatedCredential` / `-FicOnly` / `-AllowClientSecretMint` (throws with actionable message).
@@ -582,6 +593,14 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 
 ## Release & Deployment Orchestration
 
+### `Import-SolutionScoped.ps1` and `lib/Publish-SolutionComponents.ps1`
+**Purpose:** The ONE way to import a Dataverse solution (task 130, owner decision D-83). Imports without publishing, then POSTs a single `PublishXml` for exactly the solution's components (entities, web resources, option sets, site maps, dashboards, app modules; a PCF control through its `cc_` bundle web resources) and reads web resources and app modules back. `-PlanOnly` is read-only. Replaces every tenant-wide publish (the patterns are listed in the Pester test); `tests/scripts/Publish-SolutionComponents.Tests.ps1` and the `scoped-publish-lint` workflow fail if one comes back. Entity publishes are entity-wide (all pending views and forms of that entity); D-103: the script STOPS before the import or publish when that would publish someone else's pending change, unless `-AllowPendingCollateral` is given.
+**Usage:** 🟢 Active - every Dataverse solution import
+**Lifecycle:** ✅ Maintained
+**Dependencies:** PowerShell 7, pac CLI, `az login`
+**Owner:** spaarke-ontology-platform-r1 (task 130)
+**Last Used:** October 2026 (read-only plan against spaarkedev1)
+
 ### `Package-OfficeAddinUnified.ps1`
 **Purpose:** Zips the combined Outlook + Word Spaarke add-in — ONE Microsoft 365 unified-manifest app (schema 1.30) — into the two packages the admin center accepts: `spaarke-addin-<ver>.zip` (production; hides the live XML add-ins on clients that can run it) and `spaarke-addin-<ver>-TEST.zip` (own id, "(TEST)" name, hides nothing). Reads the parts webpack's `SpaarkeUnifiedPackagePlugin` emits into `src/client/office-addins/dist/spaarke/`; writes OUTSIDE `dist/` so the public site does not serve them. **Fails (exit 1)** if the build output is missing or the icons are not 192×192 (color) / 32×32 (outline).
 **Usage:** 🟢 Active - every add-in release (run by `deploy-office-addins.yml`, which uploads the zips as the artifact `spaarke-addin-unified-package`)
@@ -634,7 +653,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 - `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
 - `-SkipBuild` — Shortcut for `-SkipPhase Build`
 - `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
-- `-ClientSecret` — Service principal client secret for Dataverse solution import (falls back to `SPAARKE_SP_CLIENT_SECRET` env var)
+- `-ClientSecret` — ignored since T218f (warns): Phase 3 imports SpaarkeMaster with your own az/pac sign-in
 
 **Pipeline Phases:**
 | Phase | Script Called | Description |
@@ -642,7 +661,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
-| 3 | `Deploy-DataverseSolutions.ps1` | Dataverse solution import (per environment) |
+| 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
 | 6 | (built-in) | Tag release in git |
@@ -787,7 +806,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
-| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
+| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ (script deleted 2026-10-08) | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
 | 2 | ~~`Deploy-ExternalWorkspaceSpa.ps1`~~ | ~~`sprk_externalworkspace` (HTML + inline JS)~~ — **RETIRED 2026-07-20** (spaarke-SPA-external-access-platform-r1 task 041; SPA now served from Azure Static Web Apps via `.github/workflows/deploy-external-spa.yml`) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
 | 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
@@ -1139,9 +1158,11 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 ```
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
-`Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
-that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
-`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
+`Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,
+task 227g — read both back, remove the container if either did not land), used by every script that creates a container
+(`New-BusinessUnitContainer.ps1 -CustomerId`, `Provision-Customer.ps1` step 10, `Create-NewContainerType.ps1
+-CreateTestContainer -TestContainerBusinessUnitId <bu> -TestContainerCustomerId <id>`). `SpeContainerMarkerParityTests` fails
+the build on a call without `-CustomerId`. `SpeAdminContainerBindingGuardTests`
 fails the build on a script that creates a container without it — including a URI held in a variable, a splat, `az rest`,
 or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 item 5).
 
@@ -1171,21 +1192,36 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
-### `Retire-CommunicationAccessPermission.ps1`
-**Purpose:** Retires the dead `sprk_communication.sprk_accesspermission` column (owner decision Q6: a communication inherits its parent's Access Permission). Removes form, view and Copilot form-fill (`aiskillconfig`) references first, re-checks `RetrieveDependenciesForDelete`, then deletes the column and publishes. Refuses (exit 2) on any managed reference, any workflow/business rule, or a view that FILTERS on the column.
-**Usage:** 🔴 One-time (per environment); idempotent — a second run reports "nothing to do".
-**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 138)
+### `Set-DocumentAccessPermissionSchema.ps1`
+**Purpose:** Brings `sprk_document.sprk_accesspermission` into source (owner round 81): the column exists, is a Choice bound to the SAME global choice as the roots' Access Permission, and ships in `SpaarkeCore` (membership decided through `scripts/common/DataverseSolutionMembership.ps1`). `-Apply` creates the column when absent (or adds it to the solution); it never alters an existing one (`COLUMN_MISMATCH` refuses).
+**Usage:** 🟡 Per environment, before `Set-InheritedAccessPermissionFormLock.ps1`; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
-**Last Used:** 2026-10-02 — **dry run only** against `spaarkedev1` (plan: delete 1 unmanaged FormFillFieldOptOut `aiskillconfig`, then the column; no form/view/workflow references). **No `-Apply` has been run** — that is the operator's manual gate (task 138 criterion 16e).
+**Last Used:** 2026-10-08 — `-SelfTest` PASS; `-Verify` PASS against `spaarkedev1` (the owner added the column live; it ships in SpaarkeCore with its table).
 
 **Command:**
 ```powershell
-# Dry run (default) — zero writes; prints the plan.
-.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+.\Set-DocumentAccessPermissionSchema.ps1 -Verify      # read-only (exit 0 / 1)
+.\Set-DocumentAccessPermissionSchema.ps1              # dry run
+.\Set-DocumentAccessPermissionSchema.ps1 -Apply       # operator only
+```
 
-# Perform the retirement (operator only).
-.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+### `Set-InheritedAccessPermissionFormLock.ps1`
+**Purpose:** Registers the form library `sprk_accesspermission_inherited` (OnLoad `Spaarke.AccessPermissionInherited.onLoad`) on every Main / Quick Create form of To Do, Event, Communication and Document that shows `sprk_accesspermission`, and adds a plain control to the Communication "Message main form" and the "Document main form" (owner round 81: no TrackingFieldTrio on Communication). The library locks the field with "Access permission is inherited from …" while the record has a parent. Additive string insertions proven by a parse check; snapshot before every write.
+**Usage:** 🟡 Per environment, after the web resource is deployed; `-Verify` any time (fails on a form that shows the field without the lock, or a deployed library that differs from the repo).
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-08 — `-SelfTest` PASS; dry run against `spaarkedev1` (refused PREREQ_MISSING until the web resource is deployed — the main session's gate).
+
+**Command:**
+```powershell
+.\Set-InheritedAccessPermissionFormLock.ps1 -SelfTest   # offline fixtures
+.\Set-InheritedAccessPermissionFormLock.ps1             # dry run
+.\Set-InheritedAccessPermissionFormLock.ps1 -Apply      # operator only: snapshot, PATCH, publish, read back
+.\Set-InheritedAccessPermissionFormLock.ps1 -Verify     # read-only (exit 0 / 1)
+.\Set-InheritedAccessPermissionFormLock.ps1 -RestoreFrom .\accesspermission-lock-snapshot-<stamp>.json
 ```
 
 ### `Set-SecureRecordOwnerRolePrivileges.ps1`
@@ -1217,6 +1253,28 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 - Dataverse caches principal privileges, so re-probe an assignment until it is stable across 3 polls (setup guide §7).
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
+
+### `Deploy-ExternalShareExpiryViews.ps1`
+**Purpose:** Creates two public views on `sprk_externalrecordaccess` in SpaarkeCore. "Active External Shares by Expiration" lists every active row, soonest expiry first. "External Shares Expiring in 30 Days" lists the same rows with an expiry on or before today + 30, using a relative filter that never goes stale. Together they answer what is about to lapse across all external shares, which the per-grant reminders (FR-33) cannot.
+**Usage:** 🟡 Per environment, once; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-07 by `unified-access-control-r2` task 101)
+**Dependencies:** Azure CLI (`az login`) with System Customizer or System Administrator in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-07, dry run and `-Verify` against `spaarkedev1`. Not applied (operator step).
+
+**Command:**
+```powershell
+# Dry run (default): checks every column against metadata, runs both queries live, prints the plan. Zero writes.
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1
+
+# Create, rewrite a same-named view that differs (snapshot to scripts/logs/ first), add to SpaarkeCore if missing, publish when anything was written or is unpublished, then verify.
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Apply
+
+# Check: exit 0 = both views exist once, are published with the right definition, are in SpaarkeCore, and return the right rows (all pages).
+pwsh -File scripts/Deploy-ExternalShareExpiryViews.ps1 -Verify
+```
+
+Detail, including the measured semantics of the relative date operators: [`projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md`](../projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md).
 
 ### `Set-RecordNumberingSchema.ps1`
 **Purpose:** The INTERIM record numbering (owner decisions 2026-10-02, "until we build the numbering function"): Matters get `MAT-######`, Projects `PRJ-######`, sequential, from Dataverse's platform autonumber. `sprk_matternumber` / `sprk_projectnumber` are their tables' PRIMARY NAME, so a record without a number is nameless everywhere (write-path invariant **I-11**). Sets the `AutoNumberFormat`, seeds the sequence from the data (above the highest existing `MAT-`/`PRJ-` value), numbers blank rows oldest first, creates the alternate keys, and confirms `SpaarkeCore` carries the tables.

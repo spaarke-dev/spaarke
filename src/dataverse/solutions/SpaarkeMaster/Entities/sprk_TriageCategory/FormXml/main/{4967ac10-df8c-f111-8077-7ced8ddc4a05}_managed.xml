@@ -1,0 +1,121 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{4967ac10-df8c-f111-8077-7ced8ddc4a05}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{2ebcfc8c-e5cc-4e2a-bb9d-8f4a860a1547}" IsUserDefined="1" labelid="{4aa3b67e-1076-4395-b237-3f037b62d290}" name="General">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{15f6596e-1f11-4be1-a073-8fec92a9261c}" labelid="{d227ae8c-911a-4ab7-a8dd-920fa9a66faa}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{1f920d6f-6e07-4aa0-8989-660d7138a199}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_enabled" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_enabled" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b57cf922-5e82-4976-b8a3-ce2a69ca2c71}" labelid="{181637a0-5bc9-44cf-84c1-d7820aa2f6ba}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{26b1462e-4d89-4681-bbce-439c0c18a32e}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_priorityweight" classid="{C6D124CA-7EDA-4A60-AEA9-7FB8D318B68F}" datafieldname="sprk_priorityweight" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{c1dd63bf-6449-4613-9755-f61e035c2cd6}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{e6d7c5f9-4698-4d00-9222-c0af99ed828a}" showlabel="false" labelid="{b0f83da2-e0b6-4d10-a597-b0830ffa4edd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{0a1a8416-c532-4cb1-a6fc-5c00498bc2d5}" showlabel="false" labelid="{d3fd917a-a7ad-4011-818e-badd72ff6aeb}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{0ad00097-223c-4986-9a81-d4690cde5eb4}" showlabel="false" labelid="{d17afd81-abef-49af-8172-9994b4b5dc20}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{754451bd-890e-4a87-af10-108026d5c78e}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{ef20b256-cb05-4a07-bc06-4ba091c63bf4}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{7c2499a2-b123-4c5e-9ac0-c8c6fd30614f}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{20aa587b-db12-4d3d-9afb-dfd024e88072}" showlabel="false" labelid="{af565f6d-9e0c-42b7-a5d6-deb215d9956c}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{b141cc3e-1cfa-4377-8c92-169dce486586}" showlabel="false" labelid="{e455c59d-4527-4115-8261-b969c70771bd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{b92e58a9-5dfb-4fa5-8e15-ff7f0d1ba6d1}" showlabel="false" labelid="{687f440e-4405-474c-922b-5f216376b0b0}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Triage Category main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

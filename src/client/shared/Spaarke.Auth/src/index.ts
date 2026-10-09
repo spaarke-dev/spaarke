@@ -3,6 +3,8 @@ export type { IAuthConfig, IProblemDetails, TokenResult, AuthenticatedFetchFn } 
 
 // Errors
 export { AuthError, ApiError } from './errors';
+// Guards for what authenticatedFetch THROWS (it never returns a non-2xx Response)
+export { isApiError, problemOf, isAuthFailure } from './errorGuards';
 
 // Config
 export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
@@ -41,6 +43,9 @@ export type { UseAuthResult } from './useAuth';
 
 // Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
 export { resolveTenantIdSync } from './resolveTenantIdSync';
+
+// Tenant validation (#1453) — the same check the library applies before building an authority
+export { isValidTenant } from './tenant';
 
 // Code Page auth initializer factory (FR-20a / ADR-028) — canonical consumption
 // pattern that replaces the 3 byte-similar solution-local `authInit.ts` copies.

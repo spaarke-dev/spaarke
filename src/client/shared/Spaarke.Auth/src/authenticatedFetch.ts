@@ -14,6 +14,9 @@ const MAX_RETRIES = 3;
  *
  * Features:
  *   - Auto-attaches Bearer header from SpaarkeAuthProvider
+ *   - Never sends a request without a token (#1453): if none can be acquired it
+ *     throws instead. Sending it anyway only earned a 401, and each 401 retry
+ *     re-ran the silent → popup chain, so a user could see repeated popups.
  *   - 401 retry with exponential backoff (up to 3 attempts)
  *   - RFC 7807 ProblemDetails error parsing
  *   - Returns Response on success, throws ApiError or AuthError on failure
@@ -22,7 +25,8 @@ const MAX_RETRIES = 3;
  * @param init Standard fetch RequestInit options
  * @returns Fetch Response (status 2xx-3xx)
  * @throws ApiError for non-2xx responses with ProblemDetails
- * @throws AuthError when token acquisition fails after retries
+ * @throws AuthError `no_token` when no token can be acquired (the request is not sent),
+ *   or `auth_exhausted` when the BFF still answers 401 after retries
  */
 export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
   const provider = getAuthProvider();
@@ -34,10 +38,11 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const token = await provider.getAccessToken();
-    const headers = new Headers(init?.headers);
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
+    if (!token) {
+      throw new AuthError('No access token could be acquired; the request was not sent', 'no_token');
     }
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${token}`);
 
     lastResponse = await fetch(resolvedUrl, { ...init, headers });
 

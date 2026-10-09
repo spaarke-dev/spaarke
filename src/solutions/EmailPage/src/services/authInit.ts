@@ -16,7 +16,7 @@
  */
 
 import { createCodePageAuthInitializer, type CodePageAuthInitializer } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, waitForConfig } from "../config/runtimeConfig";
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId as getConfiguredTenantId, waitForConfig } from "../config/runtimeConfig";
 
 let _initializer: CodePageAuthInitializer | null = null;
 
@@ -34,10 +34,11 @@ function getInitializer(): CodePageAuthInitializer {
   if (!_initializer) {
     _initializer = createCodePageAuthInitializer({
       clientId: getMsalClientId(),
+      // The environment's tenant (sprk_TenantId, via runtime config) — a tenant-specific authority is required
+      // for B2B guests (#1453). The library validates it and ignores an invalid value.
+      tenantId: getConfiguredTenantId(),
       bffBaseUrl: getBffBaseUrl(),
       bffApiScope: getBffOAuthScope(),
-      // EmailPage-specific: omit tenantId → factory falls back to Xrm
-      // (preserves the DailyBriefing precedent for standalone code pages).
       proactiveRefresh: false, // Short-lived dialog / standalone tab
       // owner UAT 2026-08-03 R5 item 6 — suppress the involuntary acquireTokenPopup on
       // load (ADR-028 INV-5). The Email page's first `.eml` render fetch was popping an

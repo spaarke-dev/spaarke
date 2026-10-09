@@ -79,6 +79,12 @@ $Api = "$DvUrl/api/data/v9.2"
 
 ## 3. Step 1 — the business unit
 
+> **New customer environments (T256, 2026-10-08):** the provisioning handler **H7b** performs §3 → §5.5 (unit,
+> named team, role created in the unit, the §5.3 grant from the ONE file, the §5.4 strip, §5.5 assignment and
+> System Administrator removal), the §7b profile memberships and the §7c NULL-flag repair — read-then-write, with a dry
+> run (`secureRecordSetupDryRun`). This runbook remains the procedure for an environment provisioning did not build
+> (dev) and for diagnosing one H7b refused. Code: `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/`.
+
 The BU is resolved **by name from configuration**, never by GUID (GUIDs differ per environment).
 
 - Default name if `SecureRecord:BusinessUnitName` is unset: **`Secure Record`** — **singular**.
@@ -596,8 +602,7 @@ proven) and the creator beside them, so the same command finishes a Make Secure 
 **A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
 `65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
 `sprk_containerid` is classified: a business unit's shared container, or one this BFF is configured to use for many
-records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`,
-`SharePointEmbedded:StagingContainerId`), is **replaced** by the record's own — its owner keeps pointing at it; one that
+records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`), is **replaced** by the record's own — its owner keeps pointing at it; one that
 another project, matter or work assignment also records is **refused**; anything else is the record's **own** and is
 **kept** — no container is created and the value is not rewritten.
 

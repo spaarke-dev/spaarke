@@ -115,10 +115,39 @@
  *   its menu is the unchanged Standard / Limited / Restricted list, so the
  *   secure display never rewrites the stored value.
  * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
- *   on a form whose table has no such column (the retired
- *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ *   on a form whose table has no such column; unbound → no pill. (Corrected for
+ *   task 173, owner round 81: `sprk_communication.sprk_accesspermission` is NOT
+ *   retired - on a child table the column is a display copy of the parent's
+ *   value, written by the BFF and locked on the form while the record has a
+ *   parent; no TrackingFieldTrio is placed on Communication.)
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
+ *
+ * v1.0.43 (task 174, unified-access-control-r2 — owner round 84; task 067's amendment): no change in this file's logic;
+ *   the bundled `AccessGrantModal` gates its options, explains its banner ("It follows the {matter|project} it is filed
+ *   under: {name}.") and marks "No effect" from the record's EFFECTIVE access that task 064's read now reports — the
+ *   stricter of that and the stored values this host passes. Also carries task 123's auth change (#1453, declared 1.0.42).
+ *
+ * v1.0.41 (task 153, unified-access-control-r2 — owner round 83 item 11, O1 "BOTH"): an access-status indicator in the
+ *   header row. The host reads task 064's per-record route (`GET /api/v1/records/{table}/{id}/no-access`, Read-gated,
+ *   the same answer the form banner `sprk_accessstatus_banner.js` reads) with `evaluateGrantGate`'s rules — fail
+ *   closed to "Access status unavailable", the answer must name THIS record, a late answer for a record the control has
+ *   left is dropped — and passes it as `accessStatus`. Clicking it (only when the server says the caller may manage
+ *   access) opens Manage Access, at the No Access List when a No Access restriction applies (`initialSection`).
+ *   Only the three root tables are asked; on any other host table no indicator is drawn.
+ *
+ * v1.0.40 (task 067, unified-access-control-r2 — owner round 59 item 3; task 066 folded in): the bundled
+ *   `AccessGrantModal` shows a read-only No Access List (task 064's `GET /api/v1/records/{table}/{id}/no-access`, Write
+ *   holders only), marks Current Access rows an in-force wall overrides ("No Access") and rows the record's Secure /
+ *   Limited / Restricted state cancels ("No effect"). New host callback `fetchContactOrganizationMemberships` reads
+ *   `sprk_contactorganization` so a contact in a walled organization is marked too. Walls are still authored only in
+ *   No Access Entries (task 154).
+ *
+ * v1.0.39 (task 114, unified-access-control-r2 — owner test round 3, 2026-10-07): dark mode still light on 1.0.38 —
+ *   a STANDARD control's `fluentDesignLanguage.isDarkTheme` reads false in Spaarke dark mode, so the theme no longer
+ *   reads the PCF context (user choice → dark-mode URL flag → navbar; the shared resolver also gained the URL step).
+ *   While a lookup is open the lookup pane now opens ON TOP of the Manage Access modal where it can be layered above
+ *   it (SprkModal `sidePaneLayering`), else the modal docks left as before.
  *
  * v1.0.38 (task 114, unified-access-control-r2 — owner test round 2, 2026-10-07): dark mode. The control and the
  *   Manage Access modal (which renders inside this control's FluentProvider) hard-coded `webLightTheme`; they now use
@@ -185,6 +214,9 @@ import {
   TrackingFieldTrio as SharedTrackingFieldTrio,
   type ITrackingFieldTrioProps,
   type IAccessPermissionOption,
+  type ITrackingAccessStatus,
+  type GrantModalSection,
+  readAccessStatus,
 } from '@spaarke/ui-components/dist/components/TrackingFieldTrio';
 import {
   AccessGrantModal,
@@ -195,6 +227,7 @@ import {
   type IUserPick,
   type IUserPickOptions,
   type ISecureOwnerInfo,
+  type IContactOrganizationMembership,
   type ExternalGrantRootType,
   type AccessPermissionState,
   resolveAccessPermissionState,
@@ -235,9 +268,10 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environme
 // sprk_matter and sprk_workassignment carry the identical option set (verified
 // live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
 // same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
-// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
-// column is retired (task 138, owner Q6): a communication inherits its parent's
-// permission and has no value of its own.
+// shared `TrackingFieldTrio` core (FR-14). The same global choice backs the
+// column on To Do, Event, Communication and Document, where it is a display copy
+// of the parent's value that enforcement never reads (task 173, owner round 81;
+// it was to be retired by task 138). No TrackingFieldTrio is placed on Communication.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
@@ -385,6 +419,17 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * {@link grantGateRequestedFor}, so `updateView` does not re-read on every refresh. */
   private secureFlagRequestedFor: string | null | undefined = undefined;
 
+  /** The Manage Access section the current open was asked for (task 153); reset on close. */
+  private grantModalSection: GrantModalSection | undefined = undefined;
+
+  /** The record's access status from task 064's route (task 153). `undefined` while not asked, in flight, or on a
+   * host table that has no such route (no indicator is drawn); the shared ACCESS_STATUS_UNAVAILABLE on every failure to
+   * obtain an answer this client can trust. */
+  private accessStatusValue: ITrackingAccessStatus | undefined = undefined;
+
+  /** The record id the status was ASKED about — the same three-state discipline as {@link grantGateRequestedFor}. */
+  private accessStatusRequestedFor: string | null | undefined = undefined;
+
   private authInitPromise: Promise<void> = Promise.resolve();
 
   // Email-members state (task 042). `apiBaseUrl` mirrors the value passed to
@@ -424,7 +469,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const bffAppId =
         (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
       this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
-      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      const tenantId = (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl(), tenantId);
       // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
       // up the resolved value now that auth init has completed.
       this.renderControl();
@@ -443,9 +489,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // Read the record's Secure flag for the Access Permission gate (task 138) — also not awaited; until it
     // answers, the modal state is the fail-closed Limited.
     this.ensureSecureFlag();
+    // The access-status indicator (task 153) — not awaited; nothing is drawn until it answers.
+    this.ensureAccessStatus();
 
     // Re-render when the user switches the Spaarke theme (same tab or another tab).
-    this.themeListenerCleanup = setupThemeListener(() => this.renderControl(), context);
+    this.themeListenerCleanup = setupThemeListener(() => this.renderControl());
 
     this.renderControl();
   }
@@ -463,7 +511,51 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     this.ensureGrantGate();
     // Same for the record's Secure flag (task 138).
     this.ensureSecureFlag();
+    // And for the access-status indicator (task 153).
+    this.ensureAccessStatus();
 
+    this.renderControl();
+  }
+
+  /**
+   * Reads the bound record's access status for the indicator (task 153), unless it is already asked or answered for
+   * this record. Only the three root tables have task 064's route: on any other host table nothing is asked and no
+   * indicator is drawn (the project fallback of `resolveGrantRoot` would ask about the wrong table).
+   */
+  private ensureAccessStatus(): void {
+    const recordId = this.getRecordId();
+    if (recordId === this.accessStatusRequestedFor) {
+      return;
+    }
+
+    // A different record: the previous record's status must not be shown for even one render.
+    this.accessStatusRequestedFor = recordId;
+    this.accessStatusValue = undefined;
+    const root = GRANT_ROOT_BY_ENTITY[this.getHostEntity()];
+    if (!recordId || !root) {
+      return;
+    }
+
+    void this.evaluateAccessStatus(recordId, root.recordType);
+  }
+
+  /**
+   * Asks task 064's per-record route whether the record is Secure and under a No Access restriction, with
+   * `evaluateGrantGate`'s rules, through the shared `readAccessStatus`: every non-200 (the route's uniform 404
+   * included), a thrown call (auth not initialised, network), an unparseable body or an answer that does not name THIS
+   * record is "unavailable" — shown as "Access status unavailable", never as "not restricted"; an unknown or missing
+   * signal is `unknown`. Entries a Write caller also receives are never read: the indicator shows no count, name or
+   * reason. Here only the staleness rule is applied.
+   */
+  private async evaluateAccessStatus(recordId: string, recordType: ExternalGrantRootType): Promise<void> {
+    // Never rejects; every failure is ACCESS_STATUS_UNAVAILABLE (the shared helper's tests pin each case).
+    const status = await readAccessStatus(this.authenticatedFetchGated, recordType, recordId);
+
+    // Drop a late answer for a record the control has since left.
+    if (this.accessStatusRequestedFor !== recordId) {
+      return;
+    }
+    this.accessStatusValue = status;
     this.renderControl();
   }
 
@@ -831,7 +923,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * Maps the bound record's raw `sprk_accesspermission` value (a root's own; on a To Do or Event the display copy of
+   * its parent's, task 173) AND its `sprk_issecure` flag (task 043, spec
    * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
    * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
    * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules
@@ -1103,6 +1196,48 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }
   };
 
+  /** Task 067: which of the given contacts hold an ACTIVE membership in which of the given (walled) organizations —
+   * `sprk_contactorganization`, bounded by its own state only (`statecode` active or blank, no dates), the same predicate
+   * the server's wall uses (`ExternalParticipationService.WallMembershipStateClause`). The modal calls this only when an
+   * organization wall is in force on the record, and marks those contacts' Current Access rows walled off. Errors
+   * propagate: the modal then says the rows could not be checked, never that they are not walled. Contacts are asked in
+   * chunks so a long Current Access list cannot exceed the URL limit. */
+  private fetchContactOrganizationMemberships = async (
+    contactIds: string[],
+    organizationIds: string[]
+  ): Promise<IContactOrganizationMembership[]> => {
+    if (contactIds.length === 0 || organizationIds.length === 0) return [];
+    // Only canonical GUIDs enter the OData filter. Anything else is refused (the modal then says the rows could not be
+    // checked) rather than dropped, so a bad id can neither alter the query nor silently unmark a row.
+    const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const contacts = contactIds.map(cleanGuid);
+    const organizations = organizationIds.map(cleanGuid);
+    if (![...contacts, ...organizations].every(id => GUID.test(id))) {
+      throw new Error('fetchContactOrganizationMemberships: an id is not a GUID');
+    }
+    const orgClause = organizations.map(id => `_sprk_organization_value eq ${id}`).join(' or ');
+    const memberships: IContactOrganizationMembership[] = [];
+    const CHUNK = 40;
+    for (let i = 0; i < contacts.length; i += CHUNK) {
+      const contactClause = contacts
+        .slice(i, i + CHUNK)
+        .map(id => `_sprk_contact_value eq ${id}`)
+        .join(' or ');
+      const result = await this.context.webAPI.retrieveMultipleRecords(
+        'sprk_contactorganization',
+        `?$select=_sprk_contact_value,_sprk_organization_value` +
+          `&$filter=(${contactClause}) and (${orgClause}) and (statecode eq 0 or statecode eq null)`
+      );
+      for (const e of result.entities) {
+        const row = e as unknown as { _sprk_contact_value?: string; _sprk_organization_value?: string };
+        if (row._sprk_contact_value && row._sprk_organization_value) {
+          memberships.push({ contactId: row._sprk_contact_value, organizationId: row._sprk_organization_value });
+        }
+      }
+    }
+    return memberships;
+  };
+
   /** Reads the bound record's secure-project owner + business-unit alignment
    * (task 065, design.md §6) for the modal's read-only display. Host-context,
    * single-entity read of `ownerid`/`owningbusinessunit`/`sprk_issecure` —
@@ -1247,7 +1382,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.38 • Built 2026-10-07',
+      versionText: 'v1.0.43 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1269,7 +1404,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       },
       // Governance toolbar — person icon opens the real access-grant modal
       // (task 041); email icon opens the canonical SendEmailDialog (task 042).
-      onOpenGrantModal: () => {
+      // Task 153: the access-status indicator passes 'noAccess' to open at the No Access List; the person icon passes
+      // nothing (the top).
+      onOpenGrantModal: (section?: GrantModalSection) => {
+        this.grantModalSection = section;
         this.isGrantModalOpen = true;
         this.renderControl();
       },
@@ -1299,6 +1437,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermissionDisabled: !this.isAccessPermissionEditable(),
       showAccessPermission: accessPermissionBound,
       secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
+      // Task 153: the access-status indicator (undefined while unasked or in flight → nothing drawn).
+      accessStatus: this.accessStatusValue,
     };
 
     const recordId = this.getRecordId();
@@ -1307,7 +1447,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     ReactDOM.render(
       React.createElement(
         FluentProvider,
-        { theme: resolveThemeWithUserPreference(this.context), style: { width: '100%' } },
+        // No PCF context: in a STANDARD control `fluentDesignLanguage.isDarkTheme` reads false in Spaarke dark mode
+        // (owner test 2026-10-07), so the theme comes from the user's choice, the dark-mode URL flag, then the navbar.
+        { theme: resolveThemeWithUserPreference(), style: { width: '100%' } },
         React.createElement(
           React.Fragment,
           null,
@@ -1346,8 +1488,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     open: this.isGrantModalOpen,
                     onClose: () => {
                       this.isGrantModalOpen = false;
+                      this.grantModalSection = undefined;
                       this.renderControl();
                     },
+                    // Task 153: open at the No Access List when the access-status indicator asked for it.
+                    initialSection: this.grantModalSection,
                     recordId,
                     // Polymorphic root type derived from the bound host entity
                     // (task 071) — the modal sends {recordType, recordId}.
@@ -1380,6 +1525,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     isSecureRecord: this.isSecureValue === true,
                     // Secure-record owner/BU read-only display (task 065, design.md §6).
                     fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
+                    // Task 067: contacts in a walled organization are marked walled off in Current Access.
+                    fetchContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the

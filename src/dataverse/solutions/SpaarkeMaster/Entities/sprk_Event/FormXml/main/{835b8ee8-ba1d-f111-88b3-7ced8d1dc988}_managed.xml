@@ -1,0 +1,607 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{835b8ee8-ba1d-f111-88b3-7ced8d1dc988}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{0cbf6c8e-37ae-4adc-a184-3c1bf6a50d63}" IsUserDefined="1" labelid="{65b7c8da-94d2-4903-aa86-764c7e8abc27}" name="tab_overview" expanded="false">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="34%">
+              <sections>
+                <section name="sprk_filing_picker" id="0855b148-8adc-9811-121f-97f6ded1d2d5" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="RELATED RECORD" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{0ba23a0d-0d9b-5d53-26e8-10fe8d6d46a0}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="RELATED RECORD" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordtype1" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_regardingrecordtype" uniqueid="{f031a56c-bdc8-af9b-a315-5cc992fb3e3c}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="sprk_filing_hidden" id="31e3f59b-bc3e-b7b5-2be7-bbd02b1db0e5" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" visible="false">
+                  <labels>
+                    <label description="FILING (HIDDEN)" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{6e62aaf3-d1b3-8b62-cb8a-5496c0aa0351}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingcommunication" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingcommunication" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{79a898d2-d84c-f4ca-b4c3-a12b7dd324c8}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingevent" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingevent" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{8e777462-820f-1257-8734-ba0067740870}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordnumber" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordnumber" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{cbdde5a6-dd68-19b1-6274-14f090fd48ee}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingreportcard" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingreportcard" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6acf5ad9-c0f4-822e-e6d6-f3fa6c5d015b}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingservicerequest" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingservicerequest" disabled="true" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{10804ee9-6c87-4d07-9079-5071d09c223b}" labelid="{05910aad-57e9-40f1-9614-ac1c3a221fe7}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{643da743-0c2f-43e8-bc8d-38cf900e00d3}" locklevel="0" colspan="1" rowspan="1" labelid="{cc633e02-db05-4cc6-a847-ea4523920d67}" visible="false">
+                        <labels>
+                          <label description="Regarding" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordname" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c3d6464d-a426-413b-bd8e-2e9937c226b5}" labelid="{000e1878-aeb9-48d7-b833-8d712d3ffc34}">
+                        <labels>
+                          <label description="Event Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eventname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_eventname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6700c3d8-917e-4903-af0d-3621aba36e9c}" locklevel="0" colspan="1" rowspan="1" labelid="{9bbfe4e9-3023-4fc5-85fb-34ef41bba99a}">
+                        <labels>
+                          <label description="Event Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eventtype_ref" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_eventtype_ref" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{da26d97b-fe69-4587-ae7f-db3176c1f390}" locklevel="0" colspan="1" rowspan="5" labelid="{e79895dc-ee55-4009-92b0-164384a9b052}">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_description" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="tab_overview_section_associationrevolver" id="2fe865b9-0e38-4406-b482-8d3e623e42f9" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" visible="false" labelid="{dfbcb1f1-1b46-4861-b547-b3f64a1b250f}">
+                  <labels>
+                    <label description="ASSOCIATION RESOLVER" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{b71c2e59-f06f-4436-94cc-15cd6eab7242}" locklevel="0" colspan="1" rowspan="1" labelid="{a375ae31-f9be-4e75-b198-2086980a6acc}">
+                        <labels>
+                          <label description="Link" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordurl" classid="{71716B6C-711E-476C-8AB8-5D11542BFB47}" datafieldname="sprk_regardingrecordurl" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{7afea751-7d36-4d3b-9cab-5a4ba8ee9372}" locklevel="0" colspan="1" rowspan="1" labelid="{86cf408e-a046-4330-9497-4ecec82b7554}">
+                        <labels>
+                          <label description="Regarding" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordname" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c78ca7a9-e374-4513-9b14-df2f56bb2040}" locklevel="0" colspan="1" rowspan="1" labelid="{b6e77918-33e0-437c-8ff7-a74132265414}">
+                        <labels>
+                          <label description="Regarding Record Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b481974d-c362-44a1-b7fe-334fd2c479e4}" locklevel="0" colspan="1" rowspan="1" labelid="{a252ca26-5aea-41bf-9cd8-c92954427e9e}">
+                        <labels>
+                          <label description="Regarding Record Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingrecordtype" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_overview_section_eventformcontroller" id="0ba95561-12e7-4946-887b-7e4e2bb3fe7d" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" visible="false" labelid="{33ce66a4-7971-45f7-8043-149644c932d3}">
+                  <labels>
+                    <label description="EVENT FORM CONTROLLER" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{df1bfe45-69eb-49ad-b1dd-ec89438ac185}" colspan="1" rowspan="1" labelid="{b60a595d-d7aa-4dc2-a4c4-986d2682c44b}">
+                        <labels>
+                          <label description="Event Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eventname" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_eventname" uniqueid="{63cff2bb-466b-4c19-840c-a7e38b0b5954}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section name="_section_261" id="43bbc60d-4767-41a8-8415-8d40909e8ef8" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{540b788a-24df-4975-a410-4849966cf31c}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{98892b64-914d-430c-85e5-fa61a99be52d}" locklevel="0" colspan="1" rowspan="1" labelid="{dab5612e-8974-445f-8025-5bae3a96eca2}">
+                        <labels>
+                          <label description="Priority" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_priority" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_priority" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{80e6156d-08df-467a-a43a-14297f7ba871}" locklevel="0" colspan="1" rowspan="1" labelid="{8d7a1ea7-4313-4bb2-984c-879ea9a0fc0b}">
+                        <labels>
+                          <label description="Base Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_basedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_basedate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2d338cc4-3f2a-4820-87d1-85e17ded1e9c}" locklevel="0" colspan="1" rowspan="1" labelid="{c6afb6fd-b3ac-480a-9dd7-c77c1edc7d70}">
+                        <labels>
+                          <label description="Due Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_duedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_duedate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{d86513ee-6103-4cc2-ba68-cecf0b1fd467}" locklevel="0" colspan="1" rowspan="1" labelid="{06401814-b437-41ba-817c-e7ec1b1c4f70}">
+                        <labels>
+                          <label description="Final Due Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_finalduedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_finalduedate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{78e6b8c0-3354-4e14-b3da-80b89c40051b}" locklevel="0" colspan="1" rowspan="1" labelid="{c24c862a-c16b-4e26-ba32-e162c35c6166}">
+                        <labels>
+                          <label description="Completed Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_completeddate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_completeddate" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section name="_section_846" id="120673e4-420e-429c-ba1c-ce585077893e" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{beae379a-4a8e-4b8d-8eca-fb6407bfcb9c}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{4f8d3b6a-eabb-4720-8bb2-db3035a5bb0b}" locklevel="0" colspan="1" rowspan="1" labelid="{bcf0b889-6167-448c-8f0a-426c9325de6a}">
+                        <labels>
+                          <label description="Planned Duration" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_plannedduration" classid="{AA987274-CE4E-4271-A803-66164311A958}" datafieldname="sprk_plannedduration" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{92c0fc79-0b99-4d4a-9ae0-327fa638bc34}" locklevel="0" colspan="1" rowspan="1" labelid="{906ff114-4c50-4a8e-a149-702d8ebf16f3}">
+                        <labels>
+                          <label description="Actual Duration" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_actualduration" classid="{AA987274-CE4E-4271-A803-66164311A958}" datafieldname="sprk_actualduration" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6dc4fd81-79ac-4e43-8550-686eb6f93be9}" locklevel="0" colspan="1" rowspan="1" labelid="{0d698d63-b040-40ba-ad54-62f1314d5c5c}">
+                        <labels>
+                          <label description="Planned Start" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_plannedstart" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_plannedstart" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{e7c7b575-ead5-401b-a950-6cdeb3e14700}" locklevel="0" colspan="1" rowspan="1" labelid="{e6f4df35-db11-4e6c-b4be-a3e51841b626}">
+                        <labels>
+                          <label description="Actual Start" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_actualstart" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_actualstart" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1d41f43d-1aa6-4ec7-a516-d419c4a04bb8}" locklevel="0" colspan="1" rowspan="1" labelid="{8baeabaa-f446-4abb-b3b6-82b7c3f78521}">
+                        <labels>
+                          <label description="Planned End" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_plannedend" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_plannedend" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c8346341-9c49-4f30-a97d-488fe9fdc21c}" locklevel="0" colspan="1" rowspan="1" labelid="{dba6699b-3cb3-4237-be57-a246d27eb0e7}">
+                        <labels>
+                          <label description="Actual End" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_actualend" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_actualend" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_overview_section_regardingrecord" id="32e1e74f-5c59-4eff-9669-d7160ca875b1" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{0b2eeb24-c988-408e-b1ec-6279b4f6b684}">
+                  <labels>
+                    <label description="REGARDING RECORD" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{530a347b-a69b-4fcb-92e4-be11e640868a}" locklevel="0" colspan="1" rowspan="1" labelid="{a75ca1c8-88dc-417b-96df-95d9cdd0d485}" visible="false">
+                        <labels>
+                          <label description="Regarding Record Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingrecordtype" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0397eb98-9618-4a04-aac0-310a81b74b28}" locklevel="0" colspan="1" rowspan="1" labelid="{b9023ebe-6fc6-4fb9-af10-b5097d5a2308}" visible="false">
+                        <labels>
+                          <label description="Regarding Record Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingrecordid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{df8aa63f-4e88-45b9-96a5-95b5ee102982}" locklevel="0" colspan="1" rowspan="1" labelid="{f3ab84fe-c724-490c-9ce0-a27f32178bf7}" visible="false">
+                        <labels>
+                          <label description="Regarding Account" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingaccount" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingaccount" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{376f8edf-fab8-4ad4-a5f2-440698231461}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingagreement" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingagreement" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a18c3bd5-283b-45f3-bc00-fa1e5a6cb714}" locklevel="0" colspan="1" rowspan="1" labelid="{9296cfc3-c41b-48d6-9a9c-813f0783565a}" visible="false">
+                        <labels>
+                          <label description="Regarding Analysis" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardinganalysis" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardinganalysis" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a70ba0e4-d0fe-46f1-8e83-1ed4530aa0a8}" locklevel="0" colspan="1" rowspan="1" labelid="{e331c212-9fd0-4ee1-b4b9-a96140a28a27}" visible="false">
+                        <labels>
+                          <label description="Regarding Budget" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingbudget" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingbudget" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2297d416-e53c-43d5-aedc-b57ec96bad12}" locklevel="0" colspan="1" rowspan="1" labelid="{5a3be0cc-4c02-484d-8ad4-fc43500195e2}" visible="false">
+                        <labels>
+                          <label description="Regarding Contact" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingcontact" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingcontact" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b3471f5d-38c6-4b43-b879-5727696c37a2}" locklevel="0" colspan="1" rowspan="1" labelid="{5602ba23-5cea-4d2c-a309-94c20dd03075}" visible="false">
+                        <labels>
+                          <label description="Regarding Invoice" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardinginvoice" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardinginvoice" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9633edf2-eabf-4872-982b-edff101cc635}" locklevel="0" colspan="1" rowspan="1" labelid="{d0bbcd7f-323d-479f-99ef-74a099f0887c}">
+                        <labels>
+                          <label description="Regarding Matter" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" disabled="true" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2a1d7c34-da15-4340-96cd-0a4962805e64}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingorganization" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingorganization" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1e9015f5-0222-4957-bc69-136dd5523b2d}" locklevel="0" colspan="1" rowspan="1" labelid="{3465e66c-e9de-4e0c-aed1-9548d52755cf}">
+                        <labels>
+                          <label description="Regarding Project" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingproject" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingproject" disabled="true" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0b72838d-f532-4a8f-8783-d10076803a93}" locklevel="0" colspan="1" rowspan="1" labelid="{38e60b8c-4210-4cb5-8f94-924d32fb0388}">
+                        <labels>
+                          <label description="Regarding Work Assignment" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingworkassignment" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingworkassignment" disabled="true" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_history" id="475cb501-de10-4999-a8f5-a33b93e6c036" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" labelid="{11bd3f76-429c-48f9-bedd-dc48d0567dac}">
+          <labels>
+            <label description="History" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_2_section_1" id="1130d80a-a40b-444c-8efc-26d20be188d7" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115" labelid="{2dbc1b3c-c4af-404c-a2db-dac75f5bb2dc}">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{99b2be0c-3d33-4a71-9660-1d69d645fcbc}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{768750f4-4a9c-4da5-aecc-59e818b2b1be}" showlabel="false" labelid="{b3c0e6e3-6939-46d4-8423-17540185cd7c}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{ca90fe08-66b5-4837-a8ed-d14d9bd7ad7c}" showlabel="false" labelid="{06821742-5cb3-46f4-afc8-8f09b8a1beb1}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3a07ff7c-7bec-4576-ab38-bfd0a8e731cb}" showlabel="false" labelid="{7658251a-2ab0-4bd9-90ec-057c41298cda}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{778a146d-b40b-40cd-a5b1-380def8b405a}" locklevel="0" colspan="1" rowspan="1" labelid="{359a019d-b368-4899-bfd7-6146b94e2f7a}">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{d689dc0e-4531-4a9d-b2b7-9a5081de3bb3}" locklevel="0" colspan="1" rowspan="1" labelid="{300d2705-10fa-478b-b9ff-f1e2bc2b82eb}">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{9dfb4d1d-f0ee-43a8-b9ab-8ee878e84c95}" locklevel="0" colspan="1" rowspan="1" labelid="{b38bd082-4883-4c08-8793-3b802947f30e}">
+              <labels>
+                <label description="Modified On" languagecode="1033" />
+              </labels>
+              <control id="header_modifiedon" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="modifiedon" disabled="false" />
+            </cell>
+            <cell locklevel="0" id="{a4f53ed9-bbf7-4f50-940b-2db65837c91a}" labelid="{dc09217f-7a89-4832-bcc1-fc8418ef9b7d}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3daf200c-b89b-4b05-bc9d-a96a29cdbe2a}" locklevel="0" colspan="1" rowspan="1" labelid="{935cf75e-4752-4a38-94b0-c4513e5e5b60}">
+              <labels>
+                <label description="Modified On" languagecode="1033" />
+              </labels>
+              <control id="header_modifiedon" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="modifiedon" disabled="false" />
+            </cell>
+            <cell id="{de1b515e-30cf-4b9a-b380-773592fa08da}" labelid="{b0f81337-96eb-4e4d-a8eb-ea7e8980ee87}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{0b1af224-5b84-41ec-b333-c9d813bb7f53}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{b721bf61-eada-47d2-b3d9-9d37791e82a8}" showlabel="false" labelid="{99620134-08c4-4496-9ec1-ca049bef0fc1}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{fd081313-a536-435c-ab03-9b30a56d569d}" showlabel="false" labelid="{2627f98c-96ab-4cc0-a91a-9347572c0e15}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{f1e1e3d1-ac16-46fc-b91a-6b29f69d1f35}" showlabel="false" labelid="{6ba982fe-dfa0-46b6-b1dd-0d1e2a309232}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="8" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+      <Navigation>
+        <NavBar>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_eventlog_Event_n1" Id="nav_sprk_eventlog_Event_n1" Sequence="10000">
+            <Titles>
+              <Title Text="Event Logs" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_event_RelatedEvent_n1" Id="nav_sprk_event_RelatedEvent_n1" Sequence="10000">
+            <Titles>
+              <Title Text="Events" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+        </NavBar>
+      </Navigation>
+      <controlDescriptions>
+        <controlDescription forControl="{63cff2bb-466b-4c19-840c-a7e38b0b5954}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_eventname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_eventname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Controls.EventFormController">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_eventname</boundField>
+              <eventTypeFieldName type="SingleLine.Text" static="true">sprk_eventtype</eventTypeFieldName>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Controls.EventFormController">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_eventname</boundField>
+              <eventTypeFieldName type="SingleLine.Text" static="true">sprk_eventtype</eventTypeFieldName>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Controls.EventFormController">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_eventname</boundField>
+              <eventTypeFieldName type="SingleLine.Text" static="true">sprk_eventtype</eventTypeFieldName>
+            </parameters>
+          </customControl>
+        </controlDescription>
+        <controlDescription forControl="{f031a56c-bdc8-af9b-a315-5cc992fb3e3c}">
+          <customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}">
+            <parameters>
+              <datafieldname>sprk_regardingrecordtype</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}">
+            <parameters>
+              <datafieldname>sprk_regardingrecordtype</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Controls.RegardingResolver">
+            <parameters>
+              <regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType>
+              <entity type="SingleLine.Text" static="true">sprk_event</entity>
+              <regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField>
+              <regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField>
+              <title type="SingleLine.Text" static="true">RELATED RECORD</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Controls.RegardingResolver">
+            <parameters>
+              <regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType>
+              <entity type="SingleLine.Text" static="true">sprk_event</entity>
+              <regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField>
+              <regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField>
+              <title type="SingleLine.Text" static="true">RELATED RECORD</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Controls.RegardingResolver">
+            <parameters>
+              <regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType>
+              <entity type="SingleLine.Text" static="true">sprk_event</entity>
+              <regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField>
+              <regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField>
+              <title type="SingleLine.Text" static="true">RELATED RECORD</title>
+              <showVersionFooter type="TwoOptions" static="true">true</showVersionFooter>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+      <events>
+        <event name="onload" application="false" active="false">
+          <Handlers>
+            <Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{4c285ac3-2573-fd6d-3cf2-ec8e190ecfba}" enabled="true" parameters="" passExecutionContext="true" />
+          </Handlers>
+        </event>
+      </events>
+      <formLibraries>
+        <Library name="sprk_todo_regarding_presave" libraryUniqueId="{72d1a635-32fc-5e80-4e92-f3bfeb802b29}" />
+      </formLibraries>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Event Assign Work main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Event for assigning work" languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

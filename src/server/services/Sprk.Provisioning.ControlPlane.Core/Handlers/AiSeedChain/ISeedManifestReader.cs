@@ -7,9 +7,12 @@
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 implementations exist from day 1:
-//     - Production: <see cref="FileSeedManifestReader"/> — reads the on-disk
-//       manifest, computes SHA-256 of the raw bytes, scans for retired-artifact
-//       patterns configured via <see cref="AiSeedChainOptions.RetiredArtifactPatterns"/>.
+//     - Production: <see cref="EmbeddedSeedManifestReader"/> — reads the
+//       manifest's embedded resource (task 253: never from disk — the Worker
+//       publish has no scripts/ folder), computes SHA-256 of the raw bytes,
+//       scans for retired-artifact patterns configured via
+//       <see cref="AiSeedChainOptions.RetiredArtifactPatterns"/>. Read by H12a
+//       and H12b.
 //     - Test: fakes injected per unit test that return canned bytes + hash.
 //   Interface earns its keep — no NIH.
 //

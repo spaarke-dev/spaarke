@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{68437c5f-4ac1-f111-a05c-0022482913fc}</WebResourceId>
+  <Name>sprk_/scripts/secure_child_ribbon.js</Name>
+  <DisplayName>Secure-record child New commands</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_scriptssecure_child_ribbonjs68437C5F-4AC1-F111-A05C-0022482913FC</FileName>
+</WebResource>

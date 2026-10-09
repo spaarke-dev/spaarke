@@ -88,6 +88,18 @@ param jwtTenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'
 param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 
 // ============================================================================
+// RESERVED TENANTS (task 255, INCOMING-141)
+// ============================================================================
+
+// The Entra External ID (CIAM) tenant external contacts sign in to: spaarkeextid.onmicrosoft.com
+// (config/spaarke-resources.yaml external_identity.ciam_tenant). Emitted with the deployment tenant as
+// ReservedTenants__* on the Api and the Worker; POST /api/runs, H4b and H13 refuse both as a customer
+// workforce tenant. Required: both hosts refuse to start without it.
+param ciamTenantIds = [
+  '7052feba-bfc4-43e0-b09e-65014b429131'
+]
+
+// ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
 // Points the Worker sitecontainer at the platform ACR image built by
