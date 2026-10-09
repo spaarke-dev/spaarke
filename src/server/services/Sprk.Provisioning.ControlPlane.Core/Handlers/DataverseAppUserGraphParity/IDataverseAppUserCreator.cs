@@ -14,7 +14,8 @@
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-13 (H10 acceptance) + §9.3 Dataverse Security table row:
-//     "UAMI service principal (by UAMI app ID) | System Administrator | Root".
+//     "UAMI service principal (by UAMI app ID) | System Administrator | Root" — superseded by T259 (ISS-010, owner
+//     2026-10-09): both App Users now live in the customer's own unit, a direct child of the root.
 //   - design.md §9.3 R2 note: v3.2 (M-10) interim automates the App User
 //     registration step (superseding the manual PPAC-UI-only v2 behavior);
 //     the v3 DESIGN TARGET (TF `powerplatform_user`, fully automated) is
@@ -25,7 +26,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 
 /// <summary>
 /// Result of one <see cref="IDataverseAppUserCreator.EnsureAppUserAsync"/>
-/// invocation. Exhaustive: <see cref="Success"/> | <see cref="Failure"/>.
+/// invocation. Exhaustive: <see cref="Success"/> | <see cref="Failure"/> | <see cref="InForeignBusinessUnit"/> (T259).
 /// </summary>
 public abstract record DataverseAppUserCreationOutcome
 {

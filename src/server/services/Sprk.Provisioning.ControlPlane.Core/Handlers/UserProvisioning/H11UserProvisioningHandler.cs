@@ -419,7 +419,8 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingCustomerBusinessUnit,
                 "InterStepState.CustomerBusinessUnitId (H10) is not a GUID — H11 places every guest in the customer's business " +
-                "unit, never the root. Resume the run from H10. Nothing was written.",
+                "unit, never the root. H10 records it; a run whose H10 completed without it (before T259) needs a new run. " +
+                "Nothing was written.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -567,6 +568,15 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             var dataverseUser = await _guestUserWriter.EnsureGuestUserAsync(
                 new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, customerUnitId, roleIds),
                 cancellationToken).ConfigureAwait(false);
+            if (dataverseUser is DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit foreignRole)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestHoldsRoleOutsideCustomerUnit,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {foreignRole.SystemUserId}) " +
+                    $"holds role {foreignRole.RoleId} of business unit {foreignRole.BusinessUnitId}, not of the customer's unit " +
+                    $"{customerUnitId:D}. A root role's Deep read reaches the Secure Record unit; H11 removes no role — an owner " +
+                    "decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
             if (dataverseUser is DataverseGuestUserOutcome.InForeignBusinessUnit elsewhere)
             {
                 return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestInForeignBusinessUnit,

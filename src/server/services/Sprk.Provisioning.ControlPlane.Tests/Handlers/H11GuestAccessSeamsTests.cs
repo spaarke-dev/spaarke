@@ -298,6 +298,21 @@ public sealed class H11GuestAccessSeamsTests
     }
 
     [Fact]
+    public async Task EnsureGuestUserAsync_AGuestHoldingARootRole_IsRefused_NothingAssociatedOrRemoved()
+    {
+        // An organisation that keeps roles on a unit change: the moved guest still holds the ROOT copy (Deep read there
+        // reaches the Secure Record unit).
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId, heldRoleUnit: RootBuId);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit(SystemUserId, Guid.Parse(RoleId), Guid.Parse(RootBuId)));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post || r.Method == HttpMethod.Delete);
+        http.Requests.Single(r => r.Uri.Contains("/systemuserroles_association?")).Uri
+            .Should().Contain("_businessunitid_value", "every held role's unit is read");
+    }
+
+    [Fact]
     public async Task EnsureGuestUserAsync_ARoleAlreadyHeld_WritesNothing()
     {
         var http = DataverseFake(roleRows: 1, roleHeld: true);
@@ -353,7 +368,7 @@ public sealed class H11GuestAccessSeamsTests
 
     private static FakeHttp DataverseFake(
         int roleRows, bool roleHeld, Func<HttpResponseMessage>? userRead = null, string userUnit = CustomerBuId,
-        string? unitAfterMove = null)
+        string? unitAfterMove = null, string? heldRoleUnit = null)
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
@@ -372,7 +387,9 @@ public sealed class H11GuestAccessSeamsTests
             }
             if (uri.Contains("/systemuserroles_association?"))
             {
-                return Json(HttpStatusCode.OK, roleHeld ? $$"""{"value":[{"roleid":"{{RoleId}}"}]}""" : """{"value":[]}""");
+                return Json(HttpStatusCode.OK, heldRoleUnit is not null
+                    ? $$"""{"value":[{"roleid":"{{RoleId}}","_businessunitid_value":"{{heldRoleUnit}}"}]}"""
+                    : roleHeld ? $$"""{"value":[{"roleid":"{{RoleId}}","_businessunitid_value":"{{CustomerBuId}}"}]}""" : """{"value":[]}""");
             }
             if (uri.Contains("/systemusers(azureactivedirectoryobjectid="))
             {

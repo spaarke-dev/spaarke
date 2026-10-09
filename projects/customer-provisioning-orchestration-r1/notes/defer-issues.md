@@ -355,6 +355,9 @@ customer's own unit directly under the Dataverse root (not the root itself — D
   unit (PATCH + read-back) before any role; a guest in any other unit → Quarantine `userprov-guest-in-foreign-business-unit`.
 - H7b: `secure_setup.customer_bu_missing` / `secure_setup.customer_bu_wrong_parent` / `secure_setup.app_user_outside_customer_bu`
   (all Quarantine); S2 already refuses any user in the Secure Record unit. Procedure version 3.
+- H7 (found in review): links the customer unit to H8's container beside the root — records are owned in the customer
+  unit and the BFF resolves a non-secure record's container from its owning unit only.
+- H11 also refuses (Quarantine) a guest holding a role of another unit (`userprov-guest-holds-role-outside-customer-unit`).
 - Not done here: H13 requiring the census → ISS-014. Until it lands, T186's runbook runs the census by hand after H11.
 
 ---

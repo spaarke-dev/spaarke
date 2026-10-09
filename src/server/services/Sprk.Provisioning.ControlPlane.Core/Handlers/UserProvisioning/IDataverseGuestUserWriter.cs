@@ -123,4 +123,10 @@ public abstract record DataverseGuestUserOutcome
     /// was written: moving a user out of an arbitrary unit (the Secure Record unit included) is an owner decision.
     /// </summary>
     public sealed record InForeignBusinessUnit(string SystemUserId, Guid BusinessUnitId) : DataverseGuestUserOutcome;
+
+    /// <summary>
+    /// T259: the guest (in the customer's unit) holds <paramref name="RoleId"/>, a role of another unit
+    /// (<paramref name="BusinessUnitId"/>) — a root role's Deep read would reach the Secure Record unit. Nothing removed.
+    /// </summary>
+    public sealed record HoldsRoleOutsideBusinessUnit(string SystemUserId, Guid RoleId, Guid BusinessUnitId) : DataverseGuestUserOutcome;
 }

@@ -95,6 +95,15 @@
       return=representation` header on creates (ids come from OData-EntityId, which Dataverse sends on a 204 create — the
       shape H7b's verified creates use). It became HTTP-testable (internal credential-factory constructor).
 
+    - D7 (review F1, fixed): H7 now links the CUSTOMER unit to H8's container right after the root (same equal / empty →
+      PATCH + read back / conflict rules; customer-business-unit-unresolved / -container-conflict, Resumable). Without it
+      every non-secure record owned in the customer unit resolved to no container in the BFF (RecordContainerResolver
+      reads the OWNING unit only). H7 declares CustomerBusinessUnitId; its config hash version gained
+      customer-business-unit-link=1.
+    - D8 (review F1-plausible, fixed): H11 reads every role a guest holds with its unit and refuses (Quarantine,
+      userprov-guest-holds-role-outside-customer-unit) one of another unit — an org that keeps roles on a unit change
+      would otherwise leave a root role's Deep read. No role is removed.
+
     LIVE PROOF OWED (T186): the PATCH systemusers businessunitid move (H11) and the customer-unit creates (H10) have only
     HTTP-shape tests; H11's read-back fails closed if the move does not land.
 

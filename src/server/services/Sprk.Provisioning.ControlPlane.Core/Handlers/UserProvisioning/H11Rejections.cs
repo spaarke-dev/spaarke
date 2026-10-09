@@ -97,6 +97,13 @@ public static class H11Rejections
     public const string GuestInForeignBusinessUnit = "userprov-guest-in-foreign-business-unit";
 
     /// <summary>
+    /// T259 (ISS-010): a guest in the customer's unit holds a role of ANOTHER unit (e.g. a root role kept across a unit
+    /// change). A root role's Deep read reaches the Secure Record unit; removing roles is an owner decision
+    /// (QuarantineRequired).
+    /// </summary>
+    public const string GuestHoldsRoleOutsideCustomerUnit = "userprov-guest-holds-role-outside-customer-unit";
+
+    /// <summary>
     /// Task 232 (R7 "validated but not wired"): a NativeAccount run with no licence SKU configured
     /// (<c>H11UserProvisioningOptions</c>) — refused before any user is created, instead of creating unlicensed users.
     /// </summary>

@@ -302,6 +302,15 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 "stamp's own BFF URL and the source for sprk_BffApiBaseUrl (task 245b; there is no platform default).",
                 cancellationToken).ConfigureAwait(false);
         }
+        // T259 (ISS-010): the customer's business unit (H10) — every user lives there, so its records are owned there and
+        // the BFF resolves their container from it; H7 links it to H8's container right after the root.
+        if (!Guid.TryParse(state.CustomerBusinessUnitId, out var customerBusinessUnitId) || customerBusinessUnitId == Guid.Empty)
+        {
+            return await FailMissingUpstreamAsync(run, etag, "customerBusinessUnitId",
+                "InterStepState.customerBusinessUnitId (H10's customer business unit) is not a GUID. H7 links it to H8's " +
+                "container: every user owns its records there, and the BFF resolves a non-secure record's container from its " +
+                "owning unit (T259).", cancellationToken).ConfigureAwait(false);
+        }
         // A44.5 (task 205i): chain-aware secret guard. The secret is REQUIRED
         // only when the FR-39 ordered credential chain's primary is
         // ClientSecret (legacy/unconfigured default — prong-3 unmigrated env,
@@ -375,7 +384,9 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             ClientSecret: _options.ClientSecret,
             Values: values,
             // Task 227g: the root business unit's container is H8's — uac-r2 task 076's non-secure default.
-            RootBusinessUnitContainerId: state.SpeContainerId);
+            RootBusinessUnitContainerId: state.SpeContainerId,
+            // T259: and the customer's own unit, where every user — and so every record they own — lives.
+            CustomerBusinessUnitId: customerBusinessUnitId);
 
         EnvVarValuesWriteOutcome writeOutcome;
         try
@@ -419,7 +430,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             envelope.RunId, envelope.CustomerId, success.WrittenVariables.Count, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, configVer, success.WrittenVariables, success.LinkedRootBusinessUnitId, envelope,
+            run, etag, idempotencyKey, configVer, success.WrittenVariables, success.LinkedRootBusinessUnitId,
+            success.LinkedCustomerBusinessUnitId, envelope,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -443,7 +455,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
     /// direct testing. Parity with H6's CatalogHash / H4's secretsVer shape.
     /// </summary>
     /// <summary>Task 227g: the root-business-unit link's version in <see cref="ComputeConfigVer"/>.</summary>
-    internal const string RootBusinessUnitLinkVersion = "root-business-unit-link=1";
+    internal const string RootBusinessUnitLinkVersion = "root-business-unit-link=1;customer-business-unit-link=1";   // T259: + the customer unit
 
     internal static string ComputeConfigVer(IReadOnlyList<KeyValuePair<string, string>> values)
     {
@@ -480,6 +492,10 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 (EnvVarValuesRejectionCodes.RootBusinessUnitUnresolved, FailureClass.Resumable),
             EnvVarValuesWriteFailureKind.RootBusinessUnitContainerConflict =>
                 (EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.CustomerBusinessUnitUnresolved =>
+                (EnvVarValuesRejectionCodes.CustomerBusinessUnitUnresolved, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.CustomerBusinessUnitContainerConflict =>
+                (EnvVarValuesRejectionCodes.CustomerBusinessUnitContainerConflict, FailureClass.Resumable),
             _ =>
                 (EnvVarValuesRejectionCodes.WriterInvocationFailed, FailureClass.Resumable),
         };
@@ -567,6 +583,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         string configVer,
         IReadOnlyList<KeyValuePair<string, string>> writtenVariables,
         Guid? linkedRootBusinessUnitId,
+        Guid? linkedCustomerBusinessUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -596,6 +613,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             schemaNames = writtenVariables.Select(kv => kv.Key).ToArray(),
             // Task 227g: the root business unit whose sprk_containerid names H8's container.
             rootBusinessUnitLinked = linkedRootBusinessUnitId,
+            // T259: the customer's own unit, linked to the same container.
+            customerBusinessUnitLinked = linkedCustomerBusinessUnitId,
         };
         var evidence = JsonDocument.Parse(JsonSerializer.Serialize(evidencePayload)).RootElement.Clone();
         run.GateStates[EnvVarsSetGateId] = new GateEntry

@@ -183,6 +183,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.OpenAiEndpoint), required: false),
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
+                // T259 (ISS-010): the customer's unit (H10) is linked to H8's container beside the root — its users own records there.
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H7b] =
             [

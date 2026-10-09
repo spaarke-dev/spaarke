@@ -207,15 +207,22 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
                 }
             }
 
-            foreach (var roleId in request.RoleIds)
+            // T259: every role the guest holds must belong to the customer's unit. A unit change normally strips roles, but an
+            // organisation that keeps roles on a unit change (or a hand-made grant) could leave a ROOT role — Deep read there
+            // reaches the Secure Record unit. Refused, never removed here.
+            using var heldDoc = await GetJsonAsync(envUri, token,
+                $"systemusers({systemUserId:D})/systemuserroles_association?$select=roleid,_businessunitid_value",
+                cancellationToken).ConfigureAwait(false);
+            var held = HeldRoles(heldDoc);
+            var foreign = held.Where(r => r.BusinessUnitId != request.BusinessUnitId).ToList();
+            if (foreign.Count > 0)
             {
-                using var held = await GetJsonAsync(envUri, token,
-                    $"systemusers({systemUserId:D})/systemuserroles_association?$filter=roleid eq {roleId:D}&$select=roleid",
-                    cancellationToken).ConfigureAwait(false);
-                if (ReadIds(held, "roleid").Count == 0)
-                {
-                    await AssociateRoleAsync(envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
-                }
+                return new DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit(
+                    systemUserId.ToString("D"), foreign[0].RoleId, foreign[0].BusinessUnitId ?? Guid.Empty);
+            }
+            foreach (var roleId in request.RoleIds.Where(r => held.All(h => h.RoleId != r)))
+            {
+                await AssociateRoleAsync(envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
             }
             return new DataverseGuestUserOutcome.Success(systemUserId.ToString("D"));
         }
@@ -298,6 +305,21 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         using var doc = await GetJsonAsync(envUri, token, $"systemusers({systemUserId:D})?$select=_businessunitid_value", ct)
             .ConfigureAwait(false);
         return UnitOf(doc.RootElement);
+    }
+
+    private static List<(Guid RoleId, Guid? BusinessUnitId)> HeldRoles(JsonDocument doc)
+    {
+        if (!doc.RootElement.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("The Dataverse response has no 'value' array.");
+        }
+        return values.EnumerateArray()
+            .Select(v => (
+                v.TryGetProperty("roleid", out var id) && Guid.TryParse(id.GetString(), out var roleId) && roleId != Guid.Empty
+                    ? roleId
+                    : throw new InvalidOperationException("A Dataverse row has no usable 'roleid'."),
+                UnitOf(v)))
+            .ToList();
     }
 
     private static Guid? UnitOf(JsonElement user)
