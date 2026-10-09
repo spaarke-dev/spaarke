@@ -624,7 +624,7 @@ builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName)
     .ConfigureHttpClient((sp, client) =>
         client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 // A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
-// OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
+// OWN Dataverse auth as the customer's BFF app-reg (D-13) — consumed by H7's writer +
 // H6's importer/verifier. Mirrors master's DataverseServiceClientImpl
 // ordered-credential migration (auth-v4 task 022, brought in via A35):
 // MI-FIC first on secret-free envs (EnvVarValues__Credentials__Order__0 /
@@ -683,9 +683,11 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 //
 // Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret wired via
 // modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
-// KV-reference app setting (sourced from the platform KV's canonical
-// BFF-API-ClientSecret, the shared multitenant BFF app-reg secret — same
-// identity H7 authenticates to customer Dataverse envs with). AddOptions +
+// KV-reference app setting — emitted ONLY on the legacy prong-3 chain
+// (requireSecretFreeIdentity=false; the default is the secret-free chain
+// since task 252, where the slot is empty and Validate accepts it). On that
+// legacy chain it resolves the platform KV's BFF-API-ClientSecret (ISS-015:
+// not the secret of the per-customer app H7 signs in as). AddOptions +
 // Validate + ValidateOnStart fails fast at Worker boot (NFR-05 parity with
 // DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry, task 122)
 // if a deployed Worker is missing this setting — replaces the plain

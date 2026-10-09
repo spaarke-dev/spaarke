@@ -100,6 +100,17 @@ param ciamTenantIds = [
 ]
 
 // ============================================================================
+// WORKER CREDENTIAL CHAIN (task 252, owner-approved 2026-10-09)
+// ============================================================================
+// Secret-free: the Worker signs in to customer Dataverse environments (H6, H7, H7b) with the
+// FR-39 chain [ManagedIdentityFederated] only, and carries NO Key Vault reference to
+// BFF-API-ClientSecret. Stated explicitly so dev never depends on the template default. Before
+// task 252 dev ran the legacy [ClientSecret] chain against a SENTINEL value in
+// sprk-controlplane-dev-kv (never a usable secret); that secret is left in the vault, untouched
+// and unreferenced (never delete -- provisioning.md KV credential lifecycle).
+param requireSecretFreeIdentity = true
+
+// ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
 // Points the Worker sitecontainer at the platform ACR image built by
