@@ -529,7 +529,6 @@ During development, individual web resources can be updated without re-exporting
 
 | Script | Purpose |
 |--------|---------|
-| `Deploy-CorporateWorkspace.ps1` | Upload sprk_corporateworkspace HTML |
 | `Deploy-WizardCodePages.ps1` | Upload 12 wizard/code page web resources |
 | `Deploy-EventsPage.ps1` | Upload sprk_eventspage HTML |
 | `Deploy-SpeAdminApp.ps1` | Upload sprk_speadmin HTML |
@@ -786,7 +785,7 @@ For critical production issues requiring immediate deployment. This is an **abbr
          -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged
 
    Web resource fix:
-     .\scripts\Deploy-CorporateWorkspace.ps1 `  # or whichever script
+     .\scripts\Deploy-EventsPage.ps1 `  # or whichever script
          -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
 
 5. Validate

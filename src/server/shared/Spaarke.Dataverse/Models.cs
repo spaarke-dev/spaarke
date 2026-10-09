@@ -1009,6 +1009,13 @@ public class CreateEventRequest
     public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
 
     /// <summary>
+    /// <c>sprk_accesspermission</c> the event takes from the records it is filed under (unified-access-control-r2 task 173,
+    /// owner round 81), resolved by the BFF's <c>CoreAncestorResolver</c>; null writes nothing (a parentless event keeps
+    /// the user's own value). Display only: no access decision reads a child's value.
+    /// </summary>
+    public int? AccessPermission { get; set; }
+
+    /// <summary>
     /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
     /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
     /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create

@@ -74,8 +74,10 @@
  * @see projects/spaarkeai-compose-r1/design.md §14 row 3 — Path A entry UX (locked)
  */
 
-// The modules themselves, not the package barrel: the ribbon bundles (esbuild, build-ribbon.mjs) import this file
-// and must not pull in React/Fluent or the barrel's services.
+// Leaf-module deep imports, NOT the barrel: the ribbon is a plain IIFE bundle built by
+// esbuild (scripts/build-ribbon.mjs) and the barrel's closure pulls in React, Fluent and
+// other shared-package sources it cannot resolve (ISS-014 / #1412). Both modules are
+// dependency-free.
 import { cleanGuid } from '@spaarke/ui-components/utils/guid';
 import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 

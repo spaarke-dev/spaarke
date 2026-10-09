@@ -54,7 +54,7 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAi } from "../utils/launch-resolver";
-// The guid module itself, not the package barrel: a ribbon bundle (esbuild, build-ribbon.mjs) must not pull in React/Fluent.
+// Leaf deep import, not the barrel (ISS-014 / #1412): see scripts/build-ribbon.mjs.
 import { cleanGuid } from "@spaarke/ui-components/utils/guid";
 
 /**

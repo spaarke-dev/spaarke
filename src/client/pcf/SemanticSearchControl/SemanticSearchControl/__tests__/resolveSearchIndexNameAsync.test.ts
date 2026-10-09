@@ -5,7 +5,7 @@
  * v1.1.74 manifest-bound `searchIndexName` property.
  *
  * Contract (per spec §3.1 + §5):
- *   - Reads `_sprk_ai_search_index_value` + `$expand=sprk_ai_search_index($select=sprk_searchindexname)`
+ *   - Reads `_sprk_ai_search_index_value` + `$expand=sprk_AI_Search_Index($select=sprk_searchindexname)`
  *     via `context.webAPI.retrieveRecord(entityType, entityId, options)`
  *   - Returns the expanded `sprk_searchindexname` string on success
  *   - Returns `null` if entityType OR entityId is missing
@@ -35,7 +35,7 @@ function buildContext(opts: {
   entityId?: string | undefined;
   retrieveRecord?: jest.Mock;
 }): ComponentFramework.Context<IInputs> {
-  const retrieveRecord = opts.retrieveRecord ?? jest.fn().mockResolvedValue({ sprk_ai_search_index: null });
+  const retrieveRecord = opts.retrieveRecord ?? jest.fn().mockResolvedValue({ sprk_AI_Search_Index: null });
   return {
     mode: {
       contextInfo: {
@@ -56,7 +56,7 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
   it('returns the linked sprk_searchindexname when the lookup is set', async () => {
     const retrieveRecord = jest.fn().mockResolvedValue({
       _sprk_ai_search_index_value: '11111111-2222-3333-4444-555555555555',
-      sprk_ai_search_index: {
+      sprk_AI_Search_Index: {
         sprk_searchindexname: 'spaarke-file-index',
       },
     });
@@ -75,10 +75,13 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
       'aaaa-bbbb-cccc-dddd',
       expect.stringContaining('_sprk_ai_search_index_value')
     );
-    // Confirm the $expand clause uses the correct navigation property name
-    // (`sprk_ai_search_index`, NOT `sprk_aisearchindexid` — per spec §3.1).
+    // Confirm the $expand clause uses the correct OData navigation property name.
+    // v1.1.76: it is the associatednavigationproperty annotation value
+    // `sprk_AI_Search_Index` (PascalCase) — the lowercase column logical name makes
+    // Dataverse 400 ("Could not find a property named ...") and the PCF silently falls
+    // back to the wrong index. The case is load-bearing, so it is asserted exactly.
     const optionsArg = retrieveRecord.mock.calls[0][2] as string;
-    expect(optionsArg).toContain('$expand=sprk_ai_search_index($select=sprk_searchindexname)');
+    expect(optionsArg).toContain('$expand=sprk_AI_Search_Index($select=sprk_searchindexname)');
   });
 
   // ---------------------------------------------------------------------------
@@ -122,7 +125,7 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
     // so the BFF tenant default applies.
     const retrieveRecord = jest.fn().mockResolvedValue({
       _sprk_ai_search_index_value: null,
-      sprk_ai_search_index: null,
+      sprk_AI_Search_Index: null,
     });
     const context = buildContext({
       entityTypeName: 'sprk_matter',
@@ -139,7 +142,7 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
     // Defensive: the linked catalog row exists but has an empty name field
     // (data-quality issue). Treat as null — BFF tenant default applies.
     const retrieveRecord = jest.fn().mockResolvedValue({
-      sprk_ai_search_index: {
+      sprk_AI_Search_Index: {
         // sprk_searchindexname missing entirely
       },
     });
@@ -192,7 +195,7 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
   // ---------------------------------------------------------------------------
   it('resolves successfully for any host entity (sprk_project)', async () => {
     const retrieveRecord = jest.fn().mockResolvedValue({
-      sprk_ai_search_index: { sprk_searchindexname: 'spaarke-records-index' },
+      sprk_AI_Search_Index: { sprk_searchindexname: 'spaarke-records-index' },
     });
     const context = buildContext({
       entityTypeName: 'sprk_project',
@@ -208,7 +211,7 @@ describe('resolveSearchIndexNameAsync — Phase G v1.1.75', () => {
 
   it('resolves successfully for sprk_event', async () => {
     const retrieveRecord = jest.fn().mockResolvedValue({
-      sprk_ai_search_index: { sprk_searchindexname: 'spaarke-events-index' },
+      sprk_AI_Search_Index: { sprk_searchindexname: 'spaarke-events-index' },
     });
     const context = buildContext({
       entityTypeName: 'sprk_event',

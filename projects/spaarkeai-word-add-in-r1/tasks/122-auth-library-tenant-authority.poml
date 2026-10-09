@@ -3,7 +3,7 @@
   <metadata>
     <title>@spaarke/auth: always sign in against the environment's tenant (never /organizations in a Dataverse host); account selection; no token-less requests</title>
     <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth library used by every client surface; security-sensitive.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -45,4 +45,5 @@
     <extension>Yes — extend resolveConfig/initAuth to reuse that chain; no new module beyond a small validator.</extension>
     <cost-of-doing-nothing>Every Model 1 customer user (a B2B guest) is blocked on ~19 Dataverse surfaces with AADSTS700016.</cost-of-doing-nothing>
   </justification>
+  <notes>DONE 2026-10-08. A Dataverse host always signs in against the environment's tenant: validated tenant values (tenant.ts); one TENANT PRECEDENCE (caller, env-var-derived global/cache, Xrm, sprk_TenantId, BFF /api/config/client; 8 s timeouts, 60 s backoff); unresolved in a Dataverse host throws AuthError('tenant_unresolved'); a provider on a non-tenant authority is replaced after its in-flight acquisition settles; no persisted MSAL active account (shared browsers), tenant-matching account selection; one in-flight acquisition; authenticatedFetch never sends without a token (AuthError 'no_token'). OfficeNaaStrategy untouched. Spaarke.Auth jest 12/182 (was 8/49), add-ins jest 102/1347, tsc prod 0 / 68. Two independent verifier passes: no F-class remaining. CI: office-addins-tests.yml now runs the library's tests. Follow-up #1471. Consumers need a rebuild (tasks 123/125).</notes>
 </task>

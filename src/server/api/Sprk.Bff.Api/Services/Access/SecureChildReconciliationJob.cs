@@ -67,6 +67,13 @@ namespace Sprk.Bff.Api.Services.Access;
 /// recent-changes pass (on unless that pass's emergency stop is set). Reported in <c>ResultJson.makeSecureRelocations</c>;
 /// a document still owing a step makes the run unsuccessful. A row that names no file it can resolve is reported
 /// (<c>unresolvable</c>) and never moved or deleted.</para>
+/// <para><b>The inherited Access Permission (task 173, owner rounds 81/84).</b> Each run also keeps <c>sprk_accesspermission</c>
+/// on To Do, Event, Communication and Document equal to the most restrictive value of the records at the top of their
+/// filing (<see cref="ChildAccessPermissionReconciler"/>): the rows changed since its own watermark and everything filed
+/// under them, the rows it carried, and a capped sweep window until this instance has covered every row once. A parentless
+/// row is never written. Its listing, watermark and carried rows are its own, so its faults never hold the secure pass's
+/// window (#1378). Reported in <c>ResultJson.accessPermission</c>; a listing fault or a failed write makes the run
+/// unsuccessful.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
@@ -108,6 +115,25 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     internal const string MaxRelocationsPerRunConfigKey = "SecureChild:Reconciliation:MaxRelocationsPerRun";
 
     internal const int DefaultMaxRelocationsPerRun = 25;
+
+    /// <summary>
+    /// Task 173: the per-run cap on the inherited Access Permission SWEEP window (the rows of To Do, Event, Communication and
+    /// Document read in order while this instance's sweep has not covered them all).
+    /// </summary>
+    internal const string MaxAccessPermissionRowsPerRunConfigKey = "SecureChild:Reconciliation:MaxAccessPermissionRowsPerRun";
+
+    internal const int DefaultMaxAccessPermissionRowsPerRun = 1000;
+
+    /// <summary>
+    /// Task 173 (verifier F3): the most <c>sprk_accesspermission</c> writes one run makes. A matter with thousands of children
+    /// turning Restricted would otherwise write all of them, one at a time, in one run — holding the job and spending the
+    /// BFF's Dataverse service-protection budget. Past the cap the pass stops writing and keeps its window (the watermark and
+    /// the sweep cursor stay), so the next run lists the same rows again and writes the next ones; only rows whose value
+    /// differs are written, so it converges.
+    /// </summary>
+    internal const string MaxAccessPermissionWritesPerRunConfigKey = "SecureChild:Reconciliation:MaxAccessPermissionWritesPerRun";
+
+    internal const int DefaultMaxAccessPermissionWritesPerRun = 500;
 
     /// <summary>
     /// Planned / applied row changes listed in <c>ResultJson</c>; <c>changesTotal</c> counts all of them, and the complete
@@ -169,7 +195,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         "Brings every existing child of every secure project, matter and work assignment into the state the ownership rule " +
         "gives it: owned by the Secure Record owner team, shared with exactly its record's sharees (task 148). Records " +
         "whose related records changed since the last run are reconciled first (task 147). Report-only unless " +
-        "SecureChild:Reconciliation:WritesEnabled is true.";
+        "SecureChild:Reconciliation:WritesEnabled is true. Also keeps the Access Permission of To Do, Event, " +
+        "Communication and Document equal to their parents' (task 173).";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -377,6 +404,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
             .ConfigureAwait(false);
 
+
         var lastKey = batch.Count > 0 ? batch[^1].Key : null;
         var passComplete = runSweep && start + batch.Count >= roots.Count;
         lock (_cursorGate)
@@ -422,13 +450,22 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
         }
 
+        // Task 173 (owner rounds 81/84): the inherited Access Permission of To Do, Event, Communication and Document. Its own
+        // listing, watermark and carried rows, so a fault there never holds the secure pass's window (#1378). It runs AFTER
+        // the secure pass has saved its cursor and watermark (verifier K2): a long or cancelled access pass can never make
+        // the secure pass redo its work. Its writes follow the recent-changes pass (on unless that pass's emergency stop is
+        // set) and are capped per run (MaxAccessPermissionWritesPerRunConfigKey).
+        var accessPermission = await ReconcileChildAccessPermissionAsync(
+            scope.ServiceProvider, dataverse, recentWrites, startedAt, context.RunId, cancellationToken).ConfigureAwait(false);
+
         var duration = _timeProvider.GetElapsedTime(started);
 
         // A recently changed row the pass could not place is reported and makes the run unsuccessful, never silently
         // skipped (task 147, ADR-003). Examples are a row under a record flagged secure but not isolated, or under a
         // missing ancestor.
         var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0
-                      && relocations.Failure is null && (relocations.Files?.Incomplete ?? 0) == 0;
+                      && relocations.Failure is null && (relocations.Files?.Incomplete ?? 0) == 0
+                      && accessPermission.Run?.Failure is null && (accessPermission.Run?.Failed ?? 0) == 0;
         int carriedRoots, carriedRows;
         bool catchUpComplete;
         (string Table, Guid Id)? catchUpResumeAfter;
@@ -464,8 +501,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 ? null
                 : $"{incompleteRoots.Count} secure record(s) not fully reconciled, {recent.Undetermined.Count} recently " +
                   $"changed related record(s) not placed and {relocations.Files?.Incomplete ?? 0} Make Secure file " +
-                  $"relocation(s) still owed{(relocations.Failure is null ? "" : $" ({relocations.Failure})")}; the next run " +
-                  "revisits them: " + string.Join("; ", problems),
+                  $"relocation(s) still owed{(relocations.Failure is null ? "" : $" ({relocations.Failure})")}" +
+                  (accessPermission.Run is { } ap && (ap.Failure is not null || ap.Failed > 0)
+                      ? $", and the inherited Access Permission pass {(ap.Failure ?? $"could not write {ap.Failed} row(s)")}"
+                      : "") +
+                  "; the next run revisits them: " + string.Join("; ", problems),
             ProcessedItems: work.Count,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
@@ -555,8 +595,136 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     passComplete = relocations.PassComplete,
                     failure = relocations.Failure,
                 },
+                // Task 173 (owner rounds 81/84): To Do, Event, Communication and Document show the most restrictive Access
+                // Permission of what they are filed under. `changes` lists the rows set (or, report-only, to be set).
+                accessPermission = accessPermission.Run is not { } apRun
+                    ? (object)new { mode = accessPermission.Mode }
+                    : new
+                    {
+                        mode = accessPermission.Mode,
+                        since = accessPermission.Since?.UtcDateTime,
+                        rowsChanged = apRun.RowsChanged,
+                        examined = apRun.Examined,
+                        alreadyCorrect = apRun.AlreadyCorrect,
+                        changed = apRun.Changed,
+                        wouldChange = apRun.WouldChange,
+                        parentless = apRun.Parentless,
+                        undetermined = apRun.Undetermined,
+                        failed = apRun.Failed,
+                        // F3: rows left for the next run because this one reached the write cap (its window was kept).
+                        deferred = apRun.Deferred,
+                        writeCapReached = apRun.WriteCapReached,
+                        problems = apRun.Problems,
+                        changes = apRun.Changes.Select(c => new { table = c.Table, id = c.Id, from = c.From, to = c.To }).ToArray(),
+                        carriedRows = accessPermission.CarriedRows,
+                        tablesWithoutColumn = apRun.TablesWithoutColumn,
+                        failure = apRun.Failure,
+                        sweep = new
+                        {
+                            ran = accessPermission.SweepRan,
+                            rows = apRun.SweepRows,
+                            complete = accessPermission.SweepComplete,
+                        },
+                    },
                 attempt = context.Attempt,
             }, ResultJsonOptions));
+    }
+
+    /// <summary>What the inherited Access Permission pass did in one run (task 173); <see cref="Run"/> null when it did not run.</summary>
+    private sealed record AccessPermissionRunReport(
+        string Mode, ChildAccessPermissionRun? Run, DateTimeOffset? Since, int CarriedRows, bool SweepRan, bool SweepComplete);
+
+    /// <summary>
+    /// Task 173 — runs <see cref="ChildAccessPermissionReconciler"/> over the window since this instance's own Access
+    /// Permission watermark, the rows it carried, and (until this instance has covered every row of the four tables once)
+    /// a capped sweep window. The watermark moves only past a pass that listed completely, in a run that wrote; undecided
+    /// and failed rows are carried (at most <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Never throws
+    /// (cancellation aside). Past <see cref="MaxAccessPermissionWritesPerRunConfigKey"/> writes the window is kept (the
+    /// watermark and the sweep cursor stay) so the next run continues. <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/>
+    /// is registered unconditionally (<c>AddCoreAncestorResolver</c>), so it is required here like every other service of the
+    /// run.
+    /// </summary>
+    private async Task<AccessPermissionRunReport> ReconcileChildAccessPermissionAsync(
+        IServiceProvider services, IGenericEntityService dataverse, bool writes, DateTimeOffset startedAt, Guid runId,
+        CancellationToken ct)
+    {
+        var mode = writes ? ModeWrite : ModeReportOnly;
+        var coreAncestors = services.GetRequiredService<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>();
+
+        var cap = int.TryParse(_configuration[MaxAccessPermissionRowsPerRunConfigKey], out var configured) && configured > 0
+            ? Math.Min(configured, 4999)
+            : DefaultMaxAccessPermissionRowsPerRun;
+        var writeCap = int.TryParse(_configuration[MaxAccessPermissionWritesPerRunConfigKey], out var configuredWrites)
+                       && configuredWrites > 0
+            ? configuredWrites
+            : DefaultMaxAccessPermissionWritesPerRun;
+
+        DateTimeOffset since;
+        List<(string Table, Guid Id)> carried;
+        (string Table, Guid Id)? sweepAfter;
+        lock (_cursorGate)
+        {
+            since = _accessPermissionWatermark ?? startedAt - InitialRecentChangesLookback;
+            carried = _accessPermissionPending.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+            sweepAfter = _accessPermissionSweepComplete
+                ? null
+                : _accessPermissionSweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
+        }
+
+        var reconciler = new ChildAccessPermissionReconciler(
+            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger);
+        ChildAccessPermissionRun run;
+        try
+        {
+            run = await reconciler.RunAsync(since, carried, sweepAfter, cap, writes, writeCap, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[CHILD-ACCESS-PERMISSION] run={RunId}: the pass faulted; its window is looked at again next run.",
+                runId);
+            run = new ChildAccessPermissionRun { Failure = "the pass faulted", Carry = carried };
+        }
+
+        int carriedRows;
+        bool sweepComplete;
+        lock (_cursorGate)
+        {
+            // The window moves only past a pass that listed completely, wrote, and did not stop at the write cap (F3): a
+            // capped run's unwritten rows are listed again from the same watermark next run.
+            var overflow = run.Carry.Count > MaxCarriedRows;
+            if (run.Failure is null && writes && !overflow && !run.WriteCapReached)
+                _accessPermissionWatermark = startedAt - RecentChangesOverlap;
+
+            _accessPermissionPending.Clear();
+            _accessPermissionPending.UnionWith(run.Carry.Take(MaxCarriedRows));
+
+            // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing).
+            if (sweepAfter is not null && run.Failure is null && writes && !run.WriteCapReached)
+            {
+                if (run.SweepReachedEnd)
+                {
+                    _accessPermissionSweepComplete = true;
+                    _accessPermissionSweepCursor = null;
+                }
+                else if (run.SweepResumeAfter is { } resume)
+                {
+                    _accessPermissionSweepCursor = resume;
+                }
+            }
+
+            (carriedRows, sweepComplete) = (_accessPermissionPending.Count, _accessPermissionSweepComplete);
+        }
+
+        _logger.Log(
+            run.Failure is null && run.Failed == 0 ? LogLevel.Information : LogLevel.Warning,
+            "[CHILD-ACCESS-PERMISSION] run={RunId} mode={Mode} since={Since:o} rowsChanged={RowsChanged} examined={Examined} " +
+            "alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} parentless={Parentless} " +
+            "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
+            "sweepRows={SweepRows} sweepComplete={SweepComplete} failure={Failure}",
+            runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
+            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete, run.Failure);
+
+        return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }
 
     /// <summary>What the Make Secure file backstop did in one run (round 46 item 2).</summary>
@@ -897,6 +1065,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // the loss of the other per-instance state on a start.
     private bool _catchUpComplete;
     private (string Table, Guid Id)? _catchUpCursor;
+
+    // Task 173: the inherited Access Permission pass's own window, carried rows and sweep (the same per-instance, in-singleton
+    // reasoning as above). Its own watermark, so a fault in it never holds the secure pass's window (#1378). A restart
+    // loses them; the new instance's sweep then covers every row of the four tables once.
+    private DateTimeOffset? _accessPermissionWatermark;
+    private readonly HashSet<(string Table, Guid Id)> _accessPermissionPending = new();
+    private bool _accessPermissionSweepComplete;
+    private (string Table, Guid Id)? _accessPermissionSweepCursor;
 
     /// <summary>Which part of a run a record is reconciled in (task 147 r1c).</summary>
     private enum WorkGroup

@@ -823,7 +823,8 @@ public static class EventEndpoints
         string? Name,
         string Url,
         string? Number,
-        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps);
+        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps,
+        int? AccessPermission = null);
 
     /// <summary>Pause before the one catalog retry: long enough for a throttle window to pass, short for a request.</summary>
     internal static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(500);
@@ -983,6 +984,7 @@ public static class EventEndpoints
         }
 
         var stamps = new List<(string LookupAttribute, string EntitySetName, Guid RecordId)>();
+        int? accessPermission;
         try
         {
             var outcome = await coreAncestors.DeriveForHostAsync("sprk_event", logicalName, regardingId, ct);
@@ -999,6 +1001,9 @@ public static class EventEndpoints
                 var stampSet = await entities.GetEntitySetNameAsync(stamp.EntityType, ct);
                 stamps.Add((stamp.LookupAttribute, stampSet, stamp.RecordId));
             }
+
+            // Task 173 (owner round 81): the Access Permission the event takes from what it is filed under, in the same body.
+            accessPermission = outcome.InheritedAccessPermission;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1016,7 +1021,8 @@ public static class EventEndpoints
             name,
             TodoRegardingBuilder.BuildRecordUrl(logicalName, regardingId.ToString("D")),
             number,
-            stamps);
+            stamps,
+            accessPermission);
     }
 
     /// <summary>The refusal when a create cannot be stamped: a 500 that names no record and writes nothing.</summary>
@@ -1072,6 +1078,7 @@ public static class EventEndpoints
             dataverseRequest.RegardingRecordUrl = regarding.Url;
             dataverseRequest.RegardingRecordNumber = regarding.Number;
             dataverseRequest.RegardingCoreStamps = regarding.CoreStamps;
+            dataverseRequest.AccessPermission = regarding.AccessPermission; // task 173 (owner round 81)
         }
 
         // Create the event record
