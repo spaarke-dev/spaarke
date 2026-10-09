@@ -157,10 +157,7 @@
             <condition attribute="sprk_eventstatus" operator="eq" value="1" />
             <filter type="or">
               <condition attribute="sprk_duedate" operator="next-seven-days" />
-              <filter type="or">
-                <condition attribute="sprk_finalduedate" operator="next-seven-days" />
-                <condition attribute="sprk_finalduedate" operator="olderthan-x-days" value="1" />
-              </filter>
+              <condition attribute="sprk_duedate" operator="olderthan-x-days" value="1" />
             </filter>
           </filter>
           <attribute name="sprk_finalduedate" />

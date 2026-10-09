@@ -9,7 +9,7 @@
  * the fetch wrapper materializes the Bearer header at request time and retries on 401.
  */
 
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import type {
   DocumentGraphResponse,
   ApiDocumentNode,
@@ -37,11 +37,19 @@ export class VisualizationApiService {
   }> {
     const url = this.buildUrl(documentId, params);
 
-    const response = await authenticatedFetch(url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    });
+    let response: Response;
+    try {
+      response = await authenticatedFetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+    } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — the `!response.ok` branch below never runs
+      // under it. Build the same VisualizationApiError so 404 (empty graph) and 401/403 (permission
+      // text) keep their handling.
+      throw toVisualizationApiError(err);
+    }
 
     if (!response.ok) {
       const errorBody = await this.parseErrorResponse(response);
@@ -224,4 +232,20 @@ export class VisualizationApiError extends Error {
   isUnauthorized(): boolean {
     return this.statusCode === 401 || this.statusCode === 403;
   }
+}
+
+/**
+ * The {@link VisualizationApiError} for an error `authenticatedFetch` threw: its `ApiError` (status +
+ * ProblemDetails, same message rule as a returned response), or 401 for an `AuthError` (retries spent).
+ * Anything else (a network failure) is returned unchanged.
+ */
+function toVisualizationApiError(err: unknown): unknown {
+  if (isApiError(err)) {
+    const problem = problemOf(err);
+    return new VisualizationApiError(problem?.detail ?? `API error: ${err.status}`, err.status, problem ?? undefined);
+  }
+  if (isAuthFailure(err)) {
+    return new VisualizationApiError(err instanceof Error ? err.message : 'Authentication failed', 401);
+  }
+  return err;
 }

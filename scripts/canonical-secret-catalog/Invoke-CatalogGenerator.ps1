@@ -159,13 +159,20 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:service_bus_fqns',
     'from-h2a-output:redis_endpoint',
     'from-h2a-output:content_safety_endpoint',
+    'from-h2a-output:bff_url',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
     'from-h8-output:spe_container_id',
     'from-intake-parameter:tenant_id',
     'from-intake-parameter:container_type_id',
     'from-intake-parameter:customer_id',
-    'from-intake-parameter:openai_monthly_limit_usd'
+    'from-intake-parameter:openai_monthly_limit_usd',
+    'from-intake-parameter:customer_workforce_tenant_ids'
+)
+# Task 255: the LIST sources among them (PerEnvSourceCatalog entries with ResolveList). A list source feeds only an
+# `indexed: true` entry and an indexed entry reads only a list source; its script parameter is [string[]].
+$script:ListPerEnvSources = @(
+    'from-intake-parameter:customer_workforce_tenant_ids'
 )
 
 # ---------------------------------------------------------------------------
@@ -379,6 +386,25 @@ function Test-PerEnvSettingsShape {
         if ($null -eq $req -or ($req -isnot [bool])) {
             throw "per_env_settings entry '$key' has non-boolean 'required' value: '$req' (type: $($req?.GetType().FullName))"
         }
+
+        # Task 255: `indexed` (optional bool) — a .NET configuration list fed by a list source; always required.
+        $indexed = $false
+        if ($entry.ContainsKey('indexed')) {
+            if ($entry.indexed -isnot [bool]) {
+                throw "per_env_settings entry '$key' has non-boolean 'indexed' value: '$($entry.indexed)'"
+            }
+            $indexed = [bool]$entry.indexed
+        }
+        $isListSource = $script:ListPerEnvSources -ccontains $srcRaw
+        if ($indexed -and -not $isListSource) {
+            throw "per_env_settings entry '$key' is indexed but per_env_source '$srcRaw' is not a list source ($($script:ListPerEnvSources -join ', '))."
+        }
+        if ($isListSource -and -not $indexed) {
+            throw "per_env_settings entry '$key' reads the list source '$srcRaw' but is not 'indexed: true' (a list is written as {key}__0, {key}__1, ...)."
+        }
+        if ($indexed -and -not $req) {
+            throw "per_env_settings entry '$key' is indexed and 'required: false'; an indexed entry must be required (H4b owns the whole list and removes indices it does not write)."
+        }
     }
 }
 
@@ -400,7 +426,7 @@ function Get-UniquePerEnvSources {
         script's param(...) block. `literal` sources do NOT contribute
         parameters (their value is embedded verbatim).
 
-        Returns objects: { SourceKey; PsVarName; RawSource; Optional }
+        Returns objects: { SourceKey; PsVarName; RawSource; Optional; IsList }
         where PsVarName is the PascalCase transform of SourceKey (e.g.
         'kv_vault_uri' -> 'KvVaultUri', 'tenant_id' -> 'TenantId'), and
         Optional (task 254) is true when EVERY entry reading the source is
@@ -427,6 +453,8 @@ function Get-UniquePerEnvSources {
             PsVarName = $psVar
             RawSource = $src
             Optional  = (@($readers | Where-Object { $_.required -ne $false }).Count -eq 0)
+            # Task 255: a list source becomes a [string[]] parameter.
+            IsList    = ($script:ListPerEnvSources -ccontains $src)
         }
     }
     return @($unique.Values)
@@ -804,6 +832,8 @@ function New-ConfigureArtifact {
     # Task 254: a `required: false` entry is written only when the run supplies its value (H4b skips it otherwise and
     # passes no argument). Its source parameter is optional (default '') and its line is appended conditionally below.
     $optionalLines = [System.Collections.Generic.List[pscustomobject]]::new()
+    # Task 255: indexed entries — one `for` line each, appending {key}__{i}; their keys are owned whole (stale removed).
+    $listLines = [System.Collections.Generic.List[pscustomobject]]::new()
 
     # Compose the parameter block. Fixed params (RG / AppService / VaultName /
     # IncludeSlots) plus one per unique per-env source.
@@ -818,7 +848,10 @@ function New-ConfigureArtifact {
     [void]$paramLines.Add("    [string]`$VaultName,")
     foreach ($src in $perEnvSources) {
         [void]$paramLines.Add("")
-        if ($src.Optional) {
+        if ($src.IsList) {
+            [void]$paramLines.Add("    [Parameter(Mandatory = `$true)]")
+            [void]$paramLines.Add("    [string[]]`$$($src.PsVarName),")
+        } elseif ($src.Optional) {
             [void]$paramLines.Add("    [Parameter(Mandatory = `$false)]")
             [void]$paramLines.Add("    [string]`$$($src.PsVarName) = '',")
         } else {
@@ -877,6 +910,10 @@ function New-ConfigureArtifact {
             $colon = $src.IndexOf(':')
             $sourceKey = $src.Substring($colon + 1)
             $var = $sourceToVar[$sourceKey]
+            if ($entry.ContainsKey('indexed') -and [bool]$entry.indexed) {
+                [void]$listLines.Add([pscustomobject]@{ Key = $key; Var = $var })
+                continue
+            }
             if ($entry.required -eq $false) {
                 [void]$optionalLines.Add([pscustomobject]@{ Key = $key; Var = $var })
                 continue
@@ -964,6 +1001,44 @@ if (-not [string]::IsNullOrWhiteSpace(`$$($opt.Var))) { `$settings += "$($opt.Ke
 "@)
     }
 
+    # Task 255: indexed (list) settings — {key}__0 … {key}__{n-1}, in list order; the keys are owned whole, so
+    # Remove-StaleListSettings below deletes every other {key}__* setting on each slot (H4b does the same).
+    $sortedListLines = @($listLines | Sort-Object -Property Key -Culture 'en-US')
+    foreach ($ll in $sortedListLines) {
+        $loop = 'for ($i = 0; $i -lt $' + $ll.Var + '.Count; $i++) { $settings += "' + $ll.Key + '__$i=$($' + $ll.Var + '[$i])" }'
+        [void]$sb.Append("`n" + $loop + "`n")
+    }
+    if ($sortedListLines.Count -gt 0) {
+        $keysLiteral = ($sortedListLines | ForEach-Object { "'" + $_.Key + "'" }) -join ', '
+        [void]$sb.Append("`n" + '$exclusiveListKeys = @(' + $keysLiteral + ')' + "`n")
+        [void]$sb.Append(@'
+
+function Remove-StaleListSettings {
+    # Task 255: removes every setting under an exclusive list key that $settings does not name — the bare key or
+    # any {key}__* child, case-insensitive, ':' read as '__' (how .NET configuration binds it).
+    param([string[]]$SlotArgs = @())
+    $desired = @($settings | ForEach-Object { ($_ -split '=', 2)[0] })
+    $current = @(az webapp config appsettings list --resource-group $ResourceGroupName --name $AppServiceName @SlotArgs --query '[].name' --output json | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to list app settings for the stale-list check.' }
+    $stale = @($current | Where-Object {
+            $name = $_ -replace ':', '__'
+            $listed = $desired -ccontains $_
+            $under = @($exclusiveListKeys | Where-Object { $name -ieq $_ -or $name.StartsWith("${_}__", [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            $under -and -not $listed
+        })
+    if ($stale.Count -gt 0) {
+        az webapp config appsettings delete --resource-group $ResourceGroupName --name $AppServiceName @SlotArgs --setting-names @stale --output none 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to remove stale list settings.' }
+        Write-Host "  Removed $($stale.Count) stale list setting(s): $($stale -join ', ')" -ForegroundColor Yellow
+    }
+}
+
+'@)
+    }
+    $hasLists = $sortedListLines.Count -gt 0
+    $removeProduction = if ($hasLists) { "`nRemove-StaleListSettings" } else { '' }
+    $removeStaging = if ($hasLists) { "`n    Remove-StaleListSettings -SlotArgs @('--slot', 'staging')" } else { '' }
+
     [void]$sb.Append(@"
 
 Write-Host ''
@@ -981,7 +1056,7 @@ az webapp config appsettings set ``
     --name `$AppServiceName ``
     --settings @settings ``
     --output none 2>&1 | Out-Null
-if (`$LASTEXITCODE -ne 0) { throw 'Failed to set production-slot app settings.' }
+if (`$LASTEXITCODE -ne 0) { throw 'Failed to set production-slot app settings.' }$removeProduction
 Write-Host "  Production slot: `$(`$settings.Count) settings configured." -ForegroundColor Green
 
 if (`$IncludeSlots) {
@@ -991,7 +1066,7 @@ if (`$IncludeSlots) {
         --slot staging ``
         --settings @settings ``
         --output none 2>&1 | Out-Null
-    if (`$LASTEXITCODE -ne 0) { throw 'Failed to set staging-slot app settings.' }
+    if (`$LASTEXITCODE -ne 0) { throw 'Failed to set staging-slot app settings.' }$removeStaging
     Write-Host "  Staging slot:    `$(`$settings.Count) settings configured." -ForegroundColor Green
 }
 

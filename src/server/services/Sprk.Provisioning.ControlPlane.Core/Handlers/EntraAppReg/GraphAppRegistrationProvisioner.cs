@@ -83,6 +83,12 @@
 // Teams client later), so they get this BFF's token without a consent prompt. It only ever PATCHes this customer's own
 // app object; the client apps themselves are never touched. A second run with the same inputs sends no PATCH.
 //
+// ACCT OPTIONAL CLAIM (task 255, INCOMING-141 §5 from unified-access-control-r2 task 141): every per-customer BFF
+// registration carries the `acct` optional claim (member = 0, guest = 1) on its ACCESS tokens — the stamp BFF's
+// workforce member test reads it and fails closed without it (workforce_acct_claim_missing). A new registration is
+// created with it; an existing one gets it added (every other optional claim preserved — the retired script's
+// -AcctClaimOnly mode, Get-SpaarkeAccessTokenOptionalClaimsWithAcct). Read fresh, PATCH only when missing, read back.
+//
 // KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
 // KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
 // the L2 Worker identity (ControlPlaneIdentityOptions.PrincipalObjectId) — the only caller of the
@@ -226,6 +232,13 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             if (accessFailure is not null)
             {
                 return accessFailure;
+            }
+
+            // (2c) T255: the `acct` optional claim on the access tokens (new and existing registrations alike).
+            var acctFailure = await EnsureAcctOptionalClaimAsync(graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            if (acctFailure is not null)
+            {
+                return acctFailure;
             }
 
             // (3) Ensure service principal.
@@ -459,6 +472,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 Oauth2PermissionScopes = new List<PermissionScope> { BuildExposedScope() },
             },
             AppRoles = new List<AppRole> { BuildKeylessProofAppRole() },
+            // T255: created with the `acct` optional claim; EnsureAcctOptionalClaimAsync then finds it and writes nothing.
+            OptionalClaims = PlanAcctOptionalClaim(null),
         };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -698,6 +713,112 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                     $"ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
                     $"[{EntraAppRegRejectionCodes.ClientAccessFailed}]");
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // `acct` optional claim (task 255) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>The optional claim the stamp BFF's workforce member test reads (member = 0, guest = 1).</summary>
+    internal const string AcctClaimName = "acct";
+
+    /// <summary>
+    /// The <c>optionalClaims</c> to PATCH so the access tokens carry <c>acct</c>, or null when they already do. Graph
+    /// replaces the whole <c>optionalClaims</c> object, so the plan carries every existing access-, id- and SAML-token
+    /// claim unchanged. Each claim is COPIED into a new object: a model read from Graph is not re-serialised whole when
+    /// reused in a PATCH body (the SDK's backing store sends only changed values).
+    /// </summary>
+    internal static OptionalClaims? PlanAcctOptionalClaim(OptionalClaims? current)
+    {
+        var accessToken = current?.AccessToken ?? [];
+        if (accessToken.Any(c => string.Equals(c.Name, AcctClaimName, StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        return new OptionalClaims
+        {
+            AccessToken = accessToken.Select(Copy)
+                .Append(new OptionalClaim { Name = AcctClaimName, Essential = false, AdditionalProperties = [] })
+                .ToList(),
+            IdToken = (current?.IdToken ?? []).Select(Copy).ToList(),
+            Saml2Token = (current?.Saml2Token ?? []).Select(Copy).ToList(),
+        };
+
+        static OptionalClaim Copy(OptionalClaim claim) => new()
+        {
+            Name = claim.Name,
+            Source = claim.Source,
+            Essential = claim.Essential,
+            AdditionalProperties = claim.AdditionalProperties?.ToList() ?? [],
+        };
+    }
+
+    /// <summary>
+    /// Reads the app's <c>optionalClaims</c> fresh, adds <c>acct</c> to the access tokens when missing
+    /// (<see cref="PlanAcctOptionalClaim"/>), and reads it back. Idempotent: a registration that has it is not written.
+    /// Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureAcctOptionalClaimAsync(
+        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+            var current = await graph.Applications[appObjectId]
+                .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "optionalClaims"], timeoutCts.Token)
+                .ConfigureAwait(false);
+            if (current is null)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.AcctClaimFailed}]");
+            }
+
+            var plan = PlanAcctOptionalClaim(current.OptionalClaims);
+            if (plan is null)
+            {
+                return null;
+            }
+
+            await graph.Applications[appObjectId].PatchAsync(new Application { OptionalClaims = plan }, cancellationToken: timeoutCts.Token)
+                .ConfigureAwait(false);
+
+            // A write we did not observe is not a write we can report (the retired script read it back too). Entra
+            // replicates writes, so a read straight after the PATCH may be stale: retry before calling it a failure.
+            for (var attempt = 1; ; attempt++)
+            {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readCts.CancelAfter(_options.GraphRequestTimeout);
+                var after = await graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "optionalClaims"], readCts.Token)
+                    .ConfigureAwait(false);
+                if (PlanAcctOptionalClaim(after?.OptionalClaims) is null)
+                {
+                    break;
+                }
+                if (attempt >= _options.RoleAssignmentRetryCount)
+                {
+                    return new EntraAppRegOutcome.Failure(
+                        $"The acct optional claim was written to application {current.AppId} but is not on its access " +
+                        $"tokens when read back ({attempt} reads). Resume H3. [{EntraAppRegRejectionCodes.AcctClaimFailed}]");
+                }
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "H3 added the acct optional claim: customerId={CustomerId} appId={AppId} accessTokenClaims={Claims}",
+                request.CustomerId, current.AppId, string.Join(",", plan.AccessToken!.Select(c => c.Name)));
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            return new EntraAppRegOutcome.Failure(
+                $"Adding the acct optional claim to application {appObjectId} failed: Graph ODataError " +
+                $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
+                $"[{EntraAppRegRejectionCodes.AcctClaimFailed}]");
         }
     }
 

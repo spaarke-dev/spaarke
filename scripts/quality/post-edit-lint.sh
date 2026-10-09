@@ -71,50 +71,34 @@ EXT="${BASENAME##*.}"
 EXT_LOWER=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
 
 # --- Dispatch to appropriate linter ---
+# FINDINGS holds only lines that are real lint findings (filtered per tool), so a clean file, a
+# timeout (exit 124, no output), a missing config or a missing tool never reaches the agent.
+FINDINGS=""
 case "$EXT_LOWER" in
   cs)
     # C# files: use dotnet format in verify mode
-    if ! command -v dotnet &>/dev/null; then
-      echo "[post-edit-lint] Warning: dotnet not found in PATH, skipping C# lint" >&2
-      exit 0
-    fi
-    echo "[post-edit-lint] Linting C# file: $BASENAME"
+    command -v dotnet &>/dev/null || { echo "[post-edit-lint] dotnet not found, skipping C# lint" >&2; exit 0; }
     OUTPUT=$(timeout 4 dotnet format --include "$FILE" --verify-no-changes 2>&1) || true
-    if [ -n "$OUTPUT" ]; then
-      echo "$OUTPUT"
-    fi
+    FINDINGS=$(echo "$OUTPUT" | grep -E ': (error|warning) [A-Za-z]+[0-9]*' || true)
     ;;
 
   ts|tsx)
     # TypeScript files: use ESLint with compact format
-    if ! command -v npx &>/dev/null; then
-      echo "[post-edit-lint] Warning: npx not found in PATH, skipping TypeScript lint" >&2
-      exit 0
-    fi
-    echo "[post-edit-lint] Linting TypeScript file: $BASENAME"
+    command -v npx &>/dev/null || { echo "[post-edit-lint] npx not found, skipping TypeScript lint" >&2; exit 0; }
     OUTPUT=$(timeout 4 npx eslint "$FILE" --format compact 2>&1) || true
-    if [ -n "$OUTPUT" ]; then
-      echo "$OUTPUT"
-    fi
+    FINDINGS=$(echo "$OUTPUT" | grep -E ': line [0-9]+, col [0-9]+, (Error|Warning)' || true)
     ;;
 
   ps1)
     # PowerShell files: use PSScriptAnalyzer via pwsh
-    if ! command -v pwsh &>/dev/null; then
-      echo "[post-edit-lint] Warning: pwsh not found in PATH, skipping PowerShell lint" >&2
-      exit 0
-    fi
-    echo "[post-edit-lint] Linting PowerShell file: $BASENAME"
+    command -v pwsh &>/dev/null || { echo "[post-edit-lint] pwsh not found, skipping PowerShell lint" >&2; exit 0; }
     OUTPUT=$(timeout 4 pwsh -NoProfile -Command "
       if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
-        Invoke-ScriptAnalyzer -Path '$FILE' -Severity Warning,Error | Format-Table -AutoSize
-      } else {
-        Write-Warning 'PSScriptAnalyzer module not installed, skipping'
+        Invoke-ScriptAnalyzer -Path '$FILE' -Severity Warning,Error |
+          ForEach-Object { 'line ' + \$_.Line + ': ' + \$_.Severity + ' ' + \$_.RuleName + ' - ' + \$_.Message }
       }
     " 2>&1) || true
-    if [ -n "$OUTPUT" ]; then
-      echo "$OUTPUT"
-    fi
+    FINDINGS=$(echo "$OUTPUT" | grep -E '^line [0-9]+: (Warning|Error) ' || true)
     ;;
 
   *)
@@ -123,5 +107,19 @@ case "$EXT_LOWER" in
     ;;
 esac
 
-# Always exit 0: lint violations are advisory, not blocking
+# --- Report findings to the agent ---
+# A PostToolUse hook's plain stdout goes only to the debug log. Findings reach the agent through
+# hookSpecificOutput.additionalContext (root CLAUDE.md §16, enforcement ladder: the lint rung).
+# Capped so a noisy file cannot flood the context. Still advisory: exit 0, never blocks the edit.
+if [ -n "$FINDINGS" ]; then
+  MSG="post-edit-lint: $BASENAME has lint findings (advisory - fix the ones your edit introduced):
+$(echo "$FINDINGS" | head -c 3000)"
+  PY=$(command -v python3 || command -v python || true)
+  if [ -n "$PY" ]; then
+    printf '%s' "$MSG" | "$PY" -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":sys.stdin.read()}}))'
+  else
+    echo "$MSG" >&2
+  fi
+fi
+
 exit 0

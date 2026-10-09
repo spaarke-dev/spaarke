@@ -321,7 +321,8 @@ public class OfficeDocumentPersistence
                 : null;
             updateRequest.EmailDate = request.Email.SentDate?.DateTime;
             updateRequest.EmailBody = request.Email.Body?[..Math.Min(request.Email.Body?.Length ?? 0, 2000)];
-            updateRequest.EmailMessageId = request.Email.InternetMessageId;
+            // Task 121: the RFC Message-ID (an older pane's item id is still stored as before — see the resolver).
+            updateRequest.EmailMessageId = OfficeEmailEnricher.ResolveStoredMessageId(request.Email);
             updateRequest.EmailConversationIndex = request.Email.ConversationId;
             updateRequest.IsEmailArchive = true;
         }

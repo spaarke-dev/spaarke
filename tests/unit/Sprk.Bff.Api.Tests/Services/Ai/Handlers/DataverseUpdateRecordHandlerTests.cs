@@ -305,7 +305,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     public async Task ExecuteChatAsync_UsersUpdateRefused_RestampsNothing()
     {
         SeedEventWithTwoSources();
-        NSubstitute.SubstituteExtensions.ClearReceivedCalls(_world.Service);
+        Mock.Get(_world.Service).Invocations.Clear();
         SetupEventMetadata();
         _dataverse
             .Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -317,7 +317,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
-        NSubstitute.SubstituteExtensions.ReceivedCalls(_world.Service).Should().BeEmpty("the re-stamp runs only after the caller's own update succeeded");
+        Mock.Get(_world.Service).Invocations.Should().BeEmpty("the re-stamp runs only after the caller's own update succeeded");
         _world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA);
     }
 
@@ -335,7 +335,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        NSubstitute.SubstituteExtensions.ReceivedCalls(_world.Service).Should().BeEmpty("a write that cannot move a stamp costs nothing");
+        Mock.Get(_world.Service).Invocations.Should().BeEmpty("a write that cannot move a stamp costs nothing");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

@@ -579,12 +579,14 @@
         <event name="onload" application="false" active="false">
           <Handlers>
             <Handler functionName="Spaarke.AssignedAccess.onLoad" libraryName="sprk_/scripts/assignedaccess_postsave.js" handlerUniqueId="{2b5691eb-cb5e-bad7-8cda-96f2217cc19b}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.AccessStatus.onLoad" libraryName="sprk_/scripts/accessstatus_banner.js" handlerUniqueId="{999e174e-5148-8626-4eaf-9b1337b697b5}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>
       <formLibraries>
         <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{ae05f743-efcd-5b0b-bdf9-8b79cd3cc323}" />
         <Library name="sprk_/scripts/assignedaccess_postsave.js" libraryUniqueId="{2b445d23-c6da-6c4d-86ae-ba628d2e2c1d}" />
+        <Library name="sprk_/scripts/accessstatus_banner.js" libraryUniqueId="{24327b6d-8547-bf31-5008-8e7900ed9daf}" />
       </formLibraries>
     </form>
     <IsCustomizable>1</IsCustomizable>

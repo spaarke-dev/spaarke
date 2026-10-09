@@ -154,6 +154,40 @@ Describe 'Get-PackageRuleComponents (T218c)' {
     }
 }
 
+Describe 'Get-PackageRuleComponents - alternate keys on OOB tables (T255)' {
+    # The fake serves the same EntityDefinitions page for the column query and the key query (prefix match).
+    $pages = Get-DevPages
+    $entities = @($pages['EntityDefinitions'].Page.value)
+    $contact = $entities | Where-Object LogicalName -eq 'contact'
+    $contact | Add-Member -NotePropertyName Keys -NotePropertyValue @(
+        [PSCustomObject]@{ LogicalName = 'sprk_externalobjectiduniquekey'; MetadataId = 'K1'; IsManaged = $false }
+        [PSCustomObject]@{ LogicalName = 'msdyn_vendorkey'; MetadataId = 'K2'; IsManaged = $false }
+        [PSCustomObject]@{ LogicalName = 'sprk_managedkey'; MetadataId = 'K3'; IsManaged = $true }
+    )
+    $matter = $entities | Where-Object LogicalName -eq 'sprk_matter'
+    $matter | Add-Member -NotePropertyName Keys -NotePropertyValue @(
+        [PSCustomObject]@{ LogicalName = 'sprk_matterkey'; MetadataId = 'K4'; IsManaged = $false }
+    )
+    $rule = @(Get-PackageRuleComponents -Get (New-FakeGet $pages) -Scope (New-Scope))
+    $keys = @($rule | Where-Object TypeName -eq 'EntityKey')
+
+    It 'takes an unmanaged sprk_ key on an OOB table, as component type 14, with the OOB table as parent' {
+        $k = $keys | Where-Object Name -eq 'contact.sprk_externalobjectiduniquekey'
+        $k | Should Not BeNullOrEmpty
+        $k.ComponentType | Should Be 14
+        $k.ObjectId | Should Be 'k1'
+        $k.ParentEntityId | Should Be 'e3'
+    }
+
+    It 'skips a non-prefixed key, a managed key and a key on a sprk_ table (it ships with the table)' {
+        @($keys | ForEach-Object Name) | Should Be @('contact.sprk_externalobjectiduniquekey')
+    }
+
+    It 'adds no key when the metadata carries none (the default dev pages)' {
+        @(Get-PackageRuleComponents -Get (New-FakeGet (Get-DevPages)) -Scope (New-Scope) | Where-Object TypeName -eq 'EntityKey').Count | Should Be 0
+    }
+}
+
 Describe 'Read-PackageScope + exclusions (T218c)' {
     It 'marks an excluded component with its reason' {
         $scope = New-Scope @([PSCustomObject]@{ type = 'CustomControl'; name = 'sprk_Spaarke.Controls.DueDatesWidget'; reason = 'not on a form'; date = '2026-08-21' })

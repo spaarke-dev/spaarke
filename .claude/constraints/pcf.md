@@ -39,7 +39,7 @@ Load when:
 - ✅ **MUST** use PCF for field-bound form controls
 - ✅ **MUST** use React Code Page for standalone dialogs and custom pages
 - ✅ **MUST** place PCF controls in `src/client/pcf/`
-- ✅ **MUST** place React Code Pages in `src/client/code-pages/`
+- ✅ **MUST** place new React Code Pages in `src/solutions/{Page}/` (root CLAUDE.md §13); `src/client/code-pages/` holds four older pages
 - ✅ **MUST** keep ribbon/command bar scripts minimal (invocation only)
 
 ### PCF Controls (ADR-022)
@@ -51,8 +51,8 @@ Load when:
 
 ### React Code Pages (ADR-006, ADR-021)
 
-- ✅ **MUST** use React 18 `createRoot()` entry point
-- ✅ **MUST** bundle React 18 + Fluent v9 in Code Page output
+- ✅ **MUST** use the `createRoot()` entry point
+- ✅ **MUST** bundle React (19 — see `.claude/constraints/react-versioning.md`) + Fluent v9 in Code Page output
 - ✅ **MUST** read parameters from `URLSearchParams` (passed via `navigateTo` `data` field)
 - ✅ **MUST** open via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... })`
 
@@ -92,7 +92,7 @@ Load when:
 - ✅ **MUST** use semantic tokens for theming (no hard-coded colors)
 - ✅ **MUST** support dark mode and high-contrast
 - ✅ **MUST** export TypeScript types alongside components
-- ✅ **MUST** achieve 90%+ test coverage on shared components
+- ✅ **MUST** ship tests for the behaviour a consumer of each shared component would notice (`tests/CLAUDE.md` for .NET; RTL inside a `FluentProvider` for components). Coverage is observed, never targeted (ADR-038 — the former "90%+ coverage" MUST here was removed 2026-10-07 for the same reason as the PCF 80% target above)
 
 ### Shared Library Build Chain (CRITICAL)
 
@@ -189,24 +189,15 @@ const documentId = params.get("documentId") ?? "";
 ## Directory Structure
 
 ```
+src/solutions/{Page}/                       # React Code Pages — where new pages go (bundled React 19)
 src/client/
-├── pcf/                                    # Field-bound PCF controls (React 16/17)
-│   ├── SemanticSearchControl/              # Form-embedded document search
-│   ├── UniversalDatasetGrid/              # Dataset PCF for form subgrids
-│   └── DocumentRelationshipViewer/        # (legacy — migrate to code-pages/)
-├── code-pages/                            # Standalone dialogs & pages (React 18)
-│   ├── DocumentRelationshipViewer/        # Graph visualization dialog
-│   ├── CreateMatterWizard/                # Multi-step matter creation
-│   └── DocumentUploadDialog/              # File upload wizard
-├── shared/
-│   └── Spaarke.UI.Components/             # Shared React library (both surfaces)
-│       ├── src/components/layout/         # WizardDialog, SidePanel, PageLayout
-│       ├── src/components/data/           # DataGrid, FilterPanel, CommandBar
-│       ├── src/components/feedback/       # LoadingState, EmptyState, ErrorState
-│       ├── src/hooks/
-│       ├── src/theme/
-│       └── src/utils/
-└── office-addins/                         # Office Add-ins (React 18)
+├── pcf/{Control}/                          # Field-bound PCF controls (platform React 16.14.0)
+├── code-pages/                             # Four older code pages (CommunicationPage,
+│                                           #   DocumentRelationshipViewer, PlaybookBuilder, SemanticSearch)
+├── shared/                                 # Shared TS packages (@spaarke/ui-components, @spaarke/auth, …)
+└── office-addins/                          # Office add-ins (React 19)
+
+(UniversalDatasetGrid is deleted — use the DataGrid framework; see the note above and src/client/pcf/CLAUDE.md.)
 ```
 
 ---

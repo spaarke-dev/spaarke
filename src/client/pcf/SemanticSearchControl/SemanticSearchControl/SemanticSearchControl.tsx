@@ -56,6 +56,11 @@ import {
 import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
 import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
 import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
+import {
+  bulkDownloadFailureForStatus,
+  bulkDownloadFailureForThrown,
+  type BulkDownloadFailureToast,
+} from './services/bulkDownloadFailure';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
@@ -1262,6 +1267,22 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       action_name: 'download',
       selection_count: ids.length,
     });
+    const showBulkDownloadFailure = (failure: BulkDownloadFailureToast): void => {
+      showToast(
+        failure.title,
+        failure.body,
+        'error',
+        TOAST_DEFAULT_MS,
+        failure.retry
+          ? {
+              label: 'Retry',
+              onClick: () => {
+                void handleBulkDownload();
+              },
+            }
+          : undefined
+      );
+    };
     try {
       const response = await authenticatedFetch(`${apiBaseUrl}/api/documents/bulk-download`, {
         method: 'POST',
@@ -1269,23 +1290,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         body: JSON.stringify({ documentIds: ids }),
       });
 
-      if (response.status === 413) {
-        showToast('Too many documents', 'Maximum 500 documents per bulk download.', 'error');
-        return;
-      }
-
       if (!response.ok) {
-        // Surface BFF ProblemDetails 4xx (404 "no accessible documents", 403, 401).
-        const detail =
-          response.status === 404
-            ? 'No accessible documents in the current selection.'
-            : `Download failed (${response.status}).`;
-        showToast('Download failed', detail, 'error', TOAST_DEFAULT_MS, {
-          label: 'Retry',
-          onClick: () => {
-            void handleBulkDownload();
-          },
-        });
+        showBulkDownloadFailure(bulkDownloadFailureForStatus(response.status));
         return;
       }
 
@@ -1311,6 +1317,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         'success'
       );
     } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — the 413 / 404 / other-status copy above is
+      // reached from here in production.
+      const failure = bulkDownloadFailureForThrown(err);
+      if (failure) {
+        showBulkDownloadFailure(failure);
+        return;
+      }
       // Network or other unrecoverable error — show a retry toast.
       const message = err instanceof Error ? err.message : 'Unknown error';
       showToast('Download failed', message, 'error', TOAST_DEFAULT_MS, {
@@ -1842,7 +1855,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.83 • Built 2026-08-26</Text>
+        <Text size={100}>v1.1.84 • Built 2026-10-09</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1893,7 +1906,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           full result set and the user had to prune in step 1; the
           bulk-toolbar Email button is now gated on `selectedIds.size
           > 0` so launching with zero selection is impossible.
-          v1.1.63 — `maxWidth='1280px'` + `height='85vh'` mirror the
+          `size="lg"` (1280px / 85vh) mirrors the
           FilePreviewDialog so the wizard footprint matches when
           stacked over an open preview (Item 3 + Item 2 combine: the
           preview stays open behind the wizard for both row-menu and
@@ -1918,15 +1931,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
-        // v1.1.63 — match the FilePreviewDialog footprint so the wizard
-        // doesn't feel mismatched when stacked over an open preview.
-        // FilePreviewDialog uses maxWidth='1280px' height='85vh' (see
-        // SemanticSearchControl/components/FilePreviewDialog.tsx
-        // styles.surface). Mirroring those values here removes the
-        // visual size jump UAT flagged when the wizard launches with
-        // the preview still open.
-        maxWidth="1280px"
-        height="85vh"
+        // Named `lg` size (1280px / 85vh) matches the FilePreviewDialog footprint so the wizard
+        // doesn't jump in size when stacked over an open preview (ontology task 111).
+        size="lg"
       />
 
       {/* Toaster — single instance per PCF surface (FR-DOC-02 bulk-action
