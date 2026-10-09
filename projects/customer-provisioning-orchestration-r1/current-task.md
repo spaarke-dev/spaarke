@@ -1,70 +1,70 @@
 # Current Task State — `customer-provisioning-orchestration-r1`
 
-> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
+> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas". Decisions → `notes/decisions.md`. Session narrative → commit messages. History: git + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-09 SESSION 45 — parallel waves (owner: "get through this project"). Wave 1 merged: T253, T256, T206, T207, 204e, punch list 203b/204a/204f/204g; T208 + T209 done; T250 superseded. Wave 2 running: T258 + T255 (background agents).
+> **Last Updated**: 2026-10-09 SESSION 45 end (context-handoff before /compact). Two parallel waves done and on the branch; **PR #1502 open, every check green (44 pass / 3 skip, CLEAN) — waiting for the owner's OK to merge.** Board: 214 of 228 tasks ✅.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Wave 2** — agents running in isolated worktrees: **T258** (stamp BFF startup settings, 204e F5–F8; T186 blocker) and **T255** (workforce tenant list + H3 `acct`; INCOMING-141). Main session merges each as it reports. |
-| **Step** | Wave 1 all merged + verified on the branch (solution build 0 errors / 0 warnings in touched projects; ControlPlane 2423/2424; ArchTests 888; LoadTests 5/5; recipe Pester 39/39; validate.ps1 OK; catalog -Verify OK). Applied every agent-proposed `.claude/` edit (provisioning.md: H7b + no-shell-Worker sections, handler count 21, DAG; bff-extensions §F.5; provision-environment skill: Step 0.5b `Invoke-PrereqPass`, NEW Step 1e-ter customer pass, H7b dry-run intake; manifest-driven-secret-catalog pattern). Follow-ups done here: PRQ-T-05/T-06 retired; bash-resolution bug (WSL stub in WindowsApps) fixed; H9 dead Deploy-Release.ps1 scan removed; CA2024 fixed. Filed: ISS-008 #1484 (run guard off), ISS-009 #1485 (E11 bind-by-email), ISS-010 #1486 (guests in root BU read secure records), ISS-011 #1487 (BFF gate asymmetries). |
-| **Status** | in-progress — waiting for T258 + T255 agent reports (notifications arrive automatically; do NOT relaunch). |
-| **Next Action** | For each report: `git merge <agent-branch>`; resolve (both touch manifest.yaml + generated/); apply proposed `.claude/` edits; build + ControlPlane + ArchTests (WITH build — `--no-build` ran a stale ArchTests dll twice) + LoadTests + `Invoke-CatalogGenerator.ps1 -Verify` + validate.ps1; mark POML/TASK-INDEX; commit + push. Then: PR to master (its CI runs the new router `prereqs` job). Owner-blocked: T240b re-test → T240c; T240d + T257 design notes (review); ISS-010 placement decision (customer BU — recommend H10); ISS-008 live step (run guard); T242c / T252 live. Then T186. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed; 0 behind master; carries the 218f close-out + checkpoints not yet on master (next PR). |
-| **Main repo** | `C:\code_files\spaarke` master NOT fast-forwarded (still `b0a78f880`): another session's uncommitted researcher-memory edits (`.claude/agent-memory/researcher/MEMORY.md` + 2 files) block it. Left untouched — the owner decides. |
-| **Order** | T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
+| **Task** | **Merge PR #1502** (owner OK needed) → owner-blocked items → **T186** (first live E2E on a NEW environment). |
+| **Status** | waiting on the owner. No agents or background jobs running. |
+| **Next Action** | (1) On owner OK: `gh pr checks 1502` — every check terminal + green (CI head `0e14cc113`); master was 1 commit ahead, trial merge clean → `gh pr merge 1502 --merge`; verify master: grep BFF `.ForApp(` = 31, `dotnet test tests/Spaarke.ArchTests` (build it — ArchTests is not in Spaarke.sln). (2) Push the local checkpoint commit(s) (see Branch). (3) Work the owner decisions below as they arrive. |
+| **Branch** | `work/customer-provisioning-orchestration-r1`. Remote head `0e14cc113` (= PR #1502 head). **This checkpoint is committed LOCALLY only — not pushed, so PR CI is not restarted. Push it after #1502 merges** (or with the next change). |
+| **Main repo** | `C:\code_files\spaarke` master not fast-forwarded: another session's uncommitted researcher-memory edits block it. Leave them; the owner decides. |
 
-### Files changed this session (all committed and pushed)
-- Package: `src/dataverse/solutions/SpaarkeMaster/**` (1.2.0.0 export), `docs/data-model/package-scope.json`, `docs/data-model/spaarke-components-inventory.json`.
-- Scripts: `scripts/solution-authoring/{SpaarkePackageScope.psm1, Assemble-…, Export-…, Import-SpaarkeMasterPackage.ps1 (new)}`, `scripts/Deploy-Release.ps1`, `scripts/Provision-Customer.ps1`, `scripts/Load-DemoSampleData.ps1`; `scripts/Deploy-DataverseSolutions.ps1` deleted; `config/environments.json` (`solutionPackageType`).
-- CI: `.github/workflows/publish-dataverse-solutions-manifest.yml` (rewritten). Infra: `infrastructure/bicep/modules/controlplane-app-service.bicep` (+ JSON).
-- Tests: `tests/scripts/SpaarkePackageScope.Tests.ps1` (39), ControlPlane `H11DefaultGuestRolePackagedTests`, parser fixture `Fixtures/spaarkemaster-manifest.sample.json`.
-- Governance/docs: ADR-028 A6, ADR-027 MUSTs, skills `provision-environment` + `deploy-new-release`, constraints `provisioning.md`, CHANGELOG, many docs (T235 sweep, RAG guidance).
+## ✅ Completed this session (all on the branch, verified)
 
-### Critical context
-- **The store** (`sprkcpartifactsdev/provisioning-artifacts`): `dataverse-solutions-latest.json` → SpaarkeMaster 1.2.0.0 (managed + unmanaged, SHA-256); `latest.previous` = the hand-made 2026-08-21 manifest (rollback pointer). H6 and `Import-SpaarkeMasterPackage.ps1` now accept it.
-- **Demo:** SpaarkeMaster 1.0.0.0 **unmanaged** + hand-installed dev-team solutions → `solutionPackageType` unmanaged (switch = rebuild, owner decision). Dev: `none` (authoring).
+- **T253** the L2 Worker runs no shell tool: H4b via ARM SDK (both slots, merge, parity test); H6 org settings via Dataverse Web API, no application installer (PRQ-C-07 retired); H12a/H12b embedded manifests; ArchTest bans `Process.Start` in L2.
+- **T256** H7b Secure Record setup (unit, owner team, Secure Record Owner role in the unit; `sprk_noaccessentry` gate before H9; dry run `secureRecordSetupDryRun`) **+ identity-link profile memberships** (Readers ← default teams; Writers ← H10's two BFF app users).
+- **T258** stamp BFF startup settings (PublicConfig:*, Graph:Scopes, ServiceBus:QueueName via H4b; Onboarding consent callback gated off → 404).
+- **T255 (code)** customer workforce tenant list for every model + H3 `acct` claim; new required L2 setting `ReservedTenants__*` / Bicep `ciamTenantIds`; package rule now includes alternate keys on standard tables.
+- **T206/T207** every prereq recipe exits 1 on failure; skill Step 0.5b `Invoke-PrereqPass`; **new Step 1e-ter** runs the 18 `once_per_customer` checks; PRQ-T-05/T-06 retired.
+- **T208** prereqs validator gates merges via router job `prereqs` (standalone workflow deleted). **T209** done (ruleset 21824191). **T250** superseded (master `bb8ba7251`). **204e** ADR-032 + IOptions-drift ArchTests. Punch list 203b/204a/204f/204g closed.
+- Fixes: H9 dead Deploy-Release scan removed; CA2024; bicep dry-run uses the dev .bicepparam; tier2 Markdown timeout 2→5 min.
+- Branch verification: build 0 errors / 0 warnings; ControlPlane 2532/2533; ArchTests 889; LoadTests 5/5; recipe Pester 39/39; catalog `-Verify` OK; validate.ps1 OK (41 prereqs); BFF publish 38,110,809 B (+218 B vs master).
+- Design notes written for owner review: `notes/t257-copilot-agent-design.md`, `notes/t240d-ciam-external-contacts-design.md`.
 
-## Owner items
+## 🔔 Owner decisions / live actions waiting (each needs an explicit OK)
 
-1. **Done 2026-10-08:** PR #1365 merged; first SpaarkeMaster publish; #1446 FIC deleted.
-4. **T240b live re-test** with add-in package 1.1.2 (owner, test tenant Dewey Cheatham `deweycheatham.onmicrosoft.com`; guest `ralph@deweycheatham.onmicrosoft.com`; Diagnostics view should show `acct` 1).
-5. **G36** (ADR-027 management group), **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
-6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
-7. Relay handed to the owner 2026-10-08: `notes/coordination/2026-10-08-to-uac-r2-2.md` (Secure Record Owner stays contained; H7b creates it — UAC-r2's design is right).
+1. **Merge PR #1502.**
+2. **SpaarkeMaster re-export** with the contact alternate key `sprk_ExternalObjectIdUniqueKey` (Assemble → Export from spaarkedev1, then CI publish `publish-dataverse-solutions-manifest.yml` publish=true). Unblocks T255's last item; then remove the `KeyAwaitingExport` pin in `ContactIdentityBindingSchemaPackagedTests`. Without it every external-contact create fails on a new stamp.
+3. **ISS-010 / #1486** (T186 blocker): guests in the root BU read every secure record. Decide the customer business unit placement (recommend H10 creates the unit + app users in it; H11 creates guests in it; H13 runs the isolation census) + one intake value (customer display name). Then build it.
+4. **ISS-008 / #1484**: run guard off — make the L2 UAMI an Application User on the admin environment (`Grant-ControlPlaneIdentity.ps1`), set `customerRunGuardEnabled=true` in the dev bicepparam, redeploy.
+5. **Control-plane redeploy** with `ReservedTenants__*` (`ciamTenantIds` in the bicepparam) — `Deploy-ControlPlane.ps1` refuses the new code without it.
+6. **T240d** design note review (+ spike S1 approval, CIAM-tenant one-time actions, `User.Create` sign-off).
+7. **T257** design note review (7 questions, recommended answers in §4).
+8. **T240b** owner re-test (add-in 1.1.2, Dewey Cheatham guest; Diagnostics shows `acct` 1) → unblocks **T240c**.
+9. **T242c** demo BFF refresh and **T252** control-plane vault sentinels — live, OK per action.
+10. Dewey Cheatham's tenant id (T186 intake `customerWorkforceTenantIds`); the SPE container type id for the T186 stamp.
+11. Still open from before: G36 (management group), G31 (H10 tenant-wide roles) — do NOT act; board Status/Reason mismatch on #438.
 
-## Cross-project deliveries (track until delivered)
+## 📋 Remaining tasks (TASK-INDEX)
 
-- **UAC-r2**: answers owed on #1364 (`sprk_noaccessentry` — now ships in SpaarkeMaster 1.2.0.0; re-export if its schema changes) and the 2026-10-08 Secure Record Owner note; #1363 fix.
-- **word-add-in-r1**: first production deploy to `addins.spaarke.com` waits for our T240c (their task 114).
-- **external-access-r3**: owes its Teams client app id and the T240d CIAM design session.
+- **Open, owner-gated:** 240b, 240c, 240d, 257, 242c, 252, 255 (export only).
+- **Blocked:** 186 (first live E2E — needs items 2–5 + 10 above and ISS-010 built), 162, 089, 212, 213 (historical gates folded into 186).
+- **Post-186:** 203d. **Wrap-up:** 090 (`/test-diet`, lessons learned, archive).
+- **To build after decisions:** ISS-010 customer BU (new task), T240c directory endpoint, T240d per the accepted design, T257 per the accepted design.
+
+## 🐞 Filed defects (open)
+
+#1484 ISS-008 run guard · #1485 ISS-009 E11 bind-by-email (UAC-r2; before CIAM on stamps) · #1486 ISS-010 guests/secure records (before T186) · #1487 ISS-011 BFF gate asymmetries (latent) · #1499 ISS-012 Graph:Scopes unread (owner: drop validator?) · #1500 ISS-013 consent callback (Model 2) · #1504 office server tests near 20-min cap (word-add-in-r1) · #1432 ISS-006 RAG Dedicated · #1376 ISS-003 · #1377 ISS-004.
+
+## Cross-project
+
+- **UAC-r2**: #1364 confirmation (H7b implements the check); E11 fix (#1485); open question — Model 1 sign-in authority: if clients sign customer staff in through Spaarke's tenant, `tid` = Spaarke and the T255 member test denies them (coordinate with external-access-r3). `Set-ContactIdentityBindingSchema.ps1` still defaults to `SpaarkeCore` (theirs).
+- **word-add-in-r1**: first prod deploy waits for T240c; #1504 is theirs.
+- **external-access-r3**: T240d design (link carries only the customer key; no BFF URL in links); Teams client app id.
+
+## T186 (first live E2E) — plan
+
+- Mock customer homed in Dewey Cheatham (paid M365 Business); stamp in Spaarke's tenant (own subscription, Dataverse env `spaarke-{customerId}`, BFF app reg, `sprk-{customerId}-users`). Run 2 (later) adds a second customer tenant for isolation (ISS-003/004).
+- Live checks to watch: H4b ARM write both slots + `/healthz`; H6 org PATCH (`maxuploadfilesize` 25600000) + import with no MissingDependency; H7b dry run then apply; H12a/H12b embedded manifests; stamp BFF starts with no hand-set settings, `GET /api/config` correct, consent callback 404; jobs on `sdap-jobs`; keyless proofs `proved`; H3 `acct` on registration + token; H4b workforce list + stale removal, T7 passes; earlier lists (T228 H5 WhoAmI, T218b async import, T227 PATCHes, T251 group name, T240a client access + CORS).
+- H12a seeds 4 of 12 artifacts (playbooks + consumers pending — task 150).
 
 ## Live state
 
-- Dev control plane (`rg-spaarke-platform-dev`, sub `484bc857…`): Bicep `s44b` Succeeded; Worker + Api deployed from `35c20287c`, healthy; Api staging slot now carries the same settings as production (fixed `21b96bf1e`).
-- Prod client sites (`rg-spaarke-shared-prod`): `addins.spaarke.com`, `external.spaarke.com` — Ready, empty.
-- Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master. Dev BFF MI holds application `full` on the Model 1 container type (owner option A).
-- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → closes with 218f), #1432 (ISS-006 RAG `Dedicated` dead mode — BFF), #1446 (ISS-007 PR OIDC subject).
-
-## Open items (no task yet)
-
-- `RoutingConsumerTypeHealthCheck FAILED: AI catalog drift` on the dev BFF — reported, no outcome recorded.
-- BFF MI lacks `SecurityEvents.Read.All` (§6B Security tab). No alert on `failed_open_auth` (Prompt Shield).
-- Dev Redis memory trend — recheck `performanceCounters | where name has 'Private Bytes'` on `spe-insights-dev-67e2xz`.
-- Latent: the BFF does not boot without `AzureOpenAI:Endpoint` + `ChatModelName`; stamps always set both.
-- `sprk_tenancymodel` local option-set description still has pre-D-12 text (Web API cannot update it; cosmetic).
-
-## T186 (first live E2E) — open questions + live checks
-
-- Target customer (owner 2026-10-09): run 1 is a MOCK customer whose home tenant is Dewey Cheatham (`deweycheatham.onmicrosoft.com`, paid M365 Business — not a trial); its users are B2B guests from there. The stamp itself (subscription, Dataverse environment `spaarke-{customerId}`, BFF app registration, `sprk-{customerId}-users`) is in Spaarke's tenant; container type id still needed. A second customer tenant is created only for run 2 (cross-customer isolation: ISS-003 #1376, ISS-004 #1377, T255's per-stamp tenant list). Do NOT use `runs/trial1-intake.json`.
-- H12a seeds 4 of 12 artifacts (playbooks + consumers pending — task 150).
-- Live checks: (T228) H5 WhoAmI as the Worker; H1 RG listing under Owner; H6 sign-in right after H10. (T218b) async import + poll against a real environment; managed import over a fresh environment. (T227e/g/d) env-var definitions read; marker PATCHes; `businessunit.sprk_containerid` PATCH. (T251) W1 group Name vs DisplayName. (T230b) keyless proof all `proved`, E-2 measurement. (T240a) H3 client-access PATCH + adoption check; stamp BFF CORS literals.
-
-## Notes for later tasks
-
-- T250 likely superseded by master `bb8ba7251` (SPE Admin as the BFF MI) — raise with the owner when reached.
-- T242c re-scope per D27 (demo = next env; `rg-spaarke-demo` has no AI Search; demo lacks `AiSafety__ContentSafety__Endpoint`).
-- T241: shared tier's leftovers; owner decision first on `spaarke-model1-prod` (holds SpaarkeMaster 1.0.0.0 managed — never upgrade it; components dropped from the package would be deleted).
-- Parked: T246 a–f, T247 (a)–(c) (pin refresh before ~2027-01-14), T244, G34, T252.
+- Store `sprkcpartifactsdev/provisioning-artifacts`: SpaarkeMaster **1.2.0.0** published (managed + unmanaged, SHA-256); `latest.previous` = hand-made 2026-08-21 manifest. Demo holds 1.0.0.0 unmanaged.
+- Dev control plane (`rg-spaarke-platform-dev`): deployed from `35c20287c` — does NOT yet carry this branch's L2 code (needs item 5).
+- Dev BFF `spaarke-bff-dev` (rg-spaarke-dev): hand-set `Graph__Scopes__0`, `ServiceBus__QueueName`, `PublicConfig__*`, `Onboarding__EnableDevBypass`; deploy only from master.

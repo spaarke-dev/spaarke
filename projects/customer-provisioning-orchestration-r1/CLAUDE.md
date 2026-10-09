@@ -199,6 +199,18 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
   - index-race recovery: `git reset --soft`, then a tagged `git stash push --keep-index -m <tag>`.
 - Never bare `git stash`, never stage `.husky/_/*`, never `--no-verify`. A fresh worktree needs a root `npm install` before the pre-commit hook works.
 - The pre-commit hook skips lint-staged on a merge commit. After resolving conflicts by hand, run `dotnet format <csproj> --include <files>` on those files. Its LF→CRLF "WHITESPACE/ENDOFLINE" reports are line endings only; check with `git diff --ignore-cr-at-eol` (2026-10-07).
+- Parallel lanes run as `Agent` with `isolation: worktree` (own branch; merge each into the work branch as it reports). The worktree is often cut from MASTER: the prompt must say "first `git fetch origin` + `git reset --hard origin/work/customer-provisioning-orchestration-r1`" — so push the work branch before dispatching. Agents cannot write `.claude/**`: they return proposed edits verbatim; the main session applies them (2026-10-09).
+- Assign ISS-numbers in the main session: parallel agents numbered two different defects ISS-008, and one filed open issues under "## Resolved" (2026-10-09).
+- `Spaarke.sln` does NOT contain `tests/Spaarke.ArchTests`: `dotnet test tests/Spaarke.ArchTests --no-build` after a solution build ran a stale dll twice (841 instead of 855/888). Always run ArchTests with a build (2026-10-09).
+- This session cannot write to the root of `C:\` ("Operation not permitted"); put scratch output in the scratchpad (2026-10-09).
+
+**CI (2026-10-09)**
+- Check names that read CANCELLED are often job timeouts, not cancellation: tier2 Markdown Link Validator (2-min cap < ~2m15s; raised to 5) and Office Add-ins "Server tests (office scope)" (11–20 min vs a 20-min cap whose owners say narrow the filter, never raise — #1504). Read the job log before re-running.
+- The Markdown validator scans all 604 governed .md files (204 pre-existing broken links on master); judge a PR by broken links in files it changed or targets it deleted.
+
+**Shell (2026-10-09)**
+- Windows `bash` on PATH can be the WSL stub in `%LOCALAPPDATA%\Microsoft\WindowsApps` (not only System32): "no installed distributions". Resolve Git for Windows' bash from `(Get-Command git).Source` → `..\..\bin\bash.exe` (the skill's Step 0.5b does).
+- A PowerShell command containing `"..."` with `$(...)` or `)` inside `-replace`/expressions can fail to parse as a whole (nothing runs). Check `git status` after such a command before assuming a commit happened.
 
 ## 7. Key documents
 
