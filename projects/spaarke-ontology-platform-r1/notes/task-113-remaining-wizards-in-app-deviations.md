@@ -23,15 +23,16 @@ In-app the parent-document `dialogCloseIconButton` click and `window.close()` ne
 
 ## D4 — Known limits (K-class)
 
+- **K**: the layout code page resolves `@spaarke/ui-components` through the package `dist` (no vite alias): build `Spaarke.UI.Components` before `vite build` there.
 - **K**: Find Similar's record lookup (`lookupObjects`) and its follow-on Relationship Viewer (`sprk_documentrelationshipviewer`, a non-wizard dialog, out of scope) still open platform surfaces.
 - **K**: `makeStyles` in `FindSimilarCodePage/App.tsx` uses the unsupported shorthand `borderColor` (Griffel warns in dev; pre-existing).
 
 ## D5 — Defects found, not caused by this task (reported)
 
-- **Fixed in the PR after review (no parking):** #1479 (`FindSimilarApp` ignored `documentId` / `containerId`; now read in both hosts via `launchParams.ts`, `containerId` carried but unused); the shared launch helper now logs non-cancel `navigateTo` failures with the surface name; `codePageMains.test.tsx` tests the Create Work Assignment and Find Similar `main.tsx` entry points directly.
-- Pre-existing failures on master (same on a clean baseline): `buildDynamicWorkspaceConfig` case (h) (#1345); `WorkspaceLayoutWizard` rowHeight / sectionInstanceAdvanced (14 tests); AI.Widgets `ContextWidgetAdapter` and `register-workspace-widgets`; `DocumentUploadWizard` jest config cannot resolve `@spaarke/ui-components`.
+- **Fixed in the PR after review (no parking), incl. the independent review (F1 barrel import so the layout code page builds, F2 token class, K1 real document name, K2 honest widget states via `failed` / `busy` outcome flags, K3 no `__dialogResult` in-app, K4 hostless refetch + launch-mechanism doc):** #1479 (`FindSimilarApp` ignored `documentId` / `containerId`; now read in both hosts via `launchParams.ts`, `containerId` carried but unused); the shared launch helper now logs non-cancel `navigateTo` failures with the surface name; `codePageMains.test.tsx` tests the Create Work Assignment and Find Similar `main.tsx` entry points directly.
+- Pre-existing failures on master (same on a clean baseline): `buildDynamicWorkspaceConfig` case (h) (#1345); AI.Widgets `ContextWidgetAdapter` and `register-workspace-widgets`; `DocumentUploadWizard` jest config cannot resolve `@spaarke/ui-components`.
 
 ## Measurements
 
-- **SpaarkeAi bundle** (`npm run build`, clean `.vite`): 5,928,045 bytes on master `65177354f` -> 6,068,818 bytes; **+140,773 bytes (+2.4%)**. The Upload, Find Similar and Layout wizard code is now bundled into the Console (Summarize Files was already in).
+- **SpaarkeAi bundle** (`npm run build`, clean `.vite`): 5,928,045 bytes on master `65177354f` -> 6,068,818 bytes; **+140,773 bytes (+2.4%)** (before the review fixes; re-measured below if changed). The Upload, Find Similar and Layout wizard code is now bundled into the Console (Summarize Files was already in).
 - Not run: the POML `<ui-tests>` (live open of each wizard, dark mode). Task 114 deploys.

@@ -4,7 +4,7 @@
     <title>ISS-017 (#1447): GridOverviewHandler resolves {{today}} as the calling user's day (D-25), own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code change (.cs) in an AI tool handler.</rigor-reason>
     <model-tier>sonnet</model-tier>
