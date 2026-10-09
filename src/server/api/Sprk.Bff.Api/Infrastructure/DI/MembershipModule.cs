@@ -288,7 +288,7 @@ public static class MembershipModule
 
         // Task 085: MembershipReconciliationJob — nightly source-of-truth
         // junction reconciliation (FR-2P2.7). Singleton with
-        // IServiceScopeFactory.CreateScope per ExecuteAsync, like PlaybookSchedulerJob.
+        // IServiceScopeFactory.CreateScope per ExecuteAsync, like the former PlaybookSchedulerJob (removed, D-100).
         services.Configure<MembershipReconciliationOptions>(
             configuration.GetSection(MembershipReconciliationOptions.SectionName));
 

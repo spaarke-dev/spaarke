@@ -104,7 +104,7 @@ public sealed class NotificationService
 
             // TTL in seconds (default: 7 days = 7 * 86400 = 604800).
             // Canonical writable field per Microsoft Learn `appnotification` table reference;
-            // matches CreateNotificationNodeExecutor.cs (R3 task 010 — `ttlindays` was non-existent,
+            // matched the removed CreateNotificationNodeExecutor.cs (D-100) (R3 task 010 — `ttlindays` was non-existent,
             // causing silent fallback to tenant-default 14d TTL).
             entity["ttlinseconds"] = 604800;
 

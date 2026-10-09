@@ -64,11 +64,10 @@ This guide covers what an operator needs to do day-to-day. **You don't need to k
 
 ## Current Job Inventory
 
-Three jobs ship and are seeded automatically at BFF startup:
+Jobs ship and are seeded automatically at BFF startup (the notification playbook scheduler, job id `notification-playbook-scheduler`, was removed on 2026-10-09, D-100, with the notification playbooks; the rows below are the ones that remain here):
 
 | Job ID | Display Name | Default Cron | Default Enabled | Purpose |
 |---|---|---|---|---|
-| `notification-playbook-scheduler` | Notification Playbook Scheduler | `0 * * * *` (every hour at minute 0) | Yes | Fans out every **active** notification-mode (`sprk_playbooktype = 2`) playbook for every active user. **As of 2026-10-09 (D-100) all seven notification playbooks are retired (inactive), so a tick fans out nothing.** Each child playbook gets a fresh correlation id; children are recorded in the parent run's `ResultJson` for tracing. Replaces the legacy `PlaybookSchedulerService`. |
 | `membership-reconciliation` | Membership Junction Reconciliation | `0 2 * * *` (daily at 02:00 UTC) | Yes (`Membership:Reconciliation:Enabled`) | Reconciles the `sprk_userentityassociation` junction table against source-of-truth identity Lookups on configured entities (`sprk_matter`, `sprk_document`, `sprk_event`, `sprk_task`, `sprk_opportunity`). Load-bearing for the 8 Q4 `sprk_assigned*` Lookups on `sprk_matter` because those fields are edited exclusively via maker portal / Power Automate / plugins (not through BFF endpoints), so real-time membership events do not cover them. |
 | `external-grant-expiry-reminders` | External Grant Expiry Reminders | `0 6 * * *` (daily at 06:00 UTC) | Yes | Reminds the internal user who granted an external share (else the record's owner, else its creator) that the grant is about to expire, through the existing `NotificationService`. Added by `unified-access-control-r2` task 100. |
 
@@ -109,17 +108,6 @@ curl -s \
     "lastRunStatus": "Succeeded",
     "nextScheduledOn": "2026-06-23T02:00:00.000+00:00"
   },
-  {
-    "jobId": "notification-playbook-scheduler",
-    "displayName": "Notification Playbook Scheduler",
-    "description": "Periodically executes notification-mode playbooks ...",
-    "enabled": true,
-    "cronSchedule": "0 * * * *",
-    "lastRunStartedOn": "2026-06-22T18:00:00.000+00:00",
-    "lastRunCompletedOn": "2026-06-22T18:00:02.108+00:00",
-    "lastRunStatus": "Succeeded",
-    "nextScheduledOn": "2026-06-22T19:00:00.000+00:00"
-  }
 ]
 ```
 
@@ -141,14 +129,14 @@ Returns the same summary fields **plus the last 10 run records** held by this in
 ```bash
 curl -s \
   -H "Authorization: Bearer {token}" \
-  "https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/status"
+  "https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/status"
 ```
 
 **Expected response (HTTP 200)**:
 
 ```json
 {
-  "jobId": "notification-playbook-scheduler",
+  "jobId": "membership-reconciliation",
   "displayName": "Notification Playbook Scheduler",
   "description": "Periodically executes notification-mode playbooks ...",
   "enabled": true,
@@ -232,7 +220,7 @@ Sets the job's `Enabled` flag in the **in-memory store of the instance that serv
 ```bash
 curl -s -X POST \
   -H "Authorization: Bearer {token}" \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/enable
+  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/enable
 ```
 
 **Expected response (HTTP 204 No Content)**. No body.
@@ -244,7 +232,7 @@ Mirror of `/enable`, with the same single-instance, non-durable scope. Disabled 
 ```bash
 curl -s -X POST \
   -H "Authorization: Bearer {token}" \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/disable
+  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/disable
 ```
 
 **Expected response (HTTP 204 No Content)**.
@@ -265,32 +253,27 @@ curl -s -X POST \
 
 ## Common Operator Scenarios
 
-### Scenario 1: "Last night's daily briefings didn't send"
+### Scenario 1: "A scheduled job's last run failed"
 
-> **2026-10-09 (D-100):** the notification playbooks behind this scenario are retired; Daily Briefing does not use them. The steps below describe the scheduler mechanics only.
+> **2026-10-09 (D-100):** this scenario used to cover the notification playbook scheduler. That job and the notification playbooks were removed; the steps below apply to any remaining job (the examples use `membership-reconciliation`).
 
-The notification playbook scheduler is hourly, but each individual playbook respects its own schedule (on its `sprk_analysisplaybook` row; typically daily at 06:00 UTC for the morning-briefing playbook). If users report a missing briefing, walk through this:
-
-1. **List all jobs** and check the playbook scheduler's last run:
+1. **List all jobs** and check the job's last run:
    ```bash
-   curl -s -H "Authorization: Bearer {token}" \
-     https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs
+   curl -s -H "Authorization: Bearer {token}"      https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs
    ```
-   Look for `notification-playbook-scheduler.lastRunStatus`. If `"Succeeded"`, the scheduler ran but individual playbooks may have been skipped (not due) or failed for some (not all) users. Since ISS-018 (#1452, 2026-10-08) a run is `"Failed"` when any playbook failed for **every** user (or its fan-out threw): its `errorMessage` names the playbook(s), that playbook's `sprk_lastrundate` is not advanced so the next hourly tick retries it, and an Error trace "… failed for every user …" fires the `notification-playbook-total-failure-<env>` alert. If `null`, the instance you reached has restarted since the run — history is not durable.
+   Look at `lastRunStatus`.
 
 2. **Pull recent history**:
    ```bash
-   curl -s -H "Authorization: Bearer {token}" \
-     "https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/history?limit=10"
+   curl -s -H "Authorization: Bearer {token}"      "https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/history?limit=10"
    ```
-   For each run, look at `errorMessage` (top-level failure). The per-child-playbook breakdown (`correlationId`, `failureCount` per playbook) is in the run's `ResultJson`, which the admin endpoints do not return — search the BFF logs by the run's `correlationId`.
+   For each run, look at `errorMessage` (top-level failure). Any per-item breakdown is in the run's `ResultJson`, which the admin endpoints do not return, so search the BFF logs by the run's `correlationId`.
 
 3. **Decide**: was it a transient failure (Dataverse hiccup, Graph throttling) or a logic error?
 
 4. **For transient failures**, trigger manually:
    ```bash
-   curl -s -X POST -H "Authorization: Bearer {token}" \
-     https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/trigger
+   curl -s -X POST -H "Authorization: Bearer {token}"      https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/trigger
    ```
    Poll status until `lastRunStatus = "Succeeded"`.
 
@@ -362,7 +345,7 @@ The framework's configuration surface lives in **code at registration** today, p
 |---|---|---|---|
 | Cron schedule | `sprk_cronschedule` | Text | Standard 5-field cron expression. Examples below. Empty or null = manual-trigger only (no scheduled ticks). |
 | Enabled | `sprk_enabled` | Yes/No | Master enable/disable. Will be toggleable fleet-wide via `POST /api/admin/jobs/{jobId}/enable\|disable`. |
-| Config JSON | `sprk_configjson` | Multiline text | Handler-specific configuration JSON. Each `IScheduledJob` implementation owns its schema. For example, `notification-playbook-scheduler` reads no fields from here (its config lives on each `sprk_analysisplaybook` row); `membership-reconciliation` reads no fields from here either (its config lives in `appsettings.json` under `Membership:Reconciliation` — see below). |
+| Config JSON | `sprk_configjson` | Multiline text | Handler-specific configuration JSON. Each `IScheduledJob` implementation owns its schema. For example, `membership-reconciliation` reads no fields from here either (its config lives in `appsettings.json` under `Membership:Reconciliation` — see below). |
 | Display name | `sprk_displayname` | Text | Updates the value returned in admin endpoints. Cosmetic. |
 | Description | `sprk_description` | Multiline text | Updates the value returned in admin endpoints. Cosmetic. |
 
@@ -471,7 +454,6 @@ In-flight runs that are cancelled return `JobRunResult.Success = false`, `ErrorM
 | Two runs of one scheduled tick | Should not happen (ADR-036 A1 rule 1) | Check that the instances share one Redis (`Redis__Enabled=true`); without Redis the host logs "no distributed lease store is configured" and every instance runs every tick. Otherwise file a bug. |
 | A disabled job ran anyway | `disable` reached one instance; another instance, or a restarted instance, ran it | Expected today — see [Scenario 2](#scenario-2-a-buggy-job-needs-to-be-paused-pending-fix) for a durable stop. |
 | Host shutdown takes longer than 30s | A job is not honoring the `CancellationToken` | Read the BFF logs for "NFR-07 ceiling reached — N job(s) still running" warnings. Identify the slow job by the in-flight count + correlation id. The job's `IScheduledJob.ExecuteAsync` implementation needs to check `CancellationToken.IsCancellationRequested` at every await boundary. |
-| Notification playbooks dispatched for "skipped" playbooks | A playbook's individual schedule said it wasn't due | Children with `status: "Skipped"` in the parent run's `ResultJson` are intentional — the scheduler ran the hourly tick but the individual playbook's `frequency = "daily"` and `lastRun` was less than 24 hours ago. `ResultJson` is not returned by the admin endpoints; check the BFF logs by correlation id. |
 
 ### Verifying the framework is healthy
 
@@ -488,17 +470,17 @@ curl -s -H "Authorization: Bearer {token}" \
 # Expected:
 #   "external-grant-expiry-reminders"
 #   "membership-reconciliation"
-#   "notification-playbook-scheduler"
+#   "membership-reconciliation"
 
 # 3. Trigger and watch — confirm the round-trip works
 RUN=$(curl -s -X POST -H "Authorization: Bearer {token}" \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/trigger \
+  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/trigger \
   | jq -r '.runId')
 echo "Run id: $RUN"
 
 sleep 5
 curl -s -H "Authorization: Bearer {token}" \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/status \
+  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/status \
   | jq '.recentRuns[0]'
 # Expected: status flips from "InProgress" to "Succeeded" within a few seconds
 # (on a multi-instance plan, retry if the poll reaches a different instance)
@@ -513,7 +495,7 @@ curl -s -H "Authorization: Bearer {token}" \
 | Dataverse entities (`sprk_backgroundjob`, `sprk_backgroundjobrun`) | Deployed, **unused** | Pending Dataverse schema deploy | Pending Dataverse schema deploy |
 | `Spaarke.Scheduling` library + `ScheduledJobHost` hosted service | Live on BFF (every instance; one run per tick via the Redis lease; slots guarded) | Pending BFF deploy | Pending BFF deploy |
 | Admin endpoints (`/api/admin/jobs/*`) | Live, `SystemAdmin`-gated, per instance | Pending BFF deploy | Pending BFF deploy |
-| Seeded jobs (`notification-playbook-scheduler`, `membership-reconciliation`, `external-grant-expiry-reminders`) | Seeded at host startup, all enabled | Pending BFF deploy | Pending BFF deploy |
+| Seeded jobs (`membership-reconciliation`, `external-grant-expiry-reminders`) | Seeded at host startup, all enabled | Pending BFF deploy | Pending BFF deploy |
 | Run-history backing store | In-memory (process-local; lost on App Service restart) | In-memory | In-memory |
 
 **About the in-memory store**: `InMemoryBackgroundJobStore` is the only `IBackgroundJobStore` implementation. The framework records every run, but the history is process-local — an App Service recycle wipes it, and each instance holds its own. **No Dataverse-backed store exists yet** (deferred — ADR-036 A1 §6, GitHub issue filed by `unified-access-control-r2` task 102); building it is real work (durable history, fleet-wide enable/disable), not a one-line swap.
@@ -533,7 +515,6 @@ curl -s -H "Authorization: Bearer {token}" \
 - **Migration of the remaining timer `BackgroundService` implementations** — **when next touched** ([ADR-052](../adr/ADR-052-workload-placement.md) §1), held by an ArchTest ratchet; tracked under the future project **`scheduled-jobs-migration`**. Queue-consumer services (`ServiceBusJobProcessor` family) are out of scope — they are ADR-004 work, not schedule-driven.
 - **Cron-expression validator helper in the admin endpoints** — pre-save feedback for operators once cron is tunable in Dataverse.
 - **Slack / Teams notification on job failure** — future hook into the run-completion path so a failed run pings a configured channel.
-- **Per-playbook "Run Now"** — today `POST .../notification-playbook-scheduler/trigger` runs the whole scheduler (every active notification playbook for all users; none today, D-100). A follow-up will optionally accept a `playbookId` in the request body to fan out only one playbook.
 
 ---
 

@@ -81,12 +81,12 @@ Registry: [`NodeExecutorRegistry.cs`](../../src/server/api/Sprk.Bff.Api/Services
 | **`UpdateRecordNodeExecutor`** | **Update Record (22)** | **Writes upstream AI output back onto a Dataverse record via PATCH** | **Yes — the bug node** |
 | `DeliverToIndexNodeExecutor` | Deliver To Index (41) | Queues the document for RAG indexing | Needs doc metadata |
 | `CreateTaskNodeExecutor` | Create Task (20) | Creates a Dataverse task | Self-contained config |
-| `CreateNotificationNodeExecutor` | Create Notification (50) | Creates an in-app notification | Self-contained config |
+| ~~`CreateNotificationNodeExecutor`~~ | Create Notification (50) | Removed 2026-10-09 (D-100); the enum value 50 is retired | n/a |
 | `SendEmailNodeExecutor` | Send Email (21) | Sends email via Graph | Self-contained config |
 | `ConditionNodeExecutor` | Condition (30) | Branch gate (emits `selectedBranch`) | Yes |
 | `DeliverComposite` / `DeliverOutput` | 42 / 40 | Compose/deliver final section output | Yes |
 
-> **Important**: `UpdateRecordNodeExecutor`, `CreateTaskNodeExecutor`, `CreateNotificationNodeExecutor`, and `SendEmailNodeExecutor` **all accept the same Playbook-Builder wrapper config format** and therefore share the Part 4 exposure whenever an upstream **multi-line or quote-bearing** value is templated into their config. Update Record is simply the one profiling hits first.
+> **Important**: `UpdateRecordNodeExecutor`, `CreateTaskNodeExecutor`, and `SendEmailNodeExecutor` (and the removed `CreateNotificationNodeExecutor`) **all accept the same Playbook-Builder wrapper config format** and therefore share the Part 4 exposure whenever an upstream **multi-line or quote-bearing** value is templated into their config. Update Record is simply the one profiling hits first.
 
 ---
 

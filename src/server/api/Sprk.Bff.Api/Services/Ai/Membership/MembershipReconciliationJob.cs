@@ -29,7 +29,7 @@
 //        triple, synthesize a MembershipChangedEvent with mutationType=
 //        Updated and dispatch to IMembershipJunctionUpdater.HandleAsync
 //        (Scoped — resolved via IServiceScopeFactory.CreateScope() per
-//        execution, matching the PlaybookSchedulerJob lifetime pattern).
+//        execution, matching the (since removed, D-100) PlaybookSchedulerJob lifetime pattern).
 //        Updated-mode is intentional: the handler's natural-key probe
 //        (Retrieve → Update OR Create) self-heals both the "missing row"
 //        and "stale role" cases idempotently per FR-2P2.4 — and the unit
@@ -59,7 +59,7 @@
 // operator-deployed. This is the explicit design intent of task 084's
 // IMembershipJunctionUpdater contract.
 //
-// Lifetime pattern (mirrors PlaybookSchedulerJob — task 023):
+// Lifetime pattern (mirrors the former PlaybookSchedulerJob, removed D-100 — task 023):
 //   - This class is registered as Singleton.
 //   - Per-tick work resolves IMembershipJunctionUpdater +
 //     IMembershipFieldDiscoveryService + IGenericEntityService from a
@@ -78,7 +78,7 @@
 //     verified).
 //   - ResultJson = per-entity-type breakdown including: discoveredFields,
 //     parentRowsScanned, verified, added, removed, errors. Mirrors
-//     PlaybookSchedulerJob.SerializeChildren shape so admin UI can render
+//     former PlaybookSchedulerJob.SerializeChildren shape so admin UI can render
 //     uniformly.
 //   - Per-parent-row errors are logged + counted in ResultJson but do
 //     NOT fail the whole run (per POML step 3 — "log + continue").
@@ -175,7 +175,7 @@ public sealed class MembershipReconciliationJob : IScheduledJob
     private const string JunctionAttrRole = "sprk_role";
 
     // Writer options for ResultJson — camelCase + omit-nulls to match the
-    // PlaybookSchedulerJob convention (admin UI surface expects camelCase
+    // former PlaybookSchedulerJob convention (admin UI surface expects camelCase
     // field names; nulls dropped to keep the payload compact).
     private static readonly JsonSerializerOptions JsonWriteOptions = new()
     {
@@ -246,7 +246,7 @@ public sealed class MembershipReconciliationJob : IScheduledJob
                     ResultJson: SerializeResult(perEntityResults));
             }
 
-            // Fresh scope per execution — mirrors PlaybookSchedulerJob pattern
+            // Fresh scope per execution — mirrors the former PlaybookSchedulerJob pattern
             // (Singleton-with-Scoped-deps). All scope-bound services resolved
             // up-front; the recon loop reuses them across all entity types
             // and pages so we do NOT thrash scope construction.

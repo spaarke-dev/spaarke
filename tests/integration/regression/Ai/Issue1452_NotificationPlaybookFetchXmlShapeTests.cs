@@ -6,11 +6,11 @@
 //   (4) `{{item.m_sprk_mattername}}` never resolved — an aliased column is keyed "m.sprk_mattername".
 // These tests run the repo definitions (and, since D-100, an inline legacy-shape fixture) through the production render
 // path and executors, and each pins the old form failing. No test before this executed a real list condition; the one Dataverse simulator split the commas itself.
-// D-100 (task 131): the seven notification playbook definitions were retired and deleted. The engine-level checks below
-// (Condition numeric left, CreateNotification per-item templates, old comma form) now run on LegacyNotificationShape, a
-// small inline definition copied from the retired Tasks Due Soon playbook. They guard CreateNotificationNodeExecutor,
-// ConditionNodeExecutor and FetchXmlShapeValidator, and go with the CreateNotification executor if the owner approves
-// its deletion (task 131 PR inventory).
+// D-100 (task 131): the seven notification playbook definitions and the CreateNotification node executor were removed.
+// The engine-level checks below (Condition numeric left, old comma form) run on LegacyNotificationShape, a small inline
+// definition copied from the retired Tasks Due Soon playbook. They guard ConditionNodeExecutor, the Layer 1 render and
+// FetchXmlShapeValidator. The FR-6 notification payload is covered by CustomDataSchemaConformanceTests (NotificationActionCore).
+
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -308,60 +308,6 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
             result.Success.Should().BeTrue(result.ErrorMessage);
             result.GetData<ConditionResult>()!.Result.Should().Be(expected);
         }
-    }
-
-    // ── (3)+(4) CreateNotification: item templates survive Layer 1 and render per item ───────
-
-    [Fact]
-    public async Task CreateNotification_RendersEachItemsTitleRegardingAndMatterName_AfterLayer1()
-    {
-        var definition = JsonNode.Parse(LegacyNotificationShape)!.AsObject();
-        var create = NodesOf(definition).Single(n => (int?)n["executorType"] == 50);
-        var query = QueryNodesOf(definition).Single();
-        var queryVar = (string)query["outputVariable"]!;
-        var entityName = XDocument.Parse((string)query["configJson"]!["fetchXml"]!).Descendants("entity").First().Attribute("name")!.Value;
-        var recordId = Guid.NewGuid();
-        var matterId = Guid.NewGuid();
-
-        // One query row as QueryDataverseNodeExecutor emits it: every queried attribute, the aliased matter name keyed
-        // "m.sprk_mattername".
-        var item = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { [entityName + "id"] = recordId.ToString() };
-        foreach (var attribute in XDocument.Parse((string)query["configJson"]!["fetchXml"]!).Descendants("entity").First().Elements("attribute"))
-        {
-            item[attribute.Attribute("name")!.Value] = "v-" + attribute.Attribute("name")!.Value;
-        }
-
-        item[entityName + "id"] = recordId.ToString();
-        item[entityName == "sprk_document" ? "sprk_matter" : "sprk_regardingmatter"] = matterId.ToString();
-        item["ownerid"] = UserId.ToString();
-        item["m.sprk_mattername"] = "Acme v. Beta";
-        var outputs = new Dictionary<string, NodeOutput>
-        {
-            ["myMatters"] = NodeOutput.Ok(Guid.NewGuid(), "myMatters", new { ids = new[] { matterId.ToString() }, count = 1, byRole = new Dictionary<string, string[]>() }),
-            [queryVar] = NodeOutput.Ok(Guid.NewGuid(), queryVar, new { count = 1, items = new[] { item } }),
-        };
-
-        var layer1 = PlaybookOrchestrationService.RenderConfigJsonStructurally(
-            create["configJson"]!.ToJsonString(), Layer1Context(outputs), Engine, ExecutorType.CreateNotification);
-        var renderedItemConfig = JsonNode.Parse(layer1)!["itemNotification"]!;
-        ((string)renderedItemConfig["regardingId"]!).Should().Contain("{{item.", "Layer 1 leaves executor-scoped templates for the per-item loop");
-
-        var entities = new Mock<IGenericEntityService>();
-        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>())).ReturnsAsync(new EntityCollection());
-        var created = new List<Entity>();
-        entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => created.Add(e)).ReturnsAsync(Guid.NewGuid());
-        var executor = new CreateNotificationNodeExecutor(Engine, entities.Object, NullLogger<CreateNotificationNodeExecutor>.Instance);
-
-        var result = await executor.ExecuteAsync(
-            NodeContext("Create Notification", layer1, ExecutorType.CreateNotification, outputs), CancellationToken.None);
-
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        var notification = created.Should().ContainSingle().Subject;
-        notification.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(UserId);
-        notification.GetAttributeValue<string>("title").Should().Contain("v-", "the per-item title rendered from the item");
-        notification.GetAttributeValue<string>("sprk_regardingid").Should().Be(recordId.ToString());
-        notification.GetAttributeValue<string>("data").Should().Contain("Acme v. Beta", "viaMatter.name reads the aliased column");
     }
 
     [Fact]

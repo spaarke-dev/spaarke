@@ -123,11 +123,11 @@ public sealed record HighPriorityCollection(HighPriorityItemDto[] Items, string[
 /// </remarks>
 public class DailyBriefingCollector : ICodedWorkflow
 {
-    // sprk_event type GUIDs (consistent with deployed notification playbooks).
+    // sprk_event type GUIDs (the notification playbooks that used these GUIDs were retired, D-100).
     // Source of truth: sprk_eventtype_ref records in spaarkedev1.
     private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
 
-    // sprk_event statuscode values (consistent with deployed notification playbooks).
+    // sprk_event statuscode values (the notification playbooks that used these values were retired, D-100).
     private const int EventStatusOpen = Spaarke.Dataverse.EventStatusCode.Open; // task 097 review F8: the one source of truth
 
     // sprk_todo statuscode values per docs/data-model schema (Open=1, In Progress=659490001).

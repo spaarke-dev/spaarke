@@ -314,7 +314,7 @@ public sealed class OutputRouter : IOutputRouter
 
             // Notification (FR-14, task 033): create the durable appnotification via the Layer-A seam
             // (IActionSeam.CreateNotificationAsync, task 031) — the SAME code path
-            // CreateNotificationNodeExecutor uses, now reachable from the dispatch/router surface. The
+            // the (since removed, D-100) CreateNotificationNodeExecutor used, now reachable from the dispatch/router surface. The
             // capability supplies presentation IN the stored payload (a `notification` object:
             // title/body/recipientId + optional category/priority/toastType/actionUrl/regarding — see
             // CreateNotificationViaSeamAsync); the router supplies storage-then-creation. Storage already

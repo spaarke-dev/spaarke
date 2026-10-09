@@ -229,8 +229,8 @@ public class WorkloadPlacementGuardTests
         var jobs = Types.InAssembly(assembly).That().ImplementInterface(typeof(IScheduledJob)).GetTypes().ToList();
         Assert.True(
             jobs.Count >= 3,
-            $"Found {jobs.Count} IScheduledJob implementations in the BFF — expected at least 3 (PlaybookSchedulerJob, " +
-            "MembershipReconciliationJob, GrantExpiryReminderJob), so the rule would pass by selecting nothing. If a job " +
+            $"Found {jobs.Count} IScheduledJob implementations in the BFF — expected at least 3 (MembershipReconciliationJob, " +
+            "GrantExpiryReminderJob, ExternalAccessReconciliationJob), so the rule would pass by selecting nothing. If a job " +
             "was legitimately removed, lower the floor in the same PR.");
 
         var result = Types.InAssembly(assembly)

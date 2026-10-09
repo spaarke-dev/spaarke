@@ -1,606 +1,201 @@
-// R4 Task 028 — customData schema-conformance xUnit fixture
+// R4 Task 028 — customData schema-conformance xUnit fixture (retargeted at NotificationActionCore, D-100 / task 131).
 //
-// Spec FR-6 AC-6a/b/c/d (lines 137-140); FR-10 AC-10 (line 152); FR-11 AC-11 (line 155).
+// Spec FR-6 AC-6a/b/c/d; FR-10 AC-10.
 //
-// Asserts that EVERY one of the 7 redeployed notification playbooks (PB-016..PB-022)
-// produces a customData JSON payload that conforms to the enriched FR-6 schema. Each
-// fixture simulates a playbook's CreateNotification config-param shape; the executor's
-// BuildNotificationEntity path is exercised end-to-end.
-//
-// Why a cross-fixture file rather than per-playbook tests:
-//   - AC-10 explicitly requires "schema-conformance fixture passes for all 7 playbooks"
-//     — a single Theory parametrized over the 7 channels is the natural shape.
-//   - Per-playbook FR-6 invariants (regardingName, source.*, viaMatter.* when applicable,
-//     sprk_category column, <10KB payload) are SAME assertions across all 7 — DRY via
-//     a parameterized fixture matrix.
-//   - Backward-compat case (AC-6b — old-shape config still produces valid output) and
-//     AC-11 (Contact-only member → member_skipped warning) are channel-independent and
-//     are covered as standalone tests below.
-//
-// Per CLAUDE.md §10 BFF Hygiene + test obligation: tests for new BFF behavior land in
-// tests/unit/Sprk.Bff.Api.Tests/. Mock all external boundaries (Dataverse client,
-// ILogger, MembershipResolverService). Assertion messages name the violated AC.
+// This file originally drove the CreateNotification node executor for the seven notification playbooks. Those playbooks
+// and the executor were removed (D-100). The FR-6 payload is still produced by NotificationActionCore.BuildNotificationEntity,
+// which IActionSeam.CreateNotificationAsync (comms-RI, OutputRouter) uses, so the same invariants are asserted against
+// the core directly: enriched fields, backward-compatible legacy shape, the 10 KB payload cap and the sprk_category
+// dual-write. The seven fixture rows are kept as seven representative channel shapes.
 
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Cache;
-using Sprk.Bff.Api.Models.Ai;
-using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.Membership;
-using Sprk.Bff.Api.Services.Ai.Membership.Models;
-using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 
 /// <summary>
-/// Cross-playbook schema-conformance fixture for the FR-6 enriched customData payload
-/// produced by <see cref="CreateNotificationNodeExecutor.BuildNotificationEntity"/>.
+/// Schema-conformance fixture for the FR-6 enriched customData payload produced by
+/// <c>NotificationActionCore.BuildNotificationEntity</c>.
 ///
-/// Covers (per R4 spec):
-///   AC-6a — enriched fields present (regardingName/regardingEntityType/regardingId,
-///           source.{entityType,id,modifiedOn,owningUser}, viaMatter.{id,name,memberships[]})
-///   AC-6b — backward compat: pre-enrichment shape still produces valid notifications
-///   AC-6c — payload <10KB (UTF-8 bytes) across all 7 representative fixtures
-///   AC-6d — sprk_category column dual-write across all 7 fixtures
-///   AC-10 — cross-fixture: all 7 playbooks emit schema-conformant output
-///   AC-11 — Contact-only member triggers structured member_skipped warning
+///   AC-6a: enriched fields present (regardingName/regardingEntityType/regardingId,
+///          source.{entityType,id,modifiedOn,owningUser}, viaMatter.{id,name,memberships[]})
+///   AC-6b: backward compat, the pre-enrichment shape still produces valid notifications
+///   AC-6c: payload under 10KB (UTF-8 bytes) across all representative fixtures
+///   AC-6d: sprk_category column dual-write across all representative fixtures
 /// </summary>
-[Trait("ac", "FR-6/FR-10/FR-11")]
+[Trait("ac", "FR-6/FR-10")]
 [Trait("rigor", "STANDARD")]
 public class CustomDataSchemaConformanceTests
 {
-    // ─────────────────────────────────────────────────────────────────────
-    // Cross-playbook fixture matrix — one InlineData per redeployed playbook.
-    //
-    // Columns (8): playbookCode, category, sourceEntityType, regardingType,
-    //              expectViaMatter, expectSource, expectDueDate, channelLabel
-    //
-    // The 7 redeployed playbooks (per task 026):
-    //   PB-016 New Documents          → sprk_document    + matter linkage
-    //   PB-017 Matter Activity        → sprk_event       + matter linkage
-    //   PB-018 New Emails             → sprk_communication + matter linkage (optional)
-    //   PB-019 New Events             → sprk_event       + matter linkage (optional)
-    //   PB-020 Tasks Due Soon         → sprk_event       + matter linkage + dueDate
-    //   PB-021 Tasks Overdue          → sprk_event       + matter linkage + dueDate
-    //   PB-022 Work Assignments       → sprk_workassignment + matter linkage
-    //
-    // The matter-linkage column controls whether viaMatter is expected; the dueDate
-    // column controls whether the dueDate scalar is supplied + expected on customData.
-    // ─────────────────────────────────────────────────────────────────────
-
-    public static IEnumerable<object[]> SevenPlaybookFixtures => new[]
+    // Columns: fixtureCode, category, sourceEntityType, regardingType, expectDueDate, channelLabel
+    public static IEnumerable<object[]> ChannelFixtures => new[]
     {
-        new object[] { "PB-016", "new-documents",       "sprk_document",       "sprk_matter", true,  true,  false, "New Documents" },
-        new object[] { "PB-017", "matter-activity",     "sprk_event",          "sprk_matter", true,  true,  false, "Matter Activity" },
-        new object[] { "PB-018", "new-emails",          "sprk_communication",  "sprk_matter", true,  true,  false, "New Emails" },
-        new object[] { "PB-019", "new-events",          "sprk_event",          "sprk_matter", true,  true,  false, "New Events" },
-        new object[] { "PB-020", "tasks-due-soon",      "sprk_event",          "sprk_matter", true,  true,  true,  "Tasks Due Soon" },
-        new object[] { "PB-021", "tasks-overdue",       "sprk_event",          "sprk_matter", true,  true,  true,  "Tasks Overdue" },
-        new object[] { "PB-022", "work-assignments",    "sprk_workassignment", "sprk_matter", true,  true,  false, "Work Assignments" },
+        new object[] { "CH-1", "new-documents",    "sprk_document",       "sprk_matter", false, "New Documents" },
+        new object[] { "CH-2", "matter-activity",  "sprk_event",          "sprk_matter", false, "Matter Activity" },
+        new object[] { "CH-3", "new-emails",       "sprk_communication",  "sprk_matter", false, "New Emails" },
+        new object[] { "CH-4", "new-events",       "sprk_event",          "sprk_matter", false, "New Events" },
+        new object[] { "CH-5", "tasks-due-soon",   "sprk_event",          "sprk_matter", true,  "Tasks Due Soon" },
+        new object[] { "CH-6", "tasks-overdue",    "sprk_event",          "sprk_matter", true,  "Tasks Overdue" },
+        new object[] { "CH-7", "work-assignments", "sprk_workassignment", "sprk_matter", false, "Work Assignments" },
     };
 
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-6a + AC-10 — every playbook fixture produces the enriched FR-6 schema.
-    // ─────────────────────────────────────────────────────────────────────
-
     [Theory]
-    [MemberData(nameof(SevenPlaybookFixtures))]
-    public async Task AllSevenPlaybookFixtures_EmitFR6Schema(
-        string playbookCode,
-        string category,
-        string sourceEntityType,
-        string regardingType,
-        bool expectViaMatter,
-        bool expectSource,
-        bool expectDueDate,
-        string channelLabel)
+    [MemberData(nameof(ChannelFixtures))]
+    public async Task AllChannelFixtures_EmitFR6Schema(
+        string code, string category, string sourceEntityType, string regardingType, bool expectDueDate, string channelLabel)
     {
-        // Arrange — synthesize the CreateNotification config-param payload a real playbook
-        // would build at execution time (post-template rendering).
-        var (executor, entityServiceMock, _) = BuildExecutor();
         var matterId = Guid.NewGuid();
         var sourceRecordId = Guid.NewGuid();
-        var recipientId = Guid.NewGuid();
-        var owningUserId = Guid.NewGuid();
-        var config = BuildPlaybookConfigJson(
-            category: category,
-            sourceEntityType: sourceEntityType,
-            regardingType: regardingType,
-            channelLabel: channelLabel,
-            matterId: matterId,
-            sourceRecordId: sourceRecordId,
-            recipientId: recipientId,
-            owningUserId: owningUserId,
-            withMatterLinkage: expectViaMatter,
-            withDueDate: expectDueDate);
+        var input = EnrichedInput(category, sourceEntityType, regardingType, channelLabel, matterId, sourceRecordId, expectDueDate, ["owner"]);
 
-        var context = CreateValidContext(config) with
-        {
-            PreviousOutputs = new Dictionary<string, NodeOutput>
-            {
-                ["myMatters"] = BuildLookupMembershipOutput(matterId, "owner")
-            }
-        };
+        var captured = await CreateAsync(input);
 
-        Entity? captured = null;
-        entityServiceMock
-            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(Guid.NewGuid());
+        var customData = ExtractCustomData(captured);
+        customData.GetProperty("regardingName").GetString().Should().NotBeNullOrEmpty($"AC-6a/{code}: regardingName");
+        customData.GetProperty("regardingEntityType").GetString().Should().Be(regardingType, $"AC-6a/{code}");
+        customData.GetProperty("regardingId").GetString().Should().NotBeNullOrEmpty($"AC-6a/{code}");
 
-        // Act
-        var result = await executor.ExecuteAsync(context, CancellationToken.None);
+        var source = customData.GetProperty("source");
+        source.GetProperty("entityType").GetString().Should().Be(sourceEntityType, $"AC-6a/{code}");
+        source.GetProperty("id").GetString().Should().Be(sourceRecordId.ToString(), $"AC-6a/{code}");
+        source.TryGetProperty("modifiedOn", out _).Should().BeTrue($"AC-6a/{code}: source.modifiedOn");
+        source.TryGetProperty("owningUser", out _).Should().BeTrue($"AC-6a/{code}: source.owningUser");
 
-        // Assert — node ran cleanly + emitted an appnotification Entity
-        result.Success.Should().BeTrue($"playbook {playbookCode} fixture must complete the executor pipeline");
-        captured.Should().NotBeNull(
-            $"AC-6a/{playbookCode}: BuildNotificationEntity MUST run and produce an Entity");
+        var viaMatter = customData.GetProperty("viaMatter");
+        viaMatter.GetProperty("id").GetString().Should().Be(matterId.ToString(), $"AC-6a/{code}");
+        viaMatter.TryGetProperty("name", out _).Should().BeTrue($"AC-6a/{code}: viaMatter.name");
+        viaMatter.GetProperty("memberships").GetArrayLength().Should().BeGreaterThan(0, $"AC-6a/{code}: memberships[]");
 
-        var customData = ExtractCustomData(captured!);
-
-        // AC-6a: enriched flat fields present
-        customData.TryGetProperty("regardingName", out var regardingName).Should().BeTrue(
-            $"AC-6a/{playbookCode}: regardingName MUST appear on customData");
-        regardingName.GetString().Should().NotBeNullOrEmpty(
-            $"AC-6a/{playbookCode}: regardingName MUST be non-empty");
-
-        customData.TryGetProperty("regardingEntityType", out var regardingEntityType).Should().BeTrue(
-            $"AC-6a/{playbookCode}: regardingEntityType MUST appear");
-        regardingEntityType.GetString().Should().Be(regardingType,
-            $"AC-6a/{playbookCode}: regardingEntityType MUST mirror config");
-
-        customData.TryGetProperty("regardingId", out var regardingId).Should().BeTrue(
-            $"AC-6a/{playbookCode}: regardingId MUST appear");
-        regardingId.GetString().Should().NotBeNullOrEmpty();
-
-        // AC-6a: source object
-        if (expectSource)
-        {
-            customData.TryGetProperty("source", out var source).Should().BeTrue(
-                $"AC-6a/{playbookCode}: source MUST appear when source-record info is supplied");
-            source.GetProperty("entityType").GetString().Should().Be(sourceEntityType,
-                $"AC-6a/{playbookCode}: source.entityType MUST mirror config");
-            source.GetProperty("id").GetString().Should().Be(sourceRecordId.ToString(),
-                $"AC-6a/{playbookCode}: source.id MUST mirror config");
-            source.TryGetProperty("modifiedOn", out _).Should().BeTrue(
-                $"AC-6a/{playbookCode}: source.modifiedOn MUST appear");
-            source.TryGetProperty("owningUser", out _).Should().BeTrue(
-                $"AC-6a/{playbookCode}: source.owningUser MUST appear");
-        }
-
-        // AC-6a: viaMatter object (and its memberships[]) when matter linkage exists
-        if (expectViaMatter)
-        {
-            customData.TryGetProperty("viaMatter", out var viaMatter).Should().BeTrue(
-                $"AC-6a/{playbookCode}: viaMatter MUST appear when matter linkage is present");
-            viaMatter.GetProperty("id").GetString().Should().Be(matterId.ToString(),
-                $"AC-6a/{playbookCode}: viaMatter.id MUST mirror the resolved matter ID");
-            viaMatter.TryGetProperty("name", out _).Should().BeTrue(
-                $"AC-6a/{playbookCode}: viaMatter.name MUST appear");
-            viaMatter.GetProperty("memberships").GetArrayLength().Should().BeGreaterThan(0,
-                $"AC-6a/{playbookCode}: viaMatter.memberships[] MUST have at least one role entry when LookupUserMembership upstream returned a match");
-        }
-
-        // AC-6a: dueDate (per-channel)
         if (expectDueDate)
         {
-            customData.TryGetProperty("dueDate", out var dueDate).Should().BeTrue(
-                $"AC-6a/{playbookCode}: dueDate MUST appear for task-channel playbooks");
-            dueDate.GetString().Should().NotBeNullOrEmpty();
+            customData.GetProperty("dueDate").GetString().Should().NotBeNullOrEmpty($"AC-6a/{code}: dueDate");
         }
 
-        // AC-6a: actionUrl (universal — all 7 playbooks build an entity-record URL)
-        customData.TryGetProperty("actionUrl", out var actionUrl).Should().BeTrue(
-            $"AC-6a/{playbookCode}: actionUrl MUST appear on all 7 playbooks");
-        actionUrl.GetString().Should().NotBeNullOrEmpty();
+        customData.GetProperty("actionUrl").GetString().Should().NotBeNullOrEmpty($"AC-6a/{code}: actionUrl");
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-6d — sprk_category column dual-write across all 7 playbooks.
-    // ─────────────────────────────────────────────────────────────────────
 
     [Theory]
-    [MemberData(nameof(SevenPlaybookFixtures))]
-    public async Task AllSevenPlaybookFixtures_HaveSprkCategoryDualWrite(
-        string playbookCode,
-        string category,
-        string sourceEntityType,
-        string regardingType,
-        bool expectViaMatter,
-        bool expectSource,
-        bool expectDueDate,
-        string channelLabel)
+    [MemberData(nameof(ChannelFixtures))]
+    public async Task AllChannelFixtures_HaveSprkCategoryDualWrite(
+        string code, string category, string sourceEntityType, string regardingType, bool expectDueDate, string channelLabel)
     {
-        // Arrange
-        // (expectSource preserved in row for documentation symmetry with the FR6Schema test;
-        // sprk_category invariant holds independent of source-block emission per AC-6d.)
-        _ = expectSource;
-        var (executor, entityServiceMock, _) = BuildExecutor();
-        var matterId = Guid.NewGuid();
-        var config = BuildPlaybookConfigJson(
-            category: category,
-            sourceEntityType: sourceEntityType,
-            regardingType: regardingType,
-            channelLabel: channelLabel,
-            matterId: matterId,
-            sourceRecordId: Guid.NewGuid(),
-            recipientId: Guid.NewGuid(),
-            owningUserId: Guid.NewGuid(),
-            withMatterLinkage: expectViaMatter,
-            withDueDate: expectDueDate);
-        var context = CreateValidContext(config) with
-        {
-            PreviousOutputs = new Dictionary<string, NodeOutput>
-            {
-                ["myMatters"] = BuildLookupMembershipOutput(matterId, "owner")
-            }
-        };
+        var input = EnrichedInput(category, sourceEntityType, regardingType, channelLabel, Guid.NewGuid(), Guid.NewGuid(), expectDueDate, ["owner"]);
 
-        Entity? captured = null;
-        entityServiceMock
-            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(Guid.NewGuid());
+        var captured = await CreateAsync(input);
 
-        // Act
-        await executor.ExecuteAsync(context, CancellationToken.None);
-
-        // Assert
-        captured.Should().NotBeNull();
-        captured!.Contains("sprk_category").Should().BeTrue(
-            $"AC-6d/{playbookCode}: sprk_category column MUST be populated so FR-17c $filter works");
-        captured["sprk_category"].Should().Be(category,
-            $"AC-6d/{playbookCode}: sprk_category column MUST mirror customData.category exactly");
-
-        // Cross-verify the dual-write invariant against customData.category
-        var customData = ExtractCustomData(captured);
-        // customData.category is NOT written by BuildNotificationEntity directly (the value flows
-        // through the entity's sprk_category column). The dual-write contract is verified by
-        // the sprk_category attribute equaling the rendered category — that IS the invariant.
-        captured["sprk_category"].Should().Be(category,
-            $"AC-6d/{playbookCode}: dual-write invariant — column == rendered category");
+        captured.Contains("sprk_category").Should().BeTrue($"AC-6d/{code}: sprk_category column MUST be populated so the category $filter works");
+        captured["sprk_category"].Should().Be(category, $"AC-6d/{code}: the column mirrors the category exactly");
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-6c — payload <10KB across all 7 playbook fixtures (UTF-8 bytes).
-    // ─────────────────────────────────────────────────────────────────────
 
     [Theory]
-    [MemberData(nameof(SevenPlaybookFixtures))]
-    public async Task AllSevenPlaybookFixtures_PayloadSizeUnder10KB(
-        string playbookCode,
-        string category,
-        string sourceEntityType,
-        string regardingType,
-        bool expectViaMatter,
-        bool expectSource,
-        bool expectDueDate,
-        string channelLabel)
+    [MemberData(nameof(ChannelFixtures))]
+    public async Task AllChannelFixtures_PayloadSizeUnder10KB(
+        string code, string category, string sourceEntityType, string regardingType, bool expectDueDate, string channelLabel)
     {
-        // Arrange — use multi-role membership to stress payload size while staying realistic
-        // (expectSource is row symmetry only; size invariant applies regardless of source emission.)
-        _ = expectSource;
-        var (executor, entityServiceMock, _) = BuildExecutor();
-        var matterId = Guid.NewGuid();
-        var config = BuildPlaybookConfigJson(
-            category: category,
-            sourceEntityType: sourceEntityType,
-            regardingType: regardingType,
-            channelLabel: channelLabel,
-            matterId: matterId,
-            sourceRecordId: Guid.NewGuid(),
-            recipientId: Guid.NewGuid(),
-            owningUserId: Guid.NewGuid(),
-            withMatterLinkage: expectViaMatter,
-            withDueDate: expectDueDate);
-        var context = CreateValidContext(config) with
-        {
-            PreviousOutputs = new Dictionary<string, NodeOutput>
-            {
-                ["myMatters"] = BuildMultiRoleLookupMembershipOutput(
-                    matterId, "owner", "assignedAttorney", "assignedParalegal")
-            }
-        };
+        var input = EnrichedInput(category, sourceEntityType, regardingType, channelLabel, Guid.NewGuid(), Guid.NewGuid(), expectDueDate,
+            ["owner", "assignedAttorney", "assignedParalegal"]);
 
-        Entity? captured = null;
-        entityServiceMock
-            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(Guid.NewGuid());
+        var captured = await CreateAsync(input);
 
-        // Act
-        await executor.ExecuteAsync(context, CancellationToken.None);
-
-        // Assert
-        captured.Should().NotBeNull();
-        var dataJson = (string)captured!["data"];
-        var sizeBytes = Encoding.UTF8.GetByteCount(dataJson);
-
-        sizeBytes.Should().BeLessThan(10_000,
-            $"AC-6c/{playbookCode}: appnotification.data payload MUST be <10KB " +
-            $"(actual {sizeBytes} bytes for a 3-role multi-role enriched payload)");
+        var sizeBytes = Encoding.UTF8.GetByteCount((string)captured["data"]);
+        sizeBytes.Should().BeLessThan(10_000, $"AC-6c/{code}: appnotification.data MUST stay under 10KB (actual {sizeBytes} bytes, 3 roles)");
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-6b — backward compat: legacy (pre-enrichment) config still produces valid output.
-    // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task BackwardCompat_OldShapeStillValid()
     {
-        // Arrange — pre-R4 config shape with NO FR-6 fields supplied.
-        var (executor, entityServiceMock, _) = BuildExecutor();
-        var recipientId = Guid.NewGuid();
-        var legacyConfig = JsonSerializer.Serialize(new
-        {
-            title = "Legacy notification (pre-R4 shape)",
-            body = "Body",
-            category = "general",
-            recipientId = recipientId.ToString(),
-            actionUrl = "/main.aspx?id=123",
-            dueDate = "2026-07-01T00:00:00Z"
-        });
-        var context = CreateValidContext(legacyConfig);
+        var input = Input() with { Category = "general", ActionUrl = "/main.aspx?id=123", DueDate = "2026-07-01T00:00:00Z" };
 
-        Entity? captured = null;
-        entityServiceMock
-            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(Guid.NewGuid());
+        var captured = await CreateAsync(input);
 
-        // Act + Assert — no exception + valid Entity emitted
-        var result = await executor.ExecuteAsync(context, CancellationToken.None);
-        result.Success.Should().BeTrue(
-            "AC-6b: pre-R4 legacy config shape MUST still produce a valid notification");
-
-        captured.Should().NotBeNull();
-        var customData = ExtractCustomData(captured!);
-
-        // Legacy fields preserved (AC-6b)
-        customData.GetProperty("actionUrl").GetString().Should().Be("/main.aspx?id=123",
-            "AC-6b: legacy actionUrl MUST survive backward-compat path");
-        customData.GetProperty("dueDate").GetString().Should().Be("2026-07-01T00:00:00Z",
-            "AC-6b: legacy dueDate MUST survive backward-compat path");
-
-        // FR-6 enriched fields MUST NOT leak in when not supplied
-        customData.TryGetProperty("regardingName", out _).Should().BeFalse(
-            "AC-6b: enriched fields MUST be absent when legacy config does not supply them");
-        customData.TryGetProperty("viaMatter", out _).Should().BeFalse(
-            "AC-6b: viaMatter MUST be absent (not null) when no matter linkage");
-        customData.TryGetProperty("source", out _).Should().BeFalse(
-            "AC-6b: source MUST be absent when no source-record info supplied");
+        var customData = ExtractCustomData(captured);
+        customData.GetProperty("actionUrl").GetString().Should().Be("/main.aspx?id=123", "AC-6b: legacy actionUrl survives");
+        customData.GetProperty("dueDate").GetString().Should().Be("2026-07-01T00:00:00Z", "AC-6b: legacy dueDate survives");
+        customData.TryGetProperty("regardingName", out _).Should().BeFalse("AC-6b: enriched fields absent when not supplied");
+        customData.TryGetProperty("viaMatter", out _).Should().BeFalse("AC-6b: viaMatter absent (not null) without matter linkage");
+        customData.TryGetProperty("source", out _).Should().BeFalse("AC-6b: source absent without source-record info");
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-6a omission semantics — viaMatter is ABSENT (not null) when no matter linkage.
-    // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task MissingMatterLinkage_ViaMatterFieldOmitted()
     {
-        // Arrange — fixture supplying source-record info but NO matter linkage
-        var (executor, entityServiceMock, _) = BuildExecutor();
-        var sourceRecordId = Guid.NewGuid();
-        var config = JsonSerializer.Serialize(new
+        var input = Input() with
         {
-            title = "Standalone notification — no matter context",
-            body = "Body",
-            category = "general",
-            recipientId = Guid.NewGuid().ToString(),
-            actionUrl = "/somewhere",
-            regardingName = "Standalone record",
-            sourceEntityType = "sprk_event",
-            sourceId = sourceRecordId.ToString(),
-            sourceModifiedOn = "2026-06-25T12:00:00Z"
-            // NO viaMatterId — viaMatter MUST be omitted from customData per AC-6 omission rule
-        });
-        var context = CreateValidContext(config);
+            Category = "general",
+            ActionUrl = "/somewhere",
+            RegardingName = "Standalone record",
+            SourceEntityType = "sprk_event",
+            SourceId = Guid.NewGuid().ToString(),
+            SourceModifiedOn = "2026-06-25T12:00:00Z",
+        };
 
-        Entity? captured = null;
-        entityServiceMock
-            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(Guid.NewGuid());
+        var captured = await CreateAsync(input);
 
-        // Act
-        await executor.ExecuteAsync(context, CancellationToken.None);
-
-        // Assert
-        captured.Should().NotBeNull();
-        var customData = ExtractCustomData(captured!);
-        customData.TryGetProperty("viaMatter", out _).Should().BeFalse(
-            "AC-6 omission semantics: viaMatter MUST be ABSENT (not present-as-null) when no matter linkage");
-
-        // Sanity — other FR-6 fields still present
+        var customData = ExtractCustomData(captured);
+        customData.TryGetProperty("viaMatter", out _).Should().BeFalse("AC-6: viaMatter ABSENT (not present-as-null) when no matter linkage");
         customData.GetProperty("regardingName").GetString().Should().Be("Standalone record");
         customData.GetProperty("source").GetProperty("entityType").GetString().Should().Be("sprk_event");
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // AC-11 — Contact-only member triggers structured member_skipped warning.
-    //
-    // Integration with MembershipResolverService (the surface task 027 modified):
-    // when a Contact-typed membership descriptor is present but identity has NO
-    // ContactId, the resolver MUST emit a structured warning that App Insights
-    // can pivot on. This test exercises the same code path the playbook does
-    // when it invokes LookupUserMembership at runtime.
-    // ─────────────────────────────────────────────────────────────────────
+    // ── Helpers ─────────────────────────────────────────────────────────────
 
+    private static NotificationActionInput Input() => new(
+        Title: "Title", Body: "Body", Category: null, Priority: 200_000_000, ToastType: 200_000_000, ActionUrl: null,
+        RecipientId: Guid.NewGuid(), RegardingId: null, RegardingType: null, DueDate: null, RegardingName: null,
+        SourceEntityType: null, SourceId: null, SourceModifiedOn: null, SourceOwningUser: null, ViaMatterId: null,
+        ViaMatterName: null, ViaMatterMemberships: null, Source: "system", CorrelationId: string.Empty);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Builds the CreateNotification.ConfigJson the playbook would produce at runtime
-    /// after template rendering, mirroring the standardized shape per task 026.
-    /// </summary>
-    private static string BuildPlaybookConfigJson(
-        string category,
-        string sourceEntityType,
-        string regardingType,
-        string channelLabel,
-        Guid matterId,
-        Guid sourceRecordId,
-        Guid recipientId,
-        Guid owningUserId,
-        bool withMatterLinkage,
-        bool withDueDate)
-    {
-        // Anonymous-object initialiser produces the exact JSON shape playbooks send
-        // when they iterate over query items. Nulls are emitted only when withDueDate
-        // / withMatterLinkage is false.
-        var payload = new Dictionary<string, object?>
+    private static NotificationActionInput EnrichedInput(
+        string category, string sourceEntityType, string regardingType, string channelLabel, Guid matterId, Guid sourceRecordId,
+        bool withDueDate, string[] roles) =>
+        Input() with
         {
-            ["title"] = $"{channelLabel}: {sourceEntityType} update",
-            ["body"] = $"Activity on {channelLabel} channel",
-            ["category"] = category,
-            ["recipientId"] = recipientId.ToString(),
-            ["actionUrl"] = $"/main.aspx?pagetype=entityrecord&etn={sourceEntityType}&id={sourceRecordId}",
-            ["regardingName"] = "Acme Corp v. Smith Industries",
-            ["regardingId"] = matterId.ToString(),
-            ["regardingType"] = regardingType,
-            ["sourceEntityType"] = sourceEntityType,
-            ["sourceId"] = sourceRecordId.ToString(),
-            ["sourceModifiedOn"] = "2026-06-25T12:00:00Z",
-            ["sourceOwningUser"] = owningUserId.ToString(),
+            Title = $"{channelLabel}: {sourceEntityType} update",
+            Body = $"Activity on {channelLabel} channel",
+            Category = category,
+            ActionUrl = $"/main.aspx?pagetype=entityrecord&etn={sourceEntityType}&id={sourceRecordId}",
+            RegardingId = matterId,
+            RegardingType = regardingType,
+            DueDate = withDueDate ? "2026-07-01T17:00:00Z" : null,
+            RegardingName = "Acme Corp v. Smith Industries",
+            SourceEntityType = sourceEntityType,
+            SourceId = sourceRecordId.ToString(),
+            SourceModifiedOn = "2026-06-25T12:00:00Z",
+            SourceOwningUser = Guid.NewGuid().ToString(),
+            ViaMatterId = matterId.ToString(),
+            ViaMatterName = "Acme Corp v. Smith Industries",
+            ViaMatterMemberships = roles.Select(r => (object)new { role = r, matterId = matterId.ToString() }).ToList(),
         };
 
-        if (withMatterLinkage)
-        {
-            payload["viaMatterId"] = matterId.ToString();
-            payload["viaMatterName"] = "Acme Corp v. Smith Industries";
-            payload["viaMatterMembershipsVariable"] = "myMatters";
-        }
-
-        if (withDueDate)
-        {
-            payload["dueDate"] = "2026-07-01T17:00:00Z";
-        }
-
-        return JsonSerializer.Serialize(payload);
-    }
-
-    private static (CreateNotificationNodeExecutor Executor,
-                    Mock<IGenericEntityService> EntityServiceMock,
-                    Mock<ILogger<CreateNotificationNodeExecutor>> LoggerMock) BuildExecutor()
+    private static async Task<Entity> CreateAsync(NotificationActionInput input)
     {
-        var templateEngineMock = new Mock<ITemplateEngine>();
-        // Pass-through template engine — config JSON is post-rendered already.
-        templateEngineMock
-            .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, object?>>()))
-            .Returns((string template, IDictionary<string, object?> _) => template);
-        templateEngineMock
-            .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>()))
-            .Returns((string template, Dictionary<string, object?> _) => template);
-
-        var entityServiceMock = new Mock<IGenericEntityService>();
-        // Default: idempotency check returns no duplicate so executor proceeds.
-        entityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
+        Entity? captured = null;
+        entities.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(Guid.NewGuid());
 
-        var loggerMock = new Mock<ILogger<CreateNotificationNodeExecutor>>();
-        var executor = new CreateNotificationNodeExecutor(
-            templateEngineMock.Object,
-            entityServiceMock.Object,
-            loggerMock.Object);
+        var result = await new NotificationActionCore(entities.Object, NullLogger.Instance).CreateAsync(input, CancellationToken.None);
 
-        return (executor, entityServiceMock, loggerMock);
+        result.Skipped.Should().BeFalse();
+        captured.Should().NotBeNull("BuildNotificationEntity MUST run and produce an Entity");
+        return captured!;
     }
 
-    private static NodeExecutionContext CreateValidContext(string configJson)
-    {
-        var nodeId = Guid.NewGuid();
-        var actionId = Guid.NewGuid();
-        return new NodeExecutionContext
-        {
-            RunId = Guid.NewGuid(),
-            PlaybookId = Guid.NewGuid(),
-            Node = new PlaybookNodeDto
-            {
-                Id = nodeId,
-                PlaybookId = Guid.NewGuid(),
-                ActionId = actionId,
-                Name = "Create Notification",
-                ExecutionOrder = 1,
-                OutputVariable = "notificationResult",
-                ConfigJson = configJson,
-                IsActive = true
-            },
-            Action = new AnalysisAction
-            {
-                Id = actionId,
-                Name = "Create Notification"
-            },
-            ExecutorType = ExecutorType.CreateNotification,
-            Scopes = new ResolvedScopes([], [], []),
-            TenantId = "test-tenant"
-        };
-    }
-
-    private static NodeOutput BuildLookupMembershipOutput(Guid matterId, string role)
-    {
-        return NodeOutput.Ok(
-            nodeId: Guid.NewGuid(),
-            outputVariable: "myMatters",
-            data: new
-            {
-                entityType = "sprk_matter",
-                count = 1,
-                ids = new[] { matterId.ToString() },
-                byRole = new Dictionary<string, string[]>
-                {
-                    [role] = new[] { matterId.ToString() }
-                }
-            },
-            textContent: "1 matter resolved");
-    }
-
-    private static NodeOutput BuildMultiRoleLookupMembershipOutput(Guid matterId, params string[] roles)
-    {
-        var byRole = roles.ToDictionary(r => r, _ => new[] { matterId.ToString() });
-        return NodeOutput.Ok(
-            nodeId: Guid.NewGuid(),
-            outputVariable: "myMatters",
-            data: new
-            {
-                entityType = "sprk_matter",
-                count = 1,
-                ids = new[] { matterId.ToString() },
-                byRole = byRole
-            },
-            textContent: $"1 matter in {roles.Length} role(s)");
-    }
-
-    /// <summary>
-    /// Reads <c>entity["data"]</c> (the serialized appnotification payload), parses the
-    /// outer JSON, and returns the <c>customData</c> JsonElement. Throws if the executor
-    /// did not write <c>data</c> — that itself is an FR-6 conformance failure.
-    /// </summary>
     private static JsonElement ExtractCustomData(Entity entity)
     {
-        entity.Contains("data").Should().BeTrue(
-            "BuildNotificationEntity MUST populate entity['data'] when any customData field is set");
-        var dataJson = (string)entity["data"];
-        var doc = JsonDocument.Parse(dataJson);
-        // We return the JsonElement directly; the JsonDocument lifetime is bound to GC.
-        // For unit-test reads (synchronous, in-scope) this is safe.
+        entity.Contains("data").Should().BeTrue("BuildNotificationEntity MUST populate entity['data'] when any customData field is set");
+        using var doc = JsonDocument.Parse((string)entity["data"]);
         return doc.RootElement.GetProperty("customData").Clone();
     }
-
-    // Note: a local `InMemoryCache : IDistributedCache` stub previously lived here. Removed
-    // when `MembershipResolverService` migrated from `IDistributedCache` to `ITenantCache`
-    // (PR #458 / spaarke-redis-cache-remediation-r1 — Wave 6 task 012). The canonical test
-    // stand-in is now `Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache`.
 }

@@ -2,8 +2,7 @@
 //   1. QueryDataverseNodeExecutor — runs it on the RENDERED query before Dataverse sees it and fails the node loudly;
 //   2. the repo regression test (tests/integration/regression/Ai/Issue1452_*) — renders every repo playbook and
 //      runs it on the result, and runs it on the authored template;
-//   3. the playbook deploy lint (scripts/common/Assert-PlaybookFetchXmlShape.ps1, called by Deploy-Playbook.ps1 and
-//      Deploy-NotificationPlaybooks.ps1) — loads THIS FILE with Add-Type and runs it on the authored template.
+//   3. the playbook deploy lint (scripts/common/Assert-PlaybookFetchXmlShape.ps1, called by Deploy-Playbook.ps1) — loads THIS FILE with Add-Type and runs it on the authored template.
 // Because PowerShell compiles this file on its own, it must stay dependency-free: BCL only, explicit usings, no
 // project types, no file-scoped namespace.
 #nullable enable

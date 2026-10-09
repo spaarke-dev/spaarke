@@ -195,7 +195,7 @@ public interface IMembershipResolverService
 /// ADR-034 Amendment A3 — the PEOPLE-TARGETING consumption surface (unified-access-control-r2 task 152; owner
 /// decisions round 2 item 9 + Q8, round 3 D1). The third surface beside AI scoping (the default) and authorization
 /// (<see cref="AccessConferringOnly"/>). It answers "which records are FOR this person" — the Daily Briefing, the
-/// Workspace top-priority matter and every notification playbook's LookupUserMembership node — and it binds ONLY
+/// Workspace top-priority matter and every playbook's LookupUserMembership node (the notification playbooks that used it were retired, D-100) — and it binds ONLY
 /// person terms:
 /// <list type="bullet">
 /// <item><c>createdby</c> = the caller, and only when the caller is a HUMAN systemuser (<c>applicationid</c> null).

@@ -596,7 +596,7 @@ internal sealed record ConditionExpression
     /// Left operand: a template expression like "{{node.output.value}}", or the value Layer 1 already rendered it to.
     /// Required for comparison operators. A <see cref="JsonElement"/> (ISS-018b, #1452): Layer 1 renders a pure template to
     /// its JSON shape, so a count arrives as a JSON number — a <c>string?</c> property failed deserialization for every
-    /// notification playbook — and a missing value arrives as JSON <c>null</c>, which is a value (<c>exists</c> → false),
+    /// (since retired, D-100) notification playbook — and a missing value arrives as JSON <c>null</c>, which is a value (<c>exists</c> → false),
     /// not an absent operand. <see cref="JsonValueKind.Undefined"/> means the property was absent.
     /// </summary>
     public JsonElement Left { get; init; }

@@ -188,7 +188,12 @@ public enum ExecutorType
     /// </summary>
     DeliverComposite = 42,
 
-    /// <summary>Create an in-app notification via the Dataverse appnotification entity.</summary>
+    /// <summary>
+    /// RETIRED (D-100, task 131): the executor that created in-app notifications for the notification playbooks was
+    /// removed. The value is kept so stored node rows and the option set do not renumber; no executor is registered,
+    /// so a node of this type fails with a clear error. Server-side notification writes go through
+    /// <c>IActionSeam.CreateNotificationAsync</c>.
+    /// </summary>
     CreateNotification = 50,
 
     /// <summary>Execute a FetchXML query against Dataverse and return results.</summary>
@@ -336,7 +341,7 @@ public static class ExecutorSideEffects
         [ExecutorType.CallWebhook] = "an outbound HTTP call to an external endpoint (no executor registered)",
         [ExecutorType.SendTeamsMessage] = "a Teams message (no executor registered)",
         [ExecutorType.DeliverToIndex] = "DeliverToIndexNodeExecutor submits a RAG indexing job",
-        [ExecutorType.CreateNotification] = "CreateNotificationNodeExecutor creates a Dataverse appnotification",
+        [ExecutorType.CreateNotification] = "a Dataverse appnotification (retired executor, D-100: no executor registered)",
         [ExecutorType.AgentService] = "AgentServiceNodeExecutor hands the run to an Azure AI Foundry agent whose tool actions the BFF does not control",
         [ExecutorType.ObservationEmit] = "ObservationEmitterNodeExecutor upserts observations into the insights index and mirrors them to Dataverse",
     };
