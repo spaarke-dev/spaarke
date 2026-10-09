@@ -115,20 +115,6 @@ export function useRelatedDocumentCount(
         return;
       }
 
-      if (!response.ok) {
-        if (response.status === 404) {
-          setCount(0);
-          setLastUpdated(new Date());
-          return;
-        }
-        if (response.status === 401 || response.status === 403) {
-          setError("You don't have permission to view related documents.");
-          return;
-        }
-        setError('Failed to load related document count.');
-        return;
-      }
-
       const data = (await response.json()) as CountOnlyResponse;
 
       if (!mountedRef.current || currentFetchId !== fetchIdRef.current) {
@@ -144,8 +130,8 @@ export function useRelatedDocumentCount(
         return;
       }
 
-      // authenticatedFetch THROWS for a non-OK response (the `!response.ok` branch above is for a
-      // fetch that returns it): ApiError(status), or AuthError once its 401 retries are spent.
+      // authenticatedFetch THROWS for a non-OK response (it never returns one): ApiError(status), or
+      // AuthError once its 401 retries are spent.
       if (isApiError(err, 404)) {
         // No relationship data for this document yet — zero, not an error.
         setCount(0);
