@@ -2,16 +2,16 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-09 SESSION 45 — PR #1365 merged (`1ef1b0949`); first SpaarkeMaster CI publish (1.2.0.0); **218f ✅**; #1446 + #1401 closed. Next: T250.
+> **Last Updated**: 2026-10-09 SESSION 45 — parallel wave running (owner: "get through this project"): 4 background agents in isolated worktrees + main session. Done this wave: T208 ✅, T209 ✅ (superseded by ruleset), T250 ⛔ superseded.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T250** (next in order) — not started. Check first whether master `bb8ba7251` (SPE Admin as the BFF MI, sdap-SPE-admin-app-r2) supersedes it; if so, raise with the owner before any work. |
-| **Step** | SESSION 45 done: PR #1365 merged after fixing 2 CI tests (`2c5cac232`); master verified (build 0 errors, ArchTests 841/841, `.ForApp(` 31). Owner OK → publish run 37864623352 succeeded (buildId 2026.10.09-13, sha 45202953f; `latest.previous` = the 2026-08-21 hand-made manifest). 218f AC2 passed (demo plan: Update 1.0.0.0 -> 1.2.0.0 unmanaged) → 218f ✅, ISS-005 + #1401 closed. Owner OK → `gh-pull_request` FIC deleted from `8c85a481-…`, OIDC guide updated, ISS-007 + #1446 closed. Deploy SpaarkeAi was red on master since 2026-10-04 (ribbon build: barrel imports); master fixed it in parallel (`35e9e244d`, #1412) — our identical fix was dropped in the merge. |
-| **Status** | ready — between tasks. |
-| **Next Action** | (1) Start T250 via task-execute (supersession check first, see Task). (2) The owner may want a real SpaarkeMaster 1.2.0.0 import into demo (`Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged`, live — owner OK per action); not required by any task. |
+| **Task** | **Parallel wave 1** — lanes below. Main session: merge each agent branch as it reports, apply its proposed `.claude/` edits, verify, update POML/TASK-INDEX. |
+| **Step** | Agents launched 2026-10-09 (each in its own worktree branch, no live actions, no `.claude/` writes, no push): **A T253** (Worker runs no shell tools; opus) · **B T256** (H7b Secure Record setup; opus) · **C T206→T207** (prereqs.yaml recipe/placeholder defects, re-measured against today; sonnet) · **D 203b/204a/204f/204g** (verify-first triage of the August punch list; sonnet). Main: T250 superseded (bb8ba7251), T208 done (`19136daf1`: router job `prereqs`, standalone workflow deleted), T209 done (ruleset 21824191). |
+| **Status** | in-progress — waiting for agent reports (completion notifications arrive automatically; do NOT relaunch them). |
+| **Next Action** | For each agent report: (1) `git merge <agent-branch>` into `work/customer-provisioning-orchestration-r1` (resolve conflicts — A and B may both touch Worker/Program.cs); (2) apply its proposed `.claude/` edits verbatim after review; (3) build `Spaarke.sln` + ControlPlane tests + ArchTests; (4) mark POML/TASK-INDEX; commit + push. After A merges: **T255** (main session; overlaps H4b + manifest.yaml with T253). Then T240c (after owner T240b), T240d/T257 (owner design), T242c/T252 (live, owner OK), then a PR to master (its CI exercises the new `prereqs` router job). |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed; 0 behind master; carries the 218f close-out + checkpoints not yet on master (next PR). |
 | **Main repo** | `C:\code_files\spaarke` master NOT fast-forwarded (still `b0a78f880`): another session's uncommitted researcher-memory edits (`.claude/agent-memory/researcher/MEMORY.md` + 2 files) block it. Left untouched — the owner decides. |
 | **Order** | T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
