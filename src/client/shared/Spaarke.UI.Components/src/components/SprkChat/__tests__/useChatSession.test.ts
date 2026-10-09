@@ -244,6 +244,60 @@ describe('useChatSession', () => {
 
       expect(outcome).toEqual({ ok: false });
       expect(result.current.error).not.toBeNull();
+      expect(result.current.error!.message).toBe('Failed to load history (500): Server error');
+    });
+  });
+
+  // The `!response.ok` branches build "<action> (<status>): <reason>"; under the throwing
+  // authenticatedFetch that message has to be rebuilt in the catch (before: the bare ApiError text).
+  describe('error messages for thrown failures', () => {
+    it('createSession: "(status): <ProblemDetails detail>"', async () => {
+      mockFetch.mockResolvedValueOnce(
+        createFetchResponse({ title: 'Service Unavailable', status: 503, detail: 'AI is unavailable.' }, 503)
+      );
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      await act(async () => {
+        await result.current.createSession();
+      });
+
+      expect(result.current.error!.message).toBe('Failed to create session (503): AI is unavailable.');
+    });
+
+    it('createSession: an exhausted sign-in is reported as 401', async () => {
+      mockFetch.mockResolvedValueOnce(createFetchResponse('Unauthorized', 401));
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      await act(async () => {
+        await result.current.createSession();
+      });
+
+      expect(result.current.error!.message).toBe(
+        'Failed to create session (401): Authentication failed after all retry attempts'
+      );
+    });
+
+    it('switchContext: "(status): <reason>"', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(
+        createFetchResponse({ title: 'Bad Request', status: 400, detail: 'Too many documents.' }, 400)
+      );
+      await act(async () => {
+        await result.current.switchContext('doc-1');
+      });
+
+      expect(result.current.error!.message).toBe('Failed to switch context (400): Too many documents.');
+    });
+
+    it('deleteSession: "(status): <reason>" and the session is kept', async () => {
+      const { result } = renderHook(() => useChatSession(DEFAULT_OPTIONS));
+      act(() => result.current.resumeSession('session-1'));
+      mockFetch.mockResolvedValueOnce(createFetchResponse({}, 500));
+      await act(async () => {
+        await result.current.deleteSession();
+      });
+
+      expect(result.current.error!.message).toBe('Failed to delete session (500): HTTP 500');
+      expect(result.current.session).not.toBeNull();
     });
   });
 
