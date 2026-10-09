@@ -4,7 +4,7 @@
     <title>Deprecate sprk_eventstatus: inventory its readers and writers, then move them to statuscode</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>098 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches event status reads across the BFF and clients; the column itself is removed only with owner sign-off.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 3 🔄 (044, 051, 070), 44 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
+| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 6 🔄 (044, 051, 070, 066, 067, 123), 41 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), synced with master 2026-10-09 (`217b8f3c6`). Signal-ownership invariant is **I-17**. |
 | **Rule** | **D-106:** fix an issue only if ontology functionality needs it; document everything else in `notes/defer-issues.md` (D-106 section, GitHub link) for post-project review. Every sub-agent/reviewer prompt carries it. No demo/non-dev work. |
 | **Critical path** | **#1390 (039) waits on uac-r2 approval** → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064 Briefing cutover. Decision path: 040 (after 039) + 044 + 046 + 070 → 043 commit route → 058 wizard → 045. |
@@ -20,6 +20,7 @@
 | ID | What | Then |
 |---|---|---|
 | `afc4660035026f317` (author) / `a85de685334513317` (reviewer) | **044** #1515 round 2 (`576517b0f`: PascalCase nav names, `PreflightAsync` on every executor, revision owner via resolver + `sprk_budgetrevision` lineage/config entries, census) in re-check | **Merge only after uac-r2 OKs the lineage/config entries** (#1355 comment 6083936041) + green CI (D-107). Live proof needs: a low-privilege user token + zz-044 test matter/budget (+ a Secure one) → owner decision |
+| `a9ff474067cdc0aa5` / `a6a2b6b48dc7c9a1e` / `ae631a5184b49f2f7` | **066** eventstatus inventory (`C:\wts-066`) · **067** To Do score (`C:\wts-067`) · **123** triage enabled/active, ISS-010 only (`C:\wts-123`) — all off the project branch | PR → independent review → merge per D-107 |
 | bg `bm3gs401l` | **070** #1512 approved (`2103825d8`) | Merges into the project branch when CI green (D-107) |
 | bg `bkwmnqywt` | **051** #1513 approved (`3dcc6240a`) | Merges into the project branch when CI green (D-107) |
 | bg `bz01xg8cg` | **130** #1467 approved (`cc8f49fa5`) | Merges into master when CI green (D-102) → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → owner: 4 live proofs |
