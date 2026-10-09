@@ -1264,6 +1264,20 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
   - registered by a checked-in operator script.
 - **Sequencing:** PR #1462 merges before PR #1450 and PR #1458.
 
+## Round 87 (2026-10-09): BINDING. OWNER decision: the parent sets a FLOOR; a child may be stricter (refines round 84)
+
+Asked during task 175 (PR #1503). Verifier pass 1 had found F1: a re-file un-secured a work assignment without F3. Owner answers, verbatim where quoted:
+
+1. **Inheritance:** "a child created on a secured (or whatever access level) [parent] is inherited by its children; if the secure parent is made unsecure then the children are changed to unsecure; but a user can update the child of an unsecure back to secure."
+2. **Own vs inherited:** a value the user set ON the child stays when the parent later loosens. Only INHERITED values follow the parent down. (Example: the child is made secure by hand, the parent is later secured and then un-secured, and the child stays secure.)
+3. **Access Permission** works the same way as Secure. The parent's value is the minimum. A user may set a child stricter by hand; looser than the parent is refused (locked). When the parent loosens, inherited values follow it down.
+4. **Who may:** the same as today. Anyone who can manage access may make a child stricter, as Make Secure works now. Removing the extra strictness, never below the parent, needs Full Access or the creator (F3).
+5. **Re-file:** a secure work assignment with no parent, filed under an ordinary matter, STAYS secure. A re-file never loosens a child; it can only raise it to the new parent's floor. This closes verifier F1.
+6. **Lock scope:** Secure and Access Permission only. People can still be granted or shared access on a child within the parent's limits. `/grant`, `/share-user` and Update Access stay available.
+7. **Documents:** "if it is technically easier for documents to then remain in both containers that is acceptable". Owner rule to confirm against the build: "in a secure 'family' of records all documents added to any of the members of the family will go to the same secure container".
+
+**Supersedes:** round 84's "always equal parent / locked" where it conflicts. The parent is a floor, not an equality. Round 84's un-secure cascade still applies, to INHERITED values only.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
