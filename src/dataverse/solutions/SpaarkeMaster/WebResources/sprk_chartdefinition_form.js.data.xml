@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{db717c13-e3e5-f011-8406-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_chartdefinition_form.js</Name>
+  <DisplayName>sprk_chartdefinition_form</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_chartdefinition_formjsDB717C13-E3E5-F011-8406-7CED8D1DC988</FileName>
+</WebResource>

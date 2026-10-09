@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<EntityMaps xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <EntityMap>
+    <EntitySource>businessunit</EntitySource>
+    <EntityTarget>sprk_matter</EntityTarget>
+    <AttributeMaps>
+      <AttributeMap>
+        <AttributeSource>sprk_ai_search_index</AttributeSource>
+        <AttributeTarget>sprk_ai_search_index</AttributeTarget>
+      </AttributeMap>
+    </AttributeMaps>
+  </EntityMap>
+</EntityMaps>

@@ -77,6 +77,7 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         var sut = new AccessibleRecordSetService(
             membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();
@@ -153,6 +154,7 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         var sut = new AccessibleRecordSetService(
             membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();

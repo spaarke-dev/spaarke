@@ -576,6 +576,17 @@ public sealed class IncomingAssociationResolver
         {
             fields[lookupAttribute] = stamp;
         }
+
+        // Task 173 (owner round 81): the Access Permission the communication takes from everything it is filed under after
+        // this write (the regarding this decision adds, its stamps, and the filing it already had), in the same update.
+        // Nothing when it is parentless or the parents cannot be read (never fails the association; the reconcile job
+        // corrects it within its cycle).
+        if (decision.RegardingWrites.Count > 0
+            && await _coreAncestors.ResolveInheritedAccessPermissionAsync(CommunicationEntity, fields, communicationId, ct)
+                .ConfigureAwait(false) is { } accessPermission)
+        {
+            fields[Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column] = new OptionSetValue(accessPermission);
+        }
     }
 
     /// <summary>

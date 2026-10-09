@@ -1,0 +1,426 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Entity xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Name LocalizedName="User" OriginalName="">SystemUser</Name>
+  <EntityInfo>
+    <entity Name="SystemUser">
+      <attributes>
+        <attribute PhysicalName="sprk_CommunicationUserId">
+          <Type>nvarchar</Type>
+          <Name>sprk_communicationuserid</Name>
+          <LogicalName>sprk_communicationuserid</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>1000</MaxLength>
+          <Length>2000</Length>
+          <displaynames>
+            <displayname description="Communication User Id" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_ContainerId">
+          <Type>nvarchar</Type>
+          <Name>sprk_containerid</Name>
+          <LogicalName>sprk_containerid</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>100</MaxLength>
+          <Length>200</Length>
+          <displaynames>
+            <displayname description="Container Id" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_IsExternal">
+          <Type>bit</Type>
+          <Name>sprk_isexternal</Name>
+          <LogicalName>sprk_isexternal</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <AppDefaultValue>0</AppDefaultValue>
+          <optionset Name="sprk_systemuser_sprk_isexternal">
+            <OptionSetType>bit</OptionSetType>
+            <IntroducedVersion>1.0.0.0</IntroducedVersion>
+            <IsCustomizable>1</IsCustomizable>
+            <ExternalTypeName></ExternalTypeName>
+            <displaynames>
+              <displayname description="Is External" languagecode="1033" />
+            </displaynames>
+            <Descriptions>
+              <Description description="" languagecode="1033" />
+            </Descriptions>
+            <options>
+              <option value="1" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Yes" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="0" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="No" languagecode="1033" />
+                </labels>
+              </option>
+            </options>
+          </optionset>
+          <displaynames>
+            <displayname description="Is External" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_PrimaryContact">
+          <Type>lookup</Type>
+          <Name>sprk_primarycontact</Name>
+          <LogicalName>sprk_primarycontact</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.0.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="Primary Contact" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_PrimaryWorkOffice">
+          <Type>lookup</Type>
+          <Name>sprk_primaryworkoffice</Name>
+          <LogicalName>sprk_primaryworkoffice</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="Primary Work Office" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_UserProfile">
+          <Type>lookup</Type>
+          <Name>sprk_userprofile</Name>
+          <LogicalName>sprk_userprofile</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="User Profile" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_UserType">
+          <Type>lookup</Type>
+          <Name>sprk_usertype</Name>
+          <LogicalName>sprk_usertype</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="User Type" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+      </attributes>
+    </entity>
+  </EntityInfo>
+  <FormXml />
+  <RibbonDiffXml />
+  <CustomControlDefaultConfigs>
+    <CustomControlDefaultConfig>
+      <ControlDescriptionXML>
+        <controlDescriptions>
+          <controlDescription>
+            <customControl id="{E7A81278-8635-4d9e-8D4D-59480B391C5B}">
+              <parameters />
+            </customControl>
+            <customControl formFactor="0" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <columnsDefaultView />
+                </data-set>
+                <EnableEditing static="true" type="Enum">yes</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+            <customControl formFactor="1" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <columnsDefaultView />
+                </data-set>
+                <EnableEditing static="true" type="Enum">yes</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+            <customControl formFactor="2" name="Microsoft.PowerApps.PowerAppsOneGrid">
+              <parameters>
+                <data-set name="Items">
+                  <columnsDefaultView />
+                </data-set>
+                <EnableEditing static="true" type="Enum">yes</EnableEditing>
+                <DisableChildItemsEditing static="true" type="Enum">no</DisableChildItemsEditing>
+                <EnableFiltering static="true" type="Enum">yes</EnableFiltering>
+                <EnableSorting static="true" type="Enum">yes</EnableSorting>
+                <EnableGrouping static="true" type="Enum">no</EnableGrouping>
+                <EnableAggregation static="true" type="Enum">no</EnableAggregation>
+                <EnableColumnMoving static="true" type="Enum">no</EnableColumnMoving>
+                <EnableMultipleSelection static="true" type="Enum">yes</EnableMultipleSelection>
+                <EnableRangeSelection static="true" type="Enum">yes</EnableRangeSelection>
+                <EnableJumpBar static="true" type="Enum">no</EnableJumpBar>
+                <EnablePagination static="true" type="Enum">no</EnablePagination>
+                <EnableDropdownColor static="true" type="Enum">no</EnableDropdownColor>
+                <EnableStatusIcons static="true" type="Enum">yes</EnableStatusIcons>
+                <EnableTypeIcons static="true" type="Enum">no</EnableTypeIcons>
+                <NavigationTypesAllowed static="true" type="Enum">all</NavigationTypesAllowed>
+                <ReflowBehavior static="true" type="Enum">Reflow</ReflowBehavior>
+                <ShowAvatar static="true" type="Enum">yes</ShowAvatar>
+                <ShowColumnNamesForListView static="true" type="Enum">no</ShowColumnNamesForListView>
+                <EnableBandedRowsForListView static="true" type="Enum">no</EnableBandedRowsForListView>
+                <NumberOfListColumns static="true" type="Whole.None">3</NumberOfListColumns>
+                <ShowFooter static="true" type="Enum">yes</ShowFooter>
+                <ShowColumnHeaders static="true" type="Enum">yes</ShowColumnHeaders>
+                <ContextualLookupColumnFilters static="true" type="Enum">yes</ContextualLookupColumnFilters>
+                <LookupFilterBeginsWith static="true" type="Enum">no</LookupFilterBeginsWith>
+                <UseFirstColumnForLookupEdits static="true" type="Enum">no</UseFirstColumnForLookupEdits>
+                <DateTimeFormat static="true" type="Enum">none</DateTimeFormat>
+                <DateOnlyFormat static="true" type="Enum">none</DateOnlyFormat>
+                <EnableStatusColumn static="true" type="Enum">yes</EnableStatusColumn>
+              </parameters>
+            </customControl>
+          </controlDescription>
+        </controlDescriptions>
+      </ControlDescriptionXML>
+      <IntroducedVersion>5.0</IntroducedVersion>
+    </CustomControlDefaultConfig>
+  </CustomControlDefaultConfigs>
+</Entity>

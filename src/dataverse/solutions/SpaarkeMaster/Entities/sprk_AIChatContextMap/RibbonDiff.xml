@@ -1,0 +1,55 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="Spaarke.ChatContextMap.RefreshCache.Form.CustomAction" Location="Mscrm.Form.sprk_aichatcontextmap.MainTab.Actions.Controls._children" Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.ChatContextMap.RefreshCache.Form.Button" Command="Spaarke.ChatContextMap.RefreshCache.Command" LabelText="$LocLabels:sprk.ChatContextMap.RefreshCache.Label" Alt="$LocLabels:sprk.ChatContextMap.RefreshCache.Alt" ToolTipTitle="$LocLabels:sprk.ChatContextMap.RefreshCache.Label" ToolTipDescription="$LocLabels:sprk.ChatContextMap.RefreshCache.Tooltip" TemplateAlias="o1" Image16by16="/_imgs/ribbon/Refresh_16.png" Image32by32="/_imgs/ribbon/Refresh_32.png" ModernImage="Refresh" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="Spaarke.ChatContextMap.RefreshCache.Grid.CustomAction" Location="Mscrm.HomepageGrid.sprk_aichatcontextmap.MainTab.Actions.Controls._children" Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.ChatContextMap.RefreshCache.Grid.Button" Command="Spaarke.ChatContextMap.RefreshCache.Command" LabelText="$LocLabels:sprk.ChatContextMap.RefreshCache.Label" Alt="$LocLabels:sprk.ChatContextMap.RefreshCache.Alt" ToolTipTitle="$LocLabels:sprk.ChatContextMap.RefreshCache.Label" ToolTipDescription="$LocLabels:sprk.ChatContextMap.RefreshCache.Tooltip" TemplateAlias="o1" Image16by16="/_imgs/ribbon/Refresh_16.png" Image32by32="/_imgs/ribbon/Refresh_32.png" ModernImage="Refresh" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Spaarke.ChatContextMap.RefreshCache.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.ChatContextMap.RefreshCache.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_aichatcontextmap_ribbon.js" FunctionName="refreshMappings"></JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="Spaarke.ChatContextMap.RefreshCache.EnableRule">
+        <CustomRule Library="$webresource:sprk_aichatcontextmap_ribbon.js" FunctionName="Spaarke_EnableRefreshMappings" Default="true"></CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.ChatContextMap.RefreshCache.Alt">
+      <Titles>
+        <Title description="Refresh Context Mapping Cache" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ChatContextMap.RefreshCache.Label">
+      <Titles>
+        <Title description="Refresh Cache" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ChatContextMap.RefreshCache.Tooltip">
+      <Titles>
+        <Title description="Evict all cached context mappings from Redis. New mappings will be loaded from Dataverse on the next request." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

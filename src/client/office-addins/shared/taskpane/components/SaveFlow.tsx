@@ -52,7 +52,7 @@ import { useCreateRecordFormData } from '../hooks/useCreateRecordFormData';
 import type { CreateRecordInput } from './CreateRecordForm';
 import type { ContactOption } from './views/CreateTodoView';
 import {
-  openFileUrl,
+  openInBrowserTab,
   openDesktopUrl,
   openRecord,
   buildOpenRecordUrl,
@@ -65,6 +65,7 @@ import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch'
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 // Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
 import { stripDocumentExtension } from '../utils/documentFileName';
+import { copyText } from '../utils/copyText';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
 function isBrowserTestMode(): boolean {
@@ -273,8 +274,18 @@ const useStyles = makeStyles({
   },
   // Task 099: the confirmation takes programmatic focus after a save (tabIndex -1); no focus ring box needed.
   savedBarWrap: { outlineStyle: 'none' },
-  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump).
-  savedBarButton: { minWidth: '8.5rem' },
+  // UAT round 12: Fluent's multiline actions (and a single-line bar reflows to multiline when narrow) are
+  // right-aligned and never wrap, so in a narrow pane View Document spilled off the box's left edge. Wrap from the
+  // left instead. Used by every SaveFlow bar with more than one action.
+  wrappingActions: {
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    rowGap: tokens.spacingVerticalS,
+    minWidth: 0,
+  },
+  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump) — a fixed flex basis, so
+  // the width never follows the label; a row narrower than two bases wraps rather than overflowing.
+  savedBarButton: { flex: '1 1 8.5rem', minWidth: 0, maxWidth: '100%' },
   savedBarDetail: {
     display: 'block',
     marginTop: tokens.spacingVerticalXXS,
@@ -327,10 +338,11 @@ interface SavedBarModel {
   filingUnknown?: boolean;
   /** The wording for `filedTo === null`. */
   notFiledText: string;
-  /** What Copy Link copies; `null` = nothing to copy. */
+  /**
+   * What Copy Link copies: the document's Spaarke record link (task 117). `null` (ORG_URL unset) = Copy Link is not
+   * rendered — in both variants, never rendered disabled.
+   */
   copyUrl: string | null;
-  /** The resolved variant hides Copy Link when there is nothing to copy; the post-save one shows it disabled. */
-  hideCopyWithoutUrl: boolean;
 }
 
 /** Task 088: taken when a save is SUBMITTED, committed to {@link SavedDocumentState} when it completes. */
@@ -481,7 +493,7 @@ export interface SaveFlowProps {
   onRetryDocumentIdentity?: () => void;
   /**
    * task 027 / FR-10 (NFR-10): whether this host can open a browser tab
-   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `SaveView` from the live
+   * (task 120: `canOpenSpaarkeRecords` — ORG_URL + `openBrowserWindow` or `window.open`, decided by `SaveView` from the live
    * adapter — never a `hostType` check here). `false`/absent renders the related-record card and
    * the Document-record affordance WITHOUT their open action — the fallback surface, not an error.
    */
@@ -696,7 +708,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave,
     reset,
     retry,
-    savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
   // Task 088: the open document's own filing, from the SAME resolved identity the related-record card reads
@@ -848,8 +859,19 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   useEffect(() => {
     setSaveModeChoice(null);
   }, [documentIdentity]);
-  const saveMode = useMemo(() => resolveSaveMode(documentIdentity, saveModeChoice), [documentIdentity, saveModeChoice]);
-  const isVersionMode = saveMode.target?.mode === 'version';
+  // Task 120: an item already in Spaarke that has no version path (an email — no document bytes) defaults to "already
+  // saved, nothing to send"; saving it again is the explicit "a new document" choice. Never a version of an email.
+  const saveMode = useMemo(
+    () => resolveSaveMode(documentIdentity, saveModeChoice, { versionable: canSaveNewVersion }),
+    [documentIdentity, saveModeChoice, canSaveNewVersion]
+  );
+  // The open item is ALREADY in Spaarke and the user has not chosen to save it as a new document: the green box, the
+  // locked/read-only name, the "Filed to" card or filing picker — and no "Related to" picker. For a Word document this
+  // is exactly the version-save mode (task 024); task 120 widened it from `target.mode === 'version'` so an email that
+  // is already saved (no version target at all) gets the same already-saved state.
+  const isExistingMode = saveMode.view === 'version' && saveMode.effectiveChoice !== 'new';
+  // Task 120: the pane's item, as the copy names it (host-shaped DATA, like the header's "Email"/"Document" label).
+  const itemNoun: 'document' | 'email' = hostType === 'outlook' ? 'email' : 'document';
   // What the LAST submitted save was — drives the success copy and whether "Related to" is handed on.
   const [submittedTarget, setSubmittedTarget] = useState<SaveTarget | null>(null);
 
@@ -861,11 +883,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         announce('Save mode: a new document. The existing document will not be changed.', 'polite');
       } else if (choice === 'version') {
         announce(`Save mode: a new version of ${saveMode.documentLabel ?? 'the existing document'}.`, 'polite');
+      } else if (saveMode.versionable === false) {
+        // Task 120: an email's "Don't save again".
+        announce(`Not saving again. The ${itemNoun} stays saved in Spaarke.`, 'polite');
       } else {
         announce('Save as a new document is no longer selected. Save is unavailable.', 'polite');
       }
     },
-    [announce, saveMode.documentLabel]
+    [announce, saveMode.documentLabel, saveMode.versionable, itemNoun]
   );
 
   // NFR-11: announce what identity resolution decided for Save.
@@ -873,7 +898,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     switch (saveMode.view) {
       case 'version':
         announce(
-          `This document is already in Spaarke. Save will add a new version of ${saveMode.documentLabel ?? 'it'}.`,
+          saveMode.versionable === false
+            ? `This ${itemNoun} is already saved in Spaarke.`
+            : `This document is already in Spaarke. Save will add a new version of ${saveMode.documentLabel ?? 'it'}.`,
           'polite'
         );
         break;
@@ -895,12 +922,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       default:
         break;
     }
-  }, [saveMode.view, saveMode.documentLabel, announce]);
+  }, [saveMode.view, saveMode.documentLabel, saveMode.versionable, itemNoun, announce]);
 
   // ── task 027 / FR-10: open the related record / Document record from the pane ──────────────────
   // Spike-2 (notes/spikes/spike-2-dialog-api.md) selected Option 3 — a browser-tab escape hatch via
   // Office.context.ui.openBrowserWindow, never the Office Dialog API. `canOpenRecord` (NFR-10) is a
-  // capability flag threaded from SaveView's hostAdapter.getCapabilities().canOpenBrowserWindow —
+  // capability flag threaded from SaveView's `canOpenSpaarkeRecords` (task 120: openBrowserWindow OR window.open) —
   // gating happens here and in the JSX below, never on `hostType`.
   // The Open buttons also need ORG_URL. Unset, `openRecord` can only no-op, so a visible button would
   // do nothing when clicked; hide it instead. The deploy workflow sets ORG_URL.
@@ -971,7 +998,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     documentIdentity && typeof documentIdentity === 'object' && documentIdentity.kind === 'resolved'
       ? documentIdentity
       : null;
-  const showResolvedBox = savedDocument === null && isVersionMode && resolvedIdentity !== null;
+  const showResolvedBox = savedDocument === null && isExistingMode && resolvedIdentity !== null;
   const showFilingPicker = showResolvedBox && resolvedRelatedRecord.kind === 'unassociated';
   const [fileTarget, setFileTarget] = useState<EntitySearchResult | null>(null);
   const [filing, setFiling] = useState(false);
@@ -1243,7 +1270,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Opens the file that already holds the name, through the EXISTING `GET /api/documents/{id}/open-links`
   // (no new route; its endpoint filter re-checks Read, so this can never open more than the server's own
   // redaction already let the pane name). "Open in browser" launches the response's https `webUrl` — WHICH
-  // opener runs is decided by capability (`canOpenRecord` = canOpenBrowserWindow), never by hostType — on
+  // opener runs is decided by the host's OpenBrowserWindowApi support (`openInBrowserTab`, task 120), never by hostType — on
   // every platform. "Open in Word" (PC/Mac only, `canOpenDesktopWord`) additionally anchor-clicks the
   // response's `desktopUrl` — an UNSUPPORTED mechanism trialled per the owner (`openDesktopUrl`'s doc
   // comment; notes/088 §3 explains why `openBrowserWindow` cannot do this). A failed call shows its reason
@@ -1295,7 +1322,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         if (!links.webUrl) {
           throw new Error('Spaarke did not return a link for this file.');
         }
-        const result = openFileUrl(links.webUrl, canOpenRecord);
+        // Task 120: the opener follows the host's actual OpenBrowserWindowApi support, not `canOpenRecord` — that
+        // prop is now true on Office on the web too (window.open), where openBrowserWindow does not exist.
+        const result = openInBrowserTab(links.webUrl);
         if (!result.opened) {
           throw new Error(result.reason ?? "Couldn't open the file.");
         }
@@ -1308,7 +1337,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         setOpenFileBusy(false);
       }
     },
-    [error, apiBaseUrl, getAccessToken, canOpenRecord, announce]
+    [error, apiBaseUrl, getAccessToken, announce]
   );
 
   // Handle entity selection (Confirm a card / select a search result / Change).
@@ -1526,18 +1555,24 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [apiBaseUrl, getAccessToken]
   );
 
-  // Handle copy link. Task 088: unchanged on purpose (owner, 2026-10-03) — it copies what it always copied, the
-  // saved file's link; only View Document moved to the Spaarke record. Task 111: the URL is the bar's own
-  // (`SavedBarModel.copyUrl`) — the session's saved link, or, for a document already in Spaarke, its record link.
+  // Handle copy link. The URL is the bar's own (`SavedBarModel.copyUrl`): the document's Spaarke RECORD link
+  // (`sprk_document`, ORG_URL + app name — `documentRecordLinkOf`), in both hosts and in both box variants. Task 117
+  // (UAT round 12 O3/W1, 2026-10-08) applies the owner's 2026-10-05 decision (task 098) that links open the Spaarke
+  // record: Copy Link used to copy the stored file's SPE `webUrl`, which for a saved .eml is the placeholder
+  // `https://aka.ms/spe-openfilelocation`, not a link to the email.
+  // Task 116: Outlook on the web can block the Clipboard API by permissions policy (B2B guest UAT, 2026-10-08) —
+  // `copyText` falls back to a selection copy, and when that fails too the link is shown to copy by hand.
+  const [manualCopyUrl, setManualCopyUrl] = useState<string | null>(null);
   const handleCopyLink = useCallback(
     async (url: string | null) => {
       if (url) {
-        try {
-          await navigator.clipboard.writeText(url);
+        if (await copyText(url)) {
+          setManualCopyUrl(null);
           announce('Link copied', 'polite');
           flashButton('copy', 'done');
-        } catch {
-          announce('Failed to copy link', 'assertive');
+        } else {
+          setManualCopyUrl(url);
+          announce("Couldn't copy here. The link is shown below to copy by hand.", 'assertive');
           flashButton('copy', 'failed');
         }
       }
@@ -1617,7 +1652,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // Task 088 (UAT-1/6, owner 2026-10-03 "Keep the form"): the confirmation bar at the top of the SAVED state.
   // Replaces the full-screen success card. Names the record the document is filed to — or says it is filed to
-  // none — with View Document (the Spaarke record, in the Spaarke app) and Copy Link (unchanged).
+  // none — with View Document (the Spaarke record, in the Spaarke app) and Copy Link (that record's link, task 117).
   const renderSavedBar = (bar: SavedBarModel) => (
     <div ref={savedBarRef} tabIndex={-1} className={styles.savedBarWrap}>
       <MessageBar intent="success" layout="multiline">
@@ -1641,7 +1676,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             )
           )}
         </MessageBarBody>
-        <MessageBarActions>
+        <MessageBarActions className={styles.wrappingActions}>
           {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set — never rendered
             disabled (AC4). */}
           {openRecordAvailable && (
@@ -1659,14 +1694,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                   : 'View Document'}
             </Button>
           )}
-          {(bar.copyUrl !== null || !bar.hideCopyWithoutUrl) && (
+          {bar.copyUrl !== null && (
             <Button
               appearance="outline"
               size="small"
               className={styles.savedBarButton}
               icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
               onClick={() => void handleCopyLink(bar.copyUrl)}
-              disabled={!bar.copyUrl}
             >
               {buttonFeedback.copy === 'done'
                 ? 'Copied'
@@ -1677,8 +1711,26 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           )}
         </MessageBarActions>
       </MessageBar>
+      {manualCopyUrl && (
+        <Input
+          readOnly
+          value={manualCopyUrl}
+          aria-label="Document link — select and copy"
+          onFocus={event => event.target.select()}
+        />
+      )}
     </div>
   );
+
+  // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
+  // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
+  // a fallback to the stored file's URL.
+  const documentRecordLinkOf = (documentId: string): string | null => {
+    const orgUrl = process.env.ORG_URL;
+    return orgUrl
+      ? buildOpenRecordUrl(orgUrl, 'sprk_document', cleanGuid(documentId), configuredSpaarkeAppName())
+      : null;
+  };
 
   // The box for a save this pane just made.
   const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
@@ -1686,27 +1738,19 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     title: saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke',
     filedTo: saved.filedTo,
     notFiledText: 'Not filed to a record.',
-    copyUrl: savedDocumentUrl ?? null,
-    hideCopyWithoutUrl: false,
+    copyUrl: documentRecordLinkOf(saved.documentId),
   });
 
-  // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the session's
-  // saved URL when there is one, else the document's Spaarke record link; with neither, it is not shown.
-  const resolvedBarOf = (identity: { documentId: string }): SavedBarModel => {
-    const orgUrl = process.env.ORG_URL;
-    const recordUrl = orgUrl
-      ? buildOpenRecordUrl(orgUrl, 'sprk_document', cleanGuid(identity.documentId), configuredSpaarkeAppName())
-      : null;
-    return {
-      documentId: identity.documentId,
-      title: 'Saved to Spaarke',
-      filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
-      filingUnknown: resolvedRelatedRecord.kind === 'unknown',
-      notFiledText: 'Not filed to a record yet.',
-      copyUrl: savedDocumentUrl ?? recordUrl,
-      hideCopyWithoutUrl: true,
-    };
-  };
+  // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the
+  // document's Spaarke record link (task 117); without ORG_URL it is not shown.
+  const resolvedBarOf = (identity: { documentId: string }): SavedBarModel => ({
+    documentId: identity.documentId,
+    title: 'Saved to Spaarke',
+    filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
+    filingUnknown: resolvedRelatedRecord.kind === 'unknown',
+    notFiledText: 'Not filed to a record yet.',
+    copyUrl: documentRecordLinkOf(identity.documentId),
+  });
 
   // Render duplicate state
   const renderDuplicateState = () => (
@@ -1754,7 +1798,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </Text>
         )}
       </MessageBarBody>
-      <MessageBarActions>
+      <MessageBarActions className={styles.wrappingActions}>
         {error?.recoverable && (
           <Button appearance="outline" size="small" onClick={retry}>
             Retry
@@ -1824,7 +1868,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             </Text>
           )}
         </MessageBarBody>
-        <MessageBarActions>
+        <MessageBarActions className={styles.wrappingActions}>
           <Button appearance="primary" size="small" onClick={handleKeepBoth}>
             Keep both
           </Button>
@@ -1877,7 +1921,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const renderForm = () => {
     // Task 099 (owner item 2): while "+ New" is open, only the pills + the create form show. Only meaningful
     // where the picker is rendered (a new document); version mode never shows it.
-    const hideForCreate = relatedCreating && (!isVersionMode || showFilingPicker);
+    const hideForCreate = relatedCreating && (!isExistingMode || showFilingPicker);
     return (
       <>
         {/* Task 111: a document already in Spaarke says so with the same green box a save ends on. */}
@@ -1886,7 +1930,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         {!hideForCreate &&
           // Task 099 (owner item 5): the Document header IS where the name is edited (or shown locked) — there is
           // no separate "Document Details" card any more.
-          (!isVersionMode
+          (!isExistingMode
             ? renderDocumentHeader('editable')
             : renderDocumentHeader(
                 canSaveNewVersion ? 'locked' : 'readonly',
@@ -1895,7 +1939,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
         {/* Filed-to card — task 026 / FR-09. A READ-BACK of what the identified document is ALREADY filed to,
           sourced from the SAME resolved identity SaveModeSection reads (no second network call, so the pane
-          never shows two different answers). Deliberately OUTSIDE the `!isVersionMode` gate below: a resolved
+          never shows two different answers). Deliberately OUTSIDE the `!isExistingMode` gate below: a resolved
           identity DEFAULTS to a version save (task 024), which is exactly when RelatedToPicker is hidden — the
           filed-to card is the pane's only indication of the record in that common case. It stays visually and
           functionally distinct from RelatedToPicker (an INPUT for an unfiled document) even when both render
@@ -1919,7 +1963,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           the picker would have no effect there, and is not shown. It appears as soon as the user chooses "A new
           document" (task 094: a document already in Spaarke gets the LOCKED name in the header, with its own
           "Save as new document" unlock). */}
-        {!isVersionMode && (
+        {!isExistingMode && (
           <div className={styles.section}>
             <RelatedToPicker
               value={selectedEntity}
@@ -1951,8 +1995,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               />
             </div>
 
-            {/* Attachment Selector (Outlook only) */}
-            {hostType === 'outlook' && attachments.length > 0 && (
+            {/* Attachment Selector (Outlook only). Task 120: not while the email is shown as already saved — there is
+                nothing to send until the user chooses to save it again. */}
+            {hostType === 'outlook' && attachments.length > 0 && !isExistingMode && (
               <AttachmentSelector
                 attachments={attachments}
                 selectedIds={selectedAttachmentIds}
@@ -1975,6 +2020,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               onChoiceChange={handleSaveModeChange}
               {...(onRetryDocumentIdentity ? { onRetryIdentity: onRetryDocumentIdentity } : {})}
               disabled={isSaving}
+              itemNoun={itemNoun}
             />
 
             {renderFooter()}
@@ -1988,15 +2034,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // shared by the pre-save form and the saved state. It replaces the former "Document Details" card.
   //
   // Task 094 (owner, 2026-10-04 — "Locked, with Save as new"): once a document is in Spaarke — the
-  // pane opened on an already-resolved identity (pre-save `isVersionMode`), or this pane session
+  // pane opened on an already-resolved identity (pre-save `isExistingMode`), or this pane session
   // already saved it — a save can never rename it (name/file names are set only by a NEW document or
   // "Save as new document"). Three modes:
   // - `'editable'`: the plain new-document path (020's pencil/Input, or Outlook's Textarea) — unchanged.
   // - `'locked'`: the Spaarke name, read-only, with a hint + a "Save as new document" link that
   //   unlocks it (pre-save: switches the save mode choice to "new"; post-save: leaves the saved state —
   //   both routes through `handleSaveAsNewInstead`, so there is exactly one unlock path).
-  // - `'readonly'`: the name, read-only, with NO hint/unlock — the saved state of a pane with no
-  //   document bytes at all (Outlook), where there is nothing to version or rename from here.
+  // - `'readonly'`: the name, read-only — the saved state of a pane with no document bytes at all (Outlook), where
+  //   there is nothing to version or rename from here. Task 120: with a "Save again as a new document" link (the same
+  //   `handleSaveAsNewInstead` path), since an email may be saved again, e.g. to another record.
   //
   // `lockedName` overrides the displayed value for `'locked'` only — the TRUE Spaarke name (the
   // resolved identity's `documentName`/`fileName` for a version save, or the name this pane's own
@@ -2007,7 +2054,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // own name (the email subject) as the first row, with the sender/date rows — host-shaped DATA, as before.
   function renderDocumentHeader(mode: 'editable' | 'locked' | 'readonly', lockedName?: string): React.ReactElement {
     const shownName =
-      mode === 'locked' && lockedName !== undefined ? lockedName : documentName || itemName || 'Untitled Document';
+      mode === 'locked' && lockedName !== undefined
+        ? lockedName
+        : // Task 120: an already-saved email shows its Spaarke name when the pane knows it.
+          (mode === 'readonly' && lockedName) || documentName || itemName || 'Untitled Document';
+    // Task 120: the read-only name repeats nothing — when it IS the subject already shown as the first row, skip it.
+    const showReadonlyName = !(showDocumentInfo && itemName && !canProvideDocumentName && shownName === itemName);
     return (
       <div className={styles.section}>
         <div className={styles.sectionTitle}>
@@ -2030,7 +2082,29 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               <Text size={200}>Sent: {sentDate.toLocaleDateString()}</Text>
             </div>
           )}
-          {mode === 'readonly' && <Text className={styles.documentNameText}>{shownName}</Text>}
+          {mode === 'readonly' && (
+            // Task 120: 'readonly' is the already-saved state of an item with no version path — an email (saved this
+            // session, or found saved when the pane opened). It can still be saved again, e.g. to another record, but
+            // only behind this explicit action, collapsed by default: the same unlock path as Word's locked name.
+            <div className={styles.documentNameLockedRow}>
+              {showReadonlyName && <Text className={styles.documentNameText}>{shownName}</Text>}
+              <Text size={200} className={styles.documentNameHint}>
+                This {itemNoun} is saved in Spaarke. To save it again, for example to another record, save it as a new
+                document.
+              </Text>
+              {!error?.offerSaveAsNew && (
+                <Button
+                  appearance="transparent"
+                  size="small"
+                  className={styles.secondaryLink}
+                  onClick={handleSaveAsNewInstead}
+                  disabled={isSaving}
+                >
+                  Save again as a new document
+                </Button>
+              )}
+            </div>
+          )}
           {mode === 'locked' && (
             <div className={styles.documentNameLockedRow}>
               <Text className={styles.documentNameText}>{shownName}</Text>
@@ -2160,6 +2234,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // the document is edited (`hasUnsavedChanges`) — then a lone "Save" (= a new version of this document). The
   // button is never "Save version" and never a gray "Saved" (the confirmation says so).
   function renderFooter(): React.ReactElement | null {
+    // Task 120: an email found ALREADY saved (no version path) has nothing to send until the user chooses "Save again
+    // as a new document" — no Cancel / Save, exactly like the post-save state of the same email.
+    if (savedDocument === null && isExistingMode && !activeTarget && !isSaving) {
+      return null;
+    }
     if (savedDocument !== null) {
       if (!hasUnsavedChanges && !isSaving) return null;
       return (

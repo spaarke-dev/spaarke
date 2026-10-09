@@ -5,6 +5,7 @@ using Moq;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Office;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Office;
 
@@ -20,9 +21,9 @@ public class OfficeStorageUploaderDeleteTests
     {
         var gcf = Mock.Of<IGraphClientFactory>();
         return new Mock<SpeFileStore>(MockBehavior.Loose,
-            new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>()),
-            new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>()),
-            new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+            new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
+            new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
+            new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
             null!);
     }

@@ -52,7 +52,7 @@ import {
 } from '@spaarke/communication-components/logic/attachments';
 import { AttachmentList } from '@spaarke/communication-components/components/AttachmentList';
 import { initializeAuth } from './authInit';
-import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getApiBaseUrl, resolveSignInIdentity } from '../../shared/utils/environmentVariables';
 
 const useStyles = makeStyles({
   root: { height: '100%', width: '100%', display: 'flex', flexDirection: 'column' },
@@ -211,9 +211,12 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
       const apiBaseUrlResolved = manifestApiBaseUrl
         ? normalizeBffBaseUrl(manifestApiBaseUrl)
         : await getApiBaseUrl(webApi);
-      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
-      const clientAppId = manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
-      const bffAppId = manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      // Environment variables first, form properties only as a fallback (#1453 — shipped forms carry dev values).
+      const { tenantId, clientAppId, bffAppId } = await resolveSignInIdentity(webApi, {
+        tenantId: manifestTenantId,
+        clientAppId: manifestClientAppId,
+        bffAppId: manifestBffAppId,
+      });
 
       await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
       if (!cancelled) {

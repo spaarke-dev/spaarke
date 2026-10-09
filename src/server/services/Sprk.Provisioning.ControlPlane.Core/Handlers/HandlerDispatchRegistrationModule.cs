@@ -113,7 +113,7 @@ public static class HandlerDispatchRegistrationModule
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4b, (sp, _) => sp.GetRequiredService<H4bBulkAppSettingsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
-            HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvCreationHandler>());
+            HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvAdoptionHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H6, (sp, _) => sp.GetRequiredService<H6SolutionImportHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

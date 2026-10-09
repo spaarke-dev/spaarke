@@ -76,13 +76,16 @@ async function bootstrap(): Promise<void> {
     window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
 
     // 3. Initialize auth with runtime-resolved values.
-    //    Eagerly warms the MSAL token cache so resolveTenantIdSync() can read
-    //    accounts[0].tenantId synchronously when "Find Similar" is clicked.
+    //    Eagerly warms the MSAL token cache so resolveTenantIdSync() can read the
+    //    authority's tenant / the token's tid synchronously when "Find Similar" is clicked.
+    //    tenantId is the environment's tenant (sprk_TenantId) so a B2B guest signs in
+    //    against it, not their home tenant (#1453); the library ignores an invalid value.
     try {
         await initAuth({
             clientId: runtimeConfig.msalClientId,
             bffApiScope: runtimeConfig.bffOAuthScope,
             bffBaseUrl: runtimeConfig.bffBaseUrl,
+            tenantId: runtimeConfig.tenantId,
         });
 
         // Patch window globals if tenantId was empty at resolveRuntimeConfig() time.

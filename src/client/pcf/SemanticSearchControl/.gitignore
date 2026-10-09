@@ -16,3 +16,6 @@ generated/
 # Logs
 *.log
 npm-debug.log*
+
+# Jest type stub (see tsconfig.jest.json) - must stay tracked despite the generated/ rule above
+!jest-stubs/**/generated/

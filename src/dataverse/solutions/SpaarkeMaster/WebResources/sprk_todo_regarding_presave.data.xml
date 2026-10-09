@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{2ae21d81-f987-4d98-b1ff-3ba6694e3b21}</WebResourceId>
+  <Name>sprk_todo_regarding_presave</Name>
+  <DisplayName>Smart To Do Regarding PreSave</DisplayName>
+  <Description>OnSave handler that stages the 5 regarding fields for a fresh sprk_todo (SRFR-040 v1.2.0).</Description>
+  <LanguageCode>1033</LanguageCode>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>0</IsCustomizable>
+  <CanBeDeleted>0</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_todo_regarding_presave2AE21D81-F987-4D98-B1FF-3BA6694E3B21</FileName>
+</WebResource>

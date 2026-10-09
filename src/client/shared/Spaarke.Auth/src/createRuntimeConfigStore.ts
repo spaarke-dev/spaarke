@@ -38,6 +38,7 @@
 
 import type { IRuntimeConfig } from './resolveRuntimeConfig';
 import { resolveTenantIdSync } from './resolveTenantIdSync';
+import { normalizeTenant } from './tenant';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,7 +110,8 @@ export interface RuntimeConfigStore {
   /**
    * Store the resolved runtime config. Called once from `main.tsx` bootstrap
    * after `resolveRuntimeConfig()` resolves. Also sets window globals so that
-   * `@spaarke/auth`'s `resolveConfig()` can find them.
+   * `@spaarke/auth`'s `resolveConfig()` can find them (client ID, and the tenant
+   * as `__SPAARKE_TENANT_ID__` when it is valid).
    */
   setRuntimeConfig(config: IRuntimeConfig): void;
 
@@ -230,8 +232,20 @@ export function createRuntimeConfigStore(options: RuntimeConfigStoreOptions): Ru
     if (typeof window !== 'undefined') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__SPAARKE_BFF_BASE_URL__ = config.bffBaseUrl;
+      // resolveConfig() reads __SPAARKE_BFF_URL__, not the name above — without it
+      // an initAuth() that omits bffBaseUrl got '' (and could not reach the BFF's
+      // tenant fallback, #1453). A value a host set itself is left alone.
+      if (!window.__SPAARKE_BFF_URL__) {
+        window.__SPAARKE_BFF_URL__ = config.bffBaseUrl;
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__SPAARKE_MSAL_CLIENT_ID__ = config.msalClientId;
+      // Publish the tenant too (#1453): resolveConfig() reads it when a consumer
+      // calls initAuth() without passing tenantId. Only a valid tenant is published.
+      const tenant = normalizeTenant(config.tenantId);
+      if (tenant) {
+        window.__SPAARKE_TENANT_ID__ = tenant;
+      }
     }
     // Resolve the gate (no-op if already resolved or disabled).
     if (_resolveReady) {

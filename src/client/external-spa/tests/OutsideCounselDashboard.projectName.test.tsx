@@ -20,20 +20,24 @@ vi.mock('../src/api/web-api-client', async () => {
     ...actual,
     getProjects: vi
       .fn()
-      .mockResolvedValue([
-        { sprk_projectid: 'p-1', sprk_name: 'Alpha Merger', sprk_referencenumber: 'PRJ-1', modifiedon: inFiveDays },
-      ]),
+      .mockResolvedValue({
+        items: [{ sprk_projectid: 'p-1', sprk_name: 'Alpha Merger', sprk_referencenumber: 'PRJ-1', modifiedon: inFiveDays }],
+        truncated: false,
+      }),
     // The BFF's event shape: the project is named by its id, in the regarding lookup.
-    getEvents: vi.fn().mockResolvedValue([
-      {
-        sprk_eventid: 'e-1',
-        sprk_name: 'Signing deadline',
-        sprk_duedate: inFiveDays,
-        createdon: new Date().toISOString(),
-        _sprk_regardingproject_value: 'p-1',
-      },
-    ]),
-    getDocuments: vi.fn().mockResolvedValue([]),
+    getEvents: vi.fn().mockResolvedValue({
+      items: [
+        {
+          sprk_eventid: 'e-1',
+          sprk_name: 'Signing deadline',
+          sprk_duedate: inFiveDays,
+          createdon: new Date().toISOString(),
+          _sprk_regardingproject_value: 'p-1',
+        },
+      ],
+      truncated: false,
+    }),
+    getDocuments: vi.fn().mockResolvedValue({ items: [], truncated: false }),
   };
 });
 

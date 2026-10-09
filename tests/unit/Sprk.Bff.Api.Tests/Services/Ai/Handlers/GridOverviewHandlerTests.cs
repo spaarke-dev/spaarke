@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
@@ -204,6 +205,127 @@ public sealed class GridOverviewHandlerTests : TypedToolHandlerTestFixture
             because: "a non-aggregate saved view is executed with an accurate total-count request");
         result.Data!.Value.GetProperty("today").GetString().Should().Be("2026-08-10",
             because: "the injected server date is surfaced for transparency");
+    }
+
+    // ── task 124 (ISS-017 / #1447, D-25): {{today}} is the CALLER's day ────────────────────────────
+
+    private const string RangeTasksFetchXml =
+        "<fetch><entity name=\"sprk_task\">" +
+        "<attribute name=\"sprk_taskid\" />" +
+        "<filter><condition attribute=\"sprk_duedate\" operator=\"on-or-after\" value=\"{{today-1}}\" />" +
+        "<condition attribute=\"sprk_duedate\" operator=\"lt\" value=\"{{today}}\" />" +
+        "<condition attribute=\"sprk_duedate\" operator=\"le\" value=\"{{today+1}}\" /></filter>" +
+        "</entity></fetch>";
+
+    private void SetupCallerWho() =>
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "UserId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" }""")));
+
+    private void SetupCallerZone(string settingsValueJson, string? standardName = null)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("usersettingscollection?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(settingsValueJson)));
+        if (standardName is not null)
+            _dataverse
+                .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("timezonedefinitions?")), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "value": [ { "standardname": "{{standardName}}" } ] }""")));
+    }
+
+    private async Task<(string Fetch, string? ToolToday, ToolResult Result)> RunWithClockAsync(string fetchXml, DateTimeOffset now)
+    {
+        SetupConfig(fetchXml);
+        SetupTaskMetadata();
+        string? capturedFetch = null;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_tasks?fetchXml=")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => capturedFetch = p)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }""")));
+
+        var handler = new GridOverviewHandler(_dataverse.Object, new FixedTimeProvider(now), CreateLogger<GridOverviewHandler>());
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(ConfigId.ToString("D")));
+        var result = await handler.ExecuteChatAsync(ctx, BuildTool(), CancellationToken.None);
+        return (Uri.UnescapeDataString(capturedFetch ?? ""), result.Success ? result.Data!.Value.GetProperty("today").GetString() : null, result);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_EasternCaller_AtLocalEvening_RendersTheLocalDate_NotTomorrow()
+    {
+        // 2026-10-08T00:30Z is 20:30 on 2026-10-07 in Eastern (EDT).
+        SetupCallerWho();
+        SetupCallerZone("""{ "value": [ { "timezonecode": 35 } ] }""", "Eastern Standard Time");
+
+        var (fetch, toolToday, result) = await RunWithClockAsync(RangeTasksFetchXml, DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        fetch.Should().Contain("value=\"2026-10-06\"", because: "{{today-1}} is the day before the caller's local day");
+        fetch.Should().Contain("value=\"2026-10-07\"", because: "{{today}} is the caller's local date, not the UTC date");
+        fetch.Should().Contain("value=\"2026-10-08\"", because: "{{today+1}} is the day after the caller's local day");
+        toolToday.Should().Be("2026-10-07");
+        CapturedLogMessages.Should().NotContain(m => m.LogLevel == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerZoneUnreadable_FallsBackToUtcDate_AndLogsOneReason()
+    {
+        SetupCallerWho();
+        SetupCallerZone("""{ "value": [] }""");   // no usersettings row -> no-timezonecode
+
+        var (fetch, toolToday, result) = await RunWithClockAsync(OverdueTasksFetchXml, DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue("a time zone that cannot be read never fails the tool");
+        fetch.Should().Contain("value=\"2026-10-08\"");
+        toolToday.Should().Be("2026-10-08");
+        CapturedLogMessages.Where(m => m.LogLevel == LogLevel.Warning).Should().ContainSingle()
+            .Which.FormattedMessage.Should().Contain("no-timezonecode");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_TimeZoneReadFails_FallsBackToUtcDate_AndWarningCarriesReasonAndStatus()
+    {
+        // The caller is known but reading their usersettings is refused (a missing prvReadUserSettings is a 403).
+        SetupCallerWho();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("usersettingscollection?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(403, "DATAVERSE_FORBIDDEN", "secret detail that must not be logged"));
+
+        var (fetch, toolToday, result) = await RunWithClockAsync(OverdueTasksFetchXml, DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue("a time zone that cannot be read never fails the tool");
+        fetch.Should().Contain("value=\"2026-10-08\"");
+        toolToday.Should().Be("2026-10-08");
+        var warning = CapturedLogMessages.Where(m => m.LogLevel == LogLevel.Warning).Should().ContainSingle().Subject.FormattedMessage;
+        warning.Should().Contain("lookup-failed").And.Contain("status=403").And.Contain("DATAVERSE_FORBIDDEN");
+        warning.Should().NotContain("secret detail", "the warning is identifier-only");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerNotIdentifiable_FallsBackToUtcDate_AndLogsOneReason()
+    {
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(403, "forbidden", "no"));
+
+        var (fetch, _, result) = await RunWithClockAsync(OverdueTasksFetchXml, DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue();
+        fetch.Should().Contain("value=\"2026-10-08\"");
+        CapturedLogMessages.Where(m => m.LogLevel == LogLevel.Warning).Should().ContainSingle()
+            .Which.FormattedMessage.Should().Contain("caller-unresolved").And.Contain("forbidden");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_QueryWithoutTodayToken_MakesNoTimeZoneReads()
+    {
+        var (fetch, _, result) = await RunWithClockAsync(
+            "<fetch><entity name=\"sprk_task\"><attribute name=\"sprk_taskid\" /></entity></fetch>",
+            DateTimeOffset.Parse("2026-10-08T00:30:00Z"));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        fetch.Should().Contain("sprk_taskid");
+        _dataverse.Verify(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()), Times.Never);
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("usersettingscollection")), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

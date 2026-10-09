@@ -39,6 +39,14 @@ public sealed record PromptShieldResult(
     public bool FailedOpen { get; init; }
 
     /// <summary>
+    /// True when the scan failed open because Content Safety REFUSED the BFF's identity (HTTP 401/403) or the
+    /// credential could not produce a token. Always implies <see cref="FailedOpen"/>. Kept distinct from other
+    /// fail-open causes because it is not transient: every scan in the environment rides unshielded until the role
+    /// assignment or credential is fixed (task 230b — the stamp has no key to fall back to).
+    /// </summary>
+    public bool AuthRefused { get; init; }
+
+    /// <summary>
     /// Convenience factory: safe result (not blocked).
     /// </summary>
     public static PromptShieldResult Safe(double latencyMs) =>
@@ -50,6 +58,13 @@ public sealed record PromptShieldResult(
     /// </summary>
     public static PromptShieldResult FailOpen(double latencyMs) =>
         new(false, PromptShieldBlockReason.None, null, [], latencyMs) { FailedOpen = true };
+
+    /// <summary>
+    /// Fail-open result when Content Safety refused the BFF's identity (HTTP 401/403) or no token could be
+    /// acquired. Callers MUST log an error before returning this result.
+    /// </summary>
+    public static PromptShieldResult FailOpenAuthRefused(double latencyMs) =>
+        new(false, PromptShieldBlockReason.None, null, [], latencyMs) { FailedOpen = true, AuthRefused = true };
 }
 
 /// <summary>

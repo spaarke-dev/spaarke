@@ -2,7 +2,6 @@ using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() e
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
-using Sprk.Bff.Api.Endpoints.Diagnostics;          // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
 using Sprk.Bff.Api.Endpoints.Onboarding;           // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
@@ -192,10 +191,13 @@ builder.Services.AddInsightsIngestModule();
 builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
-builder.Services.AddAiSafetyModule(builder.Configuration);
+builder.Services.AddAiSafetyModule(builder.Configuration, builder.Environment);
 
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
+
+// Keyless proof (customer-provisioning task 230b): one managed-identity call per stamp service, for H13.
+builder.Services.AddKeylessProofModule();
 
 // AI Platform R2: chat extensions (prompt builder, latency telemetry, playbook candidate selection)
 builder.Services.AddAiChatModule(builder.Configuration);
@@ -235,12 +237,8 @@ builder.Services.AddComposeModule();
 // ADR-010 tension row); NO AI-internal injection (ADR-013 forcing-function).
 builder.Services.AddOnboardingModule(builder.Configuration, builder.Environment);
 
-// Diagnostics surface (customer-provisioning-orchestration-r1, G-8 Batch 6 fix #18) —
-// ITenantContainerResolver for GET /api/diagnostics/tenant-container-resolver, the
-// BFF-side dependency of the L2 H13 I4 invariant probe. Unconditional per ADR-032 /
-// bff-extensions.md §F.1 (endpoint maps unconditionally). READ-ONLY; no AI-internal
-// types (ADR-013); zero new packages. See Endpoints/Diagnostics/DiagnosticsModule.cs.
-builder.Services.AddDiagnosticsModule();
+// (The I4 tenant-container-resolver diagnostic was retired by customer-provisioning-orchestration-r1 task 227f:
+// SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers.)
 
 // CORS (secure, fail-closed configuration)
 builder.Services.AddCorsModule(builder.Configuration, builder.Environment);

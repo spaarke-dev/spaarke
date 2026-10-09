@@ -37,3 +37,4 @@ export const waitForConfig = store.waitForConfig;
 export const getBffBaseUrl = store.getBffBaseUrl;
 export const getBffOAuthScope = store.getBffOAuthScope;
 export const getMsalClientId = store.getMsalClientId;
+export const getTenantId = store.getTenantId;

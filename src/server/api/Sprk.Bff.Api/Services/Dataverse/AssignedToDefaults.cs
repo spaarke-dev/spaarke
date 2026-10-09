@@ -117,6 +117,25 @@ internal static class AssignedToDefaults
         return Outcome.Unassigned;
     }
 
+    /// <summary>
+    /// The responsible internal contact a parent row names, in <see cref="ResponsibleContactColumns"/> order, or null.
+    /// The ONE precedence: <see cref="ApplyAsync"/> assigns by it, and To Do generation dates "today" by the same person
+    /// (task 098, D-25), so the two cannot disagree about who a generated to-do is for.
+    /// </summary>
+    internal static Guid? ResponsibleContactOf(Entity? parentRow)
+    {
+        foreach (var column in ResponsibleContactColumns)
+        {
+            if (parentRow is not null && parentRow.Contains(column)
+                && parentRow[column] is EntityReference contact && contact.Id != Guid.Empty)
+            {
+                return contact.Id;
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<(Guid? ContactId, bool ReadFailed)> ReadResponsibleContactAsync(
         IGenericEntityService dataverse,
         Entity record,
@@ -153,12 +172,9 @@ internal static class AssignedToDefaults
                 var row = await dataverse
                     .RetrieveAsync(entity, id, ResponsibleContactColumns.ToArray(), ct)
                     .ConfigureAwait(false);
-                foreach (var column in ResponsibleContactColumns)
+                if (ResponsibleContactOf(row) is { } contactId)
                 {
-                    if (row is not null && row.Contains(column) && row[column] is EntityReference contact && contact.Id != Guid.Empty)
-                    {
-                        return (contact.Id, false);
-                    }
+                    return (contactId, false);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

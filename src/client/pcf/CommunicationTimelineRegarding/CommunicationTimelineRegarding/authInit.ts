@@ -10,7 +10,7 @@
  * Dataverse env vars — no hardcoded client id, tenant, or BFF URL.
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 import { getXrm } from '@spaarke/ui-components';
 
@@ -18,12 +18,16 @@ export async function initializeAuth(
   clientAppId: string,
   bffAppId: string,
   bffApiUrl: string,
-  dataverseUrl: string
+  dataverseUrl: string,
+  /** The environment's tenant (sprk_TenantId). Optional: when absent or invalid, @spaarke/auth's discovery decides. */
+  tenantId?: string
 ): Promise<void> {
   const config: IAuthConfig = {
     clientId: clientAppId,
-    // authority intentionally omitted — @spaarke/auth resolves the tenant-specific
-    // authority via resolveTenantFromXrm(); passing one causes a popup regression.
+    // Pass the environment's tenant so the authority is tenant-specific (a B2B guest signed in against
+    // /organizations lands in their home tenant — #1453). The 2026-05-13 popup regression was a malformed
+    // `/undefined` authority, which @spaarke/auth now rejects; isValidTenant() filters bad values here.
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     redirectUri: dataverseUrl,
     bffApiScope: `api://${bffAppId}/user_impersonation`,
     bffBaseUrl: bffApiUrl,

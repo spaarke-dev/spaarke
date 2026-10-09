@@ -49,13 +49,11 @@ export interface UseRelatedDocumentCountResult {
  * Hook to fetch the count of semantically related documents.
  *
  * @param documentId - Source document GUID
- * @param tenantId - Azure AD tenant ID for multi-tenant routing
  * @param apiBaseUrl - BFF API base URL (defaults to dev endpoint)
  * @returns State object with count, loading, error, lastUpdated, and refetch
  */
 export function useRelatedDocumentCount(
   documentId: string,
-  tenantId: string | undefined,
   apiBaseUrl: string | undefined
 ): UseRelatedDocumentCountResult {
   const [count, setCount] = useState(0);
@@ -97,7 +95,8 @@ export function useRelatedDocumentCount(
         setIsLoading(false);
         return;
       }
-      const query = `countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
+      // No tenantId param: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
+      const query = 'countOnly=true';
       const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentCount] Fetching count:', {
@@ -157,7 +156,7 @@ export function useRelatedDocumentCount(
         setIsLoading(false);
       }
     }
-  }, [documentId, tenantId, apiBaseUrl]);
+  }, [documentId, apiBaseUrl]);
 
   // Fetch on mount and when documentId changes (record navigation)
   useEffect(() => {

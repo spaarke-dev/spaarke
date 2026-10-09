@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{803a95f8-8208-f111-8407-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_kpi_ribbon_actions.js</Name>
+  <DisplayName>sprk_kpi_ribbon_actions</DisplayName>
+  <LanguageCode>0</LanguageCode>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_kpi_ribbon_actionsjs803A95F8-8208-F111-8407-7C1E520AA4DF</FileName>
+</WebResource>

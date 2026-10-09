@@ -471,6 +471,11 @@ export interface ICreateRecordWizardProps {
    * Defaults to WizardShell's `70vh`. Ignored in embedded mode.
    */
   height?: string;
+  /**
+   * App-shell `--sprk-ui-scale`, forwarded to `WizardShell` → `SprkModal` (non-embedded mode only;
+   * ADR-050: wizards pass `uiScale` like every other preset). Task 112 (in-app host).
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------

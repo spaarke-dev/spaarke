@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<!--
+  Task 001 SPIKE HARNESS — Path B side-pane diagnostic pane body.
+  Deployed as Dataverse web resource: sprk_sidepanespike.html (webresourcetype = 1 / HTML).
+
+  PURPOSE (throwaway diagnostic): prove on the CURRENT UCI build that an app-level
+  side pane created with { canClose:false, alwaysRender:true } (a) persists across
+  record navigation, (b) keeps its JS running while collapsed, and (c) can observe
+  every record visit via an Xrm.Utility.getPageContext() polling loop.
+
+  ADR-006 note: this is a self-contained no-framework HTML harness by DESIGN — a
+  spike-scoped exception (CLAUDE.md §6.5 path A) to remove the Vite build/stale-dist
+  failure class from a browserless build session. The PRODUCTION NavigatorPane
+  (task 040) is a proper Vite + React 19 code page. Do NOT ship this file.
+
+  No external requests (CSP-safe). Vanilla JS only.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Side-Pane Spike</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg: #ffffff; --fg: #201f1e; --muted: #605e5c; --line: #edebe9;
+      --ok: #107c10; --bad: #a4262c; --warn: #797673; --accent: #0f6cbd;
+      --logbg: #faf9f8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1b1a19; --fg: #f3f2f1; --muted: #a19f9d; --line: #3b3a39;
+        --ok: #6bb700; --bad: #f1707b; --warn: #d0b17a; --accent: #4aa3f0;
+        --logbg: #201f1e;
+      }
+    }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+    body {
+      background: var(--bg); color: var(--fg); overflow: hidden;
+      font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px;
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    header { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 14px; margin: 0 0 2px; }
+    .sub { color: var(--muted); font-size: 11px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 12px; }
+    .stat { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+    .stat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat .v.small { font-size: 12px; font-weight: 500; word-break: break-all; }
+    .row { display: flex; gap: 6px; padding: 0 12px 8px; flex-wrap: wrap; }
+    button {
+      font: inherit; padding: 5px 10px; border: 1px solid var(--line);
+      background: var(--bg); color: var(--fg); border-radius: 4px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .probe { padding: 0 12px 6px; font-size: 12px; }
+    .probe .ok { color: var(--ok); } .probe .bad { color: var(--bad); }
+    .logwrap { flex: 1; min-height: 0; padding: 0 12px 12px; display: flex; flex-direction: column; }
+    .logtitle { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 4px 0; }
+    #log {
+      flex: 1; min-height: 0; overflow-y: auto; background: var(--logbg);
+      border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px;
+      font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .le { border-bottom: 1px dashed var(--line); padding: 2px 0; }
+    .le .t { color: var(--muted); }
+    .le.visit { color: var(--accent); font-weight: 600; }
+    .le.warnx { color: var(--warn); }
+    .le.errx { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Path B Side-Pane Spike <span id="ver" class="sub"></span></h1>
+    <div class="sub" id="frameInfo">locating Xrm…</div>
+  </header>
+
+  <div class="grid">
+    <div class="stat"><div class="k">Heartbeats (poll ticks)</div><div class="v" id="hb">0</div></div>
+    <div class="stat"><div class="k">Distinct record visits</div><div class="v" id="visits">0</div></div>
+    <div class="stat" style="grid-column: 1 / -1;"><div class="k">Current page context</div><div class="v small" id="cur">—</div></div>
+  </div>
+
+  <div class="row">
+    <button class="primary" id="btnProbe">Run "edited by me" WebApi probe</button>
+    <button id="btnCopy">Copy results</button>
+    <button id="btnClear">Clear log</button>
+  </div>
+  <div class="probe" id="probeOut"></div>
+
+  <div class="logwrap">
+    <div class="logtitle">Observation log (newest first)</div>
+    <div id="log"></div>
+  </div>
+
+  <script>
+  (function () {
+    "use strict";
+    var VERSION = "spike-1.0.2";
+    var POLL_MS = 1500;
+    document.getElementById("ver").textContent = "· " + VERSION + " · poll " + POLL_MS + "ms";
+
+    var state = {
+      heartbeats: 0,
+      visits: 0,
+      lastKey: null,
+      xrm: null,
+      frame: null,
+      startedIso: new Date().toISOString()
+    };
+    var logEl = document.getElementById("log");
+    var logBuffer = []; // plain-text mirror for "copy results"
+
+    function nowT() {
+      var d = new Date();
+      return d.toLocaleTimeString() + "." + String(d.getMilliseconds()).padStart(3, "0");
+    }
+    function log(msg, cls) {
+      var line = "[" + nowT() + "] " + msg;
+      logBuffer.unshift(line);
+      var div = document.createElement("div");
+      div.className = "le" + (cls ? " " + cls : "");
+      div.innerHTML = '<span class="t">[' + nowT() + ']</span> ' + msg;
+      logEl.insertBefore(div, logEl.firstChild);
+      if (logBuffer.length > 500) logBuffer.pop();
+    }
+
+    // Frame-walk: side-pane web resources run in an iframe; Xrm typically lives on
+    // parent or top. Accept the first frame exposing Utility.getPageContext.
+    function locateXrm() {
+      var candidates = [];
+      try { if (window.Xrm) candidates.push(["self", window.Xrm]); } catch (e) {}
+      try { if (window.parent && window.parent !== window && window.parent.Xrm) candidates.push(["parent", window.parent.Xrm]); } catch (e) {}
+      try { if (window.top && window.top !== window && window.top.Xrm) candidates.push(["top", window.top.Xrm]); } catch (e) {}
+      for (var i = 0; i < candidates.length; i++) {
+        var name = candidates[i][0], x = candidates[i][1];
+        if (x && x.Utility && typeof x.Utility.getPageContext === "function") {
+          return { frame: name, xrm: x };
+        }
+      }
+      // Fallback: any frame with Xrm at all (for shape inspection)
+      if (candidates.length) return { frame: candidates[0][0] + "(no getPageContext)", xrm: candidates[0][1] };
+      return null;
+    }
+
+    // Frame-walk specifically for an Xrm.WebApi exposing retrieveMultipleRecords.
+    // The frame that has Utility.getPageContext (parent) may carry a WebApi whose
+    // method surface differs; find the first frame with the real Client API method.
+    function locateWebApi() {
+      var frames = [];
+      try { frames.push(["self", window.Xrm]); } catch (e) {}
+      try { if (window.parent && window.parent !== window) frames.push(["parent", window.parent.Xrm]); } catch (e) {}
+      try { if (window.top && window.top !== window) frames.push(["top", window.top.Xrm]); } catch (e) {}
+      for (var i = 0; i < frames.length; i++) {
+        var x = frames[i][1];
+        try {
+          if (x && x.WebApi && typeof x.WebApi.retrieveMultipleRecords === "function") {
+            return { frame: frames[i][0], webApi: x.WebApi };
+          }
+        } catch (e) {}
+      }
+      return null;
+    }
+
+    // Read the current main-content context from EVERY available signal each poll, so
+    // the spike can tell WHICH source tracks navigation on the current UCI build:
+    //   - getPageContext() re-read fresh from top / parent / self frames (never cached)
+    //   - the top-window URL (pagetype/etn/id) — usually the most robust signal for a
+    //     persistent side pane, since UCI rewrites the top URL on every navigation.
+    function readFromGpc(win, label) {
+      try {
+        var x = win && win.Xrm;
+        if (!x || !x.Utility || typeof x.Utility.getPageContext !== "function") return null;
+        var pc = x.Utility.getPageContext();
+        var i = pc && pc.input ? pc.input : null;
+        if (!i) return { source: label, key: "empty", desc: "(no input)" };
+        var id = (i.entityId || "").replace(/[{}]/g, "").toLowerCase();
+        return {
+          source: label,
+          key: [i.pageType || "?", i.entityName || "", id, i.name || ""].join("|"),
+          desc: [i.pageType, i.entityName, id ? "id=" + id : "", i.name ? "name=" + i.name : ""].filter(Boolean).join(" · ")
+        };
+      } catch (e) { return { source: label, key: "err", desc: "ERR " + e.message }; }
+    }
+    function readFromUrl() {
+      try {
+        var loc = window.top.location;
+        var qs = new URLSearchParams(loc.search || "");
+        var hash = (loc.hash || "").replace(/^#/, "");
+        var hqs = new URLSearchParams(hash.indexOf("=") >= 0 ? hash : "");
+        var get = function (k) { return qs.get(k) || hqs.get(k) || ""; };
+        var pt = get("pagetype"), etn = get("etn"), id = get("id").replace(/[{}]/g, "").toLowerCase();
+        if (!pt && !etn && !id) return { source: "top.url", key: "empty", desc: "(no url params)" };
+        return { source: "top.url", key: ["url", pt, etn, id].join("|"), desc: [pt, etn, id ? "id=" + id : ""].filter(Boolean).join(" · ") };
+      } catch (e) { return { source: "top.url", key: "err", desc: "ERR " + e.message }; }
+    }
+    function winTop() { try { return window.top; } catch (e) { return null; } }
+    function winParent() { try { return window.parent; } catch (e) { return null; } }
+
+    function tick() {
+      state.heartbeats++;
+      document.getElementById("hb").textContent = state.heartbeats;
+
+      var sources = [
+        readFromGpc(winTop(), "top.gpc"),
+        readFromGpc(winParent(), "parent.gpc"),
+        readFromGpc(window, "self.gpc"),
+        readFromUrl()
+      ].filter(Boolean);
+
+      // Pick the first source with a real (non-empty/non-err) record key, by priority.
+      var priority = ["top.url", "top.gpc", "parent.gpc", "self.gpc"];
+      var best = null;
+      for (var p = 0; p < priority.length && !best; p++) {
+        for (var s = 0; s < sources.length; s++) {
+          if (sources[s].source === priority[p] && sources[s].key !== "empty" && sources[s].key !== "err") { best = sources[s]; break; }
+        }
+      }
+
+      if (!state.frameLogged) {
+        state.frameLogged = true;
+        state.frame = sources.map(function (x) { return x.source + "=" + (x.key === "empty" ? "empty" : x.key === "err" ? "err" : "ok"); }).join(", ");
+        document.getElementById("frameInfo").textContent = "signals: " + state.frame;
+        log("Context signals at mount: " + state.frame, "visit");
+      }
+
+      document.getElementById("cur").textContent = best ? (best.source + ": " + best.desc) : "(no context from any source)";
+
+      if (best && best.key !== state.lastKey) {
+        state.lastKey = best.key;
+        state.visits++;
+        document.getElementById("visits").textContent = state.visits;
+        log("VISIT #" + state.visits + " [" + best.source + "] → " + best.desc, "visit");
+      }
+
+      // Periodic multi-source snapshot so we can compare which signal tracks navigation.
+      if (state.heartbeats % 6 === 0) {
+        log("snapshot @hb" + state.heartbeats + ": " + sources.map(function (x) { return x.source + "→" + x.desc; }).join("  |  "));
+      }
+    }
+
+    // "Edited by me" probe (R2): resolve current user id, then filter a common entity
+    // by _modifiedby_value = that id. Validates the host-context WebApi + current-user
+    // filter that FR-03 (Recent → Edited) relies on. Uses 'account' (always present).
+    document.getElementById("btnProbe").addEventListener("click", function () {
+      var out = document.getElementById("probeOut");
+      out.textContent = "running probe…";
+      var xfound = locateXrm();
+      if (!xfound || !xfound.xrm) { out.innerHTML = '<span class="bad">Xrm not located yet.</span>'; return; }
+      var userId = null;
+      try {
+        var gc = xfound.xrm.Utility.getGlobalContext();
+        userId = (gc.userSettings && gc.userSettings.userId ? gc.userSettings.userId : "").replace(/[{}]/g, "");
+      } catch (e) { out.innerHTML = '<span class="bad">getGlobalContext failed: ' + e.message + '</span>'; return; }
+      log("Probe: current userId = " + userId);
+      var api = locateWebApi();
+      if (!api) {
+        out.innerHTML = '<span class="bad">No frame exposes Xrm.WebApi.retrieveMultipleRecords.</span> (This WOULD be a Path B concern — capture needs WebApi from the pane.)';
+        log("Probe FAILED: retrieveMultipleRecords not found on self/parent/top", "errx");
+        return;
+      }
+      log("WebApi found in frame: " + api.frame);
+      var q = "?$select=name&$filter=_modifiedby_value eq " + userId + "&$top=3";
+      api.webApi.retrieveMultipleRecords("account", q).then(function (res) {
+        var n = res && res.entities ? res.entities.length : 0;
+        out.innerHTML = '<span class="ok">WebApi OK</span> (frame: ' + api.frame + ') — account modifiedby=me returned ' + n + ' row(s). Current-user filter works.';
+        log("Probe OK: account?_modifiedby_value eq " + userId + " → " + n + " row(s)", "visit");
+      }).catch(function (err) {
+        var m = (err && err.message) ? err.message : String(err);
+        out.innerHTML = '<span class="bad">WebApi FAILED:</span> ' + m;
+        log("Probe FAILED: " + m, "errx");
+      });
+    });
+
+    document.getElementById("btnCopy").addEventListener("click", function () {
+      var summary =
+        "=== Side-Pane Spike results ===\n" +
+        "version: " + VERSION + "\n" +
+        "started: " + state.startedIso + "\n" +
+        "xrm frame: " + (state.frame || "NOT FOUND") + "\n" +
+        "heartbeats (poll ticks): " + state.heartbeats + "\n" +
+        "distinct record visits: " + state.visits + "\n" +
+        "current context: " + document.getElementById("cur").textContent + "\n" +
+        "probe: " + document.getElementById("probeOut").textContent + "\n" +
+        "--- log (newest first) ---\n" + logBuffer.join("\n");
+      var ta = document.createElement("textarea");
+      ta.value = summary; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(ta);
+      log("Results copied to clipboard.", "visit");
+    });
+
+    document.getElementById("btnClear").addEventListener("click", function () {
+      logEl.innerHTML = ""; logBuffer.length = 0;
+    });
+
+    log("Spike harness mounted. Beginning " + POLL_MS + "ms poll of getPageContext().");
+    tick();
+    setInterval(tick, POLL_MS);
+  })();
+  </script>
+</body>
+</html>

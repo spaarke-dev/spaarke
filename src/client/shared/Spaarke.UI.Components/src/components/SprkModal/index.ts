@@ -1,9 +1,12 @@
 /**
  * SprkModal — the canonical Spaarke modal system (spec FR-01).
  *
- * One Fluent v9 `Dialog`-envelope shell + six presets, all thin configs sharing
+ * One Fluent v9 `Dialog`-envelope shell + presets, all thin configs sharing
  * one named size scale, the standard header/footer, and dismiss semantics. See
  * `docs/standards/MODAL-DESIGN-SYSTEM.md` (the component layer) and ADR-050.
+ *
+ * The wizard preset is `WizardShell` (exported from `components/Wizard`) — it renders inside
+ * `SprkModal`. The former static-steps wizard preset was retired (ADR-050 as amended 2026-10-07, D-26).
  */
 
 // Base shell + public types (SprkModalProps / Dismiss / BodyScroll / Nav)
@@ -29,4 +32,3 @@ export * from './presets/ChoiceModal';
 export * from './presets/FormModal';
 export * from './presets/PreviewModal';
 export * from './presets/BrowseModal';
-export * from './presets/WizardModal';
