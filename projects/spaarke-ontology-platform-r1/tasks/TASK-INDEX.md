@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **113 tasks** across 14 phases (55 ✅ · 1 🔄 · 56 🔲 · 1 cancelled; updated 2026-10-09)
+> (spec §9) · **114 tasks** across 14 phases (55 ✅ · 1 🔄 · 57 🔲 · 1 cancelled; updated 2026-10-09)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -300,6 +300,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 133 | [System playbooks read-only in the Playbook Designer](133-designer-readonly-system-playbooks.poml) | FULL | sonnet/high | — | S1 | D-97 / sweep PB-08 (protects matter-health-single etc.) |
 | 🔲 [open] 134 | [uac-r2 follow-through: membership role credit bug (PB-07) + AiAnalysis write tools (AI-EX7)](134-uac-membership-role-credit-and-aianalysis-writes.poml) | FULL | **opus**/high | — | S1 | Blocked on uac-r2 (#1355 comment 6074035905) |
 | 🔲 [open] 135 | [Fix the Matter Health insights playbook; deactivate broken demo + junk playbooks](135-matter-health-playbook-fix.poml) | FULL | **opus**/high | — | S1 | D-96 / D-101 |
+| 🔲 [open] 136 | [Create Analysis from the Console hub fails at Finish (404 "filed under ... not found")](136-create-analysis-hub-finish-404.poml) | FULL | **opus**/high | — | S1 | Owner checklist r1 (2026-10-08) |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 
