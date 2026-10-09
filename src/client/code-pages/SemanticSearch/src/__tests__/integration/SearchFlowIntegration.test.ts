@@ -43,13 +43,21 @@ jest.mock('../../services/authInit', () => ({
   isAuthenticated: jest.fn().mockReturnValue(true),
 }));
 
-jest.mock('@spaarke/auth', () => ({
-  resolveRuntimeConfig: jest.fn().mockResolvedValue({
-    bffBaseUrl: 'https://test-bff-api.example.com',
-    bffOAuthScope: 'api://test-app-id/user_impersonation',
-    msalClientId: 'test-client-id',
-  }),
-}));
+jest.mock('@spaarke/auth', () => {
+  // The hooks' error path reads thrown failures with the real guards (isApiError / problemOf /
+  // isAuthFailure); without them every caught error became a second TypeError inside the catch.
+  const { isApiError, problemOf, isAuthFailure } = jest.requireActual('@spaarke/auth');
+  return {
+    isApiError,
+    problemOf,
+    isAuthFailure,
+    resolveRuntimeConfig: jest.fn().mockResolvedValue({
+      bffBaseUrl: 'https://test-bff-api.example.com',
+      bffOAuthScope: 'api://test-app-id/user_impersonation',
+      msalClientId: 'test-client-id',
+    }),
+  };
+});
 
 // Mock global fetch at the lowest level so the full service pipeline is tested
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
