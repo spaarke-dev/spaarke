@@ -798,7 +798,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
-| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
+| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ (script deleted 2026-10-08) | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
 | 2 | ~~`Deploy-ExternalWorkspaceSpa.ps1`~~ | ~~`sprk_externalworkspace` (HTML + inline JS)~~ — **RETIRED 2026-07-20** (spaarke-SPA-external-access-platform-r1 task 041; SPA now served from Azure Static Web Apps via `.github/workflows/deploy-external-spa.yml`) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
 | 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
