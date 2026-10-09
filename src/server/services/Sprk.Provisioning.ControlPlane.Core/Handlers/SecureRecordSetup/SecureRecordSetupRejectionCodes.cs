@@ -3,12 +3,14 @@
 //
 // T256 (H7b) — the rejection codes of the Secure Record setup handler. The secure_setup.* codes are the ones
 // unified-access-control-r2 proposed in INCOMING-145 §2.4, verbatim, plus the ones the steps it added later need
-// (§6 T2/T4, §4 item 2's S10–S14, the sprk_noaccessentry prerequisite, the dry run). The infrastructure codes are the
+// (§6 T2/T4, §4 item 2's S10–S14, the sprk_noaccessentry prerequisite, the dry run, and S15–S18 — the contact
+// identity-binding profiles' memberships, INCOMING-141 / T255). The infrastructure codes are the
 // shared ones H7 uses (EnvVarValuesRejectionCodes) — one code for one condition across the Dataverse handlers.
 //
 // §4C CLASS (INCOMING-145 §2.3): every failure is Resumable except where an owner decision is needed before anything
 // can change — users in the business unit, members of the owner team, a business unit under the wrong parent, a root
-// default team that reaches the secure unit by depth, and a field-security writer nobody named. Those are
+// default team that reaches the secure unit by depth, and a field-security writer nobody named (on sprk_issecure or on
+// an identity-binding column). Those are
 // QuarantineRequired: a retry cannot fix them, and the handler never moves a user, a team member or a business unit.
 // -----------------------------------------------------------------------------
 
@@ -72,7 +74,10 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string RootDefaultTeamReachesSecureUnit = "secure_setup.root_default_team_reaches_secure_bu";
 
-    /// <summary>S10: a BFF-managed field-security profile is missing or ambiguous — it ships in SpaarkeMaster (Resumable).</summary>
+    /// <summary>
+    /// S10/S15: a field-security profile H7b maintains memberships of (the two BFF-managed profiles, the two identity-link
+    /// profiles) is missing or ambiguous — every one ships in SpaarkeMaster (Resumable).
+    /// </summary>
     public const string FieldProfileUnresolved = "secure_setup.field_profile_unresolved";
 
     /// <summary>S12: the writer profile has a member other than the BFF's application users (QuarantineRequired).</summary>
@@ -81,8 +86,32 @@ public static class SecureRecordSetupRejectionCodes
     /// <summary>S14: the shipped lock on <c>sprk_issecure</c> is incomplete — not secured, or a profile grant missing (Resumable).</summary>
     public const string FieldLockIncomplete = "secure_setup.field_lock_incomplete";
 
-    /// <summary>S14: a profile other than the BFF writer profile (and System Administrator) may write <c>sprk_issecure</c> (QuarantineRequired).</summary>
+    /// <summary>
+    /// S14: a profile other than the BFF writer profile (and System Administrator) may write <c>sprk_issecure</c> — the
+    /// reader profile included: every default team is its member (QuarantineRequired).
+    /// </summary>
     public const string FieldLockOtherWriter = "secure_setup.field_lock_other_writer";
+
+    // ---- Contact identity binding (unified-access-control-r2 INCOMING-141 / task 141; T255) ----
+
+    /// <summary>
+    /// S17: "Spaarke Identity Link Writers" has a member other than the BFF's application users. Every member could bind
+    /// any contact to any identity, or point any systemuser at any contact — whose grants a caller inherits
+    /// (QuarantineRequired — nothing is removed here).
+    /// </summary>
+    public const string IdentityLinkWriterHasOtherMember = "secure_setup.identity_link_writer_has_other_member";
+
+    /// <summary>
+    /// S18: the shipped lock on <c>contact.sprk_externalobjectid</c> / <c>systemuser.sprk_primarycontact</c> is
+    /// incomplete — a column not secured, or a reader / writer grant missing (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string IdentityLinkLockIncomplete = "secure_setup.identity_link_lock_incomplete";
+
+    /// <summary>
+    /// S18: a profile other than "Spaarke Identity Link Writers" (and System Administrator) may create or update a binding
+    /// column — the reader profile included (QuarantineRequired).
+    /// </summary>
+    public const string IdentityLinkLockOtherWriter = "secure_setup.identity_link_lock_other_writer";
 
     /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing

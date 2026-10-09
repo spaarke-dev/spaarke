@@ -3,22 +3,32 @@
 //
 // T256 (H7b) — the per-environment Secure Record setup, step by step: unified-access-control-r2 INCOMING-145 §2.2
 // (S0–S9), its §4 item 2 (S10–S14, task 150's field security), its §6 topology checks (T2, T4) and the
-// sprk_noaccessentry prerequisite (#1364). Every step READS first and writes only what is missing, so a second run
-// against a configured environment performs no write at all.
+// sprk_noaccessentry prerequisite (#1364) — plus S15–S18, the memberships of the contact identity-binding profiles
+// (unified-access-control-r2 INCOMING-141 / task 141; T255), built exactly as S10/S11/S12/S14. Every step READS first
+// and writes only what is missing, so a second run against a configured environment performs no write at all.
 //
 // THREE PHASES
 //   1. Read and refuse. Everything that already exists is read and checked before anything is written: a refusal
 //      (users in the unit, members on the team, a replica role, a privilege at the wrong depth, a stray field-security
-//      writer, a root default team that reaches the unit by depth …) leaves the environment exactly as it was found.
+//      writer on either lock, a root default team that reaches the unit by depth …) leaves the environment exactly as
+//      it was found.
 //   2. Write what is missing — or, on a dry run, only record what would be written. Order: S1 unit → S3 team → S4 role
 //      → S5 grant → S6 strip (ALWAYS, after S5, even when S5 added nothing: creating a role injects ~9 platform
 //      privileges and AddPrivilegesRole re-injects the SharePoint four — setup guide §5.4) → S7 assign → S8 contain →
-//      S11 reader profile ↔ every default team → S12 writer profile ↔ the BFF's application users → S13 NULL flags.
+//      S11 reader profile ↔ every default team → S12 writer profile ↔ the BFF's application users → S16 identity-link
+//      reader profile ↔ every default team → S17 identity-link writer profile ↔ the BFF's application users → S13 NULL
+//      flags.
 //   3. Verify (S9): re-read the end state; anything but the codified state is a refusal.
 //
-// WHAT IT NEVER DOES: move a user, remove a team member, re-parent a business unit, widen or narrow an existing
-// privilege, or create a field-security profile or secure a column. The profiles, the column lock and the deny-list
-// table ship in SpaarkeMaster (H6); this procedure verifies them and adds only the memberships, which are data.
+// IDENTITY-LINK WRITERS. The BFF writes contact.sprk_externalobjectid and systemuser.sprk_primarycontact app-only with
+// its stamp managed identity (DataverseContactIdentityStore over the BFF's TokenCredential); the writer profile holds
+// exactly H10's two BFF application users — the same set as the BFF-managed writer profile (S12) and as the shipped
+// profile's description and UAC-r2's dev configuration — and nobody else (S17 refuses any other member).
+//
+// WHAT IT NEVER DOES: move a user, remove a team member or a profile member, re-parent a business unit, widen or
+// narrow an existing privilege, or create a field-security profile or secure a column. The profiles, both column locks
+// and the deny-list table ship in SpaarkeMaster (H6); this procedure verifies them and adds only the memberships,
+// which are data.
 //
 // NAMES. The business unit and the role come from config/secure-record-owner-role.json (the ONE file); the owner
 // team's name is the BFF's compiled default (SecureRecordOwnerTeam.DefaultOwnerTeamName). Customer stamps run the BFF
@@ -81,6 +91,28 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S13/S14: the secure flag only the BFF writes (task 150).</summary>
     public const string SecureFlagColumn = "sprk_issecure";
+
+    /// <summary>
+    /// S15/S16: Read on the contact identity-binding columns (INCOMING-141, task 141); every business unit's default team is
+    /// a member, because a field-secured column is HIDDEN from anyone without Read (the Console reads both as the user).
+    /// </summary>
+    public const string IdentityLinkReaderProfileName = "Spaarke Identity Link Readers";
+
+    /// <summary>
+    /// S15/S17: Read/Create/Update on the binding columns; the BFF's application users are its only members — every binding
+    /// and every systemuser→contact link is written by the BFF (DataverseContactIdentityStore, app-only).
+    /// </summary>
+    public const string IdentityLinkWriterProfileName = "Spaarke Identity Link Writers";
+
+    /// <summary>
+    /// S18: the field-secured binding columns, as (table, column). The uniqueness mirror
+    /// <c>contact.sprk_externalobjectidkey</c> is deliberately NOT secured (Dataverse cannot key a secured column).
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> IdentityLinkColumns =
+    [
+        ("contact", "sprk_externalobjectid"),
+        ("systemuser", "sprk_primarycontact"),
+    ];
 
     /// <summary>The depth the codified set grants.</summary>
     public const string BasicDepth = "Basic";
@@ -353,8 +385,10 @@ public sealed class SecureRecordSetupProcedure
                     "is incomplete. Nothing was written.");
             }
         }
+        // The reader profile is NOT exempt: every default team is its member, so a write grant there is a write grant to
+        // every user.
         var otherWriters = permissions
-            .Where(p => p.ProfileId != readerProfileId && p.ProfileId != writerProfileId
+            .Where(p => p.ProfileId != writerProfileId
                         && !systemAdministratorProfiles.Contains(p.ProfileId)
                         && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
             .ToArray();
@@ -364,6 +398,66 @@ public sealed class SecureRecordSetupProcedure
                 $"Profiles other than '{WriterProfileName}' may create or update {SecureFlagColumn}: " +
                 $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} on {p.EntityName}"))}. " +
                 "The lock is only as strong as its writer list (owner decision F4). Nothing was written.");
+        }
+
+        // S15 — the two identity-link profiles (INCOMING-141) ship in SpaarkeMaster: exactly one of each.
+        var linkReaderProfile = await ResolveProfileAsync(dv, t, IdentityLinkReaderProfileName, ct).ConfigureAwait(false);
+        var linkWriterProfile = await ResolveProfileAsync(dv, t, IdentityLinkWriterProfileName, ct).ConfigureAwait(false);
+        if (linkReaderProfile.Refusal is not null || linkWriterProfile.Refusal is not null)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.FieldProfileUnresolved,
+                (linkReaderProfile.Refusal ?? linkWriterProfile.Refusal)!);
+        }
+        var linkReaderProfileId = linkReaderProfile.Id!.Value;
+        var linkWriterProfileId = linkWriterProfile.Id!.Value;
+
+        // S17 (read half) — as S12: the link-writer profile's membership IS the lock on whose grants a caller inherits.
+        var linkWriterUsers = await dv.ListProfileUsersAsync(t, linkWriterProfileId, ct).ConfigureAwait(false);
+        var linkWriterTeams = await dv.ListProfileTeamsAsync(t, linkWriterProfileId, ct).ConfigureAwait(false);
+        var strayLinkWriters = linkWriterUsers.Where(u => !bffUsers.Contains(u.UserId)).ToArray();
+        if (strayLinkWriters.Length > 0 || linkWriterTeams.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.IdentityLinkWriterHasOtherMember,
+                $"'{IdentityLinkWriterProfileName}' has members other than the BFF's application users ({string.Join(", ", bffUsers)}): " +
+                $"users [{Ids(strayLinkWriters.Select(u => u.UserId))}], teams [{Ids(linkWriterTeams)}]. Every one of them could " +
+                "bind any contact to any identity, or point any user at any contact, and so choose whose grants a caller " +
+                "inherits. Who belongs there is an operator decision; nothing is removed here. Nothing was written.");
+        }
+
+        // S18 — the lock on the binding columns ships in SpaarkeMaster: verify it is whole, and that nobody else may write.
+        foreach (var (table, column) in IdentityLinkColumns)
+        {
+            var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, table))
+                .ToArray();
+            var secured = await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false);
+            var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == linkReaderProfileId);
+            var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == linkWriterProfileId);
+            if (secured != true
+                || reader is null || reader.CanRead != FieldPermissionAllowed
+                || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
+                || writer.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete,
+                    $"{table}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
+                    $"'{IdentityLinkReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
+                    $"'{IdentityLinkWriterProfileName}' read/create/update=" +
+                    $"{(writer is null ? "(none)" : $"{writer.CanRead}/{writer.CanCreate}/{writer.CanUpdate}")} " +
+                    "(expected secured, 4, 4/4/4). The package's identity-binding lock (task 141) is incomplete: import " +
+                    "SpaarkeMaster (H6), then resume. Nothing was written.");
+            }
+            var otherLinkWriters = columnPermissions
+                .Where(p => p.ProfileId != linkWriterProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+                .ToArray();
+            if (otherLinkWriters.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter,
+                    $"Profiles other than '{IdentityLinkWriterProfileName}' may create or update {table}.{column}: " +
+                    $"{Ids(otherLinkWriters.Select(p => p.ProfileId))}. The lock is only as strong as its writer list — a " +
+                    "client write would decide whose grants a caller inherits. Nothing was written.");
+            }
         }
 
         // §6 T4 — the ROOT unit's default team must not reach the secure unit by depth.
@@ -526,6 +620,25 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateProfileUserAsync(t, writerProfileId, bffUser, ct)).ConfigureAwait(false);
         }
 
+        // S16 — as S11: every business unit's default team reads the identity-binding columns.
+        var linkReaderTeams = await dv.ListProfileTeamsAsync(t, linkReaderProfileId, ct).ConfigureAwait(false);
+        foreach (var defaultTeam in allDefaultTeams.Where(d => !linkReaderTeams.Contains(d.Id)).ToArray())
+        {
+            await Write($"add default team '{defaultTeam.Name}' ({defaultTeam.Id}) to '{IdentityLinkReaderProfileName}'",
+                () => dv.AssociateProfileTeamAsync(t, linkReaderProfileId, defaultTeam.Id, ct)).ConfigureAwait(false);
+        }
+        if (businessUnitId is null)
+        {
+            actions.Add($"add the new unit's default team to '{IdentityLinkReaderProfileName}'");
+        }
+
+        // S17 — as S12: the BFF's application users are the link-writer profile's members.
+        foreach (var bffUser in bffUsers.Where(u => linkWriterUsers.All(w => w.UserId != u)).ToArray())
+        {
+            await Write($"add BFF application user {bffUser} to '{IdentityLinkWriterProfileName}'",
+                () => dv.AssociateProfileUserAsync(t, linkWriterProfileId, bffUser, ct)).ConfigureAwait(false);
+        }
+
         // S13 — no NULL secure flag may remain (a new environment has none; an upgraded one has the pre-column rows). It
         // runs before the BFF deploy because H9 waits for H7b, and a task-150 BFF refuses an EMPTY flag.
         foreach (var table in lockedIdentities)
@@ -545,7 +658,9 @@ public sealed class SecureRecordSetupProcedure
         // ============================ PHASE 3 — verify (S9) ============================
 
         var problems = await VerifyAsync(dv, t, set, wantedIds, businessUnitId!.Value, teamId!.Value, roleId!.Value,
-            defaultTeamId!.Value, readerProfileId, writerProfileId, bffUsers, lockedIdentities, ct).ConfigureAwait(false);
+            defaultTeamId!.Value, [(readerProfileId, ReaderProfileName), (linkReaderProfileId, IdentityLinkReaderProfileName)],
+            [(writerProfileId, WriterProfileName), (linkWriterProfileId, IdentityLinkWriterProfileName)],
+            bffUsers, lockedIdentities, ct).ConfigureAwait(false);
         if (problems.Count > 0)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.VerifyFailed,
@@ -592,7 +707,8 @@ public sealed class SecureRecordSetupProcedure
 
     private static async Task<List<string>> VerifyAsync(
         ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, SecureRecordOwnerRoleSet set, IReadOnlySet<Guid> wantedIds,
-        Guid businessUnitId, Guid teamId, Guid roleId, Guid defaultTeamId, Guid readerProfileId, Guid writerProfileId,
+        Guid businessUnitId, Guid teamId, Guid roleId, Guid defaultTeamId,
+        IReadOnlyList<(Guid Id, string Name)> readerProfiles, IReadOnlyList<(Guid Id, string Name)> writerProfiles,
         IReadOnlyList<Guid> bffUsers, IReadOnlyList<SecureSetupTableIdentity> lockedTables, CancellationToken ct)
     {
         var problems = new List<string>();
@@ -641,21 +757,28 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
+        // S11/S16: every default team in each reader profile; S12/S17: each writer profile = the BFF's application users.
         var allDefaultTeams = await dv.FindDefaultTeamsAsync(t, null, ct).ConfigureAwait(false);
-        var readerTeams = await dv.ListProfileTeamsAsync(t, readerProfileId, ct).ConfigureAwait(false);
-        var unread = allDefaultTeams.Where(d => !readerTeams.Contains(d.Id)).Select(d => d.Id).ToArray();
-        if (unread.Length > 0)
+        foreach (var (readerProfileId, readerProfileName) in readerProfiles)
         {
-            problems.Add($"default teams [{Ids(unread)}] are not in '{ReaderProfileName}'");
+            var readerTeams = await dv.ListProfileTeamsAsync(t, readerProfileId, ct).ConfigureAwait(false);
+            var unread = allDefaultTeams.Where(d => !readerTeams.Contains(d.Id)).Select(d => d.Id).ToArray();
+            if (unread.Length > 0)
+            {
+                problems.Add($"default teams [{Ids(unread)}] are not in '{readerProfileName}'");
+            }
         }
 
-        var writerUsers = (await dv.ListProfileUsersAsync(t, writerProfileId, ct).ConfigureAwait(false))
-            .Select(u => u.UserId).ToHashSet();
-        var writerTeams = await dv.ListProfileTeamsAsync(t, writerProfileId, ct).ConfigureAwait(false);
-        if (!writerUsers.SetEquals(bffUsers) || writerTeams.Count > 0)
+        foreach (var (writerProfileId, writerProfileName) in writerProfiles)
         {
-            problems.Add($"'{WriterProfileName}' members are users [{Ids(writerUsers)}] and teams [{Ids(writerTeams)}], " +
-                         $"expected exactly the BFF's application users [{Ids(bffUsers)}]");
+            var writerUsers = (await dv.ListProfileUsersAsync(t, writerProfileId, ct).ConfigureAwait(false))
+                .Select(u => u.UserId).ToHashSet();
+            var writerTeams = await dv.ListProfileTeamsAsync(t, writerProfileId, ct).ConfigureAwait(false);
+            if (!writerUsers.SetEquals(bffUsers) || writerTeams.Count > 0)
+            {
+                problems.Add($"'{writerProfileName}' members are users [{Ids(writerUsers)}] and teams [{Ids(writerTeams)}], " +
+                             $"expected exactly the BFF's application users [{Ids(bffUsers)}]");
+            }
         }
 
         foreach (var table in lockedTables)
@@ -677,7 +800,8 @@ public sealed class SecureRecordSetupProcedure
         return profiles.Count == 1
             ? (profiles[0], null)
             : (null, $"Field-security profile '{name}': found {profiles.Count} (expected exactly one). It ships in " +
-                     "SpaarkeMaster (task 133/150) — import the package (H6), then resume. Nothing was written.");
+                     "SpaarkeMaster (unified-access-control-r2 tasks 133/141/150) — import the package (H6), then resume. " +
+                     "Nothing was written.");
     }
 
     private static bool IsDeepOrGlobal(string depth) => Same(depth, "Deep") || Same(depth, "Global");

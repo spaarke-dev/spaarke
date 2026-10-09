@@ -9,8 +9,12 @@
 //   create (INCOMING-145 §1): the "Secure Record" business unit (no users, ever), its named memberless Owner team
 //   "Secure Record Owners", the "Secure Record Owner" role created INSIDE that unit (a child-unit role cannot be
 //   packaged — T218e — and its containment is the point, setup guide §5.2) holding exactly the Read-at-Basic set of
-//   config/secure-record-owner-role.json, that role on the named team alone, and the BFF-managed field-security
-//   memberships (task 150). Without them every BFF secure path refuses (sdap.provision.secure_owner_team_not_found).
+//   config/secure-record-owner-role.json, that role on the named team alone, the BFF-managed field-security
+//   memberships (task 150), and the contact identity-binding field-security memberships (INCOMING-141 / task 141,
+//   T255: "Spaarke Identity Link Readers" ← every default team, "Spaarke Identity Link Writers" ← the BFF's application
+//   users only). Without them every BFF secure path refuses (sdap.provision.secure_owner_team_not_found), and the BFF
+//   can neither read nor write a contact binding (the field-secured columns are hidden from it), so contact-bound
+//   sign-ins (CIAM, Type-2) fail.
 //   It also checks the environment can serve the BFF at all: sprk_noaccessentry (#1364) must be readable, or the BFF's
 //   fail-closed deny-list reader denies every read.
 //
@@ -66,7 +70,8 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// Version of the procedure, part of the idempotency hash: a run that completed an older procedure does not
     /// short-circuit past a step added since.
     /// </summary>
-    internal const string ProcedureVersion = "secure-setup-procedure=1";
+    /// <remarks>2 = T255: S15–S18, the contact identity-binding profiles' memberships (INCOMING-141).</remarks>
+    internal const string ProcedureVersion = "secure-setup-procedure=2";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

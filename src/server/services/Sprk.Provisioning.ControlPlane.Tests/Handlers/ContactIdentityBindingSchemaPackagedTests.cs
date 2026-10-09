@@ -7,7 +7,8 @@
 // H6 imports the CI-built SpaarkeMaster (src/dataverse/solutions/SpaarkeMaster), and H9 waits for H6 (and H7b).
 // scripts/Set-ContactIdentityBindingSchema.ps1 stays the tool for EXISTING environments (its mirror copy and backfill
 // have nothing to do in a new one); what no package carries — the field-security profile MEMBERSHIPS — is per
-// environment (reported for H7b, which already adds the BFF-managed field profiles' memberships the same way).
+// environment: H7b adds them (S15–S18, as it does the BFF-managed profiles'), using the profile names and lock columns
+// this test pins to the package.
 //
 // This structural test reads the committed export and fails when a component the BFF reads leaves the package:
 // the binding column (field-secured), its unsecured uniqueness mirror, the plane + collision columns and their two
@@ -26,6 +27,7 @@
 
 using System.Xml.Linq;
 using FluentAssertions;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -37,8 +39,9 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
     private const string BindingColumn = "sprk_externalobjectid";
     private const string MirrorColumn = "sprk_externalobjectidkey";
     private const string KeyLogicalName = "sprk_externalobjectiduniquekey";
-    private const string ReaderProfile = "Spaarke Identity Link Readers";
-    private const string WriterProfile = "Spaarke Identity Link Writers";
+    // H7b's names (S15–S18 maintain these profiles' memberships per environment): one source, pinned to the package here.
+    private const string ReaderProfile = SecureRecordSetupProcedure.IdentityLinkReaderProfileName;
+    private const string WriterProfile = SecureRecordSetupProcedure.IdentityLinkWriterProfileName;
 
     private static readonly string[] PlaneAndCollisionColumns =
     [
@@ -88,6 +91,24 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
             ("contact", BindingColumn, Read: true, Create: true, Update: true),
             ("systemuser", "sprk_primarycontact", Read: true, Create: true, Update: true),
         }, "the BFF's application users write both fields through the writer profile");
+    }
+
+    [Fact]
+    public void H7bVerifiesExactlyThePackagedIdentityLinkLock()
+    {
+        var profiles = XDocument.Load(PackagePath("Other", "FieldSecurityProfiles.xml"));
+        var contact = XDocument.Load(PackagePath("Entities", "Contact", "Entity.xml"));
+        var systemUser = XDocument.Load(PackagePath("Entities", "SystemUser", "Entity.xml"));
+
+        Permissions(profiles, WriterProfile).Select(p => (p.Entity, p.Attribute))
+            .Should().BeEquivalentTo(SecureRecordSetupProcedure.IdentityLinkColumns,
+                "H7b's S18 lock check covers exactly the columns the package's writer profile grants");
+        foreach (var (table, column) in SecureRecordSetupProcedure.IdentityLinkColumns)
+        {
+            var entity = table switch { "contact" => contact, "systemuser" => systemUser, _ => null };
+            entity.Should().NotBeNull($"H7b names table '{table}' — this test reads its packaged Entity.xml");
+            IsSecured(entity!, column).Should().BeTrue($"H7b refuses an environment where {table}.{column} is not secured");
+        }
     }
 
     [Fact]
