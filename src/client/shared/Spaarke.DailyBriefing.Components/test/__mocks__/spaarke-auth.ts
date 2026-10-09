@@ -50,6 +50,11 @@ const _driftGuard = {
 } satisfies Partial<typeof import('@spaarke/auth')>;
 void _driftGuard;
 
+// The REAL fetch types (type-only, erased at runtime): `authenticatedFetch` resolves only with a success
+// (`OkResponse`) and throws every failure. LegalWorkspace's `authInit.ts` and this package's
+// `types/index.ts` import them.
+export type { AuthenticatedFetchFn, ResponseFetchFn, OkResponse, OkStatus } from '../../../Spaarke.Auth/src/types';
+
 // The real error classes and guards — `briefingService` classifies what `authenticatedFetch` THROWS
 // (ApiError with `.status`, AuthError for an exhausted 401) through them. Dependency-free source.
 export { ApiError, AuthError } from '../../../Spaarke.Auth/src/errors';
