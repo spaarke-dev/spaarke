@@ -78,8 +78,8 @@ public sealed class CopilotAgentClientPreAuthorizationTests
             .Should().Contain("param copilotAgentClientAppId string = ''")
             .And.Contain("var effectivePreAuthorizedClientAppIds = concat(preAuthorizedClientAppIds, empty(copilotAgentClientAppId) ? [] : [copilotAgentClientAppId])");
         File.ReadAllText(Path.Combine(root, "infrastructure", "bicep", "parameters", "platform-controlplane-dev.bicepparam"))
-            .Should().Contain("param copilotAgentClientAppId = ''",
-                "dev states the value explicitly: empty until the operator creates the client");
+            .Should().MatchRegex(@"param copilotAgentClientAppId = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'",
+                "dev states the client explicitly: 'Spaarke Copilot Agent - Dev' was created 2026-10-09 (T257 live step 1)");
     }
 
     [Fact]
