@@ -4,7 +4,7 @@
     <title>Demo BFF refresh — .NET 10 runtime, settings parity, start and /healthz 200 (found by T242b)</title>
     <phase>Model 1 dedicated-stamp remediation — follow-on of plan §7 T242 (filed 2026-10-04, owner: "file a demo-refresh task")</phase>
     <gate>T242b merged to master (a master build is T242+); every live step needs owner confirmation</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live configuration of an App Service in its own subscription; the setting values decide which resources the demo BFF talks to.</rigor-reason>
     <model-tier>opus</model-tier>

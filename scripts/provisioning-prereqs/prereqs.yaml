@@ -31,9 +31,13 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 10
-last_updated: 2026-10-08
+manifest_version: 11
+last_updated: 2026-10-09
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 11 (2026-10-09, customer-provisioning-orchestration-r1 T262, G36): PRQ-S-06 ADDED (the customer's
+# subscription is a direct member of the spaarke-customers management group, where the common customer policy is
+# assigned — ADR-027). New token {customerManagementGroupId} (spaarke-constants.yaml management_groups.customers.id).
+# PRQ-S-00 remediation names the group.
 # manifest_version 10 (2026-10-08, customer-provisioning-orchestration-r1 T206 + T207): every check_recipe decides by
 # EXIT CODE and asserts the condition its `expect` describes (33 of 36 active recipes had no `exit 1`). Recipe rules,
 # enforced by validate.ps1: a {token} must be available at the pass that runs the prereq's scope (tokenMap
@@ -251,7 +255,7 @@ prereqs:
         [ -z "$others" ] || { echo "subscription already holds another customer's rg-spaarke-* group(s):"; echo "$others"; exit 1; }
         echo ok
       expect: "`ok` — the subscription is Enabled and holds no rg-spaarke-* resource group other than this customer's"
-    remediation: "Create a NEW subscription for the customer (Model 1: under Spaarke's billing account, in Spaarke's tenant), place it in the customer-subscriptions management group (ADR-027), grant PRQ-S-04, and enter its id as `subscriptionId` at intake. Never reuse another customer's subscription or the platform subscription."
+    remediation: "Create a NEW subscription for the customer (Model 1: under Spaarke's billing account, in Spaarke's tenant), place it in the `spaarke-customers` management group (PRQ-S-06, ADR-027), grant PRQ-S-04, and enter its id as `subscriptionId` at intake. Never reuse another customer's subscription or the platform subscription."
     related_findings: [T228, ADR-027, G3]
 
   - id: PRQ-S-01
@@ -342,6 +346,30 @@ prereqs:
       expect: '`ok` - the operator holds `Owner`, OR `Contributor` AND `User Access Administrator` (direct or inherited); anything else exits 1'
     remediation: Grant via Azure Portal → Subscription → Access control (IAM). Operator runs `/provision-environment` under their own AAD identity per NFR-11.
     related_findings: [F15, F18, NFR-11]
+
+  - id: PRQ-S-06
+    name: The customer's subscription is a member of the spaarke-customers management group (common customer policy, ADR-027)
+    scope: once_per_customer
+    frequency: once per customer subscription, BEFORE the run
+    owner: Spaarke platform admin (Model 1 — Spaarke's tenant)
+    consequence_of_absence: 'The subscription does not inherit the common customer policy assigned at spaarke-customers (infrastructure/bicep/customer-policy.bicep: allowed regions, resource-group tags, storage HTTPS + TLS 1.2, Key Vault RBAC + purge protection), so drift in that stamp is never reported (ADR-027: MUST use management groups for common policy across customer subscriptions). Nothing in the run itself fails; L2 does not check it (moving a subscription needs tenant-level management-group rights L2 does not hold).'
+    check_recipe:
+      cli: |
+        set -o pipefail
+        parent=$(az account management-group subscription show --name {customerManagementGroupId} --subscription {stampSubscriptionId} --query parent.id -o tsv | tr -d '\r') || { echo "subscription {stampSubscriptionId} is not a member of management group {customerManagementGroupId} (or the group does not exist, or the operator cannot read it)"; exit 1; }
+        want="/providers/Microsoft.Management/managementGroups/{customerManagementGroupId}"
+        [ "$(echo "$parent" | tr 'A-Z' 'a-z')" = "$(echo "$want" | tr 'A-Z' 'a-z')" ] || { echo "subscription {stampSubscriptionId} parent is '$parent', not $want"; exit 1; }
+        echo ok
+      expect: "`ok` - the subscription's direct parent is the spaarke-customers management group. A subscription under another group (the Tenant Root Group, spaarke-environments, a child of spaarke-customers) or one az cannot find under spaarke-customers exits 1"
+    remediation: |
+      Place the subscription in the group, then re-run this check:
+        az account management-group subscription add --name spaarke-customers --subscription {stampSubscriptionId}
+      The operator needs management-group write on spaarke-customers (Owner, Contributor or Management Group Contributor
+      there) and Owner on the subscription; leaving the Tenant Root Group needs no right on the root.
+      If spaarke-customers does not exist yet, the one-time tenant setup has not run:
+      pwsh scripts/provisioning/Deploy-ManagementGroups.ps1 (plan), then -Apply (creates the hierarchy, assigns the
+      common policy, applies the initial placement; needs rights at "/" — see the script's REQUIRED ACCESS).
+    related_findings: [G36, ADR-027, T262]
 
   # ============================================================================
   # ONCE-PER-ENV (Spaarke platform env: dev / prod — before ANY customer stamp)
