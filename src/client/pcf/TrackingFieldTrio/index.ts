@@ -460,7 +460,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const bffAppId =
         (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
       this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
-      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      const tenantId = (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl(), tenantId);
       // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
       // up the resolved value now that auth init has completed.
       this.renderControl();
@@ -1371,7 +1372,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.41 • Built 2026-10-08',
+      versionText: 'v1.0.42 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
