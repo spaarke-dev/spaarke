@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "525759037085036745"
+      "templateHash": "5383765910061710212"
     }
   },
   "parameters": {
@@ -1590,7 +1590,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9254461376985539587"
+              "templateHash": "6398521184476514988"
             }
           },
           "parameters": {
@@ -1746,7 +1746,7 @@
             "controlPlanePrincipalId": {
               "type": "string",
               "metadata": {
-                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
+                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). H3 also makes it the subject of the federated credential spaarke-l2-worker on each customer BFF app registration (ISS-015), through which H6/H7/H7b sign in as that registration secret-free -- the principalId, never the clientId (AADSTS700213). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
               }
             },
             "speContainerTypeOwners": {

@@ -74,6 +74,14 @@ public sealed class EntraAppRegOptions
     public string FicName { get; set; } = "spaarke-uami-trust";
 
     /// <summary>
+    /// ISS-015: name of the SECOND federated identity credential H3 keeps on every Spaarke-tenant BFF registration — the
+    /// one trusting the L2 Worker UAMI (subject = <see cref="ControlPlaneIdentityOptions.PrincipalObjectId"/>), so H6, H7
+    /// and H7b can sign in as the registration secret-free (D-13; <c>WorkerDataverseCredentialFactory</c>). Must differ
+    /// from <see cref="FicName"/>. Kept for the registration's lifetime: every re-run and upgrade signs in through it.
+    /// </summary>
+    public string WorkerFicName { get; set; } = "spaarke-l2-worker";
+
+    /// <summary>
     /// Spaarke's own Entra tenant id — used to compute the FIC <c>issuer</c>
     /// for the <c>spaarke-hosted-model2</c> profile (UAMI lives in Spaarke's
     /// tenant/subscription). For <c>customer-owned-model2</c>, the issuer is
