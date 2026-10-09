@@ -8,8 +8,11 @@
  * Page's `utils/todoScoreUtils.ts` and `utils/dueLabelUtils.ts` now re-export
  * from this package instead of keeping copies.
  *
- *   - Weights: priority 0.50, effort (inverted) 0.20, urgency 0.30
- *   - Composite-score urgency points: overdue=100, ≤3d=80, ≤7d=50, ≤10d=25, else=0
+ *   - Composite score (task 067 / D-29): ONE implementation, `computeTodoScoreBreakdown`
+ *     in `@spaarke/ui-components` `utils/dateLocal.ts` (weights priority 0.50, effort
+ *     inverted 0.20, urgency 0.30; urgency points overdue=100, 0-3d=80, 4-7d=50,
+ *     8-10d=25, else=0, counted in CALENDAR days like the due label). Moved there
+ *     because `TodoDetail` lives in that package and cannot import this one.
  *   - DueLabel COLOUR tiers (`urgency`): from the shared `dueUrgencyForDays`
  *     (`@spaarke/ui-components` `utils/dateLocal.ts`, task 081 / C-17) — the
  *     ONE 3/7/10 tier function every due-date surface calls.
@@ -32,19 +35,18 @@
  * @see hooks/useKanbanColumns.ts (imports the same parseDueDate)
  */
 
-import { parseDueDate, daysBetweenLocalMidnight, dueUrgencyForDays, type DueUrgency } from '@spaarke/ui-components';
+import {
+  parseDueDate,
+  daysBetweenLocalMidnight,
+  dueUrgencyForDays,
+  computeTodoScoreBreakdown,
+  type DueUrgency,
+  type ITodoScoreBreakdown,
+} from '@spaarke/ui-components';
 import type { IKanbanTodoLike } from '../types/kanban';
 
 export { parseDueDate };
-export type { DueUrgency };
-
-// ---------------------------------------------------------------------------
-// Weights — locked (see `todoScoreMappings.ts`)
-// ---------------------------------------------------------------------------
-
-const W_PRIORITY = 0.5;
-const W_EFFORT = 0.2;
-const W_URGENCY = 0.3;
+export type { DueUrgency, ITodoScoreBreakdown };
 
 // ---------------------------------------------------------------------------
 // Due-date label types (`DueUrgency` is re-exported from `@spaarke/ui-components`)
@@ -63,23 +65,6 @@ export interface IDueLabel {
 // and re-exported for existing consumers of this module; see the task-080
 // doc comment at the top of this file for why.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Urgency scoring (continuous 0–100 raw value used by composite score)
-// ---------------------------------------------------------------------------
-
-/** Convert days-until-due into a 0-100 urgency raw score. */
-function computeDueDateUrgencyRaw(dueDate: Date | null): number {
-  if (!dueDate) return 0;
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return 100;
-  if (diffDays <= 3) return 80;
-  if (diffDays <= 7) return 50;
-  if (diffDays <= 10) return 25;
-  return 0;
-}
 
 // ---------------------------------------------------------------------------
 // Display label (discrete tier used by the card's urgency badge)
@@ -122,33 +107,16 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
 // Composite To Do Score — 0–100 clamped
 // ---------------------------------------------------------------------------
 
-/** Breakdown of the To Do Score components for transparency / debugging. */
-export interface ITodoScoreBreakdown {
-  todoScore: number;
-  priorityComponent: number;
-  effortComponent: number;
-  urgencyComponent: number;
-}
-
 /**
  * Compute the To Do Score for a sprk_todo-shaped item. Works on any
  * structural supertype of `IKanbanTodoLike` (the same minimum surface the
  * `useKanbanColumns` hook depends on).
+ *
+ * Task 067 / D-29: this delegates to the ONE implementation in
+ * `@spaarke/ui-components` (`computeTodoScoreBreakdown`), whose urgency
+ * component counts calendar days like `computeDueLabel` above. It stays here as
+ * the package's public entry point.
  */
 export function computeTodoScore(todo: IKanbanTodoLike): ITodoScoreBreakdown {
-  const rawPriority = todo.sprk_priorityscore ?? 50;
-  const priorityComponent = rawPriority * W_PRIORITY;
-
-  const rawEffort = todo.sprk_effortscore ?? 50;
-  const invertedEffort = 100 - rawEffort;
-  const effortComponent = invertedEffort * W_EFFORT;
-
-  const dueDate = parseDueDate(todo.sprk_duedate);
-  const rawUrgency = computeDueDateUrgencyRaw(dueDate);
-  const urgencyComponent = rawUrgency * W_URGENCY;
-
-  const raw = priorityComponent + effortComponent + urgencyComponent;
-  const todoScore = Math.max(0, Math.min(100, Math.round(raw)));
-
-  return { todoScore, priorityComponent, effortComponent, urgencyComponent };
+  return computeTodoScoreBreakdown(todo);
 }

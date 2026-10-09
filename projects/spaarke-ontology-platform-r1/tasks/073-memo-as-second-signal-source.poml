@@ -37,6 +37,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">ADDED 2026-10-09 from the #1526 (task 123) review: any category-name-to-sprk_triagecategory binding this task adds MUST use `LookupChoicesResolver.AddOfferedRowPredicate` (statecode = 0 + sprk_enabled), so a memo can never bind a disabled or inactive category; the offered $choices set and the resolution set stay the same.</constraint>
   </constraints>
 
   <knowledge>
