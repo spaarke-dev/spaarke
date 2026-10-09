@@ -330,7 +330,7 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
               {/* Error banner */}
               {saveAsError && (
                 <div className={styles.errorWrapper}>
-                  <MessageBar intent="error" layout="singleline">
+                  <MessageBar intent="error" layout="multiline">
                     <MessageBarBody>{saveAsError}</MessageBarBody>
                   </MessageBar>
                 </div>
