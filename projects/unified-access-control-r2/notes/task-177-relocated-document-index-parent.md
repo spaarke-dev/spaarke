@@ -193,8 +193,9 @@ Dataverse proxy (spaarkedev1, read-only, 2026-10-09):
 - After the owner's Q1 decision: 279 / 279 targeted.
 - After the verifier-round rule (governing record): 2,167 targeted cases, covering indexing, Send-to-Index, index-file
   and every Communication / Email / inbound-pipeline suite. 2,154 pass and 13 are skipped. `Spaarke.ArchTests` passes
-  841 / 841, `-warnaserror` is clean, and `Spe.Integration.Tests` and `Sprk.Bff.Api.IntegrationTests` build. The full
-  suite re-run result is in the PR.
+  841 / 841, `-warnaserror` is clean, and `Spe.Integration.Tests` and `Sprk.Bff.Api.IntegrationTests` build. The full suite
+  then gave 19,087 passed, 54 skipped and 9 failed. All 9 were host-startup timeouts (2-19 min), and all 10 of their
+  cases pass in isolation.
 - Publish size (`dotnet publish -c Release`, fresh master `c8a87d818` against the first-round branch, same machine):
   +10,284 B uncompressed, +4,542 B zipped (37,203,854 B, about 35.48 MiB). No package reference changed.
 - Self-review (task-execute Step 9.5): no F-class finding remains. The K-class items are listed above.
