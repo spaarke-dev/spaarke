@@ -1288,6 +1288,15 @@ Asked after a build check showed that every secure record gets its own container
 
 **Status:** the design goes in a new task (container routing for secure families). It must not land in task 175, which leaves container routing untouched.
 
+## Round 89 (2026-10-09): BINDING. OWNER decisions: Manage Access needs the Share privilege; Create buttons follow the Create privilege; build internal grant notification
+
+Asked after the owner's hands-on testing as testuser1 (Spaarke Basic User role).
+
+1. **Who may manage access:** Dataverse's own **Share** privilege on the table (set per security role) is required IN ADDITION to Write on the record. This replaces the task-118 / D-1 "Write on the record" delegation rule as the sole test. It applies to Manage Access, grant, share, revoke and expiry changes (the delegation filter) and to `can-manage-access`, so the affordance hides for roles without Share. → task 179.
+2. **Create buttons:** every custom Create / wizard ribbon button (Create Event, Create Project, Create To Do, the other wizards) hides when the user lacks the Create privilege on the target table. Use Dataverse's standard privilege rule, no code. A read-only role then sees no create commands. → task 180.
+3. **Internal grant notification: "Build it now".** When an internal user is given access (a grant to a contact linked to an internal user, or a user share), they are notified with a link to the record. Reuse task 100's in-app notification (deep link) unless the design shows a reason not to. The dev-facing notice text "Internal notify (deep-link) is not yet available… (escalated; see project notes)" is replaced with user-facing wording. → task 181.
+4. Task 174's stand-in (testuser1's linked contact for the CIAM contact) is accepted, and 174 is closed.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.

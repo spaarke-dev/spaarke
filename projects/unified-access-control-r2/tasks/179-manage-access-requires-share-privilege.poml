@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="179" project="unified-access-control-r2">
+  <metadata>
+    <title>Managing access requires Dataverse's Share privilege on the table in addition to Write on the record: delegation filter, can-manage-access, ribbon and Manage Access affordance (owner round 89 item 1)</title>
+    <phase>Session 28 — UAC (owner round 89, 2026-10-09)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the authorization rule on every access-management route (auth/security).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security rule change on a closed route group with fail-closed semantics; the client gates must stay in step with the one server rule.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits DelegationRuleFilter and RecordAccessGateEndpoint, which task 175 (PR #1503) also edits. Start after 175 merges.</parallel-reason>
+    <deps>175</deps>
+    <tags>bff-api, auth, security, ribbon, testing, deploy</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>Owner round 89 item 1. During hands-on testing, testuser1 (Spaarke Basic User role) could open Manage Access and grant, narrowed to their own level, because the rule was only "Write on the record" (task 118, D-1).</origin>
+  </metadata>
+
+  <prompt>Implement round 89 item 1 (notes/session27-owner-decisions-and-research.md). A caller may perform any access-management action on a record (the /api/v1/external-access management group, internal shares, and can-manage-access) only if they hold Write on the record AND the Share privilege on the record's table at a depth that covers the record.</prompt>
+
+  <goal>(1) DelegationRuleFilter enforces Share in addition to Write. The test follows Dataverse semantics: Share at the depth that reaches the record (user, business unit, parent-child business unit or organization), evaluated as the caller. If Dataverse's access check can answer "Share on this record" (RetrievePrincipalAccess returns ShareAccess), use that ONE probe and add no new round trip. The organization-owned-table branch uses the table's Share privilege.
+(2) can-manage-access reports the same verdict, because it already sits behind the filter. TrackingFieldTrio, the flyout and the Access ribbon therefore hide Manage Access for a role without Share. No client mirrors the rule.
+(3) Internal user shares (InternalShareEndpoints) apply the same requirement.
+(4) The system jobs and app-identity paths (assigned access, reconciliation, cascade) are unchanged: they do not run as the caller.
+(5) Documentation: update the delegation rule in docs/architecture/uac-access-control.md and the role guidance. List which Spaarke roles on dev have Share today (read-only query) so the owner can set the roles.</goal>
+
+  <constraints>
+    <constraint source="ADR-008">Authorization stays in the group filter. No per-route copy of the rule.</constraint>
+    <constraint source="security">Fail closed: an unevaluable Share answer denies.</constraint>
+    <constraint source="project">No security-role changes on dev by the agent. Report the role inventory; the owner changes roles.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordAccessGateEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Confirm how CallerRecordAccessProbe gets the rights mask and whether ShareAccess is in it. Add Share to the filter's decision.</step>
+    <step>Tests (below); the role inventory (read-only); docs; PR.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Share on the record cannot be determined without a second Dataverse round trip per request, STOP and report the measured cost and options.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>A caller with Write but no Share gets 403 on grant, revoke, share, expiry and can-manage-access (one test per route family). A caller with both is allowed.</criterion>
+    <criterion>An unevaluable Share denies (one test).</criterion>
+    <criterion>RecordAccessGateTests are updated to the new rule, and the seeding proof that removing the Share check turns a named test red is kept.</criterion>
+    <criterion>The notes contain the dev role inventory showing Share per Spaarke role and table.</criterion>
+    <criterion>Test scope: the cases named above. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+</task>
