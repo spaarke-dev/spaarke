@@ -102,7 +102,15 @@ public sealed record DataverseAppUserCreationRequest(
     string ApplicationId,
     string SecurityRoleName,
     Guid BusinessUnitId,
-    string? AzureActiveDirectoryObjectId = null);
+    string? AzureActiveDirectoryObjectId = null)
+{
+    /// <summary>
+    /// The Dataverse table this request writes: a <c>systemuser</c> (application user) — never a contact. Named in code so
+    /// <c>ContactAadObjectIdColumnGuardTests</c> attributes <see cref="AzureActiveDirectoryObjectId"/> to systemuser (its
+    /// nearest marker had drifted past the guard's window when T259 grew this file).
+    /// </summary>
+    public const string EntityLogicalName = "systemuser";
+}
 
 /// <summary>
 /// Ensures a Dataverse Application User exists (upsert semantics — creates if
