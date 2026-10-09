@@ -73,6 +73,18 @@ python scripts/ai-cost/spend-report.py --since 2026-10-01 --format csv --out spe
 
 One pass over the local transcripts (~30–100 s), grouped by day (UTC), project, model and main vs sub-agent, with the cost split into cache read / cache write / input / output. Relay the "Biggest drivers" lines and the per-day table; for the dashboard give the file path. Read the drivers against `.claude/constraints/agent-cost.md` (sub-agent share, model mix, context size, cache-write share). Same pricing and dedup as `get-project-cost.py`; estimates at list price from this machine's transcripts only — not an invoice. The HTML stays outside the repo (it carries project costs).
 
+
+### Step 5: Refresh the Spaarke Dev Metrics page (when asked, or after Step 1 when the owner wants the page current)
+
+The private dashboard https://claude.ai/artifact/R4J6P8Adsk12XhJV8ypxjR reads one attached file, dataset `spend`. Refresh it:
+
+1. `python scripts/ai-cost/spend-report.py --days 60 --format csv --out <scratchpad>/ai-spend-daily.csv`
+2. Upload it: Artifact `publish` with `url` = the page, `file_path` = the CSV, `asset: true`. Note the returned `/_blob/<id>` url.
+3. `ArtifactData` `get` `datasets/spend`, then `update` it, pinned with `if_version`, setting `source.url` to the new url, `source.name` to `ai-spend-daily.csv` and `updated` to `{at: <ISO now>, by: "Claude (spend-report.py)"}`.
+4. Delete the previous asset (Artifact `delete` with `path` = its id) once nothing references it.
+
+The page's calculations (`summary`, `daily`, `by_model`) recompute from the file, so no page edit is needed. The data covers this machine's transcripts only, at list price.
+
 ## Outputs
 
 - Up to 3 GitHub Project field mutations per project touched
