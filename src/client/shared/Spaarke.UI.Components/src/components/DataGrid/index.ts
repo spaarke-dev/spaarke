@@ -134,3 +134,6 @@ export {
 // + entity metadata + the savedquery's FetchXML. See filterChips/index.ts.
 export { FilterChipBar, discoverChips, augmentFetchXmlWithChips, deriveChipKindFromMetadata } from './filterChips';
 export type { FilterChipBarProps, ChipDescriptor, ChipKind, ChipState, ChipValue } from './filterChips';
+
+// ─── Config -> base query resolution (shared with consumers that must match a grid's rows) ───
+export { fetchConfigRecord, resolveSource, extractEntityFromFetchXml } from './resolveGridSource';
