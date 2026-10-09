@@ -325,7 +325,9 @@ public static class PlaybookTemplateContextBuilder
                 if (!rawDict.ContainsKey("text"))
                     rawDict["text"] = output.TextContent;
                 if (!rawDict.ContainsKey("success"))
-                    rawDict["success"] = output.Success;
+                    rawDict["success"] = output.Success && !output.IsSkipped;
+                if (!rawDict.ContainsKey("skipped"))
+                    rawDict["skipped"] = output.IsSkipped;
                 // context[varName] already points to rawDict — no reassignment needed
             }
             else
@@ -337,7 +339,9 @@ public static class PlaybookTemplateContextBuilder
                 {
                     ["output"] = rawValue,
                     ["text"] = output.TextContent,
-                    ["success"] = output.Success,
+                    // Task 135: a skipped node (PB-02) did not succeed; {{#if x.success}} must not treat it as one.
+                    ["success"] = output.Success && !output.IsSkipped,
+                    ["skipped"] = output.IsSkipped,
                 };
             }
         }

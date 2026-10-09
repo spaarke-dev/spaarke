@@ -113,9 +113,15 @@ public record NodeRunDetail
     public string OutputVariable { get; init; } = string.Empty;
 
     /// <summary>
-    /// Whether the node completed successfully.
+    /// Whether the node completed successfully. False for a skipped node.
     /// </summary>
     public bool Success { get; init; }
+
+    /// <summary>
+    /// Whether the orchestrator skipped the node (branch not selected, a dependency failed, or every dependency
+    /// was skipped — PB-02).
+    /// </summary>
+    public bool Skipped { get; init; }
 
     /// <summary>
     /// Execution duration in milliseconds.

@@ -480,7 +480,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 NodeId = output.NodeId,
                 NodeName = output.OutputVariable, // Use output variable as proxy for name
                 OutputVariable = output.OutputVariable,
-                Success = output.Success,
+                Success = output.Success && !output.IsSkipped,
+                Skipped = output.IsSkipped,
                 DurationMs = output.Metrics.DurationMs,
                 TokensIn = output.Metrics.TokensIn,
                 TokensOut = output.Metrics.TokensOut,
@@ -1202,25 +1203,15 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             if (insightsL2GateFail)
             {
-                // Structured Layer 2 gate-fail per design-a3 §2.5 step 4 (CTRNS × NDA pattern).
-                // Surface as a successful skip so emitObservations downstream still runs with
-                // Layer-1-only output. Mirrors the dependency-failure-skip semantics already
-                // used by the branch-aware skip path.
+                // Structured Layer 2 gate-fail per design-a3 §2.5 step 4 (CTRNS × NDA pattern). Task 135: a skip like
+                // every other (stored as skipped, counted once, propagated to nodes that depend only on it); a join
+                // such as emitObservations still runs when another dependency ran.
                 var skipReason = "Insights Layer 2 routing: matrix row carries NULL sprk_layer2actioncode (intentional per-pair gate-fail)";
                 _logger.LogInformation(
-                    "Insights Layer 2 gate-fail for node '{NodeName}' (runId={RunId}, playbookId={PlaybookId}) — {SkipReason}. Universal-ingest will emit Layer-1-only Observation downstream.",
+                    "Insights Layer 2 gate-fail for node '{NodeName}' (runId={RunId}, playbookId={PlaybookId}) — {SkipReason}.",
                     node.Name, runContext.RunId, runContext.PlaybookId, skipReason);
 
-                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
-                runContext.RecordNodeSkipped();
-                runContext.StoreNodeOutput(skipOutput);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
-
-                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063) — Insights L2 gate-fail
-
-                return skipOutput;
+                return await SkipNodeAsync(skipReason).ConfigureAwait(false);
             }
 
             // Apply {{paramName}} template substitution to ConfigJson before the executor

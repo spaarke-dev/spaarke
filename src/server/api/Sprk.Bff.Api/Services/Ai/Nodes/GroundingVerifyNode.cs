@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Models.Ai;
@@ -165,16 +164,31 @@ public sealed class GroundingVerifyNode : INodeExecutor
         try
         {
             var parsedCitations = ExtractCitations(context, config);
-            var citations = parsedCitations.Select(c => c.Ref).ToList();
             var chunks = ExtractSourceChunks(context, config);
+            var allChunks = chunks.Select(c => c.Chunk).ToList();
 
             _logger.LogDebug(
                 "GroundingVerifyNode {NodeId}: verifying {CitationCount} citation(s) against {ChunkCount} source chunk(s)",
                 context.Node.Id,
-                citations.Count,
+                parsedCitations.Count,
                 chunks.Count);
 
-            var results = await _verifier.VerifyAsync(citations, chunks, cancellationToken).ConfigureAwait(false);
+            // A citation that names a source row by id (an assessment citation's id is the assessment's id) is
+            // verified against THAT row only, so a quote cannot pass by matching some other row. A citation that
+            // names no known row is verified against every chunk, as before.
+            var results = new List<VerificationResult>(parsedCitations.Count);
+            var originalsByResult = new List<JsonElement>(parsedCitations.Count);
+            foreach (var (citation, original) in parsedCitations)
+            {
+                var named = chunks.Where(c => c.Ids.Contains(citation.Ref)).Select(c => c.Chunk).ToList();
+                var verdicts = await _verifier.VerifyAsync([citation], named.Count > 0 ? named : allChunks, cancellationToken)
+                    .ConfigureAwait(false);
+                foreach (var verdict in verdicts)
+                {
+                    results.Add(verdict);
+                    originalsByResult.Add(original);
+                }
+            }
 
             // Build the structured output: per-citation verdict + annotated citation list.
             var annotation = string.IsNullOrWhiteSpace(config.AnnotationText)
@@ -190,8 +204,9 @@ public sealed class GroundingVerifyNode : INodeExecutor
             var noQuoteCount = 0;
             var invalidInputCount = 0;
 
-            foreach (var r in results)
+            for (var i = 0; i < results.Count; i++)
             {
+                var r = results[i];
                 var isFailure = r.Verdict is VerificationVerdict.NotFound or VerificationVerdict.InvalidInput;
                 annotated.Add(new AnnotatedCitation
                 {
@@ -205,9 +220,7 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 if (!isFailure)
                 {
                     verifiedEvidence.Add(r.Citation);
-                    var original = parsedCitations.FirstOrDefault(c => ReferenceEquals(c.Ref, r.Citation));
-                    if (original.Ref is not null)
-                        passedOriginals.Add(original.Original);
+                    passedOriginals.Add(originalsByResult[i]);
                 }
 
                 switch (r.Verdict)
@@ -231,7 +244,11 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 AllVerified = (notFoundCount + invalidInputCount) == 0,
                 AnnotatedCitations = annotated,
                 VerifiedEvidence = verifiedEvidence,
-                GroundedOutput = BuildGroundedOutput(context, config, passedOriginals)
+                GroundedOutput = BuildGroundedOutput(context, config, passedOriginals),
+                Confidence = UpstreamNumber(context, config, "confidence")
+                    ?? (results.Count == 0 ? null : (double)verifiedEvidence.Count / results.Count),
+                Reasoning = UpstreamString(context, config, "reasoning")
+                    ?? $"{verifiedEvidence.Count} of {results.Count} citation(s) verified verbatim against {chunks.Count} source row(s)."
             };
 
             var warnings = new List<string>();
@@ -344,9 +361,10 @@ public sealed class GroundingVerifyNode : INodeExecutor
         };
     }
 
-    private static IReadOnlyList<ChunkRef> ExtractSourceChunks(NodeExecutionContext context, GroundingVerifyConfig config)
+    private static IReadOnlyList<(ChunkRef Chunk, HashSet<string> Ids)> ExtractSourceChunks(
+        NodeExecutionContext context, GroundingVerifyConfig config)
     {
-        var chunks = new List<ChunkRef>();
+        var chunks = new List<(ChunkRef, HashSet<string>)>();
 
         if (!string.IsNullOrWhiteSpace(config.SourceChunksFrom))
         {
@@ -363,7 +381,8 @@ public sealed class GroundingVerifyNode : INodeExecutor
         return chunks;
     }
 
-    private static IReadOnlyList<ChunkRef> ExtractChunksFrom(NodeExecutionContext context, string from, string path)
+    private static IReadOnlyList<(ChunkRef Chunk, HashSet<string> Ids)> ExtractChunksFrom(
+        NodeExecutionContext context, string from, string path)
     {
         var upstream = context.GetPreviousOutput(from)
             ?? throw new GroundingVerifyConfigException(
@@ -374,15 +393,15 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 $"Upstream node '{from}' failed; cannot verify against missing source chunks.");
 
         if (upstream.StructuredData is null)
-            return Array.Empty<ChunkRef>();
+            return Array.Empty<(ChunkRef, HashSet<string>)>();
 
         if (!TryGetPropertyIgnoreCase(upstream.StructuredData.Value, path, out var chunksElement))
-            return Array.Empty<ChunkRef>();
+            return Array.Empty<(ChunkRef, HashSet<string>)>();
 
         if (chunksElement.ValueKind != JsonValueKind.Array)
-            return Array.Empty<ChunkRef>();
+            return Array.Empty<(ChunkRef, HashSet<string>)>();
 
-        var list = new List<ChunkRef>();
+        var list = new List<(ChunkRef, HashSet<string>)>();
         var index = 0;
         foreach (var item in chunksElement.EnumerateArray())
         {
@@ -390,12 +409,15 @@ public sealed class GroundingVerifyNode : INodeExecutor
             switch (item.ValueKind)
             {
                 case JsonValueKind.String:
-                    list.Add(new ChunkRef(fallbackId, item.GetString() ?? string.Empty));
+                    list.Add((new ChunkRef(fallbackId, item.GetString() ?? string.Empty), new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
                     break;
                 case JsonValueKind.Object:
                     var text = StringProperty(item, "text");
-                    var chunkId = StringProperty(item, "chunkId") ?? StringProperty(item, "id") ?? FirstIdProperty(item) ?? fallbackId;
-                    list.Add(new ChunkRef(chunkId, text ?? string.Join("\n", StringValues(item))));
+                    var ids = IdValues(item);
+                    var chunkId = StringProperty(item, "chunkId") ?? StringProperty(item, "id") ?? ids.FirstOrDefault() ?? fallbackId;
+                    ids.Add(chunkId);
+                    // The verifiable text is the row's content, not its ids (an id is not evidence).
+                    list.Add((new ChunkRef(chunkId, text ?? string.Join("\n", StringValues(item, skipIds: true))), ids));
                     break;
             }
         }
@@ -414,11 +436,54 @@ public sealed class GroundingVerifyNode : INodeExecutor
         if (upstream?.StructuredData is not { ValueKind: JsonValueKind.Object } data)
             return null;
 
-        var node = JsonNode.Parse(data.GetRawText())!.AsObject();
+        // Written property by property from the parsed element, so a reply with a duplicate key (which JsonNode
+        // rejects) still grounds: every property is copied, and every citation array is cut to the passing ones.
         var path = CitationsPath(config);
-        var existing = node.Select(p => p.Key).FirstOrDefault(k => string.Equals(k, path, StringComparison.OrdinalIgnoreCase));
-        node[existing ?? path] = new JsonArray(passedOriginals.Select(o => JsonNode.Parse(o.GetRawText())).ToArray());
-        return JsonSerializer.SerializeToElement(node);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var prop in data.EnumerateObject())
+            {
+                writer.WritePropertyName(prop.Name);
+                if (string.Equals(prop.Name, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    writer.WriteStartArray();
+                    foreach (var original in passedOriginals)
+                        original.WriteTo(writer);
+                    writer.WriteEndArray();
+                }
+                else
+                {
+                    prop.Value.WriteTo(writer);
+                }
+            }
+            writer.WriteEndObject();
+        }
+
+        using var doc = JsonDocument.Parse(stream.ToArray());
+        return doc.RootElement.Clone();
+    }
+
+    private static double? UpstreamNumber(NodeExecutionContext context, GroundingVerifyConfig config, string name)
+    {
+        var data = context.GetPreviousOutput(config.CitationsFrom!)?.StructuredData;
+        return data is { ValueKind: JsonValueKind.Object } obj
+               && TryGetPropertyIgnoreCase(obj, name, out var value)
+               && value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : null;
+    }
+
+    private static string? UpstreamString(NodeExecutionContext context, GroundingVerifyConfig config, string name)
+    {
+        var data = context.GetPreviousOutput(config.CitationsFrom!)?.StructuredData;
+        return data is { ValueKind: JsonValueKind.Object } obj
+               && TryGetPropertyIgnoreCase(obj, name, out var value)
+               && value.ValueKind == JsonValueKind.String
+               && !string.IsNullOrWhiteSpace(value.GetString())
+            ? value.GetString()
+            : null;
     }
 
     private static string CitationsPath(GroundingVerifyConfig config) =>
@@ -458,18 +523,23 @@ public sealed class GroundingVerifyNode : INodeExecutor
         return null;
     }
 
-    private static string? FirstIdProperty(JsonElement item)
+    /// <summary>The row's top-level string values whose property name ends in "id", in order.</summary>
+    private static HashSet<string> IdValues(JsonElement item)
     {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var prop in item.EnumerateObject())
         {
-            if (prop.Name.EndsWith("id", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
-                return prop.Value.GetString();
+            if (IsIdProperty(prop.Name) && prop.Value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(prop.Value.GetString()))
+                ids.Add(prop.Value.GetString()!);
         }
 
-        return null;
+        return ids;
     }
 
-    private static IEnumerable<string> StringValues(JsonElement element)
+    private static bool IsIdProperty(string name) => name.EndsWith("id", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<string> StringValues(JsonElement element, bool skipIds)
     {
         switch (element.ValueKind)
         {
@@ -480,12 +550,16 @@ public sealed class GroundingVerifyNode : INodeExecutor
                 break;
             case JsonValueKind.Object:
                 foreach (var prop in element.EnumerateObject())
-                    foreach (var nested in StringValues(prop.Value))
+                {
+                    if (skipIds && IsIdProperty(prop.Name))
+                        continue;
+                    foreach (var nested in StringValues(prop.Value, skipIds))
                         yield return nested;
+                }
                 break;
             case JsonValueKind.Array:
                 foreach (var entry in element.EnumerateArray())
-                    foreach (var nested in StringValues(entry))
+                    foreach (var nested in StringValues(entry, skipIds))
                         yield return nested;
                 break;
         }
@@ -552,6 +626,15 @@ public sealed record GroundingVerifyOutput
     /// that output is not a JSON object.
     /// </summary>
     public JsonElement? GroundedOutput { get; init; }
+
+    /// <summary>
+    /// The citations upstream's own <c>confidence</c> when it emits one; otherwise the share of citations that passed
+    /// (null when there were none). A terminal node reads it as the artifact's confidence.
+    /// </summary>
+    public double? Confidence { get; init; }
+
+    /// <summary>The citations upstream's own <c>reasoning</c> when it emits one; otherwise how the grounding went.</summary>
+    public string? Reasoning { get; init; }
 }
 
 /// <summary>

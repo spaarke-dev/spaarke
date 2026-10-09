@@ -100,7 +100,8 @@
         "subjectScope": "matter:{{matterId}}",
         "$comment-subjectScope": "Task 135: the index has no top-level matterId (verified against the deployed spaarke-insights-index schema), so the old filter \"matterId eq '…'\" returned HTTP 400. subjectScope makes IndexRetrieveNode build the scope/matterId (or scope/entityType + scope/entityId) filter and escape the id itself.",
         "vectorQuery": "{{matterContext.value.raw.matterType}} performance themes inflection points client copy gaps deadlines scope",
-        "topK": 25,
+        "topK": 10,
+        "$comment-topK": "Task 135: 10 rows bound the synthesis prompt (every row is passed to the model in the Input section).",
         "requireEvidence": false,
         "$comment-requireEvidence": "false — empty observations is acceptable per FR-11 ('optional — graceful empty if files-index pipeline unhealthy'). EvidenceSufficiencyNode gates on KPI assessment count instead."
       }
@@ -144,7 +145,7 @@
         "tenantId": "{{tenantId}}",
         "templateParameters": {
           "matterId": "{{matterId}}",
-          "currentGrade": "(not supplied: derive it from the assessments)",
+          "currentGrade": "{{default currentGrade '(not supplied: derive it from the assessments)'}}",
           "matterContext": "matterContext (see the Input section)",
           "assessments": "assessments (see the Input section)",
           "observations": "observations (see the Input section)"
@@ -208,7 +209,9 @@
         "$comment-producedByVersion": "Bare '1.0' string version per Q-U1 (NOT 'v1'). Authoritative version source is sprk_analysisplaybook.sprk_version (Dataverse-side) — this field is the in-envelope projection per FR-14 'playbookVersion' envelope field.",
         "valueFrom": "GroundedOutput",
         "evidenceFrom": "VerifiedEvidence",
-        "$comment-from": "Task 135: reads the groundCitations output (outputVariable groundedSynthesis). value.raw = the grounded synthesis envelope (body, verified citations, dimensions, …); evidence = the verified citations only. The property names are case-sensitive here and the grounding output serializes PascalCase.",
+        "confidenceFrom": "Confidence",
+        "reasoningFrom": "Reasoning",
+        "$comment-from": "Task 135: reads the groundCitations output (outputVariable groundedSynthesis). value.raw = the grounded synthesis envelope (body, verified citations, dimensions, …); evidence = the verified citations only; confidence / reasoning = the synthesis's own when it emits them, otherwise the grounding result (the share of citations verified, and how many). The property names are case-sensitive here and the grounding output serializes PascalCase.",
         "allowEmptyEvidence": false,
         "$comment-evidenceGuard": "allowEmptyEvidence=false enforces D-A23 / D-48 EvidenceGuard: empty citations after GroundingVerifyNode stripping yields node-level EVIDENCE_REQUIRED error. The orchestrator's null-artifact handling surfaces this as a DeclineResponse to the InsightSummaryCard, which renders the FR-06 Decline state."
       }

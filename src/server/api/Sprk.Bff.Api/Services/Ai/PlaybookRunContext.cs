@@ -235,13 +235,16 @@ public class PlaybookRunContext
     /// <param name="output">The node output to store.</param>
     public void StoreNodeOutput(NodeOutput output)
     {
-        _nodeOutputs[output.OutputVariable] = output;
-
-        // A skipped node is counted by RecordNodeSkipped, not as completed.
+        // A skipped node is counted by RecordNodeSkipped, not as completed. It never replaces an output a node that
+        // RAN stored under the same variable (two branch targets sharing an outputVariable): the result that exists
+        // must stay visible to the nodes after it.
         if (output.IsSkipped)
         {
+            _nodeOutputs.AddOrUpdate(output.OutputVariable, output, (_, existing) => existing.IsSkipped ? output : existing);
             return;
         }
+
+        _nodeOutputs[output.OutputVariable] = output;
 
         if (output.Success)
         {

@@ -17,7 +17,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using FluentAssertions;
+using System.Text;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -31,6 +34,8 @@ using Sprk.Bff.Api.Services.Ai.CitationVerification;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Regression.Ai;
@@ -100,11 +105,14 @@ public class AI01_MatterHealthSinglePlaybookTests
         artifact.Evidence.Should().ContainSingle("the fabricated citation is stripped; the verbatim one survives")
             .Which.Should().BeEquivalentTo(new EvidenceRef { RefType = "assessment", Ref = harness.AssessmentIds[0].ToString(), Quote = Harness.VerbatimExcerpt });
         artifact.Value.Raw.GetProperty("citations").GetArrayLength().Should().Be(1);
+        artifact.Confidence.Should().Be(0.5, "the synthesis emits no confidence, so it is the share of citations verified (1 of 2)");
+        artifact.Reasoning.Should().Contain("1 of 2 citation(s) verified");
 
         // The synthesis prompt came from the Action and carried the real data, not literal placeholders.
         harness.SentPrompt.Should().NotBeNull();
         harness.SentPrompt.Should().Contain(GuidelineNotes).And.Contain("Guideline Compliance").And.Contain(MatterId.ToString());
         harness.SentPrompt.Should().NotContain("{{", "every placeholder is filled");
+        harness.SentPrompt.Should().Contain("current composite grade (not supplied: derive it from the assessments)");
 
         // The index filter only uses fields the deployed index has (no top-level matterId).
         harness.IndexFilter.Should().Contain($"scope/matterId eq '{MatterId}'");
@@ -116,7 +124,7 @@ public class AI01_MatterHealthSinglePlaybookTests
         envelope.Select(p => p.Key).Should().BeEquivalentTo(
             ["schemaVersion", "body", "citations", "generatedAt", "playbookName", "tenantId", "dimensions"]);
         envelope["schemaVersion"]!.GetValue<string>().Should().Be("1.0");
-        envelope["body"]!.GetValue<string>().Should().Be(Harness.ReplyBody);
+        envelope["body"]!.GetValue<string>().Should().Be(Harness.ReplyBody, "UpdateRecord's own render must not evaluate {{ }} inside the reply");
         envelope["citations"]!.AsArray().Should().HaveCount(1);
         DateTimeOffset.TryParse(envelope["generatedAt"]!.GetValue<string>(), out _).Should().BeTrue();
         envelope["tenantId"]!.GetValue<string>().Should().Be(TenantId);
@@ -232,21 +240,267 @@ public class AI01_MatterHealthSinglePlaybookTests
         plain.TextContent.Should().Be("just text");
     }
 
+    [Fact]
+    public async Task SuppliedCurrentGrade_ReachesThePrompt()
+    {
+        var harness = new Harness(assessmentNotes: [GuidelineNotes, BudgetNotes], currentGrade: "B+");
+
+        await harness.RunAsync();
+
+        harness.SentPrompt.Should().Contain("current composite grade B+");
+    }
+
+    // ── Engine: the other skip paths and what a skip looks like downstream (review round 1) ──
+
+    [Fact]
+    public async Task Engine_AFailedDependency_StopsTheRun_AndItsDependentNeverRuns()
+    {
+        var failing = Node("failing", "f", ExecutorType.AiCompletion);
+        var after = Node("after", "a", ExecutorType.GroundingVerify, failing.Id);
+        var ran = new List<string>();
+        var registry = new Mock<INodeExecutorRegistry>();
+        registry.Setup(r => r.GetExecutor(ExecutorType.AiCompletion)).Returns(Fake((ctx, _) =>
+            Task.FromResult(NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, "boom", NodeErrorCodes.InternalError))));
+        registry.Setup(r => r.GetExecutor(ExecutorType.GroundingVerify)).Returns(Recording(ran, _ => new { ok = true }));
+
+        var events = await RunGraphAsync(registry.Object, failing, after);
+
+        ran.Should().BeEmpty();
+        events.Should().ContainSingle(e => e.Type == PlaybookEventType.RunFailed).Which.Error.Should().Contain("failing");
+    }
+
+    [Fact]
+    public async Task Engine_AFalseConditionWithAFalseBranch_SkipsTheTrueBranchChain_AndRunsTheJoin()
+    {
+        var condition = Node("condition", "cond", ExecutorType.Condition) with
+        {
+            ConfigJson = """{"condition":{"operator":"eq","left":"a","right":"b"},"trueBranch":"onTrue","falseBranch":"join"}""",
+        };
+        var onTrue = Node("onTrue", "t", ExecutorType.AiCompletion, condition.Id);
+        var afterTrue = Node("afterTrue", "t2", ExecutorType.GroundingVerify, onTrue.Id);
+        var join = Node("join", "j", ExecutorType.ObservationEmit, afterTrue.Id, condition.Id);
+        var ran = new List<string>();
+        var registry = new Mock<INodeExecutorRegistry>();
+        registry.Setup(r => r.GetExecutor(ExecutorType.Condition))
+            .Returns(new ConditionNodeExecutor(new TemplateEngine(NullLogger<TemplateEngine>.Instance), NullLogger<ConditionNodeExecutor>.Instance));
+        foreach (var type in new[] { ExecutorType.AiCompletion, ExecutorType.GroundingVerify, ExecutorType.ObservationEmit })
+            registry.Setup(r => r.GetExecutor(type)).Returns(Recording(ran, _ => new { ok = true }));
+
+        var events = await RunGraphAsync(registry.Object, condition, onTrue, afterTrue, join);
+
+        ran.Should().Equal("join");
+        events.Where(e => e.Type == PlaybookEventType.NodeSkipped).Select(e => e.NodeName)
+            .Should().BeEquivalentTo(["onTrue", "afterTrue"]);
+    }
+
+    [Fact]
+    public async Task Engine_AnInsightsLayer2GateFail_IsASkipLikeAnyOther_CountedOnce_AndPropagated()
+    {
+        var extract = Node("layer2Extract", "layer2", ExecutorType.AiCompletion);
+        var verify = Node("groundingVerify", "grounded", ExecutorType.GroundingVerify, extract.Id);
+        var ran = new List<string>();
+        var registry = new Mock<INodeExecutorRegistry>();
+        foreach (var type in new[] { ExecutorType.AiCompletion, ExecutorType.GroundingVerify })
+            registry.Setup(r => r.GetExecutor(type)).Returns(Recording(ran, _ => new { ok = true }));
+
+        var events = await RunGraphAsync(registry.Object, gateFailLayer2: true, extract, verify);
+
+        ran.Should().BeEmpty();
+        events.Where(e => e.Type == PlaybookEventType.NodeSkipped).Select(e => e.NodeName)
+            .Should().BeEquivalentTo(["layer2Extract", "groundingVerify"]);
+        var completed = events.Single(e => e.Type == PlaybookEventType.RunCompleted).Metrics!;
+        completed.SkippedNodes.Should().Be(2);
+        completed.CompletedNodes.Should().Be(0, "the gate-fail skip was counted as completed too");
+    }
+
+    [Fact]
+    public async Task Engine_ASkippedNode_ReadsAsNotSucceededAndSkipped_InTemplates_AndRunDetail()
+    {
+        var gate = Node("gate", "gate", ExecutorType.EvidenceSufficiency);
+        var skipped = Node("onSufficient", "a", ExecutorType.AiCompletion, gate.Id);
+        var join = Node("join", "j", ExecutorType.ObservationEmit, skipped.Id, gate.Id) with
+        {
+            ConfigJson = """{"success":"{{a.success}}","skipped":"{{a.skipped}}","flag":"{{#if a.success}}ran{{else}}not-ran{{/if}}"}""",
+        };
+        string? seenConfig = null;
+        var registry = new Mock<INodeExecutorRegistry>();
+        registry.Setup(r => r.GetExecutor(ExecutorType.EvidenceSufficiency)).Returns(Recording([], _ => new { SelectedBranch = "join" }));
+        registry.Setup(r => r.GetExecutor(ExecutorType.AiCompletion)).Returns(Recording([], _ => new { ok = true }));
+        registry.Setup(r => r.GetExecutor(ExecutorType.ObservationEmit)).Returns(Fake((ctx, _) =>
+        {
+            seenConfig = ctx.Node.ConfigJson;
+            return Task.FromResult(NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { ok = true }));
+        }));
+
+        var (events, orchestrator) = await RunGraphWithServiceAsync(registry.Object, false, gate, skipped, join);
+
+        var config = JsonNode.Parse(seenConfig!)!;
+        config["success"]!.GetValue<bool>().Should().BeFalse();
+        config["skipped"]!.GetValue<bool>().Should().BeTrue();
+        config["flag"]!.GetValue<string>().Should().Be("not-ran");
+        var detail = await orchestrator.GetRunDetailAsync(events[0].RunId, CancellationToken.None);
+        var skippedDetail = detail!.NodeDetails.Single(d => d.OutputVariable == "a");
+        skippedDetail.Skipped.Should().BeTrue();
+        skippedDetail.Success.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Engine_ASkippedBranch_NeverReplacesTheOutputABranchThatRanStoredUnderTheSameVariable()
+    {
+        var gate = Node("gate", "gate", ExecutorType.EvidenceSufficiency);
+        var chosen = Node("chosen", "result", ExecutorType.AiCompletion, gate.Id);
+        // "other" waits for "chosen", so its skip is stored AFTER chosen's output: a skip that overwrote would win.
+        var other = Node("other", "result", ExecutorType.AiCompletion, gate.Id, chosen.Id);
+        var reader = Node("reader", "r", ExecutorType.ObservationEmit, other.Id, chosen.Id) with
+        {
+            ConfigJson = """{"value":"{{result.value}}"}""",
+        };
+        string? seenConfig = null;
+        var registry = new Mock<INodeExecutorRegistry>();
+        registry.Setup(r => r.GetExecutor(ExecutorType.EvidenceSufficiency)).Returns(Recording([], _ => new { SelectedBranch = "chosen" }));
+        registry.Setup(r => r.GetExecutor(ExecutorType.AiCompletion)).Returns(Recording([], _ => new { value = "from-chosen" }));
+        registry.Setup(r => r.GetExecutor(ExecutorType.ObservationEmit)).Returns(Fake((ctx, _) =>
+        {
+            seenConfig = ctx.Node.ConfigJson;
+            return Task.FromResult(NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { ok = true }));
+        }));
+
+        await RunGraphAsync(registry.Object, gate, chosen, other, reader);
+
+        JsonNode.Parse(seenConfig!)!["value"]!.GetValue<string>().Should().Be("from-chosen");
+    }
+
+    [Fact]
+    public async Task DeliverComposite_DropsTheSectionOfASkippedUpstream()
+    {
+        var executor = new DeliverCompositeNodeExecutor(NullLogger<DeliverCompositeNodeExecutor>.Instance);
+        var context = AgentContext(
+            """{"destination":"workspace","sections":[{"sectionName":"ran","inputVariable":"x"},{"sectionName":"skipped","inputVariable":"y"}]}""",
+            null) with
+        {
+            PreviousOutputs = new Dictionary<string, NodeOutput>
+            {
+                ["x"] = NodeOutput.Ok(Guid.NewGuid(), "x", new { v = 1 }, "text"),
+                ["y"] = NodeOutput.Skipped(Guid.NewGuid(), "y", "Branch not selected"),
+            },
+        };
+
+        var output = await executor.ExecuteAsync(context, CancellationToken.None);
+
+        output.Success.Should().BeTrue();
+        var sections = output.StructuredData!.Value.GetProperty("sections");
+        sections.GetArrayLength().Should().Be(1);
+        sections[0].GetProperty("sectionName").GetString().Should().Be("ran");
+    }
+
+    // ── GroundingVerify: back-compat, targeting, validation, duplicate keys ─────────────────
+
+    [Fact]
+    public async Task GroundingVerify_EvidenceRefCitations_AndChunkRefSources_WorkAsBefore()
+    {
+        var context = GroundingContext(
+            """{"citationsFrom":"layer2","sourceChunksFrom":"sanitization"}""",
+            ("layer2", """{"evidence":[{"refType":"document","ref":"spe://d/1","quote":"the lease term is ten years"},{"refType":"document","ref":"spe://d/1","quote":"a sentence nobody wrote"}]}"""),
+            ("sanitization", """{"chunks":[{"chunkId":"c1","text":"Clause 4. The lease term is ten years from signing."}]}"""));
+
+        var data = (await Grounding().ExecuteAsync(context, CancellationToken.None)).StructuredData!.Value;
+
+        data.GetProperty("VerifiedCount").GetInt32().Should().Be(1);
+        data.GetProperty("NotFoundCount").GetInt32().Should().Be(1);
+        data.GetProperty("VerifiedEvidence")[0].GetProperty("ref").GetString().Should().Be("spe://d/1");
+    }
+
+    [Fact]
+    public async Task GroundingVerify_ACitationThatNamesARow_IsVerifiedAgainstThatRowOnly()
+    {
+        var context = GroundingContext(
+            """{"citationsFrom":"synthesis","citationsJsonPath":"citations","sources":[{"from":"assessments","jsonPath":"items"}]}""",
+            ("synthesis", """{"body":"b","citations":[{"type":"assessment","id":"A1","label":"l","excerpt":"budget overrun on discovery"}]}"""),
+            ("assessments", """{"items":[{"sprk_kpiassessmentid":"A1","sprk_assessmentnotes":"All deadlines met."},{"sprk_kpiassessmentid":"A2","sprk_assessmentnotes":"A budget overrun on discovery."}]}"""));
+
+        var data = (await Grounding().ExecuteAsync(context, CancellationToken.None)).StructuredData!.Value;
+
+        data.GetProperty("NotFoundCount").GetInt32().Should().Be(1, "the quote is in A2's notes, not in A1's, which the citation names");
+        data.GetProperty("GroundedOutput").GetProperty("citations").GetArrayLength().Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("""{"citationsFrom":"synthesis"}""", "sourceChunksFrom (or a non-empty 'sources' list) is required")]
+    [InlineData("""{"citationsFrom":"synthesis","sources":[{"jsonPath":"items"}]}""", "Every ConfigJson.sources entry requires 'from'")]
+    public void GroundingVerify_Validate_RejectsAMissingSource(string config, string expected)
+    {
+        Grounding().Validate(GroundingContext(config)).Errors.Should().ContainSingle().Which.Should().Contain(expected);
+    }
+
+    [Fact]
+    public async Task GroundingVerify_AReplyWithADuplicateKey_StillGrounds()
+    {
+        var context = GroundingContext(
+            """{"citationsFrom":"synthesis","citationsJsonPath":"citations","sources":[{"from":"assessments","jsonPath":"items"}]}""",
+            ("synthesis", """{"body":"first","body":"second","citations":[{"type":"assessment","id":"A1","label":"l","excerpt":"all deadlines were met"}]}"""),
+            ("assessments", """{"items":[{"sprk_kpiassessmentid":"A1","sprk_assessmentnotes":"All deadlines were met."}]}"""));
+
+        var output = await Grounding().ExecuteAsync(context, CancellationToken.None);
+
+        output.Success.Should().BeTrue(output.ErrorMessage);
+        output.StructuredData!.Value.GetProperty("GroundedOutput").GetProperty("citations").GetArrayLength().Should().Be(1);
+    }
+
+    // ── AgentService: an unresolved $ref prompt, and a placeholder left unfilled ─────────────
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void AgentService_ALiteralRefPrompt_CountsAsUnset(bool actionHasPrompt, bool expectedValid)
+    {
+        var executor = new AgentServiceNodeExecutor(DisabledAgentClient(),
+            new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<AgentServiceNodeExecutor>.Instance);
+        var context = AgentContext("""{"tenantId":"t","prompt":"$ref:Services/Ai/Insights/Prompts/predict.txt"}""",
+            actionHasPrompt ? SynthesisJps : null);
+
+        executor.Validate(context).IsValid.Should().Be(expectedValid);
+        if (actionHasPrompt)
+        {
+            var config = new AgentServiceNodeConfig { TenantId = "t", Prompt = "$ref:Services/Ai/Insights/Prompts/predict.txt" };
+            AgentServiceNodeExecutor.ResolvePrompt(context, config, new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger.Instance)
+                .Should().Contain("Spaarke Insights Engine synthesizer", "the Action's prompt is used instead of the literal reference");
+        }
+    }
+
+    [Fact]
+    public async Task AgentService_APlaceholderLeftInThePrompt_FailsBeforeAnyAgentCall()
+    {
+        var executor = new AgentServiceNodeExecutor(DisabledAgentClient(),
+            new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<AgentServiceNodeExecutor>.Instance);
+        // No templateParameters: the Action's {{matterId}} etc. stay in the rendered prompt.
+        var context = AgentContext("""{"tenantId":"t"}""", SynthesisJps);
+
+        var output = await executor.ExecuteAsync(context, CancellationToken.None);
+
+        output.Success.Should().BeFalse();
+        output.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed,
+            "the disabled client would have answered NODE_AGENT_FEATURE_DISABLED had the agent been called");
+        output.ErrorMessage.Should().Contain("unrendered {{placeholder}}");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────────────────
 
     private sealed class Harness
     {
         public const string VerbatimExcerpt = "missed the status update deadline for the third consecutive period";
-        public const string ReplyBody = "## Matter Health\n\nGuideline Compliance is slipping: \"deadlines\" were missed.";
+        public const string ReplyBody = "## Matter Health\n\nGuideline Compliance is slipping: \"deadlines\" were missed; the notes quote {{templateLike}} braces.";
 
         private readonly IReadOnlyList<string> _notes;
         private readonly Mock<INodeExecutorRegistry> _registry = new();
         private readonly Mock<IScopeResolverService> _scopes = new();
         private readonly Mock<INodeService> _nodes = new();
 
-        public Harness(IReadOnlyList<string> assessmentNotes)
+        private readonly string? _currentGrade;
+
+        public Harness(IReadOnlyList<string> assessmentNotes, string? currentGrade = null)
         {
             _notes = assessmentNotes;
+            _currentGrade = currentGrade;
             AssessmentIds = assessmentNotes.Select(_ => Guid.NewGuid()).ToList();
         }
 
@@ -279,7 +533,9 @@ public class AI01_MatterHealthSinglePlaybookTests
             {
                 PlaybookId = playbookId,
                 DocumentIds = [],
-                Parameters = new Dictionary<string, string> { ["matterId"] = MatterId.ToString(), ["tenantId"] = TenantId },
+                Parameters = _currentGrade is null
+                    ? new Dictionary<string, string> { ["matterId"] = MatterId.ToString(), ["tenantId"] = TenantId }
+                    : new Dictionary<string, string> { ["matterId"] = MatterId.ToString(), ["tenantId"] = TenantId, ["currentGrade"] = _currentGrade },
             };
             var http = new DefaultHttpContext
             {
@@ -399,12 +655,39 @@ public class AI01_MatterHealthSinglePlaybookTests
             _registry.Setup(r => r.GetExecutor(ExecutorType.ReturnInsightArtifact)).Returns(new ReturnInsightArtifactNode(NullLogger<ReturnInsightArtifactNode>.Instance));
             _registry.Setup(r => r.GetExecutor(ExecutorType.DeclineToFind)).Returns(new DeclineToFindNode(NullLogger<DeclineToFindNode>.Instance));
 
-            // Dataverse write (boundary): record the rendered envelope value.
-            _registry.Setup(r => r.GetExecutor(ExecutorType.UpdateRecord)).Returns(Fake((ctx, _) =>
-            {
-                PersistedValue = JsonNode.Parse(ctx.Node.ConfigJson!)!["fieldMappings"]![0]!["value"]!.GetValue<string>();
-                return Task.FromResult(NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { updated = true }));
-            }));
+            // The REAL UpdateRecord executor (it renders the value again, sweep PB-25); the Dataverse write is the fake.
+            var dataverse = new Mock<IDataverseService>();
+            dataverse.Setup(d => d.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((entity, id, fields, _, _) =>
+                {
+                    entity.Should().Be("sprk_matter");
+                    id.Should().Be(MatterId);
+                    PersistedValue = fields["sprk_performancesummary"] as string;
+                })
+                .Returns(Task.CompletedTask);
+            _registry.Setup(r => r.GetExecutor(ExecutorType.UpdateRecord)).Returns(new UpdateRecordNodeExecutor(
+                new TemplateEngine(NullLogger<TemplateEngine>.Instance), dataverse.Object, MatterMetadataScope(dataverse.Object),
+                NullLogger<UpdateRecordNodeExecutor>.Instance));
+        }
+
+        // MetadataService (sealed, no seam) over a cache that already holds sprk_matter's metadata: the column is a Memo.
+        private static IServiceScopeFactory MatterMetadataScope(IDataverseService dataverse)
+        {
+            var dto = new EntityMetadataDto(
+                LogicalName: "sprk_matter", PrimaryIdAttribute: "sprk_matterid", PrimaryNameAttribute: "sprk_mattername",
+                Attributes: [new AttributeDto("sprk_performancesummary", "Memo", null, false, false, null)]);
+            var cache = new Mock<IDistributedCache>();
+            cache.Setup(c => c.GetAsync("sdap:dv:entitymetadata:sprk_matter", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })));
+            var metadata = new MetadataService(dataverse, cache.Object, NullLogger<MetadataService>.Instance);
+            var provider = new Mock<IServiceProvider>();
+            provider.Setup(p => p.GetService(typeof(MetadataService))).Returns(metadata);
+            var scope = new Mock<IServiceScope>();
+            scope.Setup(s => s.ServiceProvider).Returns(provider.Object);
+            var factory = new Mock<IServiceScopeFactory>();
+            factory.Setup(f => f.CreateScope()).Returns(scope.Object);
+            return factory.Object;
         }
 
         private string Reply() => JsonSerializer.Serialize(new
@@ -474,14 +757,24 @@ public class AI01_MatterHealthSinglePlaybookTests
         return executor.Object;
     }
 
-    private static async Task<List<PlaybookStreamEvent>> RunGraphAsync(INodeExecutorRegistry registry, params PlaybookNodeDto[] nodes)
+    private static async Task<List<PlaybookStreamEvent>> RunGraphAsync(INodeExecutorRegistry registry, params PlaybookNodeDto[] nodes) =>
+        (await RunGraphWithServiceAsync(registry, false, nodes)).Events;
+
+    private static async Task<List<PlaybookStreamEvent>> RunGraphAsync(
+        INodeExecutorRegistry registry, bool gateFailLayer2, params PlaybookNodeDto[] nodes) =>
+        (await RunGraphWithServiceAsync(registry, gateFailLayer2, nodes)).Events;
+
+    private static async Task<(List<PlaybookStreamEvent> Events, PlaybookOrchestrationService Orchestrator)> RunGraphWithServiceAsync(
+        INodeExecutorRegistry registry, bool gateFailLayer2, params PlaybookNodeDto[] nodes)
     {
         var playbookId = Guid.NewGuid();
         var nodeService = new Mock<INodeService>();
         nodeService.Setup(n => n.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync(nodes);
         var router = new Mock<IInsightsActionRouter>();
         router.Setup(r => r.ResolveLayer2ActionAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string? _, string? __, AnalysisAction a, CancellationToken _) => InsightsLayer2RoutingResult.PassThrough(a));
+            .ReturnsAsync((string? _, string? __, AnalysisAction a, CancellationToken _) => gateFailLayer2
+                ? new InsightsLayer2RoutingResult(InsightsLayer2RoutingDecision.GateFailNullActionCode, a)
+                : InsightsLayer2RoutingResult.PassThrough(a));
         router.Setup(r => r.ResolveLayer1ActionAsync(It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string? _, AnalysisAction a, CancellationToken _) => a);
         var orchestrator = new PlaybookOrchestrationService(
@@ -495,7 +788,26 @@ public class AI01_MatterHealthSinglePlaybookTests
             events.Add(e);
         }
 
-        return events;
+        return (events, orchestrator);
+    }
+
+    private static GroundingVerifyNode Grounding() =>
+        new(new GroundingVerifier(NullLogger<GroundingVerifier>.Instance), NullLogger<GroundingVerifyNode>.Instance);
+
+    private static NodeExecutionContext GroundingContext(string configJson, params (string Variable, string Json)[] upstreams)
+    {
+        var previous = new Dictionary<string, NodeOutput>();
+        foreach (var (variable, json) in upstreams)
+        {
+            using var doc = JsonDocument.Parse(json);
+            previous[variable] = new NodeOutput
+            {
+                NodeId = Guid.NewGuid(), OutputVariable = variable, Success = true,
+                StructuredData = doc.RootElement.Clone(), Metrics = NodeExecutionMetrics.Empty,
+            };
+        }
+
+        return AgentContext(configJson, null) with { PreviousOutputs = previous };
     }
 
     private static NodeExecutionContext AgentContext(string configJson, string? actionPrompt)

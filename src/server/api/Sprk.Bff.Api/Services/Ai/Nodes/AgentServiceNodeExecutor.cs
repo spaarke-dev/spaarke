@@ -125,7 +125,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 if (string.IsNullOrWhiteSpace(config.TenantId))
                     errors.Add("AgentService node requires 'tenantId' in ConfigJson");
 
-                if (string.IsNullOrWhiteSpace(config.Prompt) && !HasActionPrompt(context))
+                if (!IsAuthoredPrompt(config.Prompt) && !HasActionPrompt(context))
                     errors.Add("AgentService node requires 'prompt' in ConfigJson, or a linked Action with a system prompt (sprk_systemprompt)");
             }
         }
@@ -179,7 +179,20 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             var config = JsonSerializer.Deserialize<AgentServiceNodeConfig>(context.Node.ConfigJson!, JsonOptions)!;
             var tenantId = config.TenantId!;
             var prompt = ResolvePrompt(context, config, _promptSchemaRenderer, _logger);
-            activity?.SetTag("prompt.source", string.IsNullOrWhiteSpace(config.Prompt) ? "action" : "node");
+            activity?.SetTag("prompt.source", IsAuthoredPrompt(config.Prompt) ? "node" : "action");
+
+            // Fail fast, before any agent call: a placeholder left in the prompt means an input never arrived, and the
+            // agent would answer about "{{assessments}}" instead of the data.
+            if (HasUnrenderedPlaceholder(prompt))
+            {
+                activity?.SetTag("node.outcome", "unrendered_placeholder");
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    "AgentService prompt still contains an unrendered {{placeholder}}; check the node's templateParameters / inputBinding against the Action's prompt",
+                    NodeErrorCodes.ValidationFailed,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
 
             _logger.LogDebug(
                 "AgentService node {NodeId}: creating/resuming thread for tenant {TenantId}",
@@ -290,6 +303,18 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     }
 
     /// <summary>
+    /// True when the node authors its own message. A literal <c>$ref:…</c> (an unresolved file reference a deploy
+    /// once wrote into predict-matter-cost) is not a message and counts as unset.
+    /// </summary>
+    internal static bool IsAuthoredPrompt(string? prompt) =>
+        !string.IsNullOrWhiteSpace(prompt) && !prompt.TrimStart().StartsWith("$ref:", StringComparison.OrdinalIgnoreCase);
+
+    private static readonly System.Text.RegularExpressions.Regex UnrenderedPlaceholder =
+        new(@"\{\{\s*[A-Za-z_][\w.]*\s*\}\}", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    internal static bool HasUnrenderedPlaceholder(string prompt) => UnrenderedPlaceholder.IsMatch(prompt);
+
+    /// <summary>
     /// True when the node links an Action whose system prompt can be the message (D-98).
     /// </summary>
     private static bool HasActionPrompt(NodeExecutionContext context) =>
@@ -308,7 +333,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
         PromptSchemaRenderer renderer,
         ILogger logger)
     {
-        if (!string.IsNullOrWhiteSpace(config.Prompt))
+        if (IsAuthoredPrompt(config.Prompt))
             return config.Prompt!;
 
         var rendered = renderer.Render(

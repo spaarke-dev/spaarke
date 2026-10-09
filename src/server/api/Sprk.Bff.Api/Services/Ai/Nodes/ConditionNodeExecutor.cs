@@ -535,7 +535,8 @@ public sealed class ConditionNodeExecutor : INodeExecutor
                     ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
-                success = output.Success,
+                success = output.Success && !output.IsSkipped, // a skipped node (PB-02) did not succeed
+                skipped = output.IsSkipped,
                 confidence = output.Confidence
             };
         }

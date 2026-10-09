@@ -306,7 +306,8 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
                     ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
                     : null,
                 text = output.TextContent,
-                success = output.Success
+                success = output.Success && !output.IsSkipped, // a skipped node (PB-02) did not succeed
+                skipped = output.IsSkipped
             };
         }
 

@@ -166,7 +166,11 @@ public sealed class TemplateEngine : ITemplateEngine
             return "null";
         try
         {
-            return JsonSerializer.Serialize(value, JsonHelperOptions);
+            // Task 135: "{{" can occur in JSON text only inside a string (an object key is a string, so two opening
+            // braces are never adjacent structurally). Escaping the second brace keeps the JSON value identical for
+            // any parser, while a later Handlebars pass over the rendered text (executors re-render their config,
+            // sweep PB-25) can no longer evaluate data — an LLM reply or a record name — as a template.
+            return JsonSerializer.Serialize(value, JsonHelperOptions).Replace("{{", @"{\u007B", StringComparison.Ordinal);
         }
         catch (Exception)
         {

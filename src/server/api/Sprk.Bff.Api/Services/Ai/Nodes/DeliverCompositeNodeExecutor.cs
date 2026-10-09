@@ -186,12 +186,13 @@ public sealed class DeliverCompositeNodeExecutor : INodeExecutor
             {
                 var inputVariable = spec.InputVariable ?? string.Empty;
                 var upstream = context.GetPreviousOutput(inputVariable);
-                if (upstream is null)
+                // A skipped upstream (PB-02: its branch was not selected) produced nothing — same as missing.
+                if (upstream is null || upstream.IsSkipped)
                 {
                     droppedCount++;
                     _logger.LogInformation(
                         "DeliverComposite node {NodeId}: section '{SectionName}' upstream variable '{InputVariable}' " +
-                        "not found in PreviousOutputs — dropping section silently (FR-52: partial composite is valid)",
+                        "not found in PreviousOutputs or skipped — dropping section silently (FR-52: partial composite is valid)",
                         context.Node.Id, spec.SectionName, inputVariable);
                     continue;
                 }
