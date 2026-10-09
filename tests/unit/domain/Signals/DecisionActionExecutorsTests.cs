@@ -27,8 +27,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// caller-rights probe, the caller-identity Dataverse client, the writer's SDK service and <see cref="DecisionRouteCores"/>
 /// (the adapter over the shipped event, child-record and communications cores, which have their own suites). What these
 /// pin is the contract: <b>refuse before writing</b>, <b>exactly its write</b>, <b>the written ids come back</b>, and
-/// <b>nothing ever names <c>sprk_finalduedate</c></b>. The live proof as a low-privilege user is the seam test
-/// (<c>DecisionActionExecutorsSeamTests</c>).</para>
+/// <b>nothing ever names <c>sprk_finalduedate</c></b>. The live proof as a low-privilege user is NOT in this file (see the task 044 notes: it
+/// is blocked on role grants and a low-privilege token).</para>
 /// </remarks>
 public class DecisionActionExecutorsTests
 {
