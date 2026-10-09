@@ -16,6 +16,7 @@
     "Spaarke_UploadDocumentsStandalone": "sprk_document",
     "Spaarke_AddMultipleDocuments": "sprk_document",
     "Spaarke_NewAnalysisFromSubgrid": "sprk_analysis",
+    "Spaarke_NewAnalysis": "sprk_analysis",
     "Spaarke.Email.saveToDocument": "sprk_document",
     "Spaarke.KpiRibbon.openQuickCreate": "sprk_kpiassessment",
     "Spaarke.Event.AddMemo": "sprk_memo",

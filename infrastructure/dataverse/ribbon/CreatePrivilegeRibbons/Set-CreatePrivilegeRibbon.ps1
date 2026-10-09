@@ -12,23 +12,40 @@
       DRY RUN (default; nothing written): runs Merge-CreatePrivilegeRule.ps1 -Check over every checked-in ribbon source
         that calls a launcher (git grep, so a new source is found without a list) and FAILS if a create command or its
         rule definition is missing. With -EnvironmentUrl it also reads each host table's EFFECTIVE ribbon
-        (RetrieveEntityRibbon 'All', read-only) and lists the live create commands and whether each is ruled yet.
+        (RetrieveEntityRibbon 'All', read-only) and lists the live create commands and whether each is ruled yet, and
+        lists the live create MODERN COMMANDS (see below).
 
       -Apply (LIVE WRITE - the main session runs it): records each host table's live command list (before.json);
         exports every solution in -Solutions (fresh - never a checked-in copy: those lag the environment, and an
         unmanaged ribbon import REPLACES the table's whole ribbon customisation); refuses, writing nothing, when an
-        export's RibbonDiff lacks a command the environment has for that table (a stale or partial export would delete
-        it) or when a live create command's table is in none of the exports; merges the rule into every exported
+        export's RibbonDiff lacks a command, rule, custom action, hide action or label the environment holds for that
+        table (../Test-RibbonExportCurrent.ps1: a stale or partial export would delete it) or when a live create
+        command's table is in none of the exports; merges the rule into every exported
         RibbonDiff; then packs and imports each solution with publish, and verifies (with the same bounded retry as
         Set-AccessRibbon.ps1 - the effective ribbon lags the publish).
 
       -Verify (read-only): for every host table, every command in the effective ribbon that calls a launcher carries
         its table's rule, and the rule is exactly EntityPrivilegeRule EntityName=<table> PrivilegeType=Create
-        PrivilegeDepth=Basic. With -BeforeList, every command present before the import is still present. Exit 0 = PASS.
+        PrivilegeDepth=Basic. With -BeforeList, every command present before the import is still present. It also FAILS
+        on every unruled create modern command (below). Exit 0 = PASS.
+
+    MODERN COMMANDS (appaction). A command made in the modern command designer is an appaction row, not ribbon XML:
+    RetrieveEntityRibbon does not return it and RibbonDiff cannot rule it. Every mode with -EnvironmentUrl therefore also
+    reads the unmanaged, active appactions whose onclickeventjavascriptfunctionname is a launcher, and reports each one:
+      hidden   - hidden = true: not shown;
+      formula  - visibilitytype = Formula: a Power Fx visibility rule in a command component library. Its text cannot be
+                 read back by script, so -Verify passes it and prints a manual check
+                 (Visible = DataSourceInfo(<table>, DataSourceInfo.CreatePermission));
+      UNRULED  - shown to every user: -Verify FAILS.
+    -Apply does NOT change an appaction. A Power Fx rule is authored in the command designer (the formula is compiled
+    into a component library .msapp that no supported API writes), and hiding or deleting a customisation someone made
+    is an owner decision. See README "Modern commands".
 
     Never run -Apply at the same time as another ribbon import into the same tables (Set-AccessRibbon.ps1,
     Deploy-SecureChildNewCommands.ps1): each one exports, merges and re-imports the whole ribbon of a table, so two
-    interleaved runs lose one run's change. Run them one after another; each starts from a fresh export.
+    interleaved runs lose one run's change. Run them one after another. This script and Deploy-SecureChildNewCommands.ps1
+    both refuse an export that lacks anything the environment holds (Test-RibbonExportCurrent.ps1); Set-AccessRibbon.ps1
+    exports fresh itself.
 
 .PARAMETER EnvironmentUrl
     The Dataverse org URL (https://<org>.crm.dynamics.com). Required for -Apply and -Verify.
@@ -121,10 +138,48 @@ function Get-LiveCommandIds([xml] $ribbon) {
     @($ribbon.SelectNodes('//*[local-name()="CommandDefinition"]') | ForEach-Object { $_.GetAttribute('Id') }) | Sort-Object -Unique
 }
 
-# The UNMANAGED commands Dataverse holds for a table (what an unmanaged ribbon import replaces).
-function Get-UnmanagedCommandIds([string] $table, [string] $token) {
-    $filter = [uri]::EscapeDataString("entity eq '$table' and ismanaged eq false")
-    @((Invoke-Dv "ribboncommands?`$select=command&`$filter=$filter" $token).value | ForEach-Object { $_.command }) | Sort-Object -Unique
+# The unmanaged, active MODERN commands (appaction) that call a launcher, with their visibility state.
+function Get-CreateAppActions([string] $token) {
+    $select = 'uniquename,buttonlabeltext,contextvalue,onclickeventjavascriptfunctionname,hidden,visibilitytype,' +
+        'visibilityformulacomponentlibrary,visibilityformulafunctionname,modifiedon'
+    $filter = [uri]::EscapeDataString('ismanaged eq false and statecode eq 0 and onclickeventjavascriptfunctionname ne null')
+    $uri = "appactions?`$select=$select&`$filter=$filter"
+    $rows = @()
+    while ($uri) {
+        $page = Invoke-Dv $uri $token
+        $rows += @($page.value)
+        $next = $page.'@odata.nextLink'
+        $uri = if ($next) { $next.Substring($next.IndexOf('/api/data/v9.2/') + '/api/data/v9.2/'.Length) } else { $null }
+    }
+    foreach ($a in $rows) {
+        $function = $a.onclickeventjavascriptfunctionname
+        if (-not $launchers.ContainsKey($function)) { continue }
+        $state = if ($a.hidden) { 'hidden' }
+        elseif ($a.visibilitytype -eq 1 -and $a.visibilityformulafunctionname) { 'formula' }
+        else { 'UNRULED' }
+        [pscustomobject] @{
+            UniqueName = $a.uniquename; Label = $a.buttonlabeltext; Context = $a.contextvalue; Function = $function
+            Table = $launchers[$function]; State = $state; Modified = $a.modifiedon
+            Formula = "$($a.visibilityformulacomponentlibrary)/$($a.visibilityformulafunctionname)"
+        }
+    }
+}
+
+# -Verify's appaction part: FAIL lines for unruled ones; a manual-check line for a formula.
+function Test-CreateAppActions([string] $token) {
+    $failures = New-Object System.Collections.Generic.List[string]
+    foreach ($a in @(Get-CreateAppActions $token)) {
+        $what = "modern command '$($a.Label)' ($($a.UniqueName)) on $($a.Context) calls $($a.Function) (creates $($a.Table))"
+        switch ($a.State) {
+            'hidden' { Write-Host "[PASS] appaction: $what - hidden" }
+            'formula' {
+                Write-Host ("[PASS] appaction: $what - Power Fx visibility $($a.Formula). MANUAL CHECK: the formula is " +
+                    "Visible = DataSourceInfo(<$($a.Table) data source>, DataSourceInfo.CreatePermission)") -ForegroundColor Yellow
+            }
+            default { $failures.Add("$what is shown to every user: no Create-privilege visibility (owner decision; README 'Modern commands')") }
+        }
+    }
+    return , $failures
 }
 
 # Every command of a ribbon document that calls a launcher: Command, Function, Table, Ruled (references its rule).
@@ -178,6 +233,7 @@ function Invoke-Verify([System.Collections.IDictionary] $beforeByTable) {
             foreach ($f in $result.Failures) { Write-Host "[FAIL] ${table}: $f" -ForegroundColor Red }
         }
     }
+    foreach ($f in (Test-CreateAppActions $token)) { $failed++; Write-Host "[FAIL] appaction: $f" -ForegroundColor Red }
     return $failed
 }
 
@@ -191,7 +247,7 @@ if ($Verify) {
             ForEach-Object { $beforeByTable[$_.Name] = @($_.Value) }
     }
     $failed = Invoke-Verify $beforeByTable
-    if ($failed -gt 0) { Write-Host "VERIFY FAILED on $failed table(s)." -ForegroundColor Red; exit 1 }
+    if ($failed -gt 0) { Write-Host "VERIFY FAILED on $failed table(s) or modern command(s)." -ForegroundColor Red; exit 1 }
     Write-Host 'VERIFY PASSED.' -ForegroundColor Green
     exit 0
 }
@@ -217,6 +273,12 @@ if (-not $Apply) {
                 Write-Host ("  {0,-22} {1,-48} -> {2,-22} {3}" -f $table, $c.Command, $c.Table, $(if ($c.Ruled) { 'ruled' } else { 'NOT ruled yet' }))
             }
         }
+        Write-Host 'Live create MODERN commands (appaction, unmanaged, active; read-only) - -Apply does not change these:'
+        $appActions = @(Get-CreateAppActions $token)
+        if ($appActions.Count -eq 0) { Write-Host '  (none)' }
+        foreach ($a in $appActions) {
+            Write-Host ("  {0,-22} '{1}' {2} -> {3}  {4} (modified {5})" -f $a.Context, $a.Label, $a.UniqueName, $a.Table, $a.State, $a.Modified)
+        }
     }
     if ($missing.Count -gt 0) { Write-Host "DRY RUN FAILED: $($missing.Count) checked-in command(s) or rule definition(s) missing the Create privilege rule." -ForegroundColor Red; exit 1 }
     Write-Host 'DRY RUN PASSED: every checked-in create command carries its Create privilege rule.' -ForegroundColor Green
@@ -241,6 +303,10 @@ foreach ($table in $hosts) {
 $beforePath = Join-Path $WorkDir 'before.json'
 $beforeByTable | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $beforePath -Encoding utf8
 Write-Host "Recorded the live before-list: $beforePath. Tables with live create commands: $(@($liveCreateTables) -join ', ')"
+foreach ($a in @(Get-CreateAppActions $token | Where-Object State -eq 'UNRULED')) {
+    Write-Host ("Modern command '$($a.Label)' ($($a.UniqueName)) creates $($a.Table) and is shown to every user. -Apply does " +
+        "not change it (owner decision, README 'Modern commands'); the verify below FAILS on it until it is resolved.") -ForegroundColor Yellow
+}
 
 # 2. Export every solution FIRST and check each export against the environment. Nothing is imported unless all pass.
 $unpackedBySolution = [ordered] @{}
@@ -256,16 +322,12 @@ foreach ($solution in $Solutions) {
 
     $entitiesDir = Join-Path $unpacked 'Entities'
     $ribbonDiffs = if (Test-Path -LiteralPath $entitiesDir) { @(Get-ChildItem -LiteralPath $entitiesDir -Recurse -Filter 'RibbonDiff.xml') } else { @() }
-    foreach ($ribbonDiff in $ribbonDiffs) {
-        [xml] $exported = Get-Content -Raw -LiteralPath $ribbonDiff.FullName
-        $table = $ribbonDiff.Directory.Name.ToLowerInvariant()
-        $exportedIds = @(Get-LiveCommandIds $exported)
-        $lost = @(Get-UnmanagedCommandIds $table $token | Where-Object { $exportedIds -notcontains $_ })
-        if ($lost.Count -gt 0) {
-            throw "$solution / ${table}: the export lacks command(s) the environment holds ($($lost -join ', ')); importing it would delete them. Nothing was imported."
-        }
-        [void] $covered.Add($table)
+    $lost = @(& (Join-Path (Split-Path -Parent $PSScriptRoot) 'Test-RibbonExportCurrent.ps1') -EnvironmentUrl $EnvironmentUrl `
+        -Token $token -UnpackedDir $unpacked)
+    if ($lost.Count -gt 0) {
+        throw "${solution}: the export lacks what the environment holds ($($lost -join '; ')); importing it would delete them. Nothing was imported."
     }
+    foreach ($ribbonDiff in $ribbonDiffs) { [void] $covered.Add($ribbonDiff.Directory.Name.ToLowerInvariant()) }
 }
 $uncovered = @($liveCreateTables | Where-Object { -not $covered.Contains($_) })
 if ($uncovered.Count -gt 0) {
@@ -295,13 +357,13 @@ $failed = Invoke-Verify $beforeByTable
 $attempt = 1
 foreach ($delay in $retryDelaysSeconds) {
     if ($failed -eq 0) { break }
-    Write-Host "Verify attempt $attempt failed on $failed table(s); the effective ribbon can lag the publish - retrying in $delay s." -ForegroundColor Yellow
+    Write-Host "Verify attempt $attempt failed on $failed table(s) or modern command(s); the effective ribbon can lag the publish - retrying in $delay s." -ForegroundColor Yellow
     Start-Sleep -Seconds $delay
     $attempt++
     $failed = Invoke-Verify $beforeByTable
 }
 if ($failed -gt 0) {
-    Write-Host "APPLIED, but VERIFY FAILED on $failed table(s) after $attempt attempts - see above." -ForegroundColor Red
+    Write-Host "APPLIED, but VERIFY FAILED on $failed table(s) or modern command(s) after $attempt attempts - see above." -ForegroundColor Red
     exit 1
 }
 Write-Host 'APPLIED and VERIFIED. Then run the live gate: a read-only role sees no custom create command (README).' -ForegroundColor Green

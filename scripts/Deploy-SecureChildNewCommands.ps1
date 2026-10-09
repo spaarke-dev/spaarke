@@ -41,7 +41,10 @@
       2. For each served child table, merges the ONE template into the table's RibbonDiff.xml inside -ExportDir (an
          UNPACKED fresh export of the dedicated ribbon solution -SolutionUniqueName, holding the nine served tables ribbon-only,
          exported per .claude/skills/ribbon-edit/SKILL.md - never SpaarkeCore) with
-         infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1.
+         infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1. Before anything is written, the
+         export is checked against the environment (infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1): if it
+         lacks any unmanaged ribbon command, rule, custom / hide action or label the environment holds for an exported
+         table - an export taken before another ribbon import, e.g. task 180's Create-privilege rules - nothing is written.
       3. Packs (pac solution pack) and imports the solution into -EnvironmentUrl (pac solution import --environment), then
          publishes all customizations.
 
@@ -57,6 +60,7 @@
     e.g. https://spaarkedev1.crm.dynamics.com
 .PARAMETER ExportDir
     The unpacked export of -SolutionUniqueName (folder holding Entities/<table>/RibbonDiff.xml). Required for -Apply.
+    It must be current: an export missing anything the environment holds is refused (export again right before -Apply).
 .PARAMETER SolutionUniqueName
     The dedicated ribbon solution. Default SpaarkeSecureChildRibbons.
 .PARAMETER Apply
@@ -181,6 +185,19 @@ foreach ($form in $forms) {
         elseif ($Tables -contains $child) { Ok "$where (served)" }
         else { Fail "$where is NOT served: its platform + New would create a user-owned child under or through a secure record" }
     }
+}
+
+# ── The export must be CURRENT (unified-access-control-r2 task 180, verifier K1) ───────────────────────────────
+# -ExportDir is supplied by the caller. An unmanaged ribbon import replaces each exported table's WHOLE ribbon
+# customisation, so an export taken before another ribbon import (task 180's sprk.CreatePrivilege.* rules, the Access
+# group, ...) would silently delete it. Every unmanaged command, rule, custom / hide action and label the environment
+# holds for each exported table must be in the export; anything missing fails here, and -Apply then writes nothing.
+if ($ExportDir -and -not $Verify) {
+    Write-Host "Export currency ($ExportDir against $EnvironmentUrl)"
+    $stale = @(& (Join-Path $RepoRoot 'infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1') -EnvironmentUrl $EnvironmentUrl `
+        -Token $token -UnpackedDir $ExportDir)
+    if ($stale.Count -eq 0) { Ok 'the export holds every live unmanaged ribbon customisation of its tables' }
+    foreach ($line in $stale) { Fail "stale export - importing it would delete $line (export the solution again, then re-run)" }
 }
 
 # ── Per table: platform drift, live state, quick create ────────────────────────────────────────────────────────

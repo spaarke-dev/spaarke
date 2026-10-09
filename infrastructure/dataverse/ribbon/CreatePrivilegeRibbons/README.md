@@ -39,10 +39,14 @@ already in them (and with a well-formed comment: the snippets did not parse as X
 
 ## Deployment (MANUAL GATE G180-1 — main session)
 
-`-Apply` exports four dedicated ribbon solutions fresh, refuses before importing anything if an export lacks a command
-the environment holds or if a table with a live create command is in none of them, merges, imports with publish, and
-verifies. **Do not run it while another ribbon import into the same tables is in flight** (tasks 175/179's
-`Set-AccessRibbon.ps1`, `Deploy-SecureChildNewCommands.ps1`): each re-imports a table's whole ribbon.
+`-Apply` exports four dedicated ribbon solutions fresh. Before importing anything it refuses if an export lacks any
+unmanaged ribbon command, rule, custom action, hide action or label the environment holds for an exported table
+([`../Test-RibbonExportCurrent.ps1`](../Test-RibbonExportCurrent.ps1)), or if a table with a live create command is in
+none of them. Then it merges, imports with publish, and verifies. **Do not run it while another ribbon import into the
+same tables is in flight** (tasks 175/179's `Set-AccessRibbon.ps1`, `Deploy-SecureChildNewCommands.ps1`): each
+re-imports a table's whole ribbon. `Deploy-SecureChildNewCommands.ps1` imports an export the operator supplies; it now
+runs the same currency check and writes nothing if that export lacks anything live (so an export taken before this
+task's import cannot strip the Create-privilege rules), but export it right before its `-Apply` all the same.
 
 ```powershell
 cd infrastructure/dataverse/ribbon/CreatePrivilegeRibbons
@@ -52,6 +56,33 @@ pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dyn
 pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify `
     -BeforeList <WorkDir printed by -Apply>/before.json                                       # 4. read-only, re-runnable
 ```
+
+## Modern commands (appaction) — not ruled by `-Apply`
+
+A command built in the modern command designer is an `appaction` row, not ribbon XML: `RetrieveEntityRibbon` does not
+return it and RibbonDiff cannot rule it. The dry run (with `-EnvironmentUrl`) and `-Verify` therefore also read the
+unmanaged, active appactions whose `onclickeventjavascriptfunctionname` is a launcher. `-Verify` FAILS on each one that is
+neither hidden nor on a Power Fx visibility formula.
+
+A Create-privilege rule for a modern command is a Power Fx **Visible** formula,
+`DataSourceInfo(<table>, DataSourceInfo.CreatePermission)` (Microsoft Learn, "Use Power Fx with commands"). The formula
+is authored in the command designer and compiled into the app's command component library (a canvas `.msapp`); the
+appaction only points at it (`visibilitytype` = Formula, `visibilityformulacomponentlibrary`,
+`visibilityformulafunctionname`). No supported API writes or reads that formula, so `-Apply` cannot set it and `-Verify`
+can only see THAT a formula is set (it then prints a manual check). `-Apply` never changes an appaction.
+
+Live on spaarkedev1 (2026-10-09): one such command — **"New Document"**
+(`sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1`, Matter Management app,
+sprk_document main grid, `Spaarke_UploadDocumentsStandalone` in `sprk_subgrid_commands`, visibility None, last modified
+2026-10-06). The classic "+New Document" (`sprk.Document.NewUpload.Grid.Command`, same launcher, same grid) carries the
+rule after `-Apply`. Options (owner decision, open question in the task notes):
+
+1. Author the Visible formula in the command designer (Matter Management → Documents main grid → New Document →
+   Visibility "Show on condition from formula" → `DataSourceInfo(Documents, DataSourceInfo.CreatePermission)`), publish,
+   then `-Verify` passes it with a manual check line.
+2. Hide it (`hidden = true` on that appaction): the classic "+New Document" stays, ruled.
+3. Delete it (same effect as 2, not reversible from the row).
+4. Leave it: `-Verify` keeps failing on it, and a read-only user sees "New Document" on that grid.
 
 Then the live gate (G180-2): sign in as a user whose only role cannot create (for example a copy of Spaarke Basic User
 with Create removed on matter, project, work assignment, event, to do, document and analysis) and check that the Matter,

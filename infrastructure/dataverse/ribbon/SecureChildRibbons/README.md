@@ -39,7 +39,7 @@ secure.
 | `secure-child-new.template.xml` | The ONE authored definition (per child entity: `{{entity}}`, `{{label}}`). Carries the platform's own `Mscrm.AddNewRecordFromSubGridStandard` (copied from `RetrieveEntityRibbon`, spaarkedev1, 2026-10-04) plus the one rule. |
 | `Merge-SecureChildRibbon.ps1` | Pure file transformation into a FRESH export of the child's `RibbonDiff.xml`; idempotent; extends an existing override instead of replacing it; guards Spaarke's own parent-prefilled creates of the table ("+ Add KPI"); throws if a command is lost. |
 | `src/client/webresources/js/sprk_secure_child_ribbon.js` | The command script (`sprk_/scripts/secure_child_ribbon.js`, `Spaarke.SecureChild.Ribbon`). Behaviour pinned by `Spaarke.UI.Components/src/utils/adapters/__tests__/secureChildRibbonScript.test.ts` (the script run in a sandbox). |
-| `scripts/Deploy-SecureChildNewCommands.ps1` | Dry run (reads only: a live inventory of every ownership-child subgrid on every active main form — FAIL on one not served; platform drift of the copied command; quick-create turned on; missing helper libraries) / `-Apply` / `-Verify`. |
+| `scripts/Deploy-SecureChildNewCommands.ps1` | Dry run (reads only: a live inventory of every ownership-child subgrid on every active main form — FAIL on one not served; platform drift of the copied command; quick-create turned on; missing helper libraries; with `-ExportDir`, an export that lacks a live ribbon customisation of its tables) / `-Apply` (writes nothing on any failure) / `-Verify`. |
 
 Served tables: `sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_reportcard`, `sprk_document`, `sprk_communication`,
 `sprk_budget`, `sprk_kpiassessment`, `sprk_billingevent`. `sprk_analysis` is already covered (AnalysisRibbons hides its
@@ -57,6 +57,8 @@ web resources (`sprk_/scripts/bff_auth.js`, `sprk_/scripts/assignedaccess_postsa
 ```powershell
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com            # dry run
 # export a dedicated ribbon solution (SpaarkeSecureChildRibbons; the nine tables, ribbon only) per the ribbon-edit skill, unpack it
+# (right before -Apply: -Apply refuses, writing nothing, an export that lacks any ribbon customisation the environment holds
+#  for its tables - infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1; e.g. one taken before task 180's import)
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ExportDir <unpacked> -Apply
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify
 ```

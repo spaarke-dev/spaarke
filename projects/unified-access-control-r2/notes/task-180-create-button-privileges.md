@@ -49,6 +49,38 @@ wizards had only `FormStateRule Existing`.
 | 12 | sprk_analysis subgrid | `Spaarke.Analysis.NewAnalysisSubgrid.Command` (replaces the hidden OOB New) | `Spaarke_NewAnalysisFromSubgrid` | sprk_analysis | SpaarkeMaster sprk_analysis, AnalysisRibbons/Entities/sprk_analysis/RibbonDiff.xml |
 | 13 | email form | `sprk.Email.ArchiveEmail.Command` ("Save to Document") | `Spaarke.Email.saveToDocument` | sprk_document | SpaarkeMaster Email, EmailRibbons/Entities/email/RibbonDiff.xml |
 
+### Modern command (appaction) on dev — NOT ruled; owner decision (verifier F2, fix round 1)
+
+| # | App / surface | Modern command | Launcher | Creates | State |
+|---|---|---|---|---|---|
+| 13a | Matter Management, sprk_document main grid | "New Document" — `sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1` (appactionid `ffbd45bf-8c9d-48db-b433-c3c09e6577de`; unmanaged, visible, `visibilitytype` None; made in the command designer, last modified 2026-10-06 by Ralph Schroeder) | `Spaarke_UploadDocumentsStandalone` (`sprk_subgrid_commands`) | sprk_document | **UNRULED** — `-Verify` FAILS on it |
+
+The first inventory missed it: an appaction is not ribbon XML, so `RetrieveEntityRibbon` (and everything built on it) does
+not return it. The dry run with `-EnvironmentUrl` and `-Verify` now also read every unmanaged, active appaction whose
+`onclickeventjavascriptfunctionname` is a launcher (live on dev: 6 unmanaged appactions, all on sprk_document in Matter
+Management; this is the only one calling a launcher — the other five are the platform's own New / Add New / Add Existing,
+all hidden).
+
+**Can it get a Create-privilege rule by script? No.** The modern equivalent is a Power Fx Visible formula,
+`DataSourceInfo(Documents, DataSourceInfo.CreatePermission)` (Microsoft Learn, "Use Power Fx with commands", which uses
+exactly this example). The formula is authored in the command designer and compiled into the app's command component
+library (a canvas `.msapp`); the appaction row only names the library and function (`visibilitytype` = 1 Formula,
+`visibilityformulacomponentlibrary`, `visibilityformulafunctionname`). No supported API writes that formula or reads
+its text back. dev has no command component library and no Formula-visibility appaction at all (read 2026-10-09).
+`visibilitytype` 2 "Classic Rules" applies to the platform's converted commands; there is no documented way to point a
+custom appaction at a RibbonDiff rule. So `-Apply` does not touch it, and nothing was deleted.
+
+**Options (owner decision):**
+1. Author the formula in the command designer (Matter Management → Documents main grid → New Document → Visibility
+   "Show on condition from formula" → `DataSourceInfo(Documents, DataSourceInfo.CreatePermission)`), publish.
+   `-Verify` then passes it with a "manual check" line, since the formula text cannot be read back.
+2. Hide it (`hidden = true` on the row, reversible). The classic "+New Document" (`sprk.Document.NewUpload.Grid.Command`,
+   row 10: same launcher, same grid) already covers it and is ruled by `-Apply`.
+3. Delete it (same user-visible result as 2).
+4. Leave it: a read-only user keeps seeing "New Document" on that grid, and `-Verify` keeps failing.
+
+Recommendation: 2, or 1 if the modern button is wanted. It duplicates the classic button that `-Apply` rules.
+
 ### In the repo, not deployed on dev — ruled in source so a later deploy carries it
 
 | # | Host / surface | Command | Creates (rule on) | Source |
@@ -58,6 +90,7 @@ wizards had only `FormStateRule Existing`.
 | 26–27 | sprk_event form | `sprk.Wizard.Event.UploadDocuments.Command`, `...PlaybookLibrary.Command` | sprk_document, sprk_analysis | EventRibbons/customizations.xml |
 | 28–29 | sprk_analysisplaybook grid / form | `Spaarke.Playbook.NewFromList.Command`, `Spaarke.Playbook.NewFromForm.Command` | sprk_analysisplaybook | src/client/webresources/ribbon/sprk_analysisplaybook_ribbon.xml |
 | 30 | sprk_event form | `Spaarke.Event.AddMemo.Command` | sprk_memo | src/solutions/EventCommands (EventRibbonDiffXml.xml, solution export/customizations.xml) |
+| — | (no command calls it yet) | `Spaarke_NewAnalysis` (`sprk_analysis_commands.js`) added to `create-launchers.json` (verifier K3) | sprk_analysis | — |
 | 31 | sprk_kpiassessment subgrid on matter | `sprk.matter.subgrid.kpi.AddKpiButton.Command` ("+ Add KPI") | sprk_kpiassessment | src/solutions/SpaarkeCore/entities/sprk_matter/RibbonDiff/add-kpi-ribbon.xml |
 
 ### Reviewed, not create commands (unchanged)
@@ -110,6 +143,17 @@ primary job, so this is deliberate.
 Prerequisites: none (no web resource or BFF change; the rule is declarative). Do not run it concurrently with another
 ribbon import into matter / project / work assignment / event / document / analysis / email (tasks 175/179's
 `Set-AccessRibbon.ps1`, task 147's `Deploy-SecureChildNewCommands.ps1`). Run before or after them, not during.
+
+Stale exports (verifier K1/K2, fixed): every importer of these tables now refuses an export that lacks anything live.
+- `Set-CreatePrivilegeRibbon.ps1 -Apply` and `Deploy-SecureChildNewCommands.ps1` (with `-ExportDir`) both run
+  `infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1`. It checks every unmanaged ribbon command, rule,
+  custom action, hide action and label the environment holds for each exported table, and it runs before anything is
+  written.
+- `Deploy-SecureChildNewCommands.ps1` still takes a caller-supplied export, but one taken before this task's import
+  can no longer strip the `sprk.CreatePrivilege.*` rules.
+- `Set-AccessRibbon.ps1` exports fresh itself.
+- The modern "New Document" (13a) is not changed by any step below: `-Verify` (step 4) fails on it until the owner
+  picks an option.
 
 ```powershell
 cd infrastructure/dataverse/ribbon/CreatePrivilegeRibbons
