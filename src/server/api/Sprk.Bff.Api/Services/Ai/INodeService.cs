@@ -92,8 +92,35 @@ public interface INodeService
     /// <param name="playbookId">Playbook to sync nodes for.</param>
     /// <param name="canvasLayout">Canvas layout containing nodes and edges from the visual designer.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Refuses before any write when the playbook is a repo-deployed system playbook; see
+    /// <see cref="EnsureCanvasSyncAllowedAsync"/>.
+    /// </remarks>
+    /// <exception cref="ProtectedPlaybookCanvasSyncException">The playbook is protected or cannot be verified.</exception>
     Task SyncCanvasToNodesAsync(
         Guid playbookId,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The single decision point for D-97 / PB-08. A playbook is protected when
+    /// <c>sprk_issystemplaybook</c> is true, OR <c>sprk_playbooktype</c> is 2 (Notification), OR any of its
+    /// nodes lacks <c>__canvasNodeId</c> (a node written by a repo deploy script; the flag is NULL on some
+    /// system playbooks, so it cannot be relied on alone). Fails closed: if the playbook or its nodes cannot
+    /// be read, it throws. Callers that persist the canvas JSON must call this first.
+    /// </summary>
+    /// <exception cref="ProtectedPlaybookCanvasSyncException">The playbook is protected or cannot be verified.</exception>
+    /// <returns>A permit carrying the node snapshot the guard read, for the permit overload of
+    /// <see cref="SyncCanvasToNodesAsync(CanvasSyncPermit, CanvasLayoutDto, CancellationToken)"/>.</returns>
+    Task<CanvasSyncPermit> EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sync using a permit from <see cref="EnsureCanvasSyncAllowedAsync"/>: no second check and no second node
+    /// read; the sync works on the permit's snapshot. Callers that persist other state first (the canvas save
+    /// endpoint) check once, persist, then sync with the permit.
+    /// </summary>
+    Task SyncCanvasToNodesAsync(
+        CanvasSyncPermit permit,
         CanvasLayoutDto canvasLayout,
         CancellationToken cancellationToken = default);
 }
