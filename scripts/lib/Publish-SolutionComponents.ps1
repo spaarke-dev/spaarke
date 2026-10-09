@@ -35,9 +35,15 @@
       app modules    published modifiedon equals the unpublished one
       app settings   published value and modifiedon equal the unpublished ones
       entities       no system form, saved query or chart of the entity differs from its RetrieveUnpublished copy
+      dashboards     system form (type 0): published formxml and modifiedon equal the unpublished ones
       site maps      published modifiedon and sitemapxml equal the unpublished ones. Microsoft Learn says the <sitemap> value in
                      ParameterXml "is not used", so a site map that failed to publish would otherwise pass silently
-    KNOWN LIMIT: option sets and the application ribbon have no read-back surface here. They are sent in the request, and a
+    KNOWN LIMITS (read-back and workflows)
+      K3  -AllowWorkflows requires EVERY workflow in the solution to read statecode 1, so a workflow deliberately left as a draft cannot
+          pass. No solution in the repo or on spaarkedev1 has one today; handle that case by hand if it ever appears.
+      K4  The entity read-back can fail falsely if someone edits a form or view of that entity between the publish and the check. The
+          failure is loud and the printed resume command recovers it.
+      Option sets and the application ribbon have no read-back surface here. They are sent in the request, and a
     failure of the request itself is the only signal. Check them by effect (a choice column's options; the effective ribbon).
 
     WORKFLOWS (type 29) are refused by default: the RetrieveUnpublished probe answers 200 for them, so a draft layer cannot be
@@ -516,6 +522,13 @@ function Test-PublishedReadBack {
         $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/sitemaps($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=sitemapxml,modifiedon"
         if ($pub.sitemapxml -ne $unp.sitemapxml -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "sitemap $g" }
     }
+    foreach ($id in @($Plan.Dashboards | Where-Object { $_ })) {
+        # Dashboards are system forms of type 0: same unpublished-copy comparison as forms.
+        $g = $id.Trim('{', '}')
+        $pub = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)?`$select=formxml,modifiedon"
+        $unp = Invoke-RestMethod -Method Get -Headers $h -Uri "$api/systemforms($g)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml,modifiedon"
+        if ($pub.formxml -ne $unp.formxml -or $pub.modifiedon -ne $unp.modifiedon) { $pending += "dashboard $g" }
+    }
     foreach ($ent in @($Plan.Entities | Where-Object { $_ })) {
         foreach ($c in @(Get-EntityPublishCollateral -Context $Context -Entity $ent)) { $pending += "entity ${ent}: $c" }
     }
@@ -596,7 +609,16 @@ function Publish-SolutionComponents {
         }
     }
     $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
+    # Components published in THIS run that are not in the solution (a caller's -Extra* lists) are lost by a plain -PublishOnly resume,
+    # so the resume command carries them.
+    $inPlanWebs = @($plan.WebResources | ForEach-Object { "$_".Trim('{', '}').ToLowerInvariant() })
+    $inPlanEnts = @($plan.Entities | ForEach-Object { "$_".ToLowerInvariant() })
+    $outsideWebs = @($ExtraWebResources | Where-Object { $_ -and ($inPlanWebs -notcontains "$_".Trim('{', '}').ToLowerInvariant()) } | Select-Object -Unique)
+    $outsideEnts = @($ExtraEntities | Where-Object { $_ -and ($inPlanEnts -notcontains "$_".ToLowerInvariant()) } | Select-Object -Unique)
     $resume = "pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl $envUrl -SolutionUniqueName $SolutionUniqueName -PublishOnly" + $(if ($AllowWorkflows) { ' -AllowWorkflows' } else { '' })
+    $outsideNote = ''
+    if ($outsideWebs.Count -gt 0) { $resume += " -ExtraWebResources $(($outsideWebs | ForEach-Object { "'$_'" }) -join ',')"; $outsideNote += " web resources outside the solution: $($outsideWebs -join ', ');" }
+    if ($outsideEnts.Count -gt 0) { $resume += " -ExtraEntities $(($outsideEnts | ForEach-Object { "'$_'" }) -join ',')"; $outsideNote += " entities outside the solution: $($outsideEnts -join ', ');" }
     $n = 0
     foreach ($c in $chunks) {
         $n++
@@ -606,10 +628,10 @@ function Publish-SolutionComponents {
             Invoke-PublishXml -Context $Context -ParameterXml $xml
             # Read this request back before the next one goes out.
             $pending = @(Test-PublishedReadBack -Context $Context -Plan ([pscustomobject]@{
-                        WebResources = $c.WebResources; AppModules = $c.AppModules; AppSettings = $c.AppSettings; Entities = $c.Entities; SiteMaps = $c.SiteMaps }))
+                        WebResources = $c.WebResources; AppModules = $c.AppModules; AppSettings = $c.AppSettings; Entities = $c.Entities; SiteMaps = $c.SiteMaps; Dashboards = $c.Dashboards }))
             if ($pending.Count -gt 0) { throw "still unpublished after PublishXml: $($pending -join ', ')" }
         } catch {
-            throw "Publish request $n of $($chunks.Count) for $SolutionUniqueName failed: $($_.Exception.Message). The solution is already imported; resume WITHOUT re-importing: $resume"
+            throw "Publish request $n of $($chunks.Count) for $SolutionUniqueName failed: $($_.Exception.Message). The solution is already imported; resume WITHOUT re-importing: $resume$(if ($outsideNote) { " (this run also published$outsideNote the resume command republishes them)" })"
         }
     }
     if ($AllowWorkflows -and @($plan.Workflows).Count -gt 0) {

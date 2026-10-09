@@ -355,6 +355,68 @@ Describe 'read-back covers entities and site maps (round-4 fix-now)' {
     }
 }
 
+Describe 'dashboards read-back (round-5 K1)' {
+    It 'reports a dashboard whose published copy differs from the unpublished one' {
+        Mock Invoke-RestMethod {
+            if ("$Uri" -match 'RetrieveUnpublished') { return [pscustomobject]@{ formxml = '<new/>'; modifiedon = '2' } }
+            return [pscustomobject]@{ formxml = '<old/>'; modifiedon = '1' }
+        }
+        $r = @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ Dashboards = @('{11111111-1111-1111-1111-111111111111}') }))
+        $r | Should -Be @('dashboard 11111111-1111-1111-1111-111111111111')
+    }
+    It 'reports nothing for a published dashboard' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ formxml = '<same/>'; modifiedon = '1' } }
+        @(Test-PublishedReadBack -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -Plan ([pscustomobject]@{ Dashboards = @('{11111111-1111-1111-1111-111111111111}') })).Count | Should -Be 0
+    }
+    It 'Publish-SolutionComponents fails when a dashboard is still unpublished after the request' {
+        Mock Invoke-RestMethod {
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 60; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                '*/systemforms(*RetrieveUnpublished*' { return [pscustomobject]@{ formxml = '<new/>'; modifiedon = '2'; objecttypecode = 'none'; type = 0 } }
+                '*/systemforms(*' { return [pscustomobject]@{ formxml = '<old/>'; modifiedon = '1'; objecttypecode = 'none'; type = 0 } }
+                default { return $null }
+            }
+        }
+        { Publish-SolutionComponents -Context @{ Api = 'https://x/api/data/v9.2'; Headers = @{} } -SolutionUniqueName S -SkipCollateralCheck } | Should -Throw '*dashboard*'
+    }
+}
+
+Describe 'resume command carries components published outside the solution (round-5 K2)' {
+    It 'names them and passes them as -ExtraWebResources / -ExtraEntities' {
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { throw 'boom' }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                default { return $null }
+            }
+        }
+        $err = $null
+        try {
+            Publish-SolutionComponents -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } -SolutionUniqueName MySol -SkipCollateralCheck `
+                -ExtraWebResources @('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111') -ExtraEntities @('sprk_event')
+        } catch { $err = $_.Exception.Message }
+        $err | Should -Match "-ExtraWebResources '22222222-2222-2222-2222-222222222222'"
+        $err | Should -Not -Match "-ExtraWebResources '[^ ]*11111111-1111"
+        $err | Should -Match "-ExtraEntities 'sprk_event'"
+        $err | Should -Match 'web resources outside the solution: 22222222'
+    }
+    It 'adds nothing when every extra is already in the solution' {
+        Mock Invoke-RestMethod {
+            if ("$Method" -eq 'Post') { throw 'boom' }
+            switch -Wildcard ("$Uri") {
+                '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                '*/solutioncomponents?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ componenttype = 61; objectid = '11111111-1111-1111-1111-111111111111' }) } }
+                default { return $null }
+            }
+        }
+        $err = $null
+        try { Publish-SolutionComponents -Context @{ Api = 'https://org.crm.dynamics.com/api/data/v9.2'; Headers = @{} } -SolutionUniqueName MySol -SkipCollateralCheck -ExtraWebResources @('11111111-1111-1111-1111-111111111111') } catch { $err = $_.Exception.Message }
+        $err | Should -Not -Match '-ExtraWebResources'
+    }
+}
+
 Describe 'request order and resume command' {
     It 'puts option sets and web resources first, entities next, app modules last' {
         $chunks = @(Split-PublishPlan -Entities @('sprk_a', 'sprk_b') -WebResources @('11111111-1111-1111-1111-111111111111') -OptionSets @('sprk_o') `

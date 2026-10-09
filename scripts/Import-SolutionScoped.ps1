@@ -30,7 +30,10 @@ param(
     # Resume after a failed publish request: publish the installed solution's components, no import.
     [switch]$PublishOnly,
     # The solution contains workflows (type 29): import with --activate-plugins and fail unless every workflow reads statecode 1.
-    [switch]$AllowWorkflows
+    [switch]$AllowWorkflows,
+    # With -PublishOnly: components published outside the solution in the failed run (the resume message prints them).
+    [string[]]$ExtraWebResources = @(),
+    [string[]]$ExtraEntities = @()
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
@@ -43,7 +46,7 @@ if ($PlanOnly) {
     return
 }
 if ($PublishOnly) {
-    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows | Out-Null
+    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities | Out-Null
     Write-Host "Scoped-published $SolutionUniqueName (no import). No tenant-wide publish was run."
     return
 }
