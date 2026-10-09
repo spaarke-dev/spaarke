@@ -146,3 +146,12 @@ Cleanup 02:36Z: deleted 2 zz-120 notifications, 2 events, 1 work assignment, 1 m
 - Read back (02:42:40Z): the five statecode=1 statuscode=2; Due Soon and WA unchanged (0/1). lastrundate values untouched.
 - Next tick 03:00:00Z (run 99196f19, trigger Scheduled, Succeeded, 0.36 s): children = Tasks Due Soon (Skipped - not due) and New Work Assignments (Skipped - not due) ONLY; the five paused playbooks are absent (not queried). Due Soon / WA last ran 02:34Z and are daily, so their next real run is the first tick after ~02:34Z 2026-10-10.
 - To resume a playbook: PATCH statecode=0, statuscode=1 (its sprk_lastrundate decides when it is next due).
+
+### D-100 retire (2026-10-09, spaarkedev1)
+Owner D-100: retire the notification playbooks (the Daily Briefing does not read appnotification; they only fed the model-driven bell). Switch = statecode (scheduler selects sprk_playbooktype = 2 AND statecode = 0, verified for D-91).
+- Before (04:14:57Z): Tasks Due Soon 77f77aa5 statecode=0 statuscode=1 (lastrun 2026-10-09 02:34:08); New Work Assignments be7874be 0/1 (lastrun 02:34:30). The other five already 1/2 (D-91).
+- Change: PATCH statecode=1, statuscode=2 (name + type checked first): Tasks Due Soon 04:14:58Z, New Work Assignments 04:14:59Z. Nothing else written (no node, alert, repo or code change; lastrundate untouched).
+- Read back (04:14:59Z): all 7 notification playbooks statecode=1 statuscode=2 - Matter/Project Activity Summary, New Documents, New Emails, New Events, New Work Assignments, Tasks Due Soon, Tasks Overdue.
+- BFF process restarted between 04:15Z and 04:45Z (in-memory run history empty); same build still running (`1.0.0+e9f08b764`, no new deploy - last OneDeploy 02:24:46Z).
+- Next tick 05:00:00Z: run 1e29021b, trigger Scheduled, Succeeded in 0.37 s, processedItems=0, children=[] -> no notification playbook queried or run.
+- Left as is (task 131 / owner): alert rule notification-playbook-total-failure-dev (no new Error traces can occur), node rows, repo JSONs, code, C:\wt120d.
