@@ -11,7 +11,7 @@
  * Task: spaarke-ontology-platform-r1, task 054 (FR-29).
  */
 import * as React from 'react';
-import type { IDataverseClient } from '@spaarke/ui-components';
+import { fetchConfigRecord, resolveSource, type IDataverseClient } from '@spaarke/ui-components';
 import { NEEDS_REVIEW_CONFIG_ID } from './ReconciliationGrid';
 
 const COUNT_ALIAS = 'sprk_needsreviewcount';
@@ -28,7 +28,7 @@ export function buildCountFetchXml(configFetchXml: string): string | null {
     const fetch = doc.documentElement;
     const entity = Array.from(fetch.children).find(c => c.tagName === 'entity');
     const entityName = entity?.getAttribute('name');
-    if (!entity || !entityName) return null;
+    if (!entity || !entityName || fetch.getAttribute('distinct') === 'true') return null;
 
     const strip = (el: Element): void => {
       Array.from(el.children).forEach(child => {
@@ -54,33 +54,25 @@ export function buildCountFetchXml(configFetchXml: string): string | null {
   }
 }
 
-/** Reads the Needs Review config record and returns its `source.fetchXml` (null when absent/unparseable). */
-async function loadConfigFetchXml(client: IDataverseClient, configId: string): Promise<string | null> {
-  const rec = await client.retrieveRecord<Record<string, unknown>>('sprk_gridconfiguration', configId, [
-    'sprk_configjson',
-  ]);
-  const raw = rec?.['sprk_configjson'];
-  if (typeof raw !== 'string') return null;
-  const parsed = JSON.parse(raw) as { source?: { fetchXml?: unknown } };
-  const xml = parsed?.source?.fetchXml;
-  return typeof xml === 'string' && xml.length > 0 ? xml : null;
-}
-
 /**
- * Count of emails the Needs Review tab lists. Resolves to null (rendered as "Missing", never 0) when
- * the configuration or the count cannot be read.
+ * Count of emails the Needs Review tab lists. The configuration is resolved by the SAME functions the
+ * DataGrid uses (`fetchConfigRecord` + `resolveSource`: schema validation, inline / savedquery /
+ * savedquery-set sources). A configuration whose rows depend on a runtime overlay this count cannot
+ * reproduce (membership or parent-context filter) resolves to null instead of a number that could differ
+ * from the tab. Resolves to null (rendered "Missing", never 0) whenever the count cannot be trusted.
  */
 export async function loadNeedsReviewCount(
   client: IDataverseClient,
   configId: string = NEEDS_REVIEW_CONFIG_ID
 ): Promise<number | null> {
   try {
-    const configXml = await loadConfigFetchXml(client, configId);
-    const countXml = configXml ? buildCountFetchXml(configXml) : null;
+    const config = await fetchConfigRecord(client, configId);
+    if (!config || config.behavior?.membershipFilter || config.behavior?.parentContextFilter) return null;
+    const source = await resolveSource(client, config, undefined);
+    if (!source?.fetchXml || !source.entityName) return null;
+    const countXml = buildCountFetchXml(source.fetchXml);
     if (!countXml) return null;
-    const entityName = /<entity\b[^>]*\bname\s*=\s*['"]([^'"]+)['"]/i.exec(countXml)?.[1];
-    if (!entityName) return null;
-    const result = await client.retrieveMultipleRecords<Record<string, unknown>>(entityName, countXml);
+    const result = await client.retrieveMultipleRecords<Record<string, unknown>>(source.entityName, countXml);
     const value = result.entities?.[0]?.[COUNT_ALIAS];
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : null;
@@ -89,7 +81,11 @@ export async function loadNeedsReviewCount(
   }
 }
 
-/** Hook form of {@link loadNeedsReviewCount}: `{ count, loading }`; count is null until loaded or on failure. */
+/**
+ * Hook form of {@link loadNeedsReviewCount}: `{ count, loading }`; count is null until loaded or on failure.
+ * `client` MUST be referentially stable (memoise it, e.g. `React.useMemo`): a new instance each render
+ * restarts the load and the card never settles.
+ */
 export function useNeedsReviewCount(
   client: IDataverseClient | undefined,
   configId: string = NEEDS_REVIEW_CONFIG_ID

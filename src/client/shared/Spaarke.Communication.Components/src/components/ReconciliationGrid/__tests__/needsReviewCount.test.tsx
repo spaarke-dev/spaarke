@@ -120,6 +120,39 @@ describe('loadNeedsReviewCount', () => {
     expect(await loadNeedsReviewCount(client)).toBe(0);
   });
 
+  it('refuses a configuration the DataGrid would reject (schema-invalid) - Missing, not a number', async () => {
+    const bad = JSON.stringify({ ...JSON.parse(configJson), _version: '9.9' });
+    const client = makeClient({ retrieveRecord: jest.fn(async () => ({ sprk_configjson: bad })) });
+    expect(await loadNeedsReviewCount(client)).toBeNull();
+    expect(client.retrieveMultipleRecords).not.toHaveBeenCalled();
+  });
+
+  it('resolves a savedquery source through the same resolver the grid uses', async () => {
+    const cfg = { ...JSON.parse(configJson), source: { type: 'savedquery', savedQueryId: 'sq-1' } };
+    const client = makeClient({ retrieveRecord: jest.fn(async () => ({ sprk_configjson: JSON.stringify(cfg) })) });
+    (client as unknown as { retrieveSavedQuery: jest.Mock }).retrieveSavedQuery = jest.fn(async () => ({
+      entityName: 'sprk_communication',
+      fetchXml: CONFIG_FETCHXML,
+      layoutXml: '',
+      name: 'v',
+    }));
+    expect(await loadNeedsReviewCount(client)).toBe(EXPECTED);
+  });
+
+  it.each([
+    ['membershipFilter', { membershipFilter: true }],
+    ['parentContextFilter', { parentContextFilter: { parentContextKey: 'matterId', attribute: 'sprk_matter' } }],
+  ])('returns null when the config carries a %s overlay the count cannot reproduce', async (_n, behavior) => {
+    const cfg = { ...JSON.parse(configJson), behavior: { ...JSON.parse(configJson).behavior, ...behavior } };
+    const client = makeClient({ retrieveRecord: jest.fn(async () => ({ sprk_configjson: JSON.stringify(cfg) })) });
+    expect(await loadNeedsReviewCount(client)).toBeNull();
+    expect(client.retrieveMultipleRecords).not.toHaveBeenCalled();
+  });
+
+  it('returns null for a distinct fetch (a count of it would not be the row count)', async () => {
+    expect(buildCountFetchXml(CONFIG_FETCHXML.replace('<fetch>', '<fetch distinct="true">'))).toBeNull();
+  });
+
   it('issues exactly one count query (no separate status count)', async () => {
     const client = makeClient();
     await loadNeedsReviewCount(client);
@@ -141,6 +174,40 @@ describe('ReconciliationAggregateCard', () => {
     fireEvent.click(screen.getByText(/Open Email Review/));
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(screen.getAllByTestId('aggregate-card')).toHaveLength(1);
+  });
+
+  it('shows a neutral placeholder (not Missing) while loading, then the count', async () => {
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <ReconciliationAggregateCard dataverseClient={makeClient()} onOpen={jest.fn()} />
+      </FluentProvider>
+    );
+    expect(screen.getByTestId('aggregate-card-loading')).toBeInTheDocument();
+    expect(screen.queryByText('Missing')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('aggregate-count')).toHaveTextContent(`${EXPECTED} emails`));
+    expect(screen.queryByTestId('aggregate-card-loading')).not.toBeInTheDocument();
+  });
+
+  it('says "1 email awaits" for a count of one, and Missing after a failed load', async () => {
+    const one = makeClient({
+      retrieveMultipleRecords: jest.fn(async () => ({ entities: [{ sprk_needsreviewcount: 1 }], moreRecords: false })),
+    });
+    const { unmount } = render(
+      <FluentProvider theme={webDarkTheme}>
+        <ReconciliationAggregateCard dataverseClient={one} onOpen={jest.fn()} />
+      </FluentProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('aggregate-count')).toHaveTextContent('1 email awaits a match confirmation')
+    );
+    unmount();
+    const failing = makeClient({ retrieveRecord: jest.fn().mockRejectedValue(new Error('x')) });
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <ReconciliationAggregateCard dataverseClient={failing} onOpen={jest.fn()} />
+      </FluentProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('aggregate-count')).toHaveTextContent('Missing'));
   });
 
   it('reads Missing when there is no client', () => {

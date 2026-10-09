@@ -8,11 +8,13 @@
  * Task: spaarke-ontology-platform-r1, task 054 (FR-29).
  */
 import * as React from 'react';
+import { Spinner } from '@fluentui/react-components';
 import { MailInboxRegular } from '@fluentui/react-icons';
 import { AggregateCard, type IDataverseClient } from '@spaarke/ui-components';
 import { useNeedsReviewCount } from './needsReviewCount';
 
 export interface ReconciliationAggregateCardProps {
+  /** MUST be referentially stable (memoised) - see useNeedsReviewCount. */
   dataverseClient: IDataverseClient | undefined;
   /** Opens the reconciliation tab. */
   onOpen: () => void;
@@ -27,11 +29,19 @@ export const ReconciliationAggregateCard: React.FC<ReconciliationAggregateCardPr
   configId,
   className,
 }) => {
-  const { count } = useNeedsReviewCount(dataverseClient, configId);
+  const { count, loading } = useNeedsReviewCount(dataverseClient, configId);
+  // While loading, show a neutral placeholder - "Missing" is for a failed/unavailable count only.
+  if (loading) {
+    return (
+      <div className={className} data-testid="aggregate-card-loading" role="status" aria-busy="true">
+        <Spinner size="tiny" label="Counting emails awaiting a match confirmation" labelPosition="after" />
+      </div>
+    );
+  }
   return (
     <AggregateCard
       count={count}
-      label="emails await a match confirmation"
+      label={count === 1 ? 'email awaits a match confirmation' : 'emails await a match confirmation'}
       linkLabel="Open Email Review"
       onOpen={onOpen}
       icon={<MailInboxRegular />}

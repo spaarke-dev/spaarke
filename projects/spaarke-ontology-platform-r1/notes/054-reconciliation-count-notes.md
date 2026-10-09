@@ -25,3 +25,11 @@ Rigor FULL (POML said STANDARD; the task adds .ts/.tsx, so raised). Model sonnet
 ## Known limit
 - Aggregate counts are capped by Dataverse at 50,000 rows (K2).
 - Count reflects the config's FetchXML only; a user-applied grid filter/chip in the tab does not change the card (by design: total).
+
+## Round 2 (#1531 review)
+- F2 fixed the preferred way: `fetchConfigRecord` / `resolveSource` / `extractEntityFromFetchXML` moved VERBATIM from DataGrid.tsx
+  to `DataGrid/resolveGridSource.ts` (exported from the DataGrid barrel); DataGrid imports them, `loadNeedsReviewCount` calls them.
+  Schema validation and savedquery / savedquery-set sources now behave the same for card and tab. A config with a membership or
+  parent-context overlay (which the card cannot reproduce) or a `distinct` fetch resolves to Missing. DataGrid suites: 83/83 pass.
+- F3: loading renders a neutral spinner, not "Missing". Pluralisation ("1 email awaits"). Hook/prop docs: client must be memoised.
+- Known limit (K2): a user's filter chip in the tab does not change the card (total by design).
