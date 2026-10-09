@@ -119,9 +119,16 @@ describe('SendEmailDialog — send-path invocation (NOT covered by wrappers.test
     // The production shape: `@spaarke/auth`'s authenticatedFetch THROWS ApiError for a 400 — it never
     // returns the failed response. (A mock resolving `{ ok: false }` let this pass while every real
     // failed send was silent.)
-    const authenticatedFetch = jest.fn().mockRejectedValue(
-      apiErrorFor(400, { title: 'Bad request', status: 400, detail: 'Invalid recipient', errorCode: 'INVALID_RECIPIENT' })
-    );
+    const authenticatedFetch = jest
+      .fn()
+      .mockRejectedValue(
+        apiErrorFor(400, {
+          title: 'Bad request',
+          status: 400,
+          detail: 'Invalid recipient',
+          errorCode: 'INVALID_RECIPIENT',
+        })
+      );
     const onError = jest.fn();
     const onClose = jest.fn();
     const onSent = jest.fn();
