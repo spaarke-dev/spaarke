@@ -1622,6 +1622,33 @@ public sealed class OfficeVersionSaveWorld
     }
 
     /// <summary>
+    /// Task 121: <c>GetCallersProcessingJobByIdempotencyKeyAsync</c> — the NEWEST row under <paramref name="key"/> that
+    /// <paramref name="callerObjectId"/> started. Production joins <c>sprk_initiatedby</c>'s systemuser on its Entra object
+    /// id; this world reads the creator the save's own view records (the same identity, the OID the save authenticated).
+    /// </summary>
+    internal ProcessingJobRecord? FindCallersJobByIdempotencyKey(string key, string callerObjectId)
+    {
+        lock (_gate)
+        {
+            // JobRows keeps insertion order (nothing is removed), so the LAST match is the newest row.
+            var id = JobRows
+                .Where(r => r.Value.GetValueOrDefault("IdempotencyKey") as string == key
+                            && CreatorOf(r.Value.GetValueOrDefault("Result") as string) == callerObjectId)
+                .Select(r => (Guid?)r.Key)
+                .LastOrDefault();
+            return id is { } found ? ToRecord(found) : null;
+        }
+    }
+
+    private static string? CreatorOf(string? view)
+    {
+        if (string.IsNullOrEmpty(view))
+            return null;
+        using var document = JsonDocument.Parse(view);
+        return document.RootElement.TryGetProperty("createdBy", out var createdBy) ? createdBy.GetString() : null;
+    }
+
+    /// <summary>
     /// When set, the NEXT <c>CreateDocumentAsync</c> throws — a save that fails AFTER its ProcessingJob row and
     /// SPE upload exist, i.e. one that leaves its job neither Completed nor explicitly Failed unless the save
     /// path marks it (task 039, finding 2).
@@ -2054,6 +2081,10 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.GetProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string key, CancellationToken _) => world.FindJobByIdempotencyKey(key));
+            // Task 121: the save's duplicate lookup is the CALLER's newest job under the key.
+            dataverse
+                .Setup(d => d.GetCallersProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string key, string oid, CancellationToken _) => world.FindCallersJobByIdempotencyKey(key, oid));
             // Task 060: the job read the status endpoint makes when it has no copy of its own. Unset before, so the loose
             // mock answered null and the read was never exercised against a row the save had written.
             dataverse

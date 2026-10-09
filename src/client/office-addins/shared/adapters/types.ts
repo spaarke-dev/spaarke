@@ -253,8 +253,9 @@ export interface HostCapabilities {
 
 /**
  * The open email's identity keys (spaarkeai-word-add-in-r1 task 120), sent as-is to
- * `POST /api/documents/resolve-email-identity`. Both are needed: the ribbon Quick Save stores the RFC Message-ID on the
- * saved `.eml`, while the task-pane save stores the Exchange item id.
+ * `POST /api/documents/resolve-email-identity`. Both are needed: every save stores the RFC Message-ID on the saved
+ * `.eml` since task 121, but a task-pane save made before task 121 stored the Exchange item id. The Save tab also reads
+ * the Message-ID from here for the save request (task 121).
  */
 export interface EmailIdentityKeys {
   /** `Office.context.mailbox.item.internetMessageId` (RFC 5322 Message-ID). */

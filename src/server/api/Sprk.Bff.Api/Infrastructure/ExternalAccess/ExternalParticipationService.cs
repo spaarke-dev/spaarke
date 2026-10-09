@@ -330,13 +330,22 @@ public class ExternalParticipationService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    /// <summary>
+    /// Task 174 (owner round 84): the app-only reader the ONE filing walk reads through
+    /// (<see cref="GetEffectiveRootRecordFlagsAsync"/>). Registered unconditionally (GraphModule), so the typed-client factory
+    /// always supplies it. A null reader (a test double that passes none) makes every work assignment or project read as
+    /// unverifiable — secure AND Restricted (fail closed), never as unfiled.
+    /// </summary>
+    private readonly Spaarke.Dataverse.IGenericEntityService? _filing;
+
     public ExternalParticipationService(
         HttpClient httpClient,
         ITenantCache cache,
         IConfiguration configuration,
         TokenCredential credential,
         IHttpContextAccessor httpContextAccessor,
-        ILogger<ExternalParticipationService> logger)
+        ILogger<ExternalParticipationService> logger,
+        Spaarke.Dataverse.IGenericEntityService? filing)
     {
         _httpClient = httpClient;
         _cache = cache;
@@ -344,6 +353,7 @@ public class ExternalParticipationService
         _credential = credential;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
+        _filing = filing;
     }
 
     /// <summary>
@@ -995,6 +1005,70 @@ public class ExternalParticipationService
     }
 
     /// <summary>
+    /// Task 174 (owner round 84; #1442): the EFFECTIVE flags of a batch of root records — the most restrictive of each
+    /// record's own flags (<see cref="GetRootRecordFlagsAsync"/>) and those of every record it is filed under, through the
+    /// ONE filing walk (<see cref="EffectiveRootFlags"/>). Every access decision asks this, not the own-row read: the
+    /// read-time cancellation and Restricted veto fold the same walk themselves (<c>AccessibleRecordSetService</c>); the
+    /// grant policy, the grantor ceiling, the share-link refusal, the internal-user Restricted bar, the No Access enforcer,
+    /// the Restricted share remover and the Assigned-To materializer read it here.
+    /// </summary>
+    /// <remarks>
+    /// <para>The same answer shape and fail-closed contract as <see cref="GetRootRecordFlagsAsync"/> (every asked id of a
+    /// flag-bearing type is present; an unreadable one is <see cref="RootRecordFlags.Unreadable"/>), plus: an ancestry that
+    /// cannot be decided is <see cref="RootRecordFlags.Unreadable"/> too.</para>
+    /// <para><b>Cost.</b> A matter reads exactly what the own-row read reads. A work assignment or project adds the walk —
+    /// batched per 200 rows per level (one point read per row for a single record) — except for a record whose own flags
+    /// are already unreadable or already Secure AND Restricted, which no ancestor can make stricter.</para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetEffectiveRootRecordFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        var own = await GetRootRecordFlagsAsync(entityType, recordIds, ct).ConfigureAwait(false);
+        return await FoldEffectiveAsync(entityType, own, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 174: folds flags the caller already read (<see cref="GetRootRecordFlagsAsync"/>) with what each record is filed
+    /// under — for a caller that needs BOTH the record's own flags and its effective ones (the Assigned-To materializer's S5
+    /// rule follows the stored ownership, its other rules the effective values). A record whose own flags are unreadable, or
+    /// already Secure AND Restricted, is not walked: nothing above it can make it stricter.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> FoldEffectiveAsync(
+        string entityType, IReadOnlyDictionary<Guid, RootRecordFlags> own, CancellationToken ct = default)
+    {
+        var walk = own.Where(kv => !kv.Value.IsUnreadable && !(kv.Value.IsSecure && kv.Value.IsRestricted))
+            .Select(kv => kv.Key).ToList();
+        if (walk.Count == 0)
+        {
+            return own;
+        }
+
+        var ancestry = await EffectiveRootFlags.ReadAncestryAsync(_filing, _logger, entityType, walk, ct).ConfigureAwait(false);
+        var folded = EffectiveRootFlags.Fold(walk.ToDictionary(id => id, id => own[id]), ancestry);
+        return own.ToDictionary(kv => kv.Key, kv => folded.TryGetValue(kv.Key, out var f) ? f : kv.Value);
+    }
+
+    /// <summary>
+    /// Task 174 (task 067's amendment): ONE record's effective access for display — the effective flags and the record they
+    /// are inherited from (<see cref="EffectiveRootFlags.InheritedFrom"/>). An id the own-row read did not return is
+    /// <see cref="RootRecordFlags.Unreadable"/>, as at write time.
+    /// </summary>
+    public async Task<EffectiveRootAccess> GetEffectiveRootAccessAsync(string entityType, Guid recordId, CancellationToken ct = default)
+    {
+        var own = await GetRootRecordFlagsAsync(entityType, new[] { recordId }, ct).ConfigureAwait(false);
+        var flags = own.TryGetValue(recordId, out var f) ? f : RootRecordFlags.Unreadable;
+        if (flags.IsUnreadable)
+        {
+            return new EffectiveRootAccess(flags, null);
+        }
+
+        var ancestry = await EffectiveRootFlags.ReadAncestryAsync(_filing, _logger, entityType, new[] { recordId }, ct)
+            .ConfigureAwait(false);
+        var answer = ancestry?.GetValueOrDefault(recordId);
+        return new EffectiveRootAccess(EffectiveRootFlags.Fold(flags, answer), EffectiveRootFlags.InheritedFrom(flags, answer));
+    }
+
+    /// <summary>
     /// The flags one SUCCESSFULLY read row carries (task 138 — extracted so the column-to-flag mapping is
     /// asserted directly, without an HTTP stack).
     /// </summary>
@@ -1239,8 +1313,31 @@ public class ExternalParticipationService
     /// <paramref name="maxRows"/> ids; one more row than that reports <c>Truncated</c>, never a silent prefix.</para>
     /// <para>An entity type with no org-typed lookups covers nothing: a static schema fact, not a fault.</para>
     /// </remarks>
-    public virtual async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindSecureRootsReferencingOrganizationAsync(
+    public virtual Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindSecureRootsReferencingOrganizationAsync(
         string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, "sprk_issecure eq true", ct);
+
+    /// <summary>
+    /// Task 174 (verifier pass 2 F1): the root records of <paramref name="entityType"/> that reference
+    /// <paramref name="organizationId"/> and are NOT flagged secure — the candidates an organization-object No Access entry
+    /// still covers when they are secure through what they are filed under (owner round 84). The enforcer folds them with
+    /// the filing walk; this read decides nothing on its own. Same registry, cap and fault contract as
+    /// <see cref="FindSecureRootsReferencingOrganizationAsync"/>.
+    /// </summary>
+    public virtual Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindUnflaggedRootsReferencingOrganizationAsync(
+        string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, UnflaggedRootFilter, ct);
+
+    /// <summary>
+    /// The flag half of <see cref="FindUnflaggedRootsReferencingOrganizationAsync"/>'s <c>$filter</c>: not flagged secure,
+    /// a BLANK flag included. Dataverse's <c>ne</c> excludes nulls (SQL <c>&lt;&gt;</c>), so <c>ne true</c> alone would skip
+    /// a record whose <c>sprk_issecure</c> is empty — and leave its share in place (fail open). Extracted so the test double
+    /// evaluates the very filter production sends.
+    /// </summary>
+    internal const string UnflaggedRootFilter = "(sprk_issecure ne true or sprk_issecure eq null)";
+
+    private async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindRootsReferencingOrganizationAsync(
+        string entityType, Guid organizationId, int maxRows, string flagFilter, CancellationToken ct)
     {
         if (organizationId == Guid.Empty ||
             !RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source) ||
@@ -1254,7 +1351,7 @@ public class ExternalParticipationService
         var apiUrl = GetDataverseApiUrl();
         var orgFilter = string.Join(" or ", orgAttributes.Select(a => $"_{a}_value eq {organizationId}"));
         var query = $"{apiUrl}/{source.Collection}" +
-                    $"?$filter=sprk_issecure eq true and ({orgFilter})" +
+                    $"?$filter={flagFilter} and ({orgFilter})" +
                     $"&$select={source.IdAttribute}&$top={maxRows + 1}";
 
         var ids = await ReadIdColumnAsync(query, token, source.IdAttribute, ct);

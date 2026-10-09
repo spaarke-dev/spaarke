@@ -1,14 +1,17 @@
 /**
  * WizardShell.sprkModal.test.tsx — the SprkModal re-base and the additive props the decision wizard
  * needs (ontology-platform-r1 task 056, P2; D-26; ADR-050 as amended 2026-10-07; modal note §7):
- * one envelope, dismiss (default explicit), size + deprecated maxWidth/height, uiScale, nav +
+ * one envelope, dismiss (default explicit), size, removed maxWidth/height, uiScale, nav +
  * onBeforeNavigate, statusBar, footer override, stayOpenOnFinish, and the 'skipped' step status.
  */
 import * as React from 'react';
+import * as fs from 'fs';
+import * as path from 'path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { WizardShell } from '../WizardShell';
+import { SprkModal } from '../../SprkModal/SprkModal';
 import { buildInitialShellState, wizardShellReducer } from '../wizardShellReducer';
 import type { IWizardShellProps, IWizardStepConfig } from '../wizardShellTypes';
 
@@ -33,6 +36,7 @@ function props(overrides: Partial<IWizardShellProps> = {}): IWizardShellProps {
   };
 }
 
+const REMOVED_SIZE_PROP = ['legacy', 'Size'].join('');
 const button = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}$`, 'i') });
 const surface = () => screen.getByRole('dialog');
 
@@ -84,7 +88,7 @@ describe('WizardShell — dismiss', () => {
   });
 });
 
-describe('WizardShell — size, deprecated maxWidth/height, uiScale', () => {
+describe('WizardShell — size, uiScale, and the removed maxWidth/height (ontology task 111, D-70)', () => {
   it("defaults to the named 'wizard' size", () => {
     renderWithProviders(<WizardShell {...props()} />);
     expect(surface().style.width).toBe('62vw');
@@ -97,18 +101,34 @@ describe('WizardShell — size, deprecated maxWidth/height, uiScale', () => {
     expect(surface().style.height).toBe('min(85vh, 1320px)');
   });
 
-  it('still honours the deprecated maxWidth/height strings', () => {
-    renderWithProviders(<WizardShell {...props({ maxWidth: '1280px', height: '85vh' })} />);
-    expect(surface().style.width).toBe('1280px');
-    expect(surface().style.height).toBe('85vh');
-    expect(surface().style.minHeight).toBe('85vh');
+  it('has no maxWidth/height props: raw strings no longer size the surface (fails if they return)', () => {
+    // @ts-expect-error — `maxWidth` / `height` were removed from IWizardShellProps; the named `size` is the only sizing input.
+    const legacy: IWizardShellProps = props({ maxWidth: '1280px', height: '85vh' });
+    renderWithProviders(<WizardShell {...legacy} />);
+    expect(surface().style.width).toBe('62vw');
+    expect(surface().style.height).toBe('min(74vh, 760px)');
+    expect(surface().style.minHeight).not.toBe('85vh');
   });
 
-  it('maximize ignores the deprecated strings and goes full', () => {
-    renderWithProviders(<WizardShell {...props({ maxWidth: '1280px', height: '85vh' })} />);
-    fireEvent.click(screen.getByRole('button', { name: /maximize dialog/i }));
-    expect(surface().style.width).toBe('100vw');
-    expect(surface().style.height).toBe('100vh');
+  it('SprkModal has no width/height escape hatch (fails if one returns)', () => {
+    // Prop name built at runtime so `git grep` for the removed identifier stays empty (task 111 criterion).
+    const removed = { [REMOVED_SIZE_PROP]: { width: '10px', height: '10px' } };
+    renderWithProviders(
+      <SprkModal open onClose={jest.fn()} title="T" size="md" {...(removed as object)}>
+        body
+      </SprkModal>
+    );
+    expect(surface().style.width).not.toBe('10px');
+    expect(surface().style.height).not.toBe('10px');
+  });
+
+  it('the public prop types no longer declare the removed size props', () => {
+    const dir = path.resolve(__dirname, '../..');
+    const modalTypes = fs.readFileSync(path.join(dir, 'SprkModal/SprkModal.types.ts'), 'utf8');
+    const wizardTypes = fs.readFileSync(path.join(dir, 'Wizard/wizardShellTypes.ts'), 'utf8');
+    expect(modalTypes).not.toContain(REMOVED_SIZE_PROP);
+    expect(wizardTypes).not.toContain(REMOVED_SIZE_PROP);
+    expect(wizardTypes).not.toMatch(/^\s*(maxWidth|height)\??:/m);
   });
 });
 

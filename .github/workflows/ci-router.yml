@@ -125,6 +125,7 @@ jobs:
       spaarke_ai: ${{ steps.filter.outputs.spaarke_ai }}
       docs: ${{ steps.filter.outputs.docs }}
       ci_workflows: ${{ steps.filter.outputs.ci_workflows }}
+      provisioning_prereqs: ${{ steps.filter.outputs.provisioning_prereqs }}
       docs_only: ${{ steps.docs-only-flag.outputs.value }}
     steps:
       - name: Checkout
@@ -165,6 +166,16 @@ jobs:
               - 'LICENSE*'
             ci_workflows:
               - '.github/workflows/**'
+            # The operator prerequisites manifest + the skill that parses it at run time
+            # (customer-provisioning-orchestration-r1 task 208). Deliberately INDEPENDENT of
+            # docs_only: `.claude/**` counts as documentation above, so a change to only the
+            # provision-environment skill is docs-only and skips Tier 1 — the `prereqs` job
+            # below must still run for it. ci-router.yml itself is listed so a change to that
+            # job runs it.
+            provisioning_prereqs:
+              - 'scripts/provisioning-prereqs/**'
+              - '.claude/skills/provision-environment/**'
+              - '.github/workflows/ci-router.yml'
 
       # ----------------------------------------------------------------------
       # CHANGED 2026-10-06 (ontology task 081 round 8, PR #1309) — owner-approved
@@ -244,6 +255,7 @@ jobs:
             echo "| SpaarkeAi (solutions/SpaarkeAi + AI client libs) | ${{ steps.filter.outputs.spaarke_ai }} |"
             echo "| Docs (docs/, .claude/, *.md, etc.) | ${{ steps.filter.outputs.docs }} |"
             echo "| CI workflows (.github/workflows/) | ${{ steps.filter.outputs.ci_workflows }} |"
+            echo "| Provisioning prerequisites (manifest + skill) | ${{ steps.filter.outputs.provisioning_prereqs }} |"
             echo "| Any non-documentation file (every-file check) | ${{ steps.non-docs.outputs.non_docs }} |"
             echo ""
             echo "**docs_only**: ${{ steps.docs-only-flag.outputs.value }}"
@@ -264,6 +276,41 @@ jobs:
     with:
       bff_changed: ${{ needs.classify.outputs.bff }}
       spaarke_ai_changed: ${{ needs.classify.outputs.spaarke_ai }}
+
+  # ==========================================================================
+  # JOB 2b — prereqs: operator prerequisites manifest (BLOCKING via the Router)
+  # ==========================================================================
+  # customer-provisioning-orchestration-r1 task 208 (spec FR-A01: ONE required
+  # check). Replaces the standalone advisory provisioning-prereqs-validate.yml.
+  # Runs whenever the manifest, intake schema or provision-environment skill
+  # changes — including docs-only diffs (see the provisioning_prereqs filter).
+  # Parser parity: validate.ps1 uses powershell-yaml, the parser the skill's
+  # Step 0.5a uses at operator run time — never substitute another parser.
+  # ==========================================================================
+  prereqs:
+    name: Provisioning prerequisites
+    needs: classify
+    if: needs.classify.outputs.provisioning_prereqs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate manifest (powershell-yaml parser parity + shape contract)
+        shell: pwsh
+        run: ./scripts/provisioning-prereqs/validate.ps1
+
+      # ajv-formats is loaded so `format: uuid` (tenantId / subscriptionId) compiles and is actually checked.
+      # Without it ajv-cli's strict mode rejects the unknown format (2026-09-30); `--strict=false` would
+      # also pass but would silently stop checking the formats.
+      - name: Validate intake.schema.json is a valid JSON Schema (Draft 2020-12)
+        shell: bash
+        run: |
+          npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv compile \
+            --spec=draft2020 \
+            -c ajv-formats \
+            -s scripts/provisioning-prereqs/intake.schema.json
 
   # ==========================================================================
   # JOB 3 — tier2: Advisory checks (format, lint, full tests, ADR, etc.)
@@ -322,7 +369,7 @@ jobs:
   router-result:
     name: Router
     if: always()
-    needs: [classify, tier1, tier2]
+    needs: [classify, tier1, prereqs, tier2]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -359,9 +406,9 @@ jobs:
           # Shape mirrors `toJSON(needs)` exactly — including the empty `outputs`
           # object — so alls-green sees the structure it would normally receive.
           # Only `result` participates in adjudication.
-          printf 'json={"classify":{"result":"%s","outputs":{}},"tier1":{"result":"%s","outputs":{}}}\n' \
-            '${{ needs.classify.result }}' '${{ needs.tier1.result }}' >> "$GITHUB_OUTPUT"
-          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }} tier2=${{ needs.tier2.result }} (tier2 not adjudicated)"
+          printf 'json={"classify":{"result":"%s","outputs":{}},"tier1":{"result":"%s","outputs":{}},"prereqs":{"result":"%s","outputs":{}}}\n' \
+            '${{ needs.classify.result }}' '${{ needs.tier1.result }}' '${{ needs.prereqs.result }}' >> "$GITHUB_OUTPUT"
+          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }} prereqs=${{ needs.prereqs.result }} tier2=${{ needs.tier2.result }} (tier2 not adjudicated)"
 
       - name: Aggregate tier results
         # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
@@ -371,8 +418,9 @@ jobs:
         with:
           jobs: ${{ steps.adjudicate.outputs.json }}
           # tier1 may legitimately be skipped when classify finds no Tier-1
-          # surface in the diff; a skipped job counts as success.
-          allowed-skips: tier1
+          # surface in the diff; prereqs when the diff does not touch the
+          # prerequisites manifest or skill. A skipped job counts as success.
+          allowed-skips: tier1,prereqs
 
       - name: Router decision summary
         if: always()
@@ -385,8 +433,9 @@ jobs:
             echo "|---|---|"
             echo "| classify | ${{ needs.classify.result }} |"
             echo "| tier1 (blocking) | ${{ needs.tier1.result }} |"
+            echo "| prereqs (blocking) | ${{ needs.prereqs.result }} |"
             echo "| tier2 (advisory) | ${{ needs.tier2.result }} |"
             echo ""
             echo "Tier 2 is **advisory** — its result does NOT block merge (per spec FR-A03)."
-            echo "Tier 1 failure OR classify failure DOES fail the required check \`CI / Router\`."
+            echo "Tier 1, prereqs or classify failure DOES fail the required check \`CI / Router\`."
           } >> "$GITHUB_STEP_SUMMARY"

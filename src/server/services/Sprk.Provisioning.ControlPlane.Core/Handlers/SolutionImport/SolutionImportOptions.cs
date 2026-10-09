@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------------
 // SolutionImportOptions.cs
 //
-// Bound options for the H6 handler's collaborators (Web API importer +
-// verifier; the pac pre-import steps, task 253). Loaded from the "SolutionImportOptions" configuration section
+// Bound options for the H6 handler's collaborators (Web API importer,
+// verifier and org-settings applier). Loaded from the "SolutionImportOptions" configuration section
 // by Program.cs — runtime-configurable so the linux-x64 App Service publish
 // layout can be honored without recompiling. Parity with
 // DataverseEnvAdoptionOptions + AiSeedChainOptions.
@@ -21,13 +21,9 @@ public sealed class SolutionImportOptions
     /// <summary>Configuration section name (bound via Program.cs <c>GetSection(nameof(SolutionImportOptions))</c>).</summary>
     public const string SectionName = nameof(SolutionImportOptions);
 
-    /// <summary>
-    /// Path to the pac CLI executable. Defaults to <c>pac</c> (resolved via
-    /// PATH).
-    /// Used by the pre-import steps (<see cref="PacRequiredApplicationsInstaller"/>,
-    /// <see cref="PacOrgSettingsContractApplier"/>) until task 253 replaces them.
-    /// </summary>
-    public string PacCliExecutable { get; set; } = "pac";
+    // Task 253 (G38): PacCliExecutable and VerifierCallTimeout were DELETED with the pac pre-import steps — the
+    // org-settings applier is a Dataverse Web API client (its per-request timeout is DataverseWebApiRequestTimeout)
+    // and H6 installs no application (SpaarkeMaster depends on none that a fresh environment lacks).
 
     /// <summary>
     /// Maximum wall-clock time for one package import (async-operation polling). Defaults to 60 minutes. If exceeded, the
@@ -35,12 +31,6 @@ public sealed class SolutionImportOptions
     /// <see cref="SolutionImportRejectionCodes.ImportTimeout"/> (Resumable — a re-run re-reads the installed version).
     /// </summary>
     public TimeSpan ImportTimeout { get; set; } = TimeSpan.FromMinutes(60);
-
-    /// <summary>
-    /// Maximum wall-clock time for a single pac call of the pre-import steps
-    /// (<see cref="PacOrgSettingsContractApplier"/>). Defaults to 90 seconds.
-    /// </summary>
-    public TimeSpan VerifierCallTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// Client secret for the BFF Entra app registration (legacy FR-39 ClientSecret chain only). MUST be null / whitespace
@@ -97,7 +87,8 @@ public sealed class SolutionImportOptions
     /// <summary>
     /// Per-HTTP-request timeout for a single Dataverse Web API call (installed-solution GET, the
     /// ImportSolutionAsync/StageAndUpgradeAsync POST — which returns at once — or a single poll GET). Applied to the
-    /// importer's named HttpClient (Worker/Program.cs). Defaults to 100 seconds — headroom for uploading the base64
+    /// importer's named HttpClient and to the verifier's and org-settings applier's typed clients (Worker/Program.cs).
+    /// Defaults to 100 seconds — headroom for uploading the base64
     /// package. Distinct from <see cref="ImportTimeout"/> (the overall deadline for the import to complete).
     /// </summary>
     public TimeSpan DataverseWebApiRequestTimeout { get; set; } = TimeSpan.FromSeconds(100);

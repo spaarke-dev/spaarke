@@ -37,16 +37,40 @@ the record it checked); no second probe and no app-only read stands in for the c
   "secure": "applies" | "doesNotApply" | "unknown",
   "noAccess": "applies" | "doesNotApply" | "unknown",
   "entriesState": "notShown" | "complete" | "truncated" | "unavailable",
-  "entries": null | [ /* RecordNoAccessEntry, Write callers only */ ]
+  "entries": null | [ /* RecordNoAccessEntry, Write callers only */ ],
+  "accessPermission": "standard" | "limited" | "restricted" | "unknown",   // task 174, additive
+  "inheritedFrom": null | { "recordType": "sprk_matter", "recordId": "…", "name": "…" }  // task 174, additive
 }
 ```
 
 ### `secure`
 
-`sprk_issecure` from the batched flag read every veto uses (`ExternalParticipationService.GetRootRecordFlagsAsync`):
-true → `applies`, false → `doesNotApply`. **`unknown`** when the read faulted, did not return the row, or the value came
-back EMPTY (`RootRecordFlags.IsUnreadable`; task 150: an empty value means field-level Read was lost and a true value may
-be masked). Never "not secure" for any of these.
+The record's EFFECTIVE Secure flag (task 174, owner round 84): `sprk_issecure` of the record from the batched flag read
+every veto uses (`ExternalParticipationService.GetRootRecordFlagsAsync`), folded with every record it is filed under
+(secure-if-any, through the ONE filing walk — `ExternalParticipationService.GetEffectiveRootAccessAsync`). True →
+`applies`, false → `doesNotApply`. **`unknown`** when the read faulted, did not return the row, the value came back EMPTY
+(`RootRecordFlags.IsUnreadable`; task 150: an empty value means field-level Read was lost and a true value may be masked),
+or what the record is filed under could not be decided. Never "not secure" for any of these. A work assignment or project
+filed under a secure matter or project is `applies` even while its own stored flag is still false (inheritance pending,
+Refused or Failed; task 175's cascade).
+
+### `accessPermission` (task 174, additive)
+
+The record's EFFECTIVE Access Permission: the most restrictive `sprk_accesspermission` of the record and every record it is
+filed under (Restricted over Limited over Standard; an empty value is Standard). `unknown` exactly when `secure` is
+`unknown`. A client folds it in as the STRICTER of this and the record's own stored value (Manage Access:
+`effectiveAccessState`, never less strict than the host's values); `unknown` folds in as Limited (the host's own rule for
+an unreadable flag). An older BFF omits the field; a client then keeps the host's values.
+
+### `inheritedFrom` (task 174, additive)
+
+The DIRECT filing parent (a matter or project on the record's own lookup) through which the stricter effective `secure` /
+`accessPermission` arrives when an ancestor makes them stricter than the record's own: the direct parent the stricter
+Access Permission arrives through, else the one Secure arrives through. **Never a record further up** (verifier F1-d): a
+direct parent is already visible on the record's own lookup to anyone who can read the record; a grandparent may not be, so
+its id and name are never sent — when the rule comes from above, the direct parent it arrives through is named.
+`null` when the record's own values govern, for a matter, and when `secure` is `unknown`. Display only (Manage Access
+names it in its banner: "It follows the {matter|project} it is filed under: {name}.").
 
 ### `noAccess`
 

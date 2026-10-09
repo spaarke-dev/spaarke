@@ -141,9 +141,10 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
-                RunInput.Output(nameof(InterStepState.AppServiceName)),
+                RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
                 // PerEnvSourceCatalog sources:
                 RunInput.Output(nameof(InterStepState.KeyVaultUri)),
                 RunInput.Output(nameof(InterStepState.CosmosEndpoint)),
@@ -182,6 +183,18 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.OpenAiEndpoint), required: false),
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
+            ],
+            [HandlerIds.H7b] =
+            [
+                Tenant,
+                // T256: dry run (validated at POST /api/runs by SecureRecordSetupIntake). Absent = apply.
+                RunInput.Intake(IntakeParameterCatalog.SecureRecordSetupDryRun, required: false),
+                // The environment H5 adopted, signed in to as the BFF app registration (H3) — the identity H6/H7 use.
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // S12: the BFF's two Dataverse application users (H10) — the only members of the BFF writer profile.
+                RunInput.Output(nameof(InterStepState.BffAppRegSystemUserId)),
+                RunInput.Output(nameof(InterStepState.SystemUserId)),
             ],
             [HandlerIds.H8] =
             [
@@ -254,6 +267,9 @@ public static class HandlerRunInputs
                 // T227c: I4 compares the BFF's container settings with it (absent → I4 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
+                // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
+                // first sign-in of a customer employee).
+                RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
             ],
             [HandlerIds.H14] =
             [

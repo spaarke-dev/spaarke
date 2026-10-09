@@ -46,7 +46,10 @@ const ATTACHMENTS: AttachmentInfo[] = [
 function outlookContext(): SaveFlowContext {
   return {
     hostType: 'outlook',
-    itemId: '<msg-1@contoso.com>',
+    // Task 121: the Exchange item id and the RFC Message-ID are separate values (the pane used to send the item id as
+    // internetMessageId).
+    itemId: 'AAMkAGI2TG93AAA=',
+    internetMessageId: '<msg-1@contoso.com>',
     itemName: 'Re: Filing',
     attachments: ATTACHMENTS,
     senderEmail: 'counsel@contoso.com',

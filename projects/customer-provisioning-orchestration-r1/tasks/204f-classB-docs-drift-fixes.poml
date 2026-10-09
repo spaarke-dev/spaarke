@@ -4,7 +4,8 @@
     <title>Class-B B17 docs drift fix — remove PLAYBOOK_EMBEDDINGS_INDEX_NAME from appsettings.tokens.md</title>
     <phase>Pre-Live-Fire — Class-B docs hygiene (post-186 safe)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <note date="2026-10-08">Executed 2026-08-24 (commit 0d3ae5c39). Re-verified 2026-10-08: the token was still listed in appsettings.template.json AllowedIndexes (missed by the original pass); removed there too, so no PLAYBOOK_EMBEDDINGS_INDEX_NAME reference remains in src, infrastructure, scripts or config.</note>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Docs-only cleanup: remove a single stale token declaration from BFF's `appsettings.tokens.md` reference doc (zero code consumers since task 035 retired playbook-embeddings). No .cs modifications; no test additions; no `.claude/` writes. Per root CLAUDE.md §8 rigor decision tree: docs/inventory/simple-updates = MINIMAL. Quality gates skipped per MINIMAL row.</rigor-reason>
     <model-tier>sonnet</model-tier>

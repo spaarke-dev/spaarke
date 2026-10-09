@@ -6,8 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
-using NSubstitute;
-using NSubstitute.ExceptionExtensions;
+using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -36,7 +35,8 @@ namespace Sprk.Bff.Api.Tests.Integration;
 ///
 /// Task 061 (Wave 2.4 — sdap-bff.api-test-suite-repair): repaired test-stale failures.
 /// `ChatResponseUpdate` from Microsoft.Extensions.AI has a non-virtual `Text` property
-/// that NSubstitute cannot intercept (CouldNotSetReturnDueToMissingInfoAboutLastCallException).
+/// that no proxy-based mocking library can intercept (the file then used NSubstitute, which threw
+/// CouldNotSetReturnDueToMissingInfoAboutLastCallException; it has since moved to Moq, the codebase standard).
 /// Helper methods now construct `new ChatResponseUpdate(ChatRole.Assistant, text)` directly,
 /// matching the pattern used by `Mocks/AsyncEnumerableHelpers.FromChunks` (task 015).
 /// `ConcurrencyLimit_Returns429WhenExceeded_AiStreamPolicy` switched from `AcquireAsync`
@@ -78,7 +78,7 @@ public class SseStreamingIntegrationTests
 
         for (var run = 0; run < totalRuns; run++)
         {
-            var chatClient = Substitute.For<IChatClient>();
+            var chatClient = new Mock<IChatClient>();
             SetupChatClientTokens(chatClient, "Hello", " world", "!");
 
             var capturedEvents = new List<ChatSseEvent>();
@@ -94,7 +94,7 @@ public class SseStreamingIntegrationTests
             // Simulate the SSE streaming pipeline: typing_start → tokens → typing_end → done
             await sseWriter(new ChatSseEvent("typing_start", null), CancellationToken.None);
 
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
+            await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
                 new List<AiChatMessage>
                 {
                     new(ChatRole.User, TestUserMessage)
@@ -139,7 +139,7 @@ public class SseStreamingIntegrationTests
     public async Task SseEventSequence_FollowsCorrectOrder_TypingStartTokensTypingEndDone()
     {
         // Arrange
-        var chatClient = Substitute.For<IChatClient>();
+        var chatClient = new Mock<IChatClient>();
         SetupChatClientTokens(chatClient, "First", " token", " stream");
 
         var capturedEvents = new List<ChatSseEvent>();
@@ -152,7 +152,7 @@ public class SseStreamingIntegrationTests
         // Act — simulate the full SSE streaming pipeline
         await sseWriter(new ChatSseEvent("typing_start", null), CancellationToken.None);
 
-        await foreach (var update in chatClient.GetStreamingResponseAsync(
+        await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
             new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
             cancellationToken: CancellationToken.None))
         {
@@ -195,7 +195,7 @@ public class SseStreamingIntegrationTests
     public async Task Cancellation_CleansUpBffStream_NoEventsAfterCancel()
     {
         // Arrange
-        var chatClient = Substitute.For<IChatClient>();
+        var chatClient = new Mock<IChatClient>();
         var cts = new CancellationTokenSource();
         var capturedEvents = new List<(ChatSseEvent Event, DateTimeOffset Timestamp)>();
         var cancellationTriggered = false;
@@ -221,7 +221,7 @@ public class SseStreamingIntegrationTests
         {
             await sseWriter(new ChatSseEvent("typing_start", null), cts.Token);
 
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
+            await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
                 new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
                 cancellationToken: cts.Token))
             {
@@ -325,7 +325,7 @@ public class SseStreamingIntegrationTests
     public async Task ErrorEvent_PropagatesCorrectly_WhenModelThrowsMidStream()
     {
         // Arrange
-        var chatClient = Substitute.For<IChatClient>();
+        var chatClient = new Mock<IChatClient>();
         SetupChatClientWithError(chatClient, tokensBeforeError: 2);
 
         var capturedEvents = new List<ChatSseEvent>();
@@ -341,7 +341,7 @@ public class SseStreamingIntegrationTests
 
         try
         {
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
+            await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
                 new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
                 cancellationToken: cancellationToken))
             {
@@ -414,7 +414,7 @@ public class SseStreamingIntegrationTests
     public async Task ErrorEvent_NotEmitted_WhenClientCancels()
     {
         // Arrange
-        var chatClient = Substitute.For<IChatClient>();
+        var chatClient = new Mock<IChatClient>();
         var cts = new CancellationTokenSource();
         SetupChatClientWithCancellableTokens(chatClient, cts.Token,
             ("Token1", TimeSpan.Zero),
@@ -433,7 +433,7 @@ public class SseStreamingIntegrationTests
         {
             await sseWriter(new ChatSseEvent("typing_start", null), cts.Token);
 
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
+            await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
                 new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
                 cancellationToken: cts.Token))
             {
@@ -591,8 +591,8 @@ public class SseStreamingIntegrationTests
     public async Task StreamingTokens_NotCachedInRedis_DuringStreaming()
     {
         // Arrange
-        var cache = Substitute.For<IDistributedCache>();
-        var chatClient = Substitute.For<IChatClient>();
+        var cache = new Mock<IDistributedCache>();
+        var chatClient = new Mock<IChatClient>();
         SetupChatClientTokens(chatClient, "This", " is", " a", " streaming", " response");
 
         var capturedEvents = new List<ChatSseEvent>();
@@ -606,7 +606,7 @@ public class SseStreamingIntegrationTests
         // Act — simulate streaming pipeline (the part that MUST NOT touch cache)
         await sseWriter(new ChatSseEvent("typing_start", null), CancellationToken.None);
 
-        await foreach (var update in chatClient.GetStreamingResponseAsync(
+        await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
             new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
             cancellationToken: CancellationToken.None))
         {
@@ -627,16 +627,16 @@ public class SseStreamingIntegrationTests
         await sseWriter(new ChatSseEvent("done", null), CancellationToken.None);
 
         // Assert — cache MUST NOT have been called during streaming
-        await cache.DidNotReceive().SetAsync(
-            Arg.Any<string>(),
-            Arg.Any<byte[]>(),
-            Arg.Any<DistributedCacheEntryOptions>(),
-            Arg.Any<CancellationToken>());
+        cache.Verify(c => c.SetAsync(
+            It.IsAny<string>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DistributedCacheEntryOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never());
 
-        cache.DidNotReceive().Set(
-            Arg.Any<string>(),
-            Arg.Any<byte[]>(),
-            Arg.Any<DistributedCacheEntryOptions>());
+        cache.Verify(c => c.Set(
+            It.IsAny<string>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DistributedCacheEntryOptions>()), Times.Never());
 
         // Verify tokens were actually streamed (pipeline worked)
         var tokenEvents = capturedEvents.Where(e => e.Type == "token").ToList();
@@ -653,9 +653,9 @@ public class SseStreamingIntegrationTests
     {
         // Arrange
         var cacheEntries = new Dictionary<string, byte[]>();
-        var cache = Substitute.For<IDistributedCache>();
-        cache.When(c => c.Set(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<DistributedCacheEntryOptions>()))
-            .Do(info => cacheEntries[info.ArgAt<string>(0)] = info.ArgAt<byte[]>(1));
+        var cache = new Mock<IDistributedCache>();
+        cache.Setup(c => c.Set(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>()))
+            .Callback((string key, byte[] value, DistributedCacheEntryOptions _) => cacheEntries[key] = value);
 
         var streamedTokens = new[] { "Individual", " token", " content" };
 
@@ -750,7 +750,7 @@ public class SseStreamingIntegrationTests
         // Arrange
         var tokenCount = 100;
         var tokens = Enumerable.Range(1, tokenCount).Select(i => $"Word{i}").ToArray();
-        var chatClient = Substitute.For<IChatClient>();
+        var chatClient = new Mock<IChatClient>();
         SetupChatClientTokens(chatClient, tokens);
 
         var eventLatencies = new List<long>();
@@ -765,7 +765,7 @@ public class SseStreamingIntegrationTests
         // Act — measure per-event latency
         await sseWriter(new ChatSseEvent("typing_start", null), CancellationToken.None);
 
-        await foreach (var update in chatClient.GetStreamingResponseAsync(
+        await foreach (var update in chatClient.Object.GetStreamingResponseAsync(
             new List<AiChatMessage> { new(ChatRole.User, TestUserMessage) },
             cancellationToken: CancellationToken.None))
         {
@@ -802,19 +802,19 @@ public class SseStreamingIntegrationTests
     /// </summary>
     /// <remarks>
     /// Task 061: `ChatResponseUpdate.Text` is a non-virtual aggregator over
-    /// `Contents` — NSubstitute cannot stub it. Constructed instances are used so the
+    /// `Contents` — a mock cannot stub it. Constructed instances are used so the
     /// real getter returns the value we want.
     /// </remarks>
-    private static void SetupChatClientTokens(IChatClient chatClient, params string[] tokens)
+    private static void SetupChatClientTokens(Mock<IChatClient> chatClient, params string[] tokens)
     {
         var updates = tokens
             .Select(t => new ChatResponseUpdate(ChatRole.Assistant, t))
             .ToList();
 
-        chatClient.GetStreamingResponseAsync(
-            Arg.Any<IEnumerable<AiChatMessage>>(),
-            Arg.Any<ChatOptions?>(),
-            Arg.Any<CancellationToken>())
+        chatClient.Setup(c => c.GetStreamingResponseAsync(
+            It.IsAny<IEnumerable<AiChatMessage>>(),
+            It.IsAny<ChatOptions?>(),
+            It.IsAny<CancellationToken>()))
             .Returns(ToAsyncEnumerable(updates));
     }
 
@@ -823,17 +823,16 @@ public class SseStreamingIntegrationTests
     /// delays between tokens to allow cancellation testing.
     /// </summary>
     private static void SetupChatClientWithCancellableTokens(
-        IChatClient chatClient,
+        Mock<IChatClient> chatClient,
         CancellationToken externalToken,
         params (string Text, TimeSpan Delay)[] tokenSpecs)
     {
-        chatClient.GetStreamingResponseAsync(
-            Arg.Any<IEnumerable<AiChatMessage>>(),
-            Arg.Any<ChatOptions?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
+        chatClient.Setup(c => c.GetStreamingResponseAsync(
+            It.IsAny<IEnumerable<AiChatMessage>>(),
+            It.IsAny<ChatOptions?>(),
+            It.IsAny<CancellationToken>()))
+            .Returns((IEnumerable<AiChatMessage> _, ChatOptions? _, CancellationToken ct) =>
             {
-                var ct = callInfo.ArgAt<CancellationToken>(2);
                 return GenerateCancellableTokens(tokenSpecs, ct);
             });
     }
@@ -841,13 +840,13 @@ public class SseStreamingIntegrationTests
     /// <summary>
     /// Sets up a mock IChatClient that yields some tokens then throws an exception.
     /// </summary>
-    private static void SetupChatClientWithError(IChatClient chatClient, int tokensBeforeError)
+    private static void SetupChatClientWithError(Mock<IChatClient> chatClient, int tokensBeforeError)
     {
-        chatClient.GetStreamingResponseAsync(
-            Arg.Any<IEnumerable<AiChatMessage>>(),
-            Arg.Any<ChatOptions?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
+        chatClient.Setup(c => c.GetStreamingResponseAsync(
+            It.IsAny<IEnumerable<AiChatMessage>>(),
+            It.IsAny<ChatOptions?>(),
+            It.IsAny<CancellationToken>()))
+            .Returns(() =>
             {
                 return GenerateTokensThenError(tokensBeforeError);
             });

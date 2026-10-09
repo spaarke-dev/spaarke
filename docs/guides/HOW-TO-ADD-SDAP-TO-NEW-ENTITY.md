@@ -164,9 +164,9 @@ Build the updated PCF control and deploy to Dataverse.
 cd src/client/pcf/UniversalQuickCreate
 
 # Build the control
-npm run build
+npm run build:prod
 
-# Deploy to Dataverse (requires pac CLI authentication)
+# Dev loop only: pac pcf push. Releases go through /pcf-deploy (solution-ZIP import).
 pac pcf push --publisher-prefix sprk
 ```
 

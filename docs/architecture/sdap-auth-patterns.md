@@ -106,7 +106,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) �
 
 1. **GraphClientFactory.ForApp** returns a cached `Lazy<GraphServiceClient>` singleton
 2. The singleton uses **`DefaultAzureCredential`** (managed identity) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. `ClientSecretCredential` is the local-dev fallback only.
-3. In Azure environments, the App Service's system-assigned MI must have appropriate Graph application permissions granted (see [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §5). For mailbox-scoped operations (`Mail.*`), Exchange `ApplicationAccessPolicy` must scope the MI to allowed mailboxes (§7).
+3. In Azure environments, the BFF's user-assigned managed identity (`Graph:ManagedIdentity:ClientId`) must have appropriate Graph application permissions granted (see [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.7). For mailbox-scoped operations (`Mail.*`), Exchange `ApplicationAccessPolicy` must scope the MI to allowed mailboxes (§7).
 4. Scope: `https://graph.microsoft.com/.default` via `AzureIdentityAuthenticationProvider`
 5. Uses beta endpoint (`https://graph.microsoft.com/beta`) for SPE admin operations
 
@@ -358,7 +358,7 @@ Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-Ap
 
 - [Spaarke SSO Binding](../../.claude/patterns/auth/spaarke-sso-binding.md) — **Canonical reference** for MSAL invariants (INV-1..INV-8) + v2 token acquisition model
 - [ADR-028: Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — **Canonical v2 ADR** (function-based contract, MI for outbound, HMAC webhooks, named API keys)
-- [auth-deployment-setup.md](../guides/auth-deployment-setup.md) — Operator runbook for new-environment setup (10 sections incl. §7 Exchange ApplicationAccessPolicy)
+- [SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — new-environment setup: auth §6.5, §7.3, §7.7; Exchange mailbox access §4.2.1, §7.9 (`auth-deployment-setup.md` is a retired stub)
 - [Token Caching](../../.claude/patterns/auth/token-caching.md) — Client localStorage + server Redis
 - [OBO Flow](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
 - [Dataverse OBO](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO

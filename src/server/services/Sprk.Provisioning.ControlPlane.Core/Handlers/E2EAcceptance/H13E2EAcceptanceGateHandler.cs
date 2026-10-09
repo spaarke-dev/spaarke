@@ -402,7 +402,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     // T4 checks the stamp identity's Exchange roles are limited to this group (task 251).
                     ExchangeScopeGroupId: parameters.TryGetValue(IntakeParameterCatalog.ExchangePolicyScopeGroupId, out var scopeGroupId)
                         ? scopeGroupId?.Trim() ?? string.Empty
-                        : string.Empty),
+                        : string.Empty,
+                    // T7 checks both slots carry exactly the run's workforce tenant list (task 255, INCOMING-141).
+                    // POST /api/runs stored it canonical and H4b re-validated it before writing; absent → T7 Failed.
+                    CustomerWorkforceTenantIds: Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsRule.ParseStored(
+                        parameters.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var workforceTenants)
+                            ? workforceTenants
+                            : null),
+                    TenancyModel: run.TenancyModel ?? string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

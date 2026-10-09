@@ -3,7 +3,7 @@
   <metadata>
     <title>Spaarke's own environments take the canonical SpaarkeMaster too: Deploy-Release imports the CI-published package; the 9-solution list (Deploy-DataverseSolutions.ps1) retires (#1401, ISS-005)</title>
     <phase>Model 1 dedicated-stamp remediation — T218 follow-on; owner decision 2026-10-08</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the release path into Spaarke's own environments (demo, dev) and retires an operator script.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -67,6 +67,7 @@
   </acceptance-criteria>
 
   <notes>
+    <note date="2026-10-08">COMPLETED (SESSION 45). PR #1365 merged (1ef1b0949). Owner OK → first CI publish, run 37864623352 (master, publish=true) succeeded: buildId 2026.10.09-13, sha 45202953f, SpaarkeMaster 1.2.0.0 managed + unmanaged zips with SHA-256 in the manifest; the hand-made 2026-08-21 manifest kept as dataverse-solutions-latest.previous.json. AC2 met (read-only): Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged -WhatIf → "Update SpaarkeMaster 1.0.0.0 -> 1.2.0.0 (unmanaged import over the existing components)" + the pac command (--async --force-overwrite --activate-plugins --publish-changes). The real release to demo (step 4) is a separate owner-approved live action, not part of the acceptance criteria. #1401 closed; ISS-005 resolved.</note>
     <note date="2026-10-08">CODE COMPLETE (SESSION 44) — open only for AC2 (the live -WhatIf against demo naming SpaarkeMaster {version} (unmanaged)), which needs the first CI publish (after PR #1365 merges + owner OK). Commits 8350f27bc (implementation), 4a0b711b6 (review fixes).
     - scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1: manifest from the store → installed package → Resolve-PackageImportPlan (H6's rules, version validated first) → pac solution import --async --force-overwrite --activate-plugins [--stage-and-upgrade managed upgrade] [--publish-changes unmanaged] → read back version + type. Operator's own az/pac identity; refuses the authoring environment (host compare incl. .api.).
     - Deploy-Release Phase 3 typed by config/environments.json solutionPackageType: dev none (authoring), demo unmanaged (demo holds SpaarkeMaster 1.0.0.0 unmanaged, read 2026-10-08; switching = rebuild, owner decision); missing = refused. -ClientSecret ignored with a warning. Provision-Customer step 7 switched (documents its two identities). Deploy-DataverseSolutions.ps1 deleted; ADR-027 MUSTs; skill + docs updated (no downgrade = roll forward; U-CB-1's nonexistent --allow-destructive flag corrected).

@@ -88,6 +88,10 @@ param adminDataverseEnvironmentUrl string
 @description('CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module\'s value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)')
 param customerRunGuardEnabled bool = false
 
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): POST /api/runs refuses either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Api startup without it. Same value the Worker module receives.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('App Insights connection string (from monitoring.bicep outputs).')
 param appInsightsConnectionString string
 
@@ -96,6 +100,15 @@ param aadLoginEndpoint string = environment().authentication.loginEndpoint
 
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 255: the tenants that are never a customer's workforce tenant — Spaarke's own (the control plane is deployed in
+// it) and the CIAM tenant(s). Appended to both slots' settings below.
+var reservedTenantSettings = concat([
+  { name: 'ReservedTenants__SpaarkeTenantId', value: tenant().tenantId }
+], map(range(0, length(ciamTenantIds)), i => {
+  name: 'ReservedTenants__CiamTenantIds__${i}'
+  value: ciamTenantIds[i]
+}))
 
 // Both slots carry the same settings. Non-sticky settings travel WITH the content on a swap, so a slot
 // without them cannot start and would hand production an empty configuration (found 2026-10-08: the
@@ -158,6 +171,8 @@ var appSettings = [
   { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
 ]
 
+var allAppSettings = concat(appSettings, reservedTenantSettings)
+
 // ============================================================================
 // APP SERVICE (UAMI-only from birth per ADR-028 + T1/T5)
 // ============================================================================
@@ -184,7 +199,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: appSettings
+      appSettings: allAppSettings
     }
   }
 }
@@ -217,7 +232,7 @@ resource stagingSlot 'Microsoft.Web/sites/slots@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: appSettings
+      appSettings: allAppSettings
     }
   }
 }
