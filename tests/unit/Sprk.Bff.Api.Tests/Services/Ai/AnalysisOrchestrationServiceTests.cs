@@ -77,6 +77,7 @@ public class AnalysisOrchestrationServiceTests
             new RagQueryBuilder(),
             tenantCacheMock.Object,
             httpContextAccessorMock.Object,
+            PermitAllRetrievalAccessTrim.Instance,
             options,
             new Mock<ILogger<AnalysisRagProcessor>>().Object);
 
