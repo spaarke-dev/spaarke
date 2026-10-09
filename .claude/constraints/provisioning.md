@@ -124,7 +124,7 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
 - A value L2 owns (its own principal, the SPE owning app per container type) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
-- H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
+- H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`. A LIST source (T255) feeds only an `indexed: true` entry, which is always required and owned whole (stale indices removed).
 - **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.
 - Every H4 manifest secret needs a source H4 can reach before H3 runs — a `from-bicep-output` label is only true if `customer.bicep`'s `kvSecretValues` writes it.
 - `RunContextContractTests` enforces all of this with a Roslyn source scan (declared inputs = reads, both ways), a DAG check and the manifest check. A failure means the data flow is wrong — fix the flow, never add a Gap to pass. Handler unit tests seeding a value by hand prove nothing about who writes it (that is how ~20 inputs shipped with no producer).
@@ -207,6 +207,14 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **One environment per customer (D6).** The registration is per customer (D-13) while H3 sets its redirect, FIC and
   pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
   staging/dev needs a per-stamp registration first (`notes/defer-issues.md`).
+
+## Customer workforce tenants + `acct` (BINDING, T255 / unified-access-control-r2 INCOMING-141)
+
+- Intake `customerWorkforceTenantIds` (JSON array, **required for every model**) is the CUSTOMER's Entra tenant(s) — Model 1: the customer's HOME tenant, never Spaarke's and never the run's `tenantId`. ONE rule, `Core/Models/CustomerWorkforceTenantsRule`, at POST /api/runs, in H4b and in H13; it refuses the CIAM tenant and Spaarke's tenant from the L2-owned `ReservedTenantsOptions` (`ReservedTenants__SpaarkeTenantId` / `__CiamTenantIds__N`, both hosts, ValidateOnStart). **NEVER** fall back to `AzureAd__TenantId` or `TenantRouting:Tenants[]`.
+- H4b writes `WorkforceIdentity__CustomerTenantIds__N` on both slots from the manifest's `indexed: true` entry and REMOVES every other `WorkforceIdentity__CustomerTenantIds__*` there; H13 T7 fails a stamp whose slots differ from the run's list. Change a stamp's list with a new run, never by hand.
+- H3 puts the `acct` optional claim on every per-customer BFF registration's access tokens (create + reconcile, read back).
+- Provisioning does **not** write `IdentityLink__Reconciliation__WritesEnabled` (H4b merges — a written `false` would undo an operator's `true`).
+- The contact identity-binding schema ships in SpaarkeMaster; OOB-table alternate keys are in the package rule (T255). Its field-security profile memberships are per environment.
 
 ## Dataverse package — one SpaarkeMaster, managed by default (BINDING, ADR-027 §3–§4 amended 2026-10-07; T218)
 

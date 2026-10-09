@@ -387,7 +387,8 @@ $prereqTokens = [ordered]@{
 # Tokens that must not be empty when a recipe uses them. artifactsStorageId / acrId / kvResourceId are exempt:
 # E-01..E-04 and E-10 report "not found" themselves.
 $mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId',
-                       'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId')
+                       'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId',
+                       'customerWorkforceTenantIds')
 
 function Invoke-PrereqPass([string[]]$Scopes, $Tokens) {
   $passResults = @()
@@ -452,7 +453,7 @@ $results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
   - Interpolated from name_templates: `{sbNamespace}`
   - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
-  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
+  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
 
 #### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type (added 2026-08-30 task 213.6; BFF-app checks removed by T227a)
@@ -621,6 +622,7 @@ if ($BatchIntakeFile) {
   $environmentSecurityGroupId  = $intake.environmentSecurityGroupId   # T232 — B2BGuest: object id of sprk-{customerId}-users (PRQ-C-10)
   $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
   $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
+  $customerWorkforceTenantIds  = if ($null -ne $intake.customerWorkforceTenantIds) { @($intake.customerWorkforceTenantIds) } else { @() }   # T255 — REQUIRED every model: the CUSTOMER's Entra tenant id(s) (PRQ-C-13); sent as nonSecretParameters.customerWorkforceTenantIds (Step 4.0)
   $communicationGraphResource  = $intake.communicationGraphResource   # at least one of these two
   $emailGraphResource          = $intake.emailGraphResource
   $communicationDefaultMailbox = $intake.communicationDefaultMailbox
@@ -675,6 +677,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "identityPreset": "B2BGuest",
   "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
   "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+  "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
   "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
   "communicationGraphResource": "users/legal-comms@acme.example/messages",
   "communicationDefaultMailbox": "legal-comms@acme.example"
@@ -977,6 +980,7 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+| `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
 
 **Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
 2026-10-01 (D15). It never goes into git: Step 1.0 refuses a batch intake file git would track, and
@@ -1129,6 +1133,21 @@ while ([string]::IsNullOrWhiteSpace($exchangePolicyScopeGroupId)) {
   $exchangePolicyScopeGroupId = Read-Host 'exchangePolicyScopeGroupId (mail-enabled security group email or object id — PRQ-C-08)'
 }
 
+# T255 (INCOMING-141): the CUSTOMER's workforce tenant id(s) — required for every model. Same shape rules as POST /api/runs
+# (CustomerWorkforceTenantsRule); L2 also refuses the CIAM tenant and Spaarke's own tenant from its own settings.
+$wfIds = @($customerWorkforceTenantIds | ForEach-Object { [string]$_ } | Where-Object { $_ -and $_.Trim() })
+while ($true) {
+  $parsed = @(); $bad = $null
+  foreach ($v in $wfIds) { $g = [guid]::Empty; if (-not [guid]::TryParse($v.Trim(), [ref]$g) -or $g -eq [guid]::Empty) { $bad = "'$v' is not a tenant id"; break }; $parsed += $g.ToString('D') }
+  if (-not $bad -and $parsed.Count -eq 0) { $bad = 'at least one is required' }
+  if (-not $bad -and $parsed.Count -gt 10) { $bad = 'at most 10' }
+  if (-not $bad -and @($parsed | Select-Object -Unique).Count -ne $parsed.Count) { $bad = 'a tenant is listed twice' }
+  if (-not $bad -and $tenancyModel -eq 'Model1' -and $parsed -contains ([guid]$tenantId).ToString('D')) { $bad = "$tenantId is this Model 1 run's tenantId (Spaarke's tenant) — give the CUSTOMER's home tenant" }
+  if (-not $bad) { $customerWorkforceTenantIds = $parsed; break }
+  Stop-IfBatch "customerWorkforceTenantIds: $bad (PRQ-C-13)."
+  $wfIds = @((Read-Host "customerWorkforceTenantIds — the customer's Entra tenant id(s), comma-separated (PRQ-C-13)") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
 while ([string]::IsNullOrWhiteSpace($communicationGraphResource) -and [string]::IsNullOrWhiteSpace($emailGraphResource)) {
   Stop-IfBatch 'at least one of communicationGraphResource / emailGraphResource is required.'
   $communicationGraphResource = Read-Host 'communicationGraphResource (e.g. users/{mailbox}/messages; blank to skip)'
@@ -1158,6 +1177,7 @@ if (-not $SkipStep0_5) {
   $customerTokens.dvUrl                      = $dataverseEnvUrl                # Step 1b-bis — canonical, trailing slash
   $customerTokens.exchangePolicyScopeGroupId = $exchangePolicyScopeGroupId     # Step 1e-bis (PRQ-C-08)
   $customerTokens.environmentSecurityGroupId = $environmentSecurityGroupId     # Step 1e-bis (PRQ-C-10; B2BGuest)
+  $customerTokens.customerWorkforceTenantIds = ($customerWorkforceTenantIds -join ' ')   # Step 1e-bis (PRQ-C-13; T255) — space-separated for the recipe's for-loop
   $customerResults = Invoke-PrereqPass -Scopes @('once_per_customer') -Tokens $customerTokens
   # Report exactly as Step 0.5d: a checklist; any Passed = $false → HARD STOP with id, output, consequence and the
   # remediation link into docs/guides/PROVISIONING-PREREQUISITES.md#<id>. Nothing has been written yet.
@@ -1611,6 +1631,7 @@ $runRequest = @{
     communicationGraphResource  = $communicationGraphResource   # H14b — at least one of these two,
     emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
     communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
+    customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
     # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
     # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
     # Any other key — a typo, `notes`, a value some handler produces — is a 400 with
@@ -2265,6 +2286,7 @@ Template shape:
 - Notify customer admin: {URL to send them / instructions}
 - Post-provision smoke tests: {list from customer-comms template U-CB-01}
 - Monitor for 24h via App Insights: {URL}
+- Identity-link writes (T255): after one report-only `identity-link-reconciliation` cycle has been reviewed, set `IdentityLink__Reconciliation__WritesEnabled=true` on BOTH BFF slots (deployment guide §6.5.2) — provisioning never sets it
 ```
 
 #### 6c. Registry-stale diagnostic (Bucket B HIGH#10 SESSION 18)
