@@ -331,6 +331,7 @@ $constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
 
 # --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
 $graphAppId       = $constants.microsoft_constants.graphAppId
+$customerManagementGroupId = $constants.management_groups.customers.id   # T262 (PRQ-S-06) — tenant-wide, not per env
 $subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; the customer pass (Step 1e-ter) uses {stampSubscriptionId} (T228)
 $openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
 
@@ -381,12 +382,12 @@ $env:MSYS_NO_PATHCONV = '1'   # Git Bash rewrites a leading /subscriptions/... a
 $prereqTokens = [ordered]@{
   env = $env; openAiRegion = $openAiRegionResolved; region = $openAiRegionResolved; subId = $subId; sub = $subId
   l2UamiPrincipalId = $l2UamiPrincipalId; l2UamiClientId = $l2UamiClientId; l2UamiSpId = $l2UamiSpId
-  graphAppId = $graphAppId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
+  graphAppId = $graphAppId; customerManagementGroupId = $customerManagementGroupId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
   kvResourceId = $kvResourceId; containerTypeId = $containerTypeId; adminDvUrl = $adminDvUrl
 }
 # Tokens that must not be empty when a recipe uses them. artifactsStorageId / acrId / kvResourceId are exempt:
 # E-01..E-04 and E-10 report "not found" themselves.
-$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId',
+$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId','customerManagementGroupId',
                        'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId',
                        'customerWorkforceTenantIds')
 
@@ -451,7 +452,7 @@ $results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
 - **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension; `{bffAppServiceId}` + `{bffAppId}` removed by T227a — there is no shared BFF):
   - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{kvResourceId}`
   - Interpolated from name_templates: `{sbNamespace}`
-  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
+  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template), `{customerManagementGroupId}` (management_groups.customers.id — tenant-wide, T262)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
   - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
@@ -1194,7 +1195,8 @@ if (-not $SkipStep0_5) {
 ```
 
 Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
-sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-E-15's Exchange half and PRQ-C-10's
+sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
+`spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
 "group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
 
 #### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
