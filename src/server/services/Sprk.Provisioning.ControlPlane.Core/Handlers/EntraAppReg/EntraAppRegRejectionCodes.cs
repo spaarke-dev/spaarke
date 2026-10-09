@@ -129,6 +129,14 @@ public static class EntraAppRegRejectionCodes
     public const string CrossTenantFicRefused = "appreg-cross-tenant-fic-refused";
 
     /// <summary>
+    /// ISS-015: H3 cannot plan the federated credential that lets the L2 Worker sign in as the customer's BFF registration
+    /// (H6 / H7 / H7b, D-13) — <c>ControlPlaneIdentity:PrincipalObjectId</c> is blank or not a GUID, it equals the stamp's
+    /// BFF UAMI, or <c>EntraAppRegOptions:WorkerFicName</c> is blank or equal to <c>FicName</c>. Platform configuration
+    /// drift, refused before any Graph write. Resumable after the Worker setting is fixed.
+    /// </summary>
+    public const string WorkerFicIdentityMissing = "appreg-worker-fic-identity-missing";
+
+    /// <summary>
     /// The provisioner reported a hard failure (PS script non-zero exit / Graph
     /// error). Handler classifies as Resumable (operator resolves the missing
     /// precondition — Entra permission, KV RBAC, or connectivity — then

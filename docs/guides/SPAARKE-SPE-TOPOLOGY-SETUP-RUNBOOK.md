@@ -338,7 +338,7 @@ owning anything (topology doc §3A "How a BFF gets container access without owni
 
 - The **BFF app registration is per customer** (D-13) and is created by **H3** during that customer's provisioning
   run: single-tenant, **no client secret**, with its own federated credential `spaarke-uami-trust` trusting the
-  customer's BFF UAMI. This runbook does not create one; its name is `spaarke-bff-api-{customerId}`. There is no
+  customer's BFF UAMI (and `spaarke-l2-worker` trusting the L2 Worker UAMI, through which H6/H7/H7b sign in as it). This runbook does not create one; its name is `spaarke-bff-api-{customerId}`. There is no
   shared-tier BFF registration (D-12/D-13; the script path that created one was deleted by T227a).
 - The **grants** for each customer are made by **H8** (T227b), as the owning app, before it creates the customer's
   container: the stamp UAMI gets application `full`, the BFF app registration delegated `full`. To inspect or repair

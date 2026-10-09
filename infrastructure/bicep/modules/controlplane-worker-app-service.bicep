@@ -187,7 +187,7 @@ var secretFreeCredentialAppSettings = [
   { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
 ]
 
-@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
+@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). H3 also makes it the subject of the federated credential spaarke-l2-worker on each customer BFF app registration (ISS-015), through which H6/H7/H7b sign in as that registration secret-free -- the principalId, never the clientId (AADSTS700213). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
 param controlPlanePrincipalId string
 
 
@@ -439,7 +439,9 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // by two handlers): H4's KV RBAC bootstrap grants THIS principal (L2's
         // own identity) Secrets Officer on each customer vault, and H2a sends it
         // as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps
-        // (Website Contributor on the stamp BFF). SPE owning-app credentials
+        // (Website Contributor on the stamp BFF); H3 makes it the subject of
+        // each customer BFF registration's spaarke-l2-worker federated
+        // credential (ISS-015). SPE owning-app credentials
         // are appended below (speContainerTypeOwnerSettings). Task 225b (D18)
         // removed the vendor-key platform vault setting (no Spaarke-shared
         // vendor key remains in the customer catalog).
