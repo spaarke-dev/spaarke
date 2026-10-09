@@ -4,7 +4,7 @@
     <title>The Inquiry: one Action row, one Binding, an executor the decision commit route calls (SLA deferred)</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>001, 036 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is the task that makes something happen in the world; it sends outward-facing mail through a gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,6 +110,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-36 (amended: D-17, D-20) and success criterion 10 (amended). design.md CM-11 and section 1.1 on the Action versus Action Engine distinction. Amended 2026-10-07 per reconciliation B.2 row 070: deps 001 + 036 (no longer 053); the gate tier outside chat is O-13 (task 043).</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1512 merged into docs/ontology-platform-design (19e2720c9) after independent review + 1 fix round. BudgetInquiryExecutor (+InquiryEmailSender): PreflightAsync (no writes), outbound sprk_servicerequest via uac-r2 OwnedChildWrite (caller Create/AppendTo; Secure matters refused), optional OutsideFirmId -> sprk_regardingorganization, email last as the user (plain text) with the service request as the first association so replies link to the inquiry; SendFailed keeps the id. 22 tests. No Action row / Binding authored (owner decision after 043). 043 adapts its result (043 POML). Known: inquiry email threads under the service request, not the matter timeline (F-27); D-106 items F-21, F-28.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
