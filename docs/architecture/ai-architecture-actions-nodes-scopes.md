@@ -46,7 +46,7 @@ The node configjson is **the right place** for executor-specific runtime fields 
 - `__actionType` — structural fallback for action-type detection when `sprk_actionid` is empty (see `ai-architecture-playbook-runtime.md` §5). In normal operation the FK wins; this is the safety net.
 - Executor-specific input bindings:
   - `QueryDataverseNodeExecutor`: `entityType`, `fetchXml`, `parameters` template fields
-  - `CreateNotificationNodeExecutor`: `recipientType`, `categoryRule`, `messageTemplate`, `ttlinseconds`
+  - ~~`CreateNotificationNodeExecutor`~~ (removed, D-100)
   - `LookupUserMembershipNodeExecutor`: `userIdParameter`, `entityTypes[]`
   - `ConditionNodeExecutor`: `conditionExpression`
   - `DeliverCompositeNodeExecutor`: `sections[]` (per ADR-037)

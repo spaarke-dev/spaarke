@@ -1316,12 +1316,8 @@ public static class AnalysisServicesModule
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
         // See AddUnconditionalChatAndNotificationServices below.
 
-        // R3 task 023 (FR-2.8 / D2 / Q1): the legacy PlaybookSchedulerService BackgroundService has
-        // been DELETED. Its discovery + fan-out logic is now PlaybookSchedulerJob (IScheduledJob),
-        // registered + seeded in SchedulingModule.AddSchedulingModule(). The ScheduledJobHost
-        // (Spaarke.Scheduling) drives the cron tick on the same 1h cadence (NFR-04 preserved).
-        // Do NOT re-add an AddHostedService<PlaybookSchedulerService> here — that path was the
-        // migration target.
+        // The notification playbook scheduler (PlaybookSchedulerService, then PlaybookSchedulerJob) and the
+        // CreateNotification node executor were removed on 2026-10-09 (D-100, task 131). Do NOT re-add them.
 
         // R5 task 007 (D1-07) — Session-files cleanup hosted service per spec NFR-02
         // "Aggressive cleanup on session-end". Scheduled sweep (every IntervalHours;
@@ -1461,7 +1457,6 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverCompositeNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
-        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
 
         // IActionSeam registration MOVED OUT of this compound gate to the top-of-module

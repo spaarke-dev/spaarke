@@ -12,7 +12,7 @@ namespace Spaarke.Scheduling;
 /// <para>
 /// <see cref="ResultJson"/> (added R3 task 023, FR-2.8) is an optional opaque JSON blob the
 /// handler can use to surface structured per-run output for the admin UI / history queries
-/// (e.g., the migrated <c>PlaybookSchedulerJob</c> records each fanned-out child playbook's
+/// (e.g., the former <c>PlaybookSchedulerJob</c> (removed, D-100) records each fanned-out child playbook's
 /// correlationId here so operators can join parent ↔ children). Persisted verbatim to
 /// <c>sprk_backgroundjobrun.sprk_resultjson</c>. Implementations MUST keep the payload small
 /// (admin UI surface) — for large outputs, write to a separate audit store and put a pointer here.

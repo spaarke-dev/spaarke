@@ -60,7 +60,7 @@ listed below.
 
 | # | Column | Type | Required | Max length | Default | Purpose |
 |---|---|---|---|---|---|---|
-| 1 | `sprk_jobid` | Text | **Required** | 100 | — | Stable string identifier (e.g., `"membership-reconciliation"`, `"notification-playbook-scheduler"`). **Unique key** — addresses jobs without GUIDs. |
+| 1 | `sprk_jobid` | Text | **Required** | 100 | — | Stable string identifier (e.g., `"membership-reconciliation"`, `"external-grant-expiry-reminders"`). **Unique key** — addresses jobs without GUIDs. |
 | 2 | `sprk_displayname` | Text | **Required** | 200 | — | Human-readable job name. **Primary name field** for the entity. |
 | 3 | `sprk_description` | Multiline Text | Optional | 2000 | — | What the job does. Surfaced in admin endpoints + maker portal. |
 | 4 | `sprk_handlertype` | Text | Optional | 500 | — | Fully-qualified C# class name (e.g., `Spaarke.Scheduling.MembershipReconciliationJob`). Resolved by `ScheduledJobHost` at startup via reflection + DI. |
@@ -133,7 +133,7 @@ Once R3 Phase 2 + Phase 3 land, the following services consume this entity:
 |---|---|---|
 | `ScheduledJobHost` | Read all enabled rows on startup + hourly refresh; update `sprk_lastrun*` denormalized fields after each run | `src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs` (R3 task 013) |
 | Admin endpoints | List, status, history, enable, disable, trigger | `src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs` (R3 tasks 020/021/022) |
-| `PlaybookSchedulerService` migration | Owns the single row with `sprk_jobid = "notification-playbook-scheduler"` | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerService.cs` (R3 task 023) |
+| ~~`PlaybookSchedulerService` migration~~ | Owned the row `sprk_jobid = "notification-playbook-scheduler"`; the job was removed 2026-10-09 (D-100) | removed |
 | `MembershipReconciliationJob` | Owns the row with `sprk_jobid = "membership-reconciliation"` | `src/server/api/Sprk.Bff.Api/Services/Membership/MembershipReconciliationJob.cs` (R3 task 085) |
 
 ---

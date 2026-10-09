@@ -81,7 +81,7 @@ public static class PlaybookParameterPolicy
     /// <summary>
     /// Keys the SERVER or the scheduler binds, never an HTTP caller (rule 1). <c>userId</c> feeds the <c>eq-userid</c>
     /// FetchXML substitution and notification recipients; <c>tenantId</c> scopes index and Dataverse queries;
-    /// <c>userName</c> is the scheduler's display name for the recipient (<c>PlaybookSchedulerJob</c>); <c>run</c>,
+    /// <c>userName</c> is the scheduler's display name for the recipient (the former <c>PlaybookSchedulerJob</c>, removed D-100); <c>run</c>,
     /// <c>start</c> and <c>userPreferences</c> are server-built bags (the run metadata, the Start node's bound payload, the
     /// user's stored preferences).
     /// </summary>

@@ -40,7 +40,7 @@ The framework consists of four pieces:
 | Retry | `JobRetryPolicy` (3 / 5s / 2min / exp) | Service Bus delivery count + DLQ | Per-worker bespoke |
 | Migration story | Opportunistic — 26 workers remain | Stable | Target of `Spaarke.Scheduling` migration |
 
-The two reference consumers shipping in R3 (`PlaybookSchedulerJob`, `MembershipReconciliationJob`) prove the framework end-to-end on a real Dataverse environment.
+The reference consumers shipping in R3 (`MembershipReconciliationJob`, and the since-removed `PlaybookSchedulerJob`, D-100) proved the framework end-to-end on a real Dataverse environment.
 
 ---
 
@@ -79,7 +79,6 @@ The two reference consumers shipping in R3 (`PlaybookSchedulerJob`, `MembershipR
 
 | Consumer | Path | Job ID | Seed cron | Purpose |
 |---|---|---|---|---|
-| `PlaybookSchedulerJob` | [`Services/Ai/PlaybookSchedulerJob.cs:67-662`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs#L67) | `notification-playbook-scheduler` ([`L74`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs#L74)) | `0 * * * *` (hourly) | R3 task 023 single-row fan-out across the active notification playbooks (**none since 2026-10-09: the seven were retired, D-100**; the job stays registered and ticks with nothing to run until the owner approves removal of the type-2 path); fresh per-child correlationId (Q1 owner clarification) recorded in `JobRunResult.ResultJson` so operators can join parent ↔ children. Migrates the legacy `PlaybookSchedulerService` (deleted). Preserves the legacy 1h tick cadence (NFR-04). |
 | `MembershipReconciliationJob` | [`Services/Ai/Membership/MembershipReconciliationJob.cs:146-…`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs#L146) | `membership-reconciliation` ([`L154`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs#L154)) | `0 2 * * *` (daily 02:00 UTC, configurable via `MembershipReconciliationOptions.CronSchedule`) | R3 task 085 nightly source-of-truth reconciliation of `sprk_userentityassociation` against the 8 `sprk_assigned*` Lookups on `sprk_matter` + `sprk_task` + `sprk_opportunity`. Independent of task 071's Service Bus topic deploy — dispatches directly to task 084's `IMembershipJunctionUpdater`. Enabled by default. |
 
 ---
@@ -133,7 +132,6 @@ The pattern: inject `IServiceScopeFactory` into the singleton job, and call `Cre
 
 **Worked examples** (cite verbatim):
 
-- `PlaybookSchedulerJob` — [`L139`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs#L139) opens a per-execution scope and resolves `IGenericEntityService` from it. Per-user inner work additionally creates a nested `using var userScope = _scopeFactory.CreateScope();` at [`L426`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs#L426) so each parallel user gets isolated `IPlaybookOrchestrationService` state.
 - `MembershipReconciliationJob` — same lifetime pattern (Singleton + `IServiceScopeFactory.CreateScope()` per `ExecuteAsync`). The job resolves `IMembershipJunctionUpdater` + `IMembershipFieldDiscoveryService` + `IGenericEntityService` from the fresh scope; the handler is Scoped per `MembershipModule` and the discovery + entity services are Singleton, but the scope is cheap and gives correct disposal for any Scoped collaborators accumulated over time. Documented at [`MembershipReconciliationJob.cs:62-71`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs#L62).
 
 **Why not register the job itself as Scoped?** Because `ScheduledJobRegistry` is singleton-scoped — a Scoped registration would be captured at startup and pinned to the root provider, defeating the point. The Singleton-with-Scoped-Inner pattern preserves the framework's "one instance per registered job" contract while keeping each execution's dependencies fresh and disposed correctly.
@@ -272,7 +270,7 @@ Where scheduled work runs — the BFF, a Functions timer, or a Container Apps jo
 - **Entities** — `sprk_backgroundjob` + `sprk_backgroundjobrun` deployed to **spaarkedev1**; idempotent re-creation scripts at `scripts/Create-BackgroundJobEntity.ps1` and `scripts/Create-BackgroundJobRunEntity.ps1`.
 - **Backing store** — `InMemoryBackgroundJobStore` is wired on spaarkedev1. Run history is process-local (lost on App Service restart). No Dataverse-backed store exists yet (ADR-036 A1 §2, §6); the entities are deployed but unused.
 - **Instances** — the host runs on every instance, but each tick runs once: Redis lease, and the others record `Skipped`. Non-production slots run no ticks (`Scheduling__RunScheduledJobs=false`, slot-sticky, set before the deploy by `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`, `deploy-bff-api.yml` and the L2 control plane's H9 provisioning deploy). Admin enable/disable and run history below are per instance. (`unified-access-control-r2` task 103.)
-- **Seeded jobs** — `notification-playbook-scheduler` (cron `0 * * * *`, enabled), `membership-reconciliation` (cron `0 2 * * *`, enabled by default; honors `Membership:Reconciliation:Enabled` appsettings override) and `external-grant-expiry-reminders` (daily 06:00 UTC; `unified-access-control-r2` task 100).
+- **Seeded jobs** — `membership-reconciliation` (cron `0 2 * * *`, enabled by default; honors `Membership:Reconciliation:Enabled` appsettings override) and `external-grant-expiry-reminders` (daily 06:00 UTC; `unified-access-control-r2` task 100).
 - **Admin endpoints** — `/api/admin/jobs/*` (all 6) live and unconditional.
 
 **Operator runbook**:

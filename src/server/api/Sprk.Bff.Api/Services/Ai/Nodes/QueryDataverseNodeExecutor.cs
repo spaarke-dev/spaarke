@@ -145,7 +145,7 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
             var userId = ResolveUserId(context);
             // Task 098: {{todayUtc}} / {{dueSoonWindowUtc}} feed Date Only comparisons — the run's USER's local
             // calendar date (Dataverse time zone), when the run has a user; otherwise the UTC date. In orchestrated
-            // runs the orchestrator renders these tokens from the run parameters first (PlaybookSchedulerJob supplies
+            // runs the orchestrator renders these tokens from the run parameters first (the former PlaybookSchedulerJob, removed D-100, supplied
             // them per user), so this applies only when the tokens reach the executor unrendered — and the zone is
             // read only then, never on every run.
             var now = _clock.GetUtcNow();

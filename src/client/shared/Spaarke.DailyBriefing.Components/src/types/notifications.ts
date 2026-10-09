@@ -154,7 +154,7 @@ export async function tryCatch<T>(fn: () => Promise<T>, errorCode: string = 'UNK
  *
  * **Categories of categories**:
  *  - **Legacy appnotification-pipeline** (preserved for back-compat with the
- *    `CreateNotificationNodeExecutor`-driven flow + R3/R4 widget pipeline):
+ *    retired `CreateNotificationNodeExecutor`-driven flow (D-100) + R3/R4 widget pipeline):
  *    `tasks-overdue`, `tasks-due-soon`, `new-documents`, `new-emails`,
  *    `new-events`, `matter-activity`, `work-assignments`, `system`.
  *  - **W11 POC live-collector codes** (emitted by `DailyBriefingCollector`
@@ -349,8 +349,8 @@ export interface NotificationItem {
   createdOn: string;
   /**
    * Optional ISO-8601 due date from notification customData.dueDate (R2.2).
-   * Set by task playbooks (notification-tasks-overdue, notification-tasks-due-soon)
-   * via the BFF CreateNotificationNodeExecutor's DueDate field. Null when the
+   * Set by the retired task notification playbooks (D-100) via the removed CreateNotificationNodeExecutor's
+   * DueDate field; kept so already-delivered rows still parse. Null when the
    * source channel has no due-date concept (documents, emails, work-assignments,
    * matter-activity, events).
    */

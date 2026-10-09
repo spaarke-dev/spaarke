@@ -85,7 +85,7 @@ public static class DispositionRoutability
         // Notification (spaarke-notification-spine-r1 task 033 / FR-14 — ADR-043 Path C): realized as a
         // routable side-effecting leg. OutputRouter's Notification case calls the Layer-A seam
         // (IActionSeam.CreateNotificationAsync, task 031) to create the durable appnotification record —
-        // the same code path CreateNotificationNodeExecutor uses, now reachable from the dispatch/router
+        // the same code path the (since removed, D-100) CreateNotificationNodeExecutor used, now reachable from the dispatch/router
         // surface. Routable ⇒ admissible on the dispatch path (ADR-043 §3), so the admit-gate follows
         // automatically. The 032 "what lights up" audit (notes/what-lights-up-audit.md) confirmed zero
         // shipped Bindings resolve to this disposition, so the flip is a no-op for existing capabilities.

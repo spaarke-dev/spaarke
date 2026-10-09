@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <remarks>
 /// <para>
 /// Introduced by task 031 (FR-07). The three node executors
-/// (<c>CreateNotificationNodeExecutor</c>/<c>CreateTaskNodeExecutor</c>/<c>UpdateRecordNodeExecutor</c>)
+/// (the removed <c>CreateNotificationNodeExecutor</c> (D-100)/<c>CreateTaskNodeExecutor</c>/<c>UpdateRecordNodeExecutor</c>)
 /// and this facade share the SAME extracted cores (<c>Services/Ai/Nodes/ActionCore/*</c>), so the
 /// records produced here are identical to what the executors produce today — the executors just add
 /// template rendering + ConfigJson parsing on top.

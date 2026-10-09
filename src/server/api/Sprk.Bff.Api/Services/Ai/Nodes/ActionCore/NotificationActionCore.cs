@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 // ---------------------------------------------------------------------------
 // Session-agnostic Layer-A action seam — CreateNotification (task 031 / FR-07).
 //
-// Extracted from CreateNotificationNodeExecutor's private BuildNotificationEntity
+// Extracted from the (since removed, D-100) CreateNotificationNodeExecutor's private BuildNotificationEntity
 // + CheckForDuplicateNotificationAsync + the idempotency-then-create flow, so an
 // appnotification can be created WITHOUT a NodeExecutionContext (no playbook run,
 // no chat session). The executor renders ConfigJson templates + resolves recipient/
@@ -158,7 +158,7 @@ internal sealed class NotificationActionCore
 
     /// <summary>
     /// Builds an SDK <see cref="Entity"/> representing the appnotification to create.
-    /// Moved verbatim from CreateNotificationNodeExecutor.BuildNotificationEntity (task 031);
+    /// Moved verbatim from the removed CreateNotificationNodeExecutor.BuildNotificationEntity (task 031);
     /// the only signature change is that the formerly playbook-baked <c>sprk_source</c> and
     /// <c>sprk_playbookrunid</c> values now come from <see cref="NotificationActionInput.Source"/>
     /// and <see cref="NotificationActionInput.CorrelationId"/>.

@@ -38,9 +38,9 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// non-production deployment slots by <c>scripts/Deploy-BffApi.ps1 -UseSlotDeploy</c> — stops the cron loop on that
 /// host. Absent means on.</para>
 ///
-/// <para><b><see cref="PlaybookSchedulerJob"/></b> (R3 task 023, the first production cron job) runs at
-/// <c>0 * * * *</c>, matching the legacy <c>PlaybookSchedulerService</c> one-hour tick exactly (NFR-04). Each
-/// playbook's own <c>IsPlaybookDue</c> check stays the final gate per tick.</para>
+/// <para>The notification playbook scheduler (<c>PlaybookSchedulerJob</c>, job id <c>notification-playbook-scheduler</c>)
+/// was removed on 2026-10-09 (D-100, task 131): bell-notification playbooks are retired. Jobs register themselves with
+/// <c>AddScheduledJob</c> from their own module.</para>
 /// </remarks>
 public static class SchedulingModule
 {
@@ -52,8 +52,7 @@ public static class SchedulingModule
 
     /// <summary>
     /// Adds the <c>Spaarke.Scheduling</c> registry, run-history store, host options, dispatch lease, the
-    /// <see cref="ScheduledJobHost"/> singleton + hosted-service registration, and
-    /// <see cref="PlaybookSchedulerJob"/>. Unconditional per bff-extensions.md §F.1.
+    /// <see cref="ScheduledJobHost"/> singleton + hosted-service registration. Unconditional per bff-extensions.md §F.1.
     /// </summary>
     public static IServiceCollection AddSchedulingModule(this IServiceCollection services)
     {
@@ -77,8 +76,6 @@ public static class SchedulingModule
 
         services.AddSingleton<ScheduledJobHost>();
         services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobHost>());
-
-        services.AddScheduledJob<PlaybookSchedulerJob>("0 * * * *");
 
         return services;
     }

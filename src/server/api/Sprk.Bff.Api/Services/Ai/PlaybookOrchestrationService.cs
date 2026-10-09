@@ -147,10 +147,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Starting app-only playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
             runId, request.PlaybookId, request.DocumentIds.Length);
 
-        // Extract userId from parameters (set by PlaybookSchedulerJob when fanning out per-user).
+        // Extract userId from parameters (set by the former PlaybookSchedulerJob, removed D-100, when fanning out per-user).
         // Without this, QueryDataverseNodeExecutor.ResolveUserId() returns null and the
         // FetchXml 'eq-userid' substitution is skipped — Dataverse then evaluates as the
-        // BFF service principal (MI), returning 0 records. R3's PlaybookSchedulerJob passes
+        // BFF service principal (MI), returning 0 records. R3's (since removed, D-100) PlaybookSchedulerJob passed
         // userId via Parameters["userId"] but did not wire it into context.UserId here.
         Guid? userId = null;
         if (request.Parameters is not null

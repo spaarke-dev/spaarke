@@ -277,7 +277,7 @@ After R4, three dispatch shapes coexist. Use this matrix when designing a new pl
 | **Path A.5** (`IConsumerRoutingService` + `IInvokePlaybookAi`) | (a) Caller has NO document; (b) caller has a `parameters` blob; (c) caller wants non-streaming response; (d) the playbook GUID should be Dataverse-data-driven not hardcoded; (e) result fits in a single JSON response (no progressive UI) | Caller needs streaming SSE (use A or B); caller has a document AND needs document semantics in the legacy orchestrator (use A) | `DailyBriefingEndpoints.cs:201-374` (R4 canonical case study) |
 | **Path B** (direct `PlaybookOrchestrationService.ExecuteAsync`) | (a) Caller has the playbook GUID already (no consumer-routing lookup needed); (b) caller needs streaming SSE; (c) caller may or may not have documents | Caller wants Dataverse-driven playbook selection (use A.5); caller doesn't need streaming (use A.5 for simpler return shape) | `PlaybookOrchestrationService.ExecuteAsync:81` |
 
-Path C (`ExecuteAppOnlyAsync`) is the app-only sibling of Path B, used by `PlaybookSchedulerJob` for notification fan-out. It is not facade-accessible and not a runtime caller-choice — selection is structural (background services vs request pipeline).
+Path C (`ExecuteAppOnlyAsync`) is the app-only sibling of Path B, used by the (since removed, D-100) `PlaybookSchedulerJob` for notification fan-out. It is not facade-accessible and not a runtime caller-choice — selection is structural (background services vs request pipeline).
 
 ---
 
