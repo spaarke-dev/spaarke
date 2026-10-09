@@ -48,6 +48,11 @@ but the secret path may only be selected for a prong-3 unmigrated environment �
 = `true`, also set explicitly by the Worker Bicep) and H4 omits **both** `BFF-API-ClientSecret` and
 `Dataverse-ClientSecret` on every new stamp. Rule 2's hold protects the EXISTING live `Dataverse-ClientSecret`
 copy from deletion — it never required H4 to write a new one.
+**Since task 252 (2026-10-09) the L2 control plane is secret-free by default too**: `platform-controlplane.bicep`
+`requireSecretFreeIdentity` defaults to `true` (Worker FR-39 chain `[ManagedIdentityFederated]`, no Key Vault reference to
+`BFF-API-ClientSecret`; `false` is a prong-3 opt-in only), and `Seed-PlatformKeyVault.ps1` never seeds
+`BFF-API-ClientSecret` or `Dataverse-ClientSecret` (no sentinel, no real value). Copies already in a platform vault stay
+untouched — never delete them.
 
 **2. NEVER purge or delete the rollback copies before 2026-11-23** (Path A, time-boxed): do not purge the
 soft-deleted `BFF-API-ClientSecret` / `bff-api-client-secret` KV entries, and do not delete the still-live

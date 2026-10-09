@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — provisioning: control plane secret-free by default (T252)
+
+`customer-provisioning-orchestration-r1` T252.
+
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle rule 1: the L2 control plane defaults to the
+  secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
+  `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
+
 ###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
 
 `customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
