@@ -1278,6 +1278,16 @@ Asked during task 175 (PR #1503). Verifier pass 1 had found F1: a re-file un-sec
 
 **Supersedes:** round 84's "always equal parent / locked" where it conflicts. The parent is a floor, not an equality. Round 84's un-secure cascade still applies, to INHERITED values only.
 
+## Round 88 (2026-10-09): BINDING. OWNER decision: one SPE container per secure family (#1506)
+
+Asked after a build check showed that every secure record gets its own container, including inherited-secure ones (task 158). The consequence: uploads under a secure work assignment filed under a secure matter are refused with `container_ancestor_ambiguous` (#1506).
+
+1. **Family container:** the TOP-most secure record in the chain owns the one container. Every record secure because of it uses that container: work assignments, projects, and their To Do / Event / Message / Document records. No new container is created for inherited-secure records. A record secured on its own, with no secure ancestor, starts a new family with its own container.
+2. **Joining a family:** new files go to the family container. Existing files may stay where they are. The owner adds: "is it more efficient and easier that if a record already has a secure container, and a new family member is added then that secure container becomes the family's container". In other words, adopt an existing secure container as the family's container instead of creating a new one, where that works. The owner also asked whether search is container-constrained, i.e. whether a search can only be directed at one container. That is being researched; the answer goes to the owner before the design is fixed.
+3. **Un-secure:** the files MOVE to the business-unit container. They do not stay in the old secure container. This replaces round 87 item 7's "remain in both containers is acceptable" for the un-secure case.
+
+**Status:** the design goes in a new task (container routing for secure families). It must not land in task 175, which leaves container routing untouched.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
