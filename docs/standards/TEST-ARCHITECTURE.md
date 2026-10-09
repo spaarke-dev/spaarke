@@ -18,7 +18,7 @@ Spaarke deliberately rejects coverage-percentage as a quality signal. Coverage i
 ### Rules
 
 1. **MUST** structure new tests as integration-first where a meaningful integration boundary exists (per §2)
-2. **MUST** place new tests under one of the six KEEP path conventions (per §3)
+2. **MUST** place new tests under one of the eight KEEP path conventions (per §3)
 3. **MUST** use `TimeProvider` for any time-dependent test (per §4)
 4. **MUST** mock at module boundaries only — never at the HTTP-handler level or DI-registration level (per §5)
 5. **MUST NOT** introduce coverage-% targets or "<N ms per test" rules to any directive file
@@ -57,9 +57,11 @@ Spaarke inverts the classical unit-heavy pyramid. The shape is:
 
 ---
 
-## 3. Six KEEP Categories
+## 3. Eight KEEP Categories
 
-These six categories are the **only** test categories Spaarke maintains. Path conventions encode them at runtime — `task-execute` Step 9.5 (code-review) checks paths, not CSVs.
+> **Corrected 2026-10-07.** This section listed six categories. ADR-038 has had eight since 2026-08-24: `tests/integration/seam/**` (added 2026-07-09, E-40) and `tests/Spaarke.ArchTests/**` (Amendment A1). Read as "six", its "not a KEEP category → DELETE candidate" rule below made every seam test and every fitness function a delete candidate. ADR-038 §2 is canonical.
+
+These eight categories are the **only** test categories Spaarke maintains. (The examples in rows 1–6 are illustrative and do not name existing files; rows 7–8 cite real files.) Path conventions encode them at runtime — `task-execute` Step 9.5 (code-review) checks paths, not CSVs.
 
 | # | Category | Path convention | Definition | Concrete example |
 |---|----------|-----------------|------------|------------------|
@@ -69,14 +71,16 @@ These six categories are the **only** test categories Spaarke maintains. Path co
 | 4 | **tenant-isolation** | `tests/integration/tenant/**` | Tenant boundary enforcement — that user A in tenant X cannot read/write resources in tenant Y, that queries filter by tenant, that cross-tenant references are rejected. | `tests/integration/tenant/CrossTenantDocumentAccessTests.cs` — provisions documents in tenant A, authenticates as user in tenant B, asserts every `GET`/`PATCH`/`DELETE` returns 404 ProblemDetails (not 403, to avoid information disclosure). |
 | 5 | **endpoint-contract** | `tests/integration/contract/**` | Every new endpoint must have at least one integration test asserting the request/response contract (route, verbs, status codes, ProblemDetails shape, content-type). | `tests/integration/contract/SemanticSearchEndpointContractTests.cs` — asserts `POST /api/ai/search` accepts `application/json`, returns `200 + SearchResultsDto` for happy path, `400 + ProblemDetails` for missing `query` field, `401 + ProblemDetails` for missing bearer token. |
 | 6 | **domain-logic** | `tests/unit/domain/**` | Pure logic — no I/O, no mocks, no DI. Validators, parsers, formatters, transforms, state machines. Fast (in-process), deterministic, no `TimeProvider` ceremony needed beyond passing `DateTimeOffset` parameters. | `tests/unit/domain/DocumentNameValidatorTests.cs` — asserts `DocumentNameValidator.IsValid("doc<>name.pdf") == false` and `IsValid("doc.pdf") == true`. Twenty assertions per file is fine; the file is small, the test is fast, the failure is localized. |
+| 7 | **vertical-slice-seam** | `tests/integration/seam/**` | End-to-end slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render) using production types, with only the LLM, catalog-data and side-effect-transport boundaries doubled. A green router-unit or contract-shape test is not a substitute. Definition of done for any dispatch-spine change (ADR-038 §2). | `tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs` |
+| 8 | **structural fitness function** | `tests/Spaarke.ArchTests/**` | Asserts an invariant over source or assemblies rather than runtime behaviour; the sanctioned replacement for the wiring tests banned by B1–B5 (ADR-038 Amendment A1). Each rule carries negative and positive controls; each allowlist entry carries a reason and an ADR citation. Naming (B13) and setup-ratio (B15) heuristics do not apply — see `tests/CLAUDE.md`. | `tests/Spaarke.ArchTests/CredentialGuardTests.cs` — fails the build on a new `.WithClientSecret(...)` site. |
 
 ### Deletion safety (binding)
 
-Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these six paths requires a **same-PR replacement** of equivalent coverage in the same category. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
+Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these eight paths requires a **same-PR replacement** of equivalent coverage in the same category. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
 
 ### What is NOT a KEEP category
 
-If a test does not fit one of the six, it is a DELETE candidate — even if it passes. The most common DELETE patterns are exhaustively listed in §5's ban list.
+If a test does not fit one of the eight, it is a DELETE candidate — even if it passes. The most common DELETE patterns are exhaustively listed in §5's ban list.
 
 ---
 
@@ -144,27 +148,29 @@ Mock at **module boundaries**, not inside the system. A module boundary is a sea
 
 | Boundary | Acceptable mock | Example use |
 |----------|----------------|-------------|
-| `IDataverseClient` (production-defined interface around the Dataverse SDK) | `Mock<IDataverseClient>` set up with `Setup(x => x.RetrieveAsync(...)).ReturnsAsync(...)` | Integration test verifies an endpoint's ProblemDetails shape when Dataverse returns a 404; mocking is the only way to reliably trigger that 404. |
+| `IDataverseService` (production-defined interface around the Dataverse SDK) | `Mock<IDataverseService>` set up with `Setup(x => x.RetrieveAsync(...)).ReturnsAsync(...)` | Integration test verifies an endpoint's ProblemDetails shape when Dataverse returns a 404; mocking is the only way to reliably trigger that 404. |
 | `IDistributedCache` | `Mock<IDistributedCache>` or a real in-memory implementation | Test that a cache miss triggers exactly one downstream call (`Verify(x => x.GetAsync(...), Times.Once)`). |
 | `TimeProvider` | `FakeTimeProvider` (per §4) | All time-dependent tests. |
 | Service Bus `ServiceBusSender` | `Mock<ServiceBusSender>` | Verify a background job is enqueued with the correct payload after an endpoint succeeds. |
 
 ### Banned mocks (explicit ban list)
 
-The following mocks are **forbidden** in any new test. Existing tests using these patterns are DELETE candidates (per the six KEEP categories in §3 — no ban-list pattern fits any KEEP category).
+The following mocks are **forbidden** in any new test. Existing tests using these patterns are DELETE candidates (per the eight KEEP categories in §3 — no ban-list pattern fits any KEEP category).
 
 | # | Forbidden pattern | Why it's wrong | What to do instead |
 |---|-------------------|---------------|--------------------|
 | 1 | **`Mock<HttpMessageHandler>`** — building a fake HTTP pipeline inside `HttpClient` to assert the BFF "would have" called Graph | Mocks the pipeline, not the boundary. Breaks on every Graph SDK upgrade. Asserts headers/bodies the production code never reads back. | Use `WebApplicationFactory<Program>` and intercept at the actual integration seam: mock `IGraphClientFactory`'s return value, or run against a real test Graph endpoint. |
-| 2 | **`Mock<IServiceClient>` for ServiceClient (Dataverse SDK)** — mocking the Microsoft.PowerPlatform.Dataverse.Client surface | The Dataverse SDK has 200+ surface methods; partial mocks return default values that mask real failures. | Use `IDataverseClient` (Spaarke's facade — a real boundary) or run integration tests against a Dataverse test environment. |
+| 2 | **`Mock<IServiceClient>` for ServiceClient (Dataverse SDK)** — mocking the Microsoft.PowerPlatform.Dataverse.Client surface | The Dataverse SDK has 200+ surface methods; partial mocks return default values that mask real failures. | Use `IDataverseService` (Spaarke's facade — a real boundary) or run integration tests against a Dataverse test environment. |
 | 3 | **DI-registration tests** — `services.BuildServiceProvider(); Assert.NotNull(sp.GetService<ISomething>())` | Tests the test harness. Passes whenever code compiles. Generates noise on every refactor. Caught 0 of the last 9 production bugs. | If you genuinely need to verify a service resolves, write an endpoint integration test — it exercises the same DI graph end-to-end with a real outcome to assert. |
 | 4 | **Constructor null-checks** — `Assert.Throws<ArgumentNullException>(() => new Service(null, mock2, mock3))` | The C# compiler + nullable reference types already enforce this. Hand-written tests of compiler-enforced behavior are pure churn. | Delete. If the constructor doesn't enforce non-null, the production code itself is the bug — fix it once, no test needed. |
 | 5 | **Mocking the class under test's collaborators when an integration boundary is available** — e.g., mocking `SpeFileStore` inside a `DocumentsController` unit test when a `WebApplicationFactory<Program>` integration test would exercise the real flow | Asserts the system "would have" called collaborators in the right order — but the right order is enforced by the production code, not by the test. Inverts dependencies into the test. | Write the integration test. If integration is genuinely too expensive (it almost never is), justify in the test class's XML doc comment with a concrete cost number. |
 
 ### One-line acceptable example per banned pattern (so authors see the alternative)
 
+The file names below are illustrative — they describe the shape, not files that exist.
+
 - **Banned 1 alternative** — `tests/integration/contract/GraphFileDownloadContractTests.cs`: `WebApplicationFactory<Program>` + `Mock<IGraphClientFactory>` returns a `GraphServiceClient` wired to a stubbed `IRequestAdapter`. The mock lives at the factory boundary; the request pipeline is real.
-- **Banned 2 alternative** — `tests/integration/data-mutation/DocumentCreateTests.cs`: `Mock<IDataverseClient>` returns a deterministic `Entity` for the `RetrieveAsync` call. The Spaarke facade is mocked; the Dataverse SDK is not.
+- **Banned 2 alternative** — `tests/integration/data-mutation/DocumentCreateTests.cs`: `Mock<IDataverseService>` returns a deterministic `Entity` for the `RetrieveAsync` call. The Spaarke facade is mocked; the Dataverse SDK is not.
 - **Banned 3 alternative** — `tests/integration/contract/HealthzEndpointTests.cs`: hits `GET /healthz` end-to-end through `WebApplicationFactory<Program>`. If DI is broken, the test 500s; the assertion is on the response, not on `GetService<T>`.
 - **Banned 4 alternative** — none. The pattern has no defensive value. Delete.
 - **Banned 5 alternative** — `tests/integration/auth/DocumentReadAuthorizationTests.cs`: `WebApplicationFactory<Program>` with a real `DocumentsController` and real `SpeFileStore`; `Mock<IGraphClientFactory>` substitutes only at the Graph boundary.
@@ -177,9 +183,9 @@ This standard is binding because three mechanisms enforce it at the points where
 
 | # | Enforcement point | What it checks | Where it is wired |
 |---|-------------------|---------------|-------------------|
-| 1 | **`task-execute` Step 9.5 — code-review for all test-modifying PRs** | Every PR that touches `tests/**` runs the `code-review` skill at Step 9.5. The reviewer checks: (a) any deletion under a KEEP path has a same-PR replacement (§3); (b) no banned mock patterns are introduced (§5); (c) any time-dependent test uses `TimeProvider` (§4); (d) new tests live under one of the six KEEP paths. Test PRs are explicitly FULL rigor (NOT auto-STANDARD) for ≥6 months. | `.claude/skills/task-execute/SKILL.md` Step 9.5; root `CLAUDE.md` §8 rigor table; `ci-cd-unit-test-remediation-r1` spec FR-B07 |
+| 1 | **`task-execute` Step 9.5 — code-review for all test-modifying PRs** | Every PR that touches `tests/**` runs the `code-review` skill at Step 9.5. The reviewer checks: (a) any deletion under a KEEP path has a same-PR replacement (§3); (b) no banned mock patterns are introduced (§5); (c) any time-dependent test uses `TimeProvider` (§4); (d) new tests live under one of the eight KEEP paths. Test PRs are explicitly FULL rigor (NOT auto-STANDARD) for ≥6 months. | `.claude/skills/task-execute/SKILL.md` Step 9.5; root `CLAUDE.md` §8 rigor table; `ci-cd-unit-test-remediation-r1` spec FR-B07 |
 | 2 | **`nightly-health.yml` Tier 3 (observation, never gating)** | Full integration test run against a real-ish environment, coverage observation (tracked for trend, never a merge gate), Trivy scan, dependency audit. Coverage trend reports are an FYI signal — a 5% drop triggers an investigation issue, not a block. | `.github/workflows/nightly-health.yml`; `ci-cd-unit-test-remediation-r1` spec FR-A04 |
-| 3 | **ADR-038 (planned)** — supersedes ADR-022's coverage clauses | Records the policy reversal (coverage-as-observation, not gate) with the evidence section (symptoms S-5, S-6 from `ci-cd-unit-test-remediation-r1` design.md §3). Standalone testing-strategy ADR (NOT a supersession of ADR-022, which is the PCF Platform Libraries ADR — the spec FR-B03 misattribution is corrected in `.claude/constraints/testing.md`). | `.claude/adr/ADR-038-testing-strategy.md` (drafted in `ci-cd-unit-test-remediation-r1` task CICD-024) |
+| 3 | **ADR-038** — supersedes ADR-022's coverage clauses | Records the policy reversal (coverage-as-observation, not gate) with the evidence section (symptoms S-5, S-6 from `ci-cd-unit-test-remediation-r1` design.md §3). Standalone testing-strategy ADR (NOT a supersession of ADR-022, which is the PCF Platform Libraries ADR — the spec FR-B03 misattribution is corrected in `.claude/constraints/testing.md`). | `docs/adr/ADR-038-testing-strategy.md` (no concise copy in `.claude/adr/`) |
 
 ### What is NOT a forcing function
 
@@ -195,7 +201,7 @@ This standard is binding because three mechanisms enforce it at the points where
 |-----------|--------------|
 | [`tests/CLAUDE.md`](../../tests/CLAUDE.md) | Per-test-tree authoring guidance (integration-first AAA template, "every bug = regression test", "every new endpoint = ≥1 integration test"). Cites this document as the cross-cutting standard. |
 | [`.claude/constraints/testing.md`](../../.claude/constraints/testing.md) | Binding MUST/MUST NOT rules in constraint form (path conventions, ban list, no coverage targets). Cites this document for definitions and examples. |
-| [`.claude/adr/ADR-038-testing-strategy.md`](../../.claude/adr/ADR-038-testing-strategy.md) (planned, forward reference) | Standalone testing-strategy ADR recording the policy reversal away from coverage-% gating. NOT a supersession of ADR-022 (which is PCF Platform Libraries). |
+| [`docs/adr/ADR-038-testing-strategy.md`](../adr/ADR-038-testing-strategy.md) | Standalone testing-strategy ADR recording the policy reversal away from coverage-% gating. NOT a supersession of ADR-022 (which is PCF Platform Libraries). |
 | [`docs/procedures/testing-and-code-quality.md`](../procedures/testing-and-code-quality.md) | Day-to-day testing workflow: how to run, how to debug, how to file new tests in the right path. |
 | [`projects/ci-cd-unit-test-remediation-r1/spec.md`](../../projects/ci-cd-unit-test-remediation-r1/spec.md) | Source-of-truth FRs (FR-B01..FR-B07) that produced this standard. |
 | [`projects/ci-cd-unit-test-remediation-r1/design.md`](../../projects/ci-cd-unit-test-remediation-r1/design.md) | Symptom evidence (S-5, S-6) — why coverage-% culture failed in practice. |

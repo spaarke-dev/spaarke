@@ -1,7 +1,6 @@
 # CLAUDE.md — Office Add-ins Module
 
-<!-- Change history: git log for this file; the full previous header is in .claude/archive/2026-10-07/modules/office-addins.CLAUDE.md -->
-> **Last Updated**: 2026-09-30 (task 078)
+> **Last Updated**: 2026-09-30 — task 078: manifests split into the LIVE XML era vs the unified app package (Outlook + Word in one app, `packaging/`); warned off `build/` folders (gitignored). 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only); added `office-addins-tests.yml` PR-check note. Originally created 2026-09-04 (email-communication-intelligence-r2 — first module pointer for the add-ins)
 > **Purpose**: Where to start reading when working in `src/client/office-addins/**`. Code is the source of truth; the architecture doc explains *why*.
 > **Full architecture**: [`docs/architecture/office-outlook-teams-integration-architecture.md`](../../../docs/architecture/office-outlook-teams-integration-architecture.md) — read it before extending the add-ins.
 

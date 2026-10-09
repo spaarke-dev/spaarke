@@ -824,6 +824,8 @@ Get-DistributionGroupMember -Identity "SDAP Mailbox Access" | Format-Table Displ
 
 ### Step 4: Create Application Access Policy
 
+> **Legacy mechanism — check before use.** Environments provisioned by the control plane get mailbox access through Exchange *RBAC for Applications*, granted by handler H14a to the stamp's managed identity only ([`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §4.2.1, §7.9). Microsoft calls Application Access Policies legacy. Under RBAC for Applications the mailbox roles must not also be granted as Entra app roles (§7.7): Exchange adds the two together, so an Entra grant reaches every mailbox. The steps below apply only to an environment set up before 2026-10-04 that still uses a policy.
+
 Restrict the BFF API app registration to only the mailboxes in the security group:
 
 ```powershell

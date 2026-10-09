@@ -27,13 +27,13 @@ Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISION
 - **I1** — `customerId`, `tenantId`, and `runId` are IMMUTABLE for this folder's lifetime. No handler reassigns them.
 - **I2** — All AI Search queries for this run MUST include unconditional `tenantId eq '{tenantId}'` filter (FR-29).
 - **I3** — All Cosmos reads/writes for this run MUST include partition-key `/customerId` predicate (FR-30).
-- **I4** — SPE container IDs come from the record being served or the stamp's own settings, and every app-only SPE call passes `SpeContainerOwnershipGuard` — the one definition of the stamp's containers (FR-31; T227d/T227f).
+- **I4** — All SPE container IDs derived from this run's tenant context via `ITenantContainerResolver` (FR-31).
 - **I5** — All Graph token acquisitions for this run use tenant `{tenantId}` (FR-32).
-- **BINDING** — Before creating, seeding, deleting or purging any Key Vault secret for this run, read and apply the current text of [`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md) "KV credential lifecycle" (time-boxed and environment-specific; root CLAUDE.md §9).
+- **BINDING** — Do NOT delete `Dataverse-ClientSecret` or `BFF-API-ClientSecret` from this run's shared KV — see [`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md).
 
 ## Escalations
 
-Any operator escalation → append to [`manual-gates.md`](manual-gates.md) with timestamp + decision + rationale. Per root CLAUDE.md §6.5 protocol, ADR-conflict escalations use the root §6.5 format (ADR, quoted rule, conflict, proposed path, rationale, impact, alternatives rejected).
+Any operator escalation → append to [`manual-gates.md`](manual-gates.md) with timestamp + decision + rationale. Per root CLAUDE.md §6.5 protocol, ADR-conflict escalations use the 6-field format (ADR + rule + conflict + path + rationale + alternative-considered).
 
 ## Postmortem obligation
 

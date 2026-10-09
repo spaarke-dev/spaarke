@@ -11,7 +11,7 @@ This directory contains comprehensive architecture documentation covering system
 
 ### Authentication & Authorization
 
-> **Canonical v2 references**: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (architecture + constraints), [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) (operator runbook with §7 Exchange ApplicationAccessPolicy), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) (MSAL INV-1..INV-8). The architecture docs below were updated 2026-05-19/20 to align with Auth v2.
+> **Canonical v2 references**: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (architecture + constraints), [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (operator runbook: auth §6.5/§7.3/§7.7, Exchange mailbox access §7.9), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) (MSAL INV-1..INV-8). The architecture docs below were updated 2026-05-19/20 to align with Auth v2.
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
