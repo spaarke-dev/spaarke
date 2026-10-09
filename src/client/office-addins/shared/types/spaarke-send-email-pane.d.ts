@@ -115,6 +115,8 @@ declare module '@spaarke/ui-components/send-email-pane' {
     onStateChange?: (state: EmailComposerStateSubset) => void;
     onSent?: (result: { communicationId: string }) => void;
     onError?: (err: SendCommunicationError) => void;
+    /** `EmailComposer.types.ts` — who tells the user a send failed: the engine's dialog (default) or the host. */
+    sendFailureDisplay?: 'dialog' | 'host';
     className?: string;
   }
 

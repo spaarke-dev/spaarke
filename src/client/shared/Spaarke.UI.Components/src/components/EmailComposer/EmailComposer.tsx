@@ -72,7 +72,14 @@ import {
 import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
 
-import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
+import { sendCommunication } from '../../services/communicationApi';
+import { SprkModal } from '../SprkModal';
+import {
+  describeDraftSaveFailure,
+  describeSendFailure,
+  toSendCommunicationError,
+  type ISendFailureDescription,
+} from './describeSendFailure';
 
 import {
   emailComposerReducer,
@@ -486,6 +493,17 @@ const useStyles = makeStyles({
   inline: {
     width: '100%',
   },
+
+  // Failed send / Save Draft dialog body: the message, then the support reference.
+  failureBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  failureReference: {
+    color: tokens.colorNeutralForeground3,
+    userSelect: 'text',
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -657,6 +675,23 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  // The "Email not sent" / "Draft not saved" dialog (owner decision 2026-10-09: a failed send is
+  // never silent). Transient UI state, not engine state. Non-null → the dialog is open.
+  const [failureNotice, setFailureNotice] = React.useState<ISendFailureDescription | null>(null);
+  // The last notice shown, so the dialog keeps its text while it animates closed.
+  const lastFailureNoticeRef = React.useRef<ISendFailureDescription | null>(null);
+  if (failureNotice) lastFailureNoticeRef.current = failureNotice;
+  const shownFailureNotice = failureNotice ?? lastFailureNoticeRef.current;
+  const closeFailureNotice = React.useCallback(() => {
+    setFailureNotice(null);
+    // Back to the composer (the draft is still there). Fluent restores focus to the element that had
+    // it when the dialog opened when it can; fall back to the composer root when that element is gone.
+    window.setTimeout(() => {
+      const root = rootRef.current;
+      if (root && !root.contains(document.activeElement)) root.focus();
+    }, 0);
   }, []);
 
   const onUploadLocalAttachment = props.onUploadLocalAttachment;
@@ -1086,6 +1121,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }
 
     dispatch({ type: 'BEGIN_SEND' });
+    // An unresolved record link is refused with an inline message (below) — it is already on screen,
+    // so it is not reported again through onError or the failure dialog.
+    let refusedInline = false;
     try {
       // Task 098: swap linked document attachments' URL for the Spaarke record link. A link the host
       // cannot produce is omitted AND the send is refused with a message the author can act on —
@@ -1103,6 +1141,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           type: 'SET_VALIDATION_ERRORS',
           result: { ok: false, errors: [{ field: 'attachments', code: 'ATTACHMENT_LINK_UNAVAILABLE', message }] },
         });
+        refusedInline = true;
         throw new Error(message);
       }
       const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
@@ -1115,10 +1154,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       return response;
     } catch (err) {
       dispatch({ type: 'END_SEND' });
-      if (err instanceof SendCommunicationError) {
-        props.onError?.(err);
+      if (refusedInline) throw err;
+      // Every other failure — a server refusal, an expired sign-in, a request that never reached the
+      // server — is normalized so the host's onError hears about it, and the user is told (owner
+      // decision 2026-10-09: a failed send is never silent). See `sendFailureDisplay`.
+      const failure = toSendCommunicationError(err);
+      props.onError?.(failure);
+      if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
+        setFailureNotice(describeSendFailure(failure));
       }
-      throw err;
+      throw failure;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
@@ -1212,7 +1257,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
             onSend={() => {
               send().catch(() => {
-                /* onError already notified; swallow so the click doesn't reject. */
+                /* send() already told the user (failure dialog / host via onError) — swallow so the
+                   click doesn't leave an unhandled rejection. */
               });
             }}
           />
@@ -1493,10 +1539,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSavingDraft={state.isSavingDraft}
         isDraftRecord={props.isDraftRecord}
         onSaveDraft={() => {
-          saveDraft().catch(() => {
-            /* surfaced via onSaveDraft/props.onError-equivalent is not
-               defined for drafts yet; the thrown error is still available
-               to callers awaiting composerRef.current.saveDraft() directly. */
+          // A failed Save Draft is told to the user like a failed send (there is no draft onError yet;
+          // callers awaiting composerRef.current.saveDraft() directly still get the rejection).
+          saveDraft().catch((err: unknown) => {
+            if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
+              setFailureNotice(describeDraftSaveFailure(err, !props.onSaveDraftRequest));
+            }
           });
         }}
         onCancel={() => props.onCancel?.()}
@@ -1504,6 +1552,33 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         onReply={props.onReply}
         onForward={props.onForward}
       />
+
+      {/* Failed send / Save Draft (owner decision 2026-10-09). The canonical shell (ADR-050) as a
+          one-button alert: `xs`, `alert` (role="alertdialog" — announced at once; no ESC/backdrop
+          dismiss), not maximizable. It opens OVER the composer (and over SendEmailDialog's own
+          SprkModal — a nested Fluent dialog), which stays mounted underneath with the draft intact. */}
+      <SprkModal
+        open={failureNotice !== null}
+        onClose={closeFailureNotice}
+        title={shownFailureNotice?.title ?? ''}
+        size="xs"
+        dismiss="alert"
+        maximizable={false}
+        footer={
+          <Button appearance="primary" onClick={closeFailureNotice}>
+            OK
+          </Button>
+        }
+      >
+        <div className={styles.failureBody}>
+          <Text>{shownFailureNotice?.message}</Text>
+          {shownFailureNotice?.reference && (
+            <Text size={200} className={styles.failureReference}>
+              Reference: {shownFailureNotice.reference}
+            </Text>
+          )}
+        </div>
+      </SprkModal>
     </div>
   );
 });

@@ -179,6 +179,11 @@ export const EmailView: React.FC<EmailViewProps> = ({
 
   const handleError = useCallback(
     (err: ComposerSendError) => {
+      // Status 0 = no server refusal: the request was never made, got no response, or got a 2xx without a
+      // record id. The pane fetch's observer (above) already reported each of those with the right wording
+      // ("not sent" / "may not have been sent" / "sent, but not recorded"); since 2026-10-09 the engine also
+      // forwards them here (normalized to status 0), so leave the observer's outcome in place.
+      if (err.status === 0) return;
       // The server's own reason (ProblemDetails `detail`) — never a bare status code.
       const text = `Email not sent: ${err.detail || err.message}`;
       setOutcome({ kind: 'error', message: text });
@@ -316,6 +321,9 @@ export const EmailView: React.FC<EmailViewProps> = ({
             authenticatedFetch={authenticatedFetch}
             bffBaseUrl={bffBaseUrl}
             onSent={handleSent}
+            // This tab tells the user itself (the outcome MessageBar + live-region announcement), so the
+            // composer's own "Email not sent" dialog is switched off — one report per failure.
+            sendFailureDisplay="host"
             onError={handleError}
             onStateChange={handleStateChange}
           />
