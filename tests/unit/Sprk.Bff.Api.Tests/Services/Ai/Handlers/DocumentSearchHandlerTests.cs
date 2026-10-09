@@ -436,7 +436,9 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
 
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
-        capturedOptions!.ParentEntityType.Should().Be("sprk_matter");
+        // Task 176 (verifier F2): the filter carries the type the index STORES ("matter"); "sprk_matter" matched no
+        // chunk, so this assertion used to pin a search that always returned nothing.
+        capturedOptions!.ParentEntityType.Should().Be("matter");
         capturedOptions.ParentEntityId.Should().Be(matterEntityId,
             because: "R6 Wave 8: SearchDiscovery scopes to the playbook's host-context parent entity when set");
     }

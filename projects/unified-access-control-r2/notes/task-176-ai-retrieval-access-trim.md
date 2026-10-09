@@ -30,11 +30,12 @@ Measured on dev App Insights `spe-insights-dev-67e2xz` over the last 7 days, a W
 
 | # | Caller | Reach | Disposition |
 |---|---|---|---|
-| 1 | `DocumentSearchHandler` SearchDocuments: chat, and playbook via `ExecuteAsync` | chat tool "SYS-Document Search", always offered | **Trimmed**; bound to the host parent when there is one |
-| 2 | `DocumentSearchHandler` SearchDiscovery: chat and playbook | chat tool "SYS-Document Discovery" | **Trimmed**; host parent as before; no host → trimmed tenant search |
+| 1 | `DocumentSearchHandler` SearchDocuments: chat, and playbook via `ExecuteAsync` | chat tool "SYS-Document Search", always offered | **Trimmed**; bound to the host parent when the index stores that type (fix round 1, F2) |
+| 2 | `DocumentSearchHandler` SearchDiscovery: chat and playbook | chat tool "SYS-Document Discovery" | **Trimmed**; same host rule; no host, or a host type the index does not store → trimmed tenant search |
 | 3 | `KnowledgeRetrievalHandler` SearchKnowledgeBase | chat tool "SYS-Knowledge Base Search", playbooks | **Trimmed** |
 | 4 | `KnowledgeRetrievalHandler` GetKnowledgeSource | chat tool "SYS-Knowledge Source Retrieval", playbooks | **Trimmed** (a knowledge-source chunk with no document id is dropped; see §7) |
 | 5 | `AiAnalysisNodeExecutor.RetrieveDocumentContextAsync` (L2) | playbook nodes with `includeDocumentContext` | **Trimmed** with the run principal; app-only run → none. A parent named in ConfigJson that the caller cannot read now yields nothing. |
+| 5b | `AiAnalysisNodeExecutor.RetrieveEntityContextAsync` (L3, records index, app-only `IRecordSearchService`) | playbook nodes with `includeEntityContext` | **Gated (fix round 1, F1).** One caller-scoped read of the ConfigJson parent (`TrimByRecordAsync`). No principal, an unreadable parent or a failed check → no L3, logged. Also new: the records-index hit must BE that parent (`RecordId` = `parentEntityId`); the keyword search's top hit was not guaranteed to be. |
 | 6 | `SemanticSearchToolHandler` (2 calls, `ISemanticSearchService`) | analysis/playbook tool "Search Documents" | **Trimmed** (2× pool, page cut, counts = rows returned); no caller → `RESULTS_WITHHELD` warning |
 | 7 | `DocumentClassifierHandler.GetRagExamplesAsync` | analysis tool "Document Classifier", including app-only document profiling | **Trimmed.** The examples are other documents' text placed in the prompt. App-only profiling has no caller, so it classifies zero-shot. |
 | 8 | `AnalysisRagProcessor.ProcessRagKnowledgeAsync` (knowledge sources, after its tenant RAG cache) | HTTP analysis (`AnalysisOrchestrationService.ExecutePlaybookAsync`) | **Trimmed** after the cache, with the HTTP caller. The cache holds untrimmed rows and is never returned as is. With no caller, RAG sources contribute nothing. |
@@ -47,8 +48,14 @@ Measured on dev App Insights `spe-insights-dev-67e2xz` over the last 7 days, a W
 | 15 | `SemanticSearchEndpoints` (`/api/ai/search`), `RecordSearchEndpoints`, visualization "related" | HTTP | Already per-row checked (out of scope, unchanged) |
 | 16 | `FileIndexingService`, `RagIndexingPipeline`, `PostUploadIndexingEnqueuer`, `RelocatedFileIndexing`, `KnowledgeBaseEndpoints` (health counts) | indexing / counts | Do not return document content to a user; no change |
 | 17 | `ReferenceRetrievalService` (L1) | playbooks | Not `IRagService`: it reads the shared `spaarke-rag-references` corpus (`tenantId = "system"`, curated reference material, not customer documents). Outside the trim, as the issue says. |
+| 18 | `IndexRetrieveNode` (`SearchAsync<SearchDocument>` on `spaarke-insights-index`) | predict-matter-cost@v1 (`retrieveCohortObservations`, `retrievePrecedents`), matter-health-single (`retrieveObservations`), reaching `POST /api/insights/ask` | **Trimmed (fix round 1, F1)** through `TrimByRecordAsync` as the run principal, from a 2× pool. The deciding record is the row's **source document** when its `document` evidence names one: a bare `sprk_document` id, or `spe://drive/{d}/item/{i}`, checked as "the caller can read a `sprk_document` row on that `sprk_driveitemid`" (the dominant emission shape). Otherwise its **scope record**: `scope.entityType` + `entityId` (matter, project, invoice, work assignment), or the legacy `scope.matterId`. A row with neither is dropped. `totalCount` is now the returned count. The `/ask` result cache key already includes the caller oid (`AccessibleScopeHash`), so trimmed results are not shared between callers. **Precedents** carry no document evidence and no scope record, so they are always dropped (escalation, §11). |
+| 19 | `InternalIndexProvider` (citation verification, `spaarke-rag-references`) | VerifyCitations tool | Reference corpus (`tenantId = "system"`, script-fed); returns a verification verdict and a score. Not customer documents; outside the trim. |
+| 20 | `FilesIndexIngestDocumentSource` | Insights ingest (app-only producer) | Reads one named document's chunks to EXTRACT observations; nothing returns to a user here. Its output is trimmed at retrieval (#18). |
+| 21 | `InvoiceSearchService` (`/api/finance/invoices/search`) | HTTP finance route | Matter-Read-gated route (task 130); invoice rows of that matter, not AI document retrieval. Unchanged. |
+| 22 | `RecordSearchService`, `RecordMatchService`, `DataverseIndexSyncService` (records index) | record search / matching | Record metadata, not document content. `/search/records` is per-row checked (issue table). Matching runs in background or through its own routes. Out of scope; listed under out-of-scope defects only if it returns a record the caller cannot read (not established here). |
+| 23 | `SessionFilesCleanupJob`, `SessionFilesHotIndexAccess`, `EmbeddingMigrationService`, `PrecedentProjectionSync`, `ObservationIndexUpserter`, `InvoiceIndexingJobHandler`, `RagIndexingPipeline`, `KnowledgeDeploymentService`, `SearchClientFactory`, `ResilientSearchClient`, `VisualizationService`, `SemanticSearchService` | jobs, writers, factories, and services whose callers are rows 6/15 | No user-facing read of their own |
 
-The search covered every `IRagService` injection (`grep -rn "IRagService"`) and every `.SearchAsync(` in `Sprk.Bff.Api`.
+The search covered every `IRagService` injection (`grep -rn "IRagService"`) and every `.SearchAsync(`. Fix round 1 re-grepped every `SearchAsync<`, `.GetSearchClient(` and `new SearchClient(` in `Sprk.Bff.Api` (rows 18–23), which is where `IndexRetrieveNode` had been missed.
 
 ## 5. Tests
 
@@ -56,8 +63,10 @@ The search covered every `IRagService` injection (`grep -rn "IRagService"`) and 
 |---|---|
 | `tests/integration/regression/Ai/Issue1511_AiRetrievalAccessTrimTests.cs` (new, KEEP path) | Real trim plus the simulated user-OBO boundary. `SecureDocument_DoesNotReachDocumentSearch` (SearchDocuments and SearchDiscovery), `…KnowledgeRetrieval` (SearchKnowledgeBase and GetKnowledgeSource), `…PlaybookNodeDocumentContext` (through `AiAnalysisNodeExecutor.ExecuteAsync`), `…SemanticSearchTool`; `ReadableDocument_IsReturnedExactlyAsBefore`; `NoCallerIdentity_ReturnsNoRows_SaysSo_AndDoesNotSearch`; `UnattendedPlaybookRun_WithNoRunPrincipal_ReturnsNoRows`; `AFailedOrThrottledAccessCheck_ReturnsNoRows` (429); `HostDropped_DiscoverySearchesTheTenant_ButReturnsOnlyWhatTheCallerCanRead`; `WithAHost_SearchDocumentsIsBoundToTheHostParent`. 12 cases. |
 | `tests/unit/.../Services/Ai/PublicContracts/RetrievalAccessTrimTests.cs` (new) | The owner's batch-read rules: ADR-044 canonicalization, chunks of 20 (45 ids → 20/20/5) with order kept, unusable ids dropped, an unasked id in the answer ignored, caller ≠ request principal → nothing and no read, malformed answer → nothing. 6 cases. |
+| Regression suite, fix round 1 additions | `WithAnIndexedHost_BothMethodsAreBoundToTheHostParent` (`sprk_matter` → `matter` for both methods, `sprk_workassignment` → `workassignment`, through production `ChatHostContext` normalization); `WithAHostTheIndexDoesNotStore_SearchIsTheTrimmedTenantSearch_NotEmpty` (`sprk_analysisoutput` and `sprk_document` hosts × both methods: no parent filter, the readable document still returned, the secure one trimmed); `SecureDocument_AndSecureMatter_Observations_DoNotReachIndexRetrieve` (restricted document under a readable matter, unreadable `spe://` item, secure matter with no document evidence → dropped; readable item and readable matter → kept); `L3EntityContext_IsAddedOnlyForAParentTheCallerCanRead` (unreadable → none; readable → still added). The earlier `WithAHost_SearchDocumentsIsBoundToTheHostParent` used `"sprk_matter"` raw (F3) and is replaced. Total 21 cases. |
 | `tests/unit/.../Insights/InsightsOrchestratorTests.cs` (+1) | `SearchAsync_DocumentTheCallerCannotRead_IsNotReturnedOrSummarized` (caller #9) |
 | Shared helpers (new) | `tests/integration/Shared/ReadableDocumentsUserClient.cs` (simulated `IDataverseUserClient`, the documented mock boundary); `PermitAllRetrievalAccessTrim.cs` (for suites that test what callers do with permitted rows) |
+| Updated (fix round 1) | `DocumentSearchHandlerTests.ExecuteChatAsync_SearchDiscovery_ForwardsParentEntity_FromKnowledgeScope` now expects `matter`; it pinned the F2 bug (`sprk_matter` matched no chunk). `IndexRetrieveNode*Tests` and `InsightsNodesIntegrationTests` pass an `IServiceScopeFactory`. `ReadableDocumentsUserClient` now answers any (entity set, key) read. |
 | Updated | `DocumentSearchHandlerTests`, `KnowledgeRetrievalHandlerTests`, `DocumentClassifierHandlerTests`, `InsightsOrchestratorTests`, `PredictMatterCostPlaybookTests`, `AnalysisOrchestrationServiceTests`, `SemanticScopeProviderSeamTests`: constructors take the trim (permit-all). `ExecuteChatAsync_SearchDiscovery_DefaultTopK_IsTen` now asserts the 2× pool (page size still 10). |
 
 **Beyond the stated contract (one line each):**
@@ -69,6 +78,12 @@ The search covered every `IRagService` injection (`grep -rn "IRagService"`) and 
 ## 6. Seeding proof and the task-163 swap
 
 **Seeding proof:** `RetrievalAccessTrim.TrimAsync` was changed to `var kept = rows.ToList();` (trim disabled). Seven tests failed: `SecureDocument_DoesNotReachDocumentSearch` ×2, `…KnowledgeRetrieval` ×2, `…PlaybookNodeDocumentContext`, `…SemanticSearchTool` and `HostDropped_…`. The change was reverted, and all pass.
+
+**Seeding proof, fix round 1:**
+- `IndexRetrieveNode` was changed to take `candidates` instead of `trim.Rows`.
+- The L3 gate was changed to `parentCheck.Rows.Count < 0`.
+- Two tests failed: `SecureDocument_AndSecureMatter_Observations_DoNotReachIndexRetrieve` and `L3EntityContext_IsAddedOnlyForAParentTheCallerCanRead(callerCanRead: False)`.
+- Both changes were reverted, and all 21 pass.
 
 **The task-163 trim stays as is.** `RagEndpoints.TrimToReadableDocumentsAsync` is not moved onto the seam. Its tests (`RagEndpoints*`, contract and auth suites) drive the real `AiAuthorizationService` through `CallerAccessSeam` (`GetUserAccessAsync`), so a swap to `IDataverseUserClient` would change those tests. Per the owner's condition ("only if mechanical with its tests unchanged"), it is not done. `/api/ai/rag/search` keeps its per-document cost; that is recorded, not fixed.
 
@@ -82,7 +97,11 @@ Read-only, with the dev **query** key, against `spaarke-search-dev` / `spaarke-f
 | `knowledgeSourceId ne null` | 0 |
 | `documentId eq null` (any orphan) | 2 (dropped by the trim, as task 163 drops them) |
 
-Trigger 2 was not fired on dev. The reference KB is in `spaarke-rag-references` (`tenantId = "system"`), which no `IRagService` caller can reach. **Before a customer deploy**, repeat the first count per environment: a non-zero count means GetKnowledgeSource or knowledge-source-scoped search for those sources returns nothing after this change.
+Trigger 2 was not fired on dev. The reference KB is in `spaarke-rag-references` (`tenantId = "system"`), which no `IRagService` caller can reach.
+
+**Before a customer deploy (K2), per environment:**
+1. Repeat the first count. A non-zero count means GetKnowledgeSource or knowledge-source-scoped search returns nothing for those sources after this change.
+2. Knowledge-source chunks that DO carry a document id are now trimmed like any other document. A user who cannot read a knowledge source's underlying `sprk_document` rows (for example, a curated library filed on a restricted matter) gets nothing from that source. Check that knowledge-source documents sit on records their audience can read.
 
 ## 8. Known behaviour changes (for the owner)
 
@@ -92,6 +111,12 @@ Trigger 2 was not fired on dev. The reference KB is in `spaarke-rag-references` 
 2. **Communication triage runs context-free** (caller #10): matter-correspondence grounding is withheld for every email.
 3. **Document Classifier RAG examples:** examples under app-only profiling are gone (zero-shot).
 4. **Chat search pages:** they may be shorter than topK when the caller can read few of the top 2× candidates. No "partial" flag is added, because the chat text already states the count.
+5. **Insights cohort retrieval (`IndexRetrieveNode`)** returns only observations the caller can read. The matter-cost cohort shrinks for a caller who cannot read many matters, and EvidenceSufficiency may decline sooner. With no run principal (any app-only run), it returns nothing.
+   - On dev, `IndexRetrieve` nodes exist only in predict-matter-cost@v1 (`retrieveCohortObservations`, `retrievePrecedents`) and matter-health-single (`retrieveObservations`).
+   - `/ask` runs predict-matter-cost with the HTTP caller (`ExecuteAsync`), so the principal is present.
+   - The dev insights index is empty (0 documents).
+6. **Precedents are always dropped** (no document evidence, no scope record): see §11.
+7. **Chat hosted on a type the index does not store** (an analysis, a document, an event) now gets the trimmed tenant search. Before, it was always empty, because `sprk_*` types never matched the index's `matter`/`project`/… values. That also affected a `sprk_matter` host on SearchDiscovery before this task.
 
 ## 9. §10 / §11 placement and justification
 
@@ -138,3 +163,27 @@ The 13 failures each took 3–5 minutes. They are Office save, document identity
 Known limits (K):
 - K4: the `SemanticScopeProviderSeamTests` "no caller" test uses the permit-all double, so it still describes `RagService`'s public-only filter, not the provider's new no-caller behaviour. The provider has no consumer yet.
 - K2: chat pages may come back short (§8.4).
+
+## 11. Fix round 1 (verifier pass 1 on PR #1520)
+
+| Item | Fix |
+|---|---|
+| **F2** host binding emptied both methods | `DocumentSearchHandler.CanonicalParentScope` normalizes the host type (strips `sprk_`) and binds ONLY to a type the index stores: matter, project, invoice, servicerequest, account, contact, and `workassignment` (the task-177 parent resolver, PR #1517, writes `workassignment`). Anything else → the trimmed tenant search (the host-dropped decision). A non-GUID host id → unbound. **What the dev index holds today** (`spaarke-files-index`, facet on `parentEntityType`, 1,347 chunks): matter 205, event 6, invoice 1, project 1. `event` is deliberately NOT bound: task 177 files an event's documents under the event's parent, so an `event` filter would find only 6 legacy chunks and miss the rest. |
+| **F3** test used `"sprk_matter"` raw | Scopes are built through `ChatHostContext` (production `EntityTypeNormalizer`). Added an analysis-host case and a document-host case for both methods: no parent filter, readable document returned, secure one trimmed. |
+| **F1** `IndexRetrieveNode` untrimmed | Trimmed (row #18). New seam method `IRetrievalAccessTrim.TrimByRecordAsync` with `RetrievalRecordKey` (factories: `Document`, `DocumentByDriveItem`, `ParentRecord`). Only those (entity set, column) pairs ever reach a filter. Same rules: 20 keys per read per kind, ADR-044 GUIDs, unasked keys ignored, fail closed. `IndexRetrieveNode` resolves the scoped trim through `IServiceScopeFactory` (it is a singleton, like `LiveFactNode`). |
+| **F1** L3 entity context unchecked | Gated (row #5b), plus the hit-must-be-the-parent check. |
+| **K3** triage logged a warning per email | The seam logs a no-DECLARED-caller withhold at **Information** (an expected unattended path). A declared caller that is not the request principal still logs a **Warning** (an anomaly). User-visible unattended paths log their own Warning: Document Search, Knowledge Retrieval, L2, `AnalysisRagProcessor`, `IndexRetrieveNode`, and now also `SemanticSearchToolHandler` and the Document Classifier examples. |
+
+**Escalation (trigger 2), not decided:** `retrievePrecedents` serves **Precedents**, curated, human-confirmed patterns stored as `pattern:{id}` with only `supporting-matter` evidence and no scope record. The trim drops every one (fail closed, not exempted). The options for the owner:
+- (a) Keep them dropped.
+- (b) Keep a Precedent only when the caller can read ALL of its supporting matters (from `value.raw.supportingMatters` or the precedent board N:N), which is one more batch read.
+- (c) Treat confirmed Precedents as a firm-level corpus, outside the trim.
+
+Dev has no Precedents (insights index empty). Recommendation: (b).
+
+**Known limits kept (verifier K1, K2, K4, K5):** left as known limits, no code change, per the coordinator. The verifier's full K-text is in the verifier report, not repeated here. K2 (knowledge-source documents) has its pre-deploy check extended in §7. This note's own K items are in §8 and §10.
+
+**Test runs after fix round 1:**
+- Affected AI suites: 1,320 passed, 3 skipped, after the F2 assertion fix.
+- ArchTests 889/889; no new interface, so the ADR-010 ceiling is unchanged.
+- `Spe.Integration.Tests` `ToolFrameworkIntegrationTests` 16/16.

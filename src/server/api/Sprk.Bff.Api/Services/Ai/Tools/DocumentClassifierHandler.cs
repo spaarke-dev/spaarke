@@ -539,7 +539,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 ? documentText.Substring(0, 500)
                 : documentText;
 
-            var (searchResult, _) = await _accessTrim.SearchReadableAsync(
+            var (searchResult, trim) = await _accessTrim.SearchReadableAsync(
                 _ragService,
                 queryText,
                 new RagSearchOptions
@@ -550,6 +550,12 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 },
                 callerObjectId,
                 cancellationToken);
+
+            if (trim.Withheld)
+            {
+                _logger.LogWarning(
+                    "RAG examples withheld: {Outcome}; classifying zero-shot (task 176, fail closed)", trim.Outcome);
+            }
 
             var examples = searchResult.Results
                 .Select(r => new RagExample

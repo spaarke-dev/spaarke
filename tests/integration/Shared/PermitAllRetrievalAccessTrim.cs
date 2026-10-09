@@ -20,4 +20,11 @@ public sealed class PermitAllRetrievalAccessTrim : IRetrievalAccessTrim
         string? callerObjectId,
         CancellationToken cancellationToken = default)
         => Task.FromResult(new RetrievalTrimResult<T>(rows, RetrievalTrimOutcome.Evaluated, 0));
+
+    public Task<RetrievalTrimResult<T>> TrimByRecordAsync<T>(
+        IReadOnlyList<T> rows,
+        Func<T, RetrievalRecordKey?> recordOf,
+        string? callerObjectId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new RetrievalTrimResult<T>(rows, RetrievalTrimOutcome.Evaluated, 0));
 }

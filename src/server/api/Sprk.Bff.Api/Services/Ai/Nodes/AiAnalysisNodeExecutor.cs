@@ -1110,6 +1110,23 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
 
         try
         {
+            // Task 176 (#1511): the parent comes from playbook ConfigJson and the records index is read app-only, so
+            // the RUN PRINCIPAL must be able to read that record before its metadata reaches the prompt. One
+            // caller-scoped read through the shared trim; no principal, an unreadable record or a failed check → no
+            // L3 context.
+            var accessTrim = scopedProvider.GetRequiredService<PublicContracts.IRetrievalAccessTrim>();
+            var parentKey = PublicContracts.RetrievalRecordKey.ParentRecord(parentEntityType, parentEntityId);
+            var parentCheck = await accessTrim.TrimByRecordAsync(
+                new[] { parentKey }, k => k, context.CallerObjectId, cancellationToken);
+            if (parentKey is null || parentCheck.Rows.Count == 0)
+            {
+                _logger.LogInformation(
+                    "L3 entity context skipped for node {NodeId}: the run principal's Read on the parent could not be "
+                    + "established ({Outcome}) (task 176, fail closed)",
+                    context.Node.Id, parentKey is null ? "unsupported parent" : parentCheck.Outcome.ToString());
+                return null;
+            }
+
             // Query the records index by parent entity name (using the entity ID as a search filter).
             // Use keyword search to find the exact record by dataverseRecordId.
             var searchRequest = new RecordSearchRequest
@@ -1160,6 +1177,18 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             }
 
             var entityRecord = searchResponse.Results[0];
+
+            // Task 176: the records index is searched by keyword, so the top hit is not necessarily the checked
+            // parent. Only that record's metadata may be used.
+            if (!Guid.TryParse(entityRecord.RecordId, out var hitId)
+                || !Guid.TryParse(parentEntityId, out var parentId)
+                || hitId != parentId)
+            {
+                _logger.LogDebug(
+                    "L3 entity context for node {NodeId}: top records-index hit is not the configured parent — skipping",
+                    context.Node.Id);
+                return null;
+            }
 
             _logger.LogInformation(
                 "L3 entity context for node {NodeId}: found '{RecordName}' ({RecordType}) in {ElapsedMs}ms",

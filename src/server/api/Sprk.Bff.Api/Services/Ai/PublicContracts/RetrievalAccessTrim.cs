@@ -6,17 +6,17 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>
-/// Default <see cref="IRetrievalAccessTrim"/>: one caller-scoped (OBO) read of <c>sprk_documents</c> per page of at most
-/// <see cref="MaxIdsPerRead"/> distinct ids. See the interface for the contract (task 176, #1511).
+/// Default <see cref="IRetrievalAccessTrim"/>: one caller-scoped (OBO) read per page of at most
+/// <see cref="MaxIdsPerRead"/> distinct keys per record kind. See the interface for the contract (task 176, #1511).
 /// </summary>
 /// <remarks>
 /// Scoped (it uses the request's <see cref="IDataverseUserClient"/>). ADR-015: logs counts, outcome and status codes only,
-/// never ids, names or content. ADR-044: ids are parsed as GUIDs and written to the filter in bare lowercase form, so the
+/// never ids, names or content. ADR-044: GUID keys are parsed and written to the filter in bare lowercase form, so the
 /// comparison never depends on the index's or the response's casing or braces.
 /// </remarks>
 public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
 {
-    /// <summary>Most document ids sent in one Dataverse read (owner decision 2026-10-09). Larger pages are chunked.</summary>
+    /// <summary>Most keys sent in one Dataverse read (owner decision 2026-10-09). Larger pages are chunked.</summary>
     public const int MaxIdsPerRead = 20;
 
     /// <summary>Over-fetch factor for callers that trim a ranked page (owner decision: "up to 2×").</summary>
@@ -47,24 +47,48 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
     public bool CanEvaluate(string? callerObjectId) => VerifiedCaller(callerObjectId) is not null;
 
     /// <inheritdoc />
-    public async Task<RetrievalTrimResult<T>> TrimAsync<T>(
+    public Task<RetrievalTrimResult<T>> TrimAsync<T>(
         IReadOnlyList<T> rows,
         Func<T, string?> documentIdOf,
         string? callerObjectId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(documentIdOf);
+        return TrimByRecordAsync(rows, r => RetrievalRecordKey.Document(documentIdOf(r)), callerObjectId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<RetrievalTrimResult<T>> TrimByRecordAsync<T>(
+        IReadOnlyList<T> rows,
+        Func<T, RetrievalRecordKey?> recordOf,
+        string? callerObjectId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(recordOf);
 
         // The caller is verified first, even for an empty page, so a path with no signed-in user always reports
-        // NoVerifiedCaller (and logs it) whatever the index returned.
+        // NoVerifiedCaller whatever the index returned.
         if (VerifiedCaller(callerObjectId) is null)
         {
-            _logger.LogWarning(
-                "[RETRIEVAL-TRIM] document retrieval withheld ({Count} row(s)): no verified caller for this retrieval "
-                + "(no declared caller, no request principal, or the request principal is not the declared caller). "
-                + "Unattended runs get no document results by design (task 176, #1511).",
-                rows.Count);
+            if (string.IsNullOrWhiteSpace(callerObjectId))
+            {
+                // No caller was DECLARED: an unattended path (scheduled run, background triage, app-only profiling).
+                // Expected, so Information; the paths that a user could notice log their own warning.
+                _logger.LogInformation(
+                    "[RETRIEVAL-TRIM] document retrieval withheld ({Count} row(s)): no caller declared (unattended run). "
+                    + "Unattended runs get no document results by design (task 176, #1511).",
+                    rows.Count);
+            }
+            else
+            {
+                // A caller WAS declared but the request has no principal, or a different one: an anomaly.
+                _logger.LogWarning(
+                    "[RETRIEVAL-TRIM] document retrieval withheld ({Count} row(s)): the declared caller is not the "
+                    + "principal of the current request (or there is none). Fail closed (task 176, #1511).",
+                    rows.Count);
+            }
+
             return new RetrievalTrimResult<T>(Array.Empty<T>(), RetrievalTrimOutcome.NoVerifiedCaller, rows.Count);
         }
 
@@ -73,45 +97,63 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
             return new RetrievalTrimResult<T>(Array.Empty<T>(), RetrievalTrimOutcome.Evaluated, 0);
         }
 
-        var distinct = new List<Guid>();
-        var seen = new HashSet<Guid>();
-        foreach (var row in rows)
+        var keys = rows.Select(recordOf).ToList();
+
+        // Distinct keys per record kind (entity set + key column), in first-seen order.
+        var byKind = new Dictionary<(string Set, string Field), List<string>>();
+        var seen = new HashSet<RetrievalRecordKey>();
+        foreach (var key in keys)
         {
-            if (TryParseDocumentId(documentIdOf(row), out var id) && seen.Add(id))
+            if (key is null || !seen.Add(key))
             {
-                distinct.Add(id);
+                continue;
             }
+
+            if (!byKind.TryGetValue((key.EntitySetName, key.KeyField), out var list))
+            {
+                byKind[(key.EntitySetName, key.KeyField)] = list = new List<string>();
+            }
+
+            list.Add(key.Value);
         }
 
-        var readable = new HashSet<Guid>();
-        for (var offset = 0; offset < distinct.Count; offset += MaxIdsPerRead)
+        var readable = new HashSet<RetrievalRecordKey>();
+        foreach (var ((set, field), values) in byKind)
         {
-            var batch = distinct.Skip(offset).Take(MaxIdsPerRead).ToList();
-            var answered = await ReadReadableIdsAsync(batch, cancellationToken).ConfigureAwait(false);
-            if (answered is null)
+            for (var offset = 0; offset < values.Count; offset += MaxIdsPerRead)
             {
-                return new RetrievalTrimResult<T>(Array.Empty<T>(), RetrievalTrimOutcome.CheckFailed, rows.Count);
-            }
-
-            // Only ids that were ASKED count: a body naming an id outside the batch cannot widen the result.
-            foreach (var id in answered)
-            {
-                if (batch.Contains(id))
+                var batch = values.Skip(offset).Take(MaxIdsPerRead).ToList();
+                var answered = await ReadReadableKeysAsync(set, field, batch, cancellationToken).ConfigureAwait(false);
+                if (answered is null)
                 {
-                    readable.Add(id);
+                    return new RetrievalTrimResult<T>(Array.Empty<T>(), RetrievalTrimOutcome.CheckFailed, rows.Count);
+                }
+
+                // Only keys that were ASKED count: a body naming a key outside the batch cannot widen the result.
+                foreach (var value in answered)
+                {
+                    if (batch.Contains(value, StringComparer.Ordinal))
+                    {
+                        readable.Add(new RetrievalRecordKey(set, field, value));
+                    }
                 }
             }
         }
 
-        var kept = rows
-            .Where(r => TryParseDocumentId(documentIdOf(r), out var id) && readable.Contains(id))
-            .ToList();
+        var kept = new List<T>(rows.Count);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (keys[i] is { } key && readable.Contains(key))
+            {
+                kept.Add(rows[i]);
+            }
+        }
 
         if (kept.Count != rows.Count)
         {
             _logger.LogInformation(
-                "[RETRIEVAL-TRIM] kept {Kept} of {Total} retrieved row(s) ({Distinct} distinct document(s) checked as the caller)",
-                kept.Count, rows.Count, distinct.Count);
+                "[RETRIEVAL-TRIM] kept {Kept} of {Total} retrieved row(s) ({Distinct} distinct record(s) checked as the caller)",
+                kept.Count, rows.Count, seen.Count);
         }
 
         return new RetrievalTrimResult<T>(kept, RetrievalTrimOutcome.Evaluated, rows.Count - kept.Count);
@@ -142,25 +184,39 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
         return same ? requestOid : null;
     }
 
-    /// <summary>One caller-scoped read. Null when the read did not produce a trustworthy answer.</summary>
-    private async Task<IReadOnlyList<Guid>?> ReadReadableIdsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
+    /// <summary>
+    /// One caller-scoped read of <paramref name="entitySet"/> filtered to <paramref name="keys"/>. Returns the keys
+    /// Dataverse returned (the ones the caller can Read), in the same canonical form; null when the read did not produce
+    /// a trustworthy answer. Only the (set, column) pairs <see cref="RetrievalRecordKey"/> can build reach here.
+    /// </summary>
+    private async Task<IReadOnlyList<string>?> ReadReadableKeysAsync(
+        string entitySet, string keyField, IReadOnlyList<string> keys, CancellationToken cancellationToken)
     {
+        var isGuid = RetrievalRecordKey.IsGuidKey(entitySet, keyField);
         var filter = new StringBuilder();
-        for (var i = 0; i < ids.Count; i++)
+        for (var i = 0; i < keys.Count; i++)
         {
             if (i > 0)
             {
                 filter.Append(" or ");
             }
 
-            filter.Append("sprk_documentid eq ").Append(ids[i].ToString("D"));
+            filter.Append(keyField).Append(" eq ");
+            if (isGuid)
+            {
+                filter.Append(keys[i]);
+            }
+            else
+            {
+                filter.Append('\'').Append(Uri.EscapeDataString(keys[i].Replace("'", "''"))).Append('\'');
+            }
         }
 
         DataverseUserResponse response;
         try
         {
             response = await _userClient
-                .GetAsync($"sprk_documents?$select=sprk_documentid&$filter={filter}", cancellationToken)
+                .GetAsync($"{entitySet}?$select={keyField}&$filter={filter}", cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -189,29 +245,21 @@ public sealed class RetrievalAccessTrim : IRetrievalAccessTrim
             return null;
         }
 
-        var result = new List<Guid>();
+        var result = new List<string>();
         foreach (var row in value.EnumerateArray())
         {
             if (row.ValueKind == JsonValueKind.Object
-                && row.TryGetProperty("sprk_documentid", out var idProp)
-                && idProp.ValueKind == JsonValueKind.String
-                && TryParseDocumentId(idProp.GetString(), out var id))
+                && row.TryGetProperty(keyField, out var keyProp)
+                && keyProp.ValueKind == JsonValueKind.String)
             {
-                result.Add(id);
+                var canonical = RetrievalRecordKey.Canonical(entitySet, keyField, keyProp.GetString());
+                if (canonical is not null)
+                {
+                    result.Add(canonical);
+                }
             }
         }
 
         return result;
-    }
-
-    private static bool TryParseDocumentId(string? value, out Guid id)
-    {
-        if (!string.IsNullOrWhiteSpace(value) && Guid.TryParse(value.Trim(), out id) && id != Guid.Empty)
-        {
-            return true;
-        }
-
-        id = Guid.Empty;
-        return false;
     }
 }

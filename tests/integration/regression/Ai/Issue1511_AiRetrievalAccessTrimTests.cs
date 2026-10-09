@@ -288,22 +288,226 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             because: "the tenant-wide page is trimmed to the caller's readable documents, never returned whole");
     }
 
-    [Fact]
-    public async Task WithAHost_SearchDocumentsIsBoundToTheHostParent()
+    /// <summary>The knowledge scope exactly as PlaybookChatContextProvider builds it from the session's host.</summary>
+    private static ChatKnowledgeScope ScopeFor(ChatHostContext host) => new(
+        RagKnowledgeSourceIds: [], InlineContent: null, SkillInstructions: null, ActiveDocumentId: null,
+        ParentEntityType: host.EntityType, ParentEntityId: host.EntityId);
+
+    [Theory]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_matter", "matter")]
+    [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_matter", "matter")]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_workassignment", "workassignment")]
+    public async Task WithAnIndexedHost_BothMethodsAreBoundToTheHostParent(string method, string hostType, string indexedType)
     {
         RagSearchOptions? sent = null;
         _rag.Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
             .Callback<string, RagSearchOptions, CancellationToken>((_, o, _) => sent = o)
             .ReturnsAsync(new RagSearchResponse { Query = "q", Results = Array.Empty<RagSearchResult>(), TotalCount = 0 });
-        var host = Guid.NewGuid();
-        var scope = new ChatKnowledgeScope(
-            RagKnowledgeSourceIds: [], InlineContent: null, SkillInstructions: null, ActiveDocumentId: null,
-            ParentEntityType: "sprk_matter", ParentEntityId: "{" + host.ToString().ToUpperInvariant() + "}");
-        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), "{\"method\":\"SearchDocuments\"}");
+        var hostId = Guid.NewGuid();
+        // Production normalization: ChatHostContext runs EntityTypeNormalizer on the type the client sent.
+        var host = new ChatHostContext(hostType, "{" + hostId.ToString().ToUpperInvariant() + "}");
+        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), $"{{\"method\":\"{method}\"}}");
 
-        await DocumentSearch().ExecuteChatAsync(Chat(scope: scope), tool, CancellationToken.None);
+        await DocumentSearch().ExecuteChatAsync(Chat(scope: ScopeFor(host)), tool, CancellationToken.None);
 
-        sent!.ParentEntityType.Should().Be("sprk_matter");
-        sent.ParentEntityId.Should().Be(host.ToString("D"), because: "ADR-044: the AI Search eq filter needs the bare lowercase id");
+        sent!.ParentEntityType.Should().Be(indexedType, because: "the filter uses the type the index stores");
+        sent.ParentEntityId.Should().Be(hostId.ToString("D"), because: "ADR-044: the AI Search eq filter needs the bare lowercase id");
+    }
+
+    [Theory]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_analysisoutput")]
+    [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_analysisoutput")]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_document")]
+    [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_document")]
+    public async Task WithAHostTheIndexDoesNotStore_SearchIsTheTrimmedTenantSearch_NotEmpty(string method, string hostType)
+    {
+        RagSearchOptions? sent = null;
+        _rag.Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, RagSearchOptions, CancellationToken>((_, o, _) => sent = o)
+            .ReturnsAsync(new RagSearchResponse
+            {
+                Query = "q",
+                Results = new[]
+                {
+                    Chunk("c-secure", SecureDoc, "Secure merger memo.docx", Secret),
+                    Chunk("c-readable", ReadableDoc, "Engagement letter.docx", Visible),
+                },
+                TotalCount = 2,
+            });
+        var host = new ChatHostContext(hostType, Guid.NewGuid().ToString());
+        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), $"{{\"method\":\"{method}\"}}");
+
+        var result = await DocumentSearch().ExecuteChatAsync(Chat(scope: ScopeFor(host)), tool, CancellationToken.None);
+
+        sent!.ParentEntityType.Should().BeNull(because: $"no chunk is filed under a {hostType}, so binding would always return nothing");
+        sent.ParentEntityId.Should().BeNull();
+        Everything(result).Should().NotContain(Secret);
+        JsonSerializer.Serialize(result.Data).Should().Contain(Visible[..20],
+            because: "a readable document still comes back, trimmed");
+    }
+
+    // ── Insights cohort retrieval (IndexRetrieveNode, verifier F1) ─────────────────────────────
+
+    [Fact]
+    public async Task SecureDocument_AndSecureMatter_Observations_DoNotReachIndexRetrieve()
+    {
+        var readableMatter = Guid.NewGuid();
+        var secureMatter = Guid.NewGuid();
+        _userClient.Allow("sprk_matters", readableMatter.ToString("D"));
+        _userClient.Allow("sprk_documents", "ITEM-READABLE");
+
+        static Azure.Search.Documents.Models.SearchResult<Azure.Search.Documents.Models.SearchDocument> Row(
+            string id, string value, Guid matter, params (string RefType, string Ref)[] evidence)
+        {
+            var doc = new Azure.Search.Documents.Models.SearchDocument
+            {
+                ["id"] = id,
+                ["tenantId"] = "tenant-1",
+                ["artifactType"] = "observation",
+                ["subject"] = $"matter:{matter}",
+                ["predicate"] = "settlementAmount",
+                ["valueJson"] = value,
+                ["evidence"] = evidence
+                    .Select(e => (object)new Azure.Search.Documents.Models.SearchDocument
+                    {
+                        ["refType"] = e.RefType, ["ref"] = e.Ref, ["quote"] = value,
+                    })
+                    .ToArray(),
+                ["scope"] = new Azure.Search.Documents.Models.SearchDocument
+                {
+                    ["entityType"] = "matter", ["entityId"] = matter.ToString(),
+                },
+            };
+            return Azure.Search.Documents.Models.SearchModelFactory.SearchResult(doc, 0.9, null);
+        }
+
+        var hits = new[]
+        {
+            // A restricted document under a matter the caller CAN read: the document decides.
+            Row("o-restricted-doc", Secret + "-A", readableMatter, ("document", SecureDoc.ToString())),
+            // An spe:// ref to an item the caller has no readable document for: the document decides.
+            Row("o-secure-item", Secret + "-B", readableMatter, ("document", "spe://drive/b!x/item/ITEM-SECURE")),
+            // No document evidence, on a secure matter: the matter decides.
+            Row("o-secure-matter", Secret + "-C", secureMatter, ("playbook-run", "playbook://x")),
+            // Readable: via a readable item, and via a readable matter.
+            Row("o-ok-item", Visible + "-D", secureMatter, ("document", "spe://drive/b!x/item/ITEM-READABLE")),
+            Row("o-ok-matter", Visible + "-E", readableMatter),
+        };
+        var results = Azure.Search.Documents.Models.SearchModelFactory.SearchResults(
+            hits, totalCount: hits.Length, facets: null, coverage: null, rawResponse: Mock.Of<Azure.Response>());
+        var searchClient = new Mock<Azure.Search.Documents.SearchClient>();
+        searchClient
+            .Setup(c => c.SearchAsync<Azure.Search.Documents.Models.SearchDocument>(
+                It.IsAny<string>(), It.IsAny<Azure.Search.Documents.SearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Azure.Response.FromValue(results, Mock.Of<Azure.Response>()));
+        var indexClient = new Mock<Azure.Search.Documents.Indexes.SearchIndexClient>();
+        indexClient.Setup(c => c.GetSearchClient(It.IsAny<string>())).Returns(searchClient.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IRetrievalAccessTrim>(_trim);
+        using var provider = services.BuildServiceProvider();
+        var node = new IndexRetrieveNode(
+            indexClient.Object, Mock.Of<IOpenAiClient>(), provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<IndexRetrieveNode>.Instance);
+        var context = NodeContext(ExecutorType.IndexRetrieve, "{\"artifactType\":\"observation\",\"predicate\":\"settlementAmount\"}");
+
+        var output = await node.ExecuteAsync(context, CancellationToken.None);
+
+        output.Success.Should().BeTrue();
+        var json = output.StructuredData!.Value.GetRawText() + output.TextContent;
+        json.Should().NotContain(Secret, because: "no observation the caller cannot read reaches the cohort");
+        json.Should().Contain(Visible + "-D").And.Contain(Visible + "-E");
+        _userClient.ReadSets.Should().Contain("sprk_matters").And.Contain("sprk_documents");
+    }
+
+    // ── L3 entity context (verifier F1) ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task L3EntityContext_IsAddedOnlyForAParentTheCallerCanRead(bool callerCanRead)
+    {
+        const string SecretMatterName = "SECRET-1511-Project-Falcon";
+        var secureMatter = Guid.NewGuid();
+        if (callerCanRead)
+        {
+            _userClient.Allow("sprk_matters", secureMatter.ToString("D"));
+        }
+
+        var records = new Mock<IRecordSearchService>();
+        records.Setup(r => r.SearchAsync(It.IsAny<Sprk.Bff.Api.Models.Ai.RecordSearch.RecordSearchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Models.Ai.RecordSearch.RecordSearchResponse
+            {
+                Results = new[]
+                {
+                    new Sprk.Bff.Api.Models.Ai.RecordSearch.RecordSearchResult
+                    {
+                        RecordId = secureMatter.ToString(), RecordType = "sprk_matter", RecordName = SecretMatterName,
+                    },
+                },
+                Metadata = new Sprk.Bff.Api.Models.Ai.RecordSearch.RecordSearchMetadata { HybridMode = "keywordOnly" },
+            });
+
+        var seen = await RunNodeCapturingToolContextAsync(
+            "{\"knowledgeRetrieval\":{\"includeEntityContext\":true},\"parentEntityType\":\"matter\",\"parentEntityId\":\"" + secureMatter + "\"}",
+            records.Object);
+
+        if (callerCanRead)
+        {
+            seen.KnowledgeContext.Should().Contain(SecretMatterName, because: "a readable parent still gets L3 context");
+        }
+        else
+        {
+            (seen.KnowledgeContext ?? string.Empty).Should().NotContain(SecretMatterName);
+        }
+
+        _userClient.ReadSets.Should().Contain("sprk_matters", because: "the parent was checked as the caller");
+    }
+
+    private NodeExecutionContext NodeContext(ExecutorType type, string configJson, Guid? toolId = null) => new()
+    {
+        RunId = Guid.NewGuid(),
+        PlaybookId = Guid.NewGuid(),
+        Node = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(), PlaybookId = Guid.NewGuid(), ActionId = Guid.NewGuid(),
+            ToolIds = toolId is { } t ? new[] { t } : Array.Empty<Guid>(),
+            Name = "Node", ExecutionOrder = 1, OutputVariable = "out", IsActive = true, ConfigJson = configJson,
+        },
+        Action = new AnalysisAction { Id = Guid.NewGuid(), Name = "Review", SystemPrompt = "Review the document." },
+        ExecutorType = type,
+        Scopes = toolId is { } id
+            ? new ResolvedScopes([], [], [new AnalysisTool { Id = id, Name = "T", Type = ToolType.Custom, HandlerClass = "CaptureHandler" }])
+            : new ResolvedScopes([], [], []),
+        Document = new DocumentContext { DocumentId = Guid.NewGuid(), Name = "Current.docx", ExtractedText = "text" },
+        TenantId = "tenant-1",
+        CallerObjectId = CallerOid,
+    };
+
+    private async Task<ToolExecutionContext> RunNodeCapturingToolContextAsync(string configJson, IRecordSearchService records)
+    {
+        ToolExecutionContext? seen = null;
+        var handler = new Mock<IAnalysisToolHandler>();
+        handler.Setup(h => h.HandlerId).Returns("CaptureHandler");
+        handler.Setup(h => h.Validate(It.IsAny<ToolExecutionContext>(), It.IsAny<AnalysisTool>()))
+            .Returns(ToolValidationResult.Success());
+        handler.Setup(h => h.ExecuteAsync(It.IsAny<ToolExecutionContext>(), It.IsAny<AnalysisTool>(), It.IsAny<CancellationToken>()))
+            .Callback<ToolExecutionContext, AnalysisTool, CancellationToken>((c, _, _) => seen = c)
+            .ReturnsAsync((ToolExecutionContext _, AnalysisTool t, CancellationToken _) =>
+                ToolResult.Ok("CaptureHandler", t.Id, t.Name, data: new { ok = true }));
+        var registry = new Mock<IToolHandlerRegistry>();
+        registry.Setup(r => r.GetHandler("CaptureHandler")).Returns(handler.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(registry.Object);
+        services.AddSingleton<IRetrievalAccessTrim>(_trim);
+        services.AddSingleton(records);
+        using var provider = services.BuildServiceProvider();
+        var executor = new AiAnalysisNodeExecutor(provider, null!, _rag.Object, NullLogger<AiAnalysisNodeExecutor>.Instance);
+
+        await executor.ExecuteAsync(NodeContext(ExecutorType.AiAnalysis, configJson, Guid.NewGuid()), CancellationToken.None);
+
+        seen.Should().NotBeNull();
+        return seen!;
     }
 }

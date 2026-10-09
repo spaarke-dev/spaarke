@@ -518,6 +518,9 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
     {
         if (!_accessTrim.CanEvaluate(context.CallerObjectId))
         {
+            _logger.LogWarning(
+                "Semantic search tool withheld for analysis {AnalysisId}: no verified run principal (task 176, fail closed)",
+                context.AnalysisId);
             var withheld = await _accessTrim.TrimAsync(
                 Array.Empty<SearchResult>(), r => r.DocumentId, context.CallerObjectId, cancellationToken);
             return (new SemanticSearchResponse { Results = Array.Empty<SearchResult>(), Metadata = new SearchMetadata() }, withheld);
@@ -529,6 +532,12 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
             cancellationToken);
 
         var trim = await _accessTrim.TrimAsync(response.Results, r => r.DocumentId, context.CallerObjectId, cancellationToken);
+        if (trim.Withheld)
+        {
+            _logger.LogWarning(
+                "Semantic search tool withheld all rows for analysis {AnalysisId}: {Outcome} (task 176, fail closed)",
+                context.AnalysisId, trim.Outcome);
+        }
         var page = trim.Rows.Take(limit).ToList();
 
         return (response with

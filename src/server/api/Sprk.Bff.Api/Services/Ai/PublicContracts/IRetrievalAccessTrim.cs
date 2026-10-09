@@ -43,6 +43,103 @@ public interface IRetrievalAccessTrim
         Func<T, string?> documentIdOf,
         string? callerObjectId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The general form of <see cref="TrimAsync{T}"/>: each row names the RECORD that decides whether the caller may see
+    /// it (its source document, or, when it has none, the matter/project/invoice/work assignment it is about). One
+    /// caller-scoped read per record kind per <see cref="RetrievalAccessTrim.MaxIdsPerRead"/> keys. A row whose key is
+    /// null is dropped. Used where a retrieved row is not a document chunk (Insights observations, L3 entity context).
+    /// </summary>
+    Task<RetrievalTrimResult<T>> TrimByRecordAsync<T>(
+        IReadOnlyList<T> rows,
+        Func<T, RetrievalRecordKey?> recordOf,
+        string? callerObjectId,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// The record a retrieved row is checked against: an entity set, the column to match, and the canonical value. Built only
+/// through the factories below, so only a fixed set of (entity set, column) pairs ever reaches a Dataverse filter.
+/// </summary>
+public sealed record RetrievalRecordKey
+{
+    private static readonly Dictionary<string, (string Set, string Key)> ParentRecordTables =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["matter"] = ("sprk_matters", "sprk_matterid"),
+            ["project"] = ("sprk_projects", "sprk_projectid"),
+            ["invoice"] = ("sprk_invoices", "sprk_invoiceid"),
+            ["workassignment"] = ("sprk_workassignments", "sprk_workassignmentid"),
+        };
+
+    private const string DocumentSet = "sprk_documents";
+    private const string DocumentIdField = "sprk_documentid";
+    private const string DriveItemIdField = "sprk_driveitemid";
+
+    internal RetrievalRecordKey(string entitySetName, string keyField, string value)
+    {
+        EntitySetName = entitySetName;
+        KeyField = keyField;
+        Value = value;
+    }
+
+    /// <summary>Entity set name, e.g. <c>sprk_documents</c>.</summary>
+    public string EntitySetName { get; }
+
+    /// <summary>The column matched, e.g. <c>sprk_documentid</c>.</summary>
+    public string KeyField { get; }
+
+    /// <summary>Canonical value: bare lowercase GUID for id columns (ADR-044), trimmed text otherwise.</summary>
+    public string Value { get; }
+
+    /// <summary>A <c>sprk_document</c> by id. Null when the value is not a non-empty GUID (any spelling).</summary>
+    public static RetrievalRecordKey? Document(string? documentId) =>
+        CanonicalGuid(documentId) is { } id ? new RetrievalRecordKey(DocumentSet, DocumentIdField, id) : null;
+
+    /// <summary>
+    /// A <c>sprk_document</c> by the SharePoint Embedded item it points at (<c>sprk_driveitemid</c>), for evidence refs
+    /// of the form <c>spe://drive/{driveId}/item/{itemId}</c>. The caller passes when they can read ANY document row on
+    /// that item, which is the file the quote came from.
+    /// </summary>
+    public static RetrievalRecordKey? DocumentByDriveItem(string? driveItemId) =>
+        string.IsNullOrWhiteSpace(driveItemId) ? null : new RetrievalRecordKey(DocumentSet, DriveItemIdField, driveItemId.Trim());
+
+    /// <summary>
+    /// A parent business record (<c>matter</c>, <c>project</c>, <c>invoice</c>, <c>workassignment</c>; the
+    /// <c>sprk_</c>-prefixed logical names are accepted too) by id. Null for any other type or a non-GUID id.
+    /// </summary>
+    public static RetrievalRecordKey? ParentRecord(string? entityType, string? id)
+    {
+        if (string.IsNullOrWhiteSpace(entityType) || CanonicalGuid(id) is not { } canonical)
+        {
+            return null;
+        }
+
+        var type = entityType.Trim();
+        if (type.StartsWith("sprk_", StringComparison.OrdinalIgnoreCase))
+        {
+            type = type[5..];
+        }
+
+        return ParentRecordTables.TryGetValue(type, out var table)
+            ? new RetrievalRecordKey(table.Set, table.Key, canonical)
+            : null;
+    }
+
+    internal static bool IsGuidKey(string entitySet, string keyField) =>
+        !(string.Equals(entitySet, DocumentSet, StringComparison.Ordinal)
+          && string.Equals(keyField, DriveItemIdField, StringComparison.Ordinal));
+
+    /// <summary>The canonical form of a value Dataverse returned for <paramref name="keyField"/>.</summary>
+    internal static string? Canonical(string entitySet, string keyField, string? value) =>
+        IsGuidKey(entitySet, keyField)
+            ? CanonicalGuid(value)
+            : string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? CanonicalGuid(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && Guid.TryParse(value.Trim(), out var id) && id != Guid.Empty
+            ? id.ToString("D")
+            : null;
 }
 
 /// <summary>Outcome of a <see cref="IRetrievalAccessTrim.TrimAsync{T}"/> call.</summary>

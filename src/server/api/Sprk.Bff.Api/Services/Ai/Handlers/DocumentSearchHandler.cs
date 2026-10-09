@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -759,18 +760,44 @@ public sealed class DocumentSearchHandler : IToolHandler
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The parent scope to filter on: both values or neither. A GUID id is written bare and lowercase (ADR-044), the
-    /// form the index stores, so a host id spelled in registry format still matches.
+    /// The <c>parentEntityType</c> values the document index stores (ParentEntityContext.EntityTypes, plus
+    /// <c>workassignment</c>, which the task-177 parent resolver writes). A host of any other type (a document, an
+    /// analysis output, an event, …) has no chunks filed under it, so binding to it would always return nothing.
     /// </summary>
-    private static (string? Type, string? Id) CanonicalParentScope(string? parentEntityType, string? parentEntityId)
+    private static readonly HashSet<string> IndexedParentTypes = new(StringComparer.Ordinal)
     {
-        if (string.IsNullOrWhiteSpace(parentEntityType) || string.IsNullOrWhiteSpace(parentEntityId))
+        ParentEntityContext.EntityTypes.Matter,
+        ParentEntityContext.EntityTypes.Project,
+        ParentEntityContext.EntityTypes.Invoice,
+        ParentEntityContext.EntityTypes.ServiceRequest,
+        ParentEntityContext.EntityTypes.Account,
+        ParentEntityContext.EntityTypes.Contact,
+        "workassignment",
+    };
+
+    /// <summary>
+    /// The parent scope to filter on: both values or neither. The host type is normalized to the index's form
+    /// (<c>sprk_matter</c> → <c>matter</c>, <c>sprk_workassignment</c> → <c>workassignment</c>) and the scope is applied
+    /// ONLY when the index stores that type and the id is a GUID; otherwise the search is the trimmed tenant search,
+    /// the same as a dropped host (task 176 goal 4, verifier F2). A GUID id is written bare and lowercase (ADR-044).
+    /// </summary>
+    internal static (string? Type, string? Id) CanonicalParentScope(string? parentEntityType, string? parentEntityId)
+    {
+        if (string.IsNullOrWhiteSpace(parentEntityType)
+            || string.IsNullOrWhiteSpace(parentEntityId)
+            || !Guid.TryParse(parentEntityId.Trim(), out var parsed)
+            || parsed == Guid.Empty)
         {
             return (null, null);
         }
 
-        var id = Guid.TryParse(parentEntityId.Trim(), out var parsed) ? parsed.ToString("D") : parentEntityId.Trim();
-        return (parentEntityType.Trim(), id);
+        var type = parentEntityType.Trim().ToLowerInvariant();
+        if (type.StartsWith("sprk_", StringComparison.Ordinal))
+        {
+            type = type[5..];
+        }
+
+        return IndexedParentTypes.Contains(type) ? (type, parsed.ToString("D")) : (null, null);
     }
 
     /// <summary>
