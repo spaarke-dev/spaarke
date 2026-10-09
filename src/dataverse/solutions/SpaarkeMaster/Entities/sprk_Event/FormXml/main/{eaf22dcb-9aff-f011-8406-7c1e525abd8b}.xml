@@ -686,11 +686,13 @@
         <event name="onload" application="false" active="false">
           <Handlers>
             <Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{f1ce7d12-4d60-4820-cd61-1b7fdaf60a4e}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.AccessPermissionInherited.onLoad" libraryName="sprk_accesspermission_inherited" handlerUniqueId="{921c153b-e1ff-0a2f-17a9-7eea55069492}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>
       <formLibraries>
         <Library name="sprk_todo_regarding_presave" libraryUniqueId="{7f7aac4a-1219-9229-5229-f54fffcbf2f0}" />
+        <Library name="sprk_accesspermission_inherited" libraryUniqueId="{b1c27f75-fa96-6cd4-8a7d-98016337c7a4}" />
       </formLibraries>
     </form>
     <IsCustomizable>1</IsCustomizable>

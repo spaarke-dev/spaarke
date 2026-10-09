@@ -662,6 +662,20 @@
           </Descriptions>
         </attribute>
       </attributes>
+      <EntityKeys>
+        <EntityKey>
+          <Name>sprk_ExternalObjectIdUniqueKey</Name>
+          <LogicalName>sprk_externalobjectiduniquekey</LogicalName>
+          <IntroducedVersion>1.0</IntroducedVersion>
+          <IsCustomizable>0</IsCustomizable>
+          <EntityKeyAttributes>
+            <AttributeName>sprk_externalobjectidkey</AttributeName>
+          </EntityKeyAttributes>
+          <displaynames>
+            <displayname description="External Object ID (unique)" languagecode="1033" />
+          </displaynames>
+        </EntityKey>
+      </EntityKeys>
       <EntitySetName>contacts</EntitySetName>
       <IsDuplicateCheckSupported>1</IsDuplicateCheckSupported>
       <IsBusinessProcessEnabled>1</IsBusinessProcessEnabled>

@@ -93,9 +93,9 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
         var reader = new StreamReader(stream);
 
         var chunks = new List<AnalysisStreamChunk>();
-        while (!reader.EndOfStream)
+        string? line;
+        while ((line = await reader.ReadLineAsync()) is not null)
         {
-            var line = await reader.ReadLineAsync();
             if (line?.StartsWith("data: ") == true)
             {
                 var json = line["data: ".Length..];
@@ -149,9 +149,9 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
         var reader = new StreamReader(stream);
 
         var chunks = new List<AnalysisStreamChunk>();
-        while (!reader.EndOfStream)
+        string? line;
+        while ((line = await reader.ReadLineAsync()) is not null)
         {
-            var line = await reader.ReadLineAsync();
             if (line?.StartsWith("data: ") == true)
             {
                 var json = line["data: ".Length..];
@@ -209,9 +209,9 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
         var reader = new StreamReader(stream);
 
         AnalysisStreamChunk? doneChunk = null;
-        while (!reader.EndOfStream)
+        string? line;
+        while ((line = await reader.ReadLineAsync()) is not null)
         {
-            var line = await reader.ReadLineAsync();
             if (line?.StartsWith("data: ") == true)
             {
                 var json = line["data: ".Length..];
@@ -331,9 +331,9 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
         var reader = new StreamReader(stream);
 
         AnalysisStreamChunk? errorChunk = null;
-        while (!reader.EndOfStream)
+        string? line;
+        while ((line = await reader.ReadLineAsync()) is not null)
         {
-            var line = await reader.ReadLineAsync();
             if (line?.StartsWith("data: ") == true)
             {
                 var json = line["data: ".Length..];

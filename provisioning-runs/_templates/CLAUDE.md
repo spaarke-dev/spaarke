@@ -20,7 +20,7 @@
 
 ## Applicable prereqs
 
-Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) by `scope` + `tenancy-model` for this run. Failures at Step 0.5 HARD STOP the run before Step 2 preflight.
+Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) by `scope` + `tenancy-model` for this run. Failures at Step 0.5 HARD STOP the run before Step 2 preflight: record the failure in [`manual-gates.md`](manual-gates.md), apply the prerequisite's `remediation`, then resume from Step 0.5.
 
 ## Run-scoped invariants (per project design.md §4D tenant-isolation)
 
@@ -29,11 +29,11 @@ Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISION
 - **I3** — All Cosmos reads/writes for this run MUST include partition-key `/customerId` predicate (FR-30).
 - **I4** — SPE container IDs come from the record being served or the stamp's own settings, and every app-only SPE call passes `SpeContainerOwnershipGuard` — the one definition of the stamp's containers (FR-31; T227d/T227f).
 - **I5** — All Graph token acquisitions for this run use tenant `{tenantId}` (FR-32).
-- **BINDING** — Do NOT delete `Dataverse-ClientSecret` or `BFF-API-ClientSecret` from this run's shared KV — see [`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md).
+- **BINDING** — Before creating, seeding, deleting or purging any Key Vault secret for this run, read and apply the current text of [`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md) "KV credential lifecycle" (time-boxed and environment-specific; root CLAUDE.md §9).
 
 ## Escalations
 
-Any operator escalation → append to [`manual-gates.md`](manual-gates.md) with timestamp + decision + rationale. Per root CLAUDE.md §6.5 protocol, ADR-conflict escalations use the 6-field format (ADR + rule + conflict + path + rationale + alternative-considered).
+Any operator escalation → append to [`manual-gates.md`](manual-gates.md) with timestamp + decision + rationale. Per root CLAUDE.md §6.5 protocol, ADR-conflict escalations use the root §6.5 format (ADR, quoted rule, conflict, proposed path, rationale, impact, alternatives rejected).
 
 ## Postmortem obligation
 

@@ -12,7 +12,7 @@
 # B1-B16 clause per finding), not general legal-citation-format checking.
 #
 # ADR-038: this is an OBSERVATION harness. It reports advisory-quality and citation-accuracy
-# scores; it is NOT part of the .NET unit/seam pyramid and does not gate via the 7 KEEP-path
+# scores; it is NOT part of the .NET unit/seam pyramid and does not gate via the KEEP-path
 # mechanism. It is its own graduation instrument for the project's north star (spec NFR-01).
 # ADR-014/ADR-015: no real client NDAs -- all 9 cases below are synthetic, jurisdiction-neutral,
 # with fictitious party names. Eval results (once live-run) are retained per the same 90-day /

@@ -19,6 +19,7 @@ import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-co
 import { resolveRuntimeConfig, initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
 import { FindSimilarApp } from "./App";
+import { parseFindSimilarLaunch } from "./launchParams";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("[FindSimilar] Root container #root not found in DOM.");
@@ -83,6 +84,7 @@ async function bootstrap(): Promise<void> {
         tenantId={tenantId}
         authenticatedFetch={authenticatedFetch}
         initialFileRefs={initialFileRefs}
+        initialDocument={parseFindSimilarLaunch()}
       />
     </FluentProvider>
   );

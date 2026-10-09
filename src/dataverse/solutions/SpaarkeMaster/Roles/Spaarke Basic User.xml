@@ -130,6 +130,7 @@
     <RolePrivilege name="prvAppendTosprk_Organization" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_OrganizationType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Project" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Report" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Deep" />

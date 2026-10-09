@@ -223,7 +223,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         {
             var diagnostic =
                 $"AI seed manifest not found at '{notFound.AttemptedPath}'. " +
-                "Verify scripts/seed-data/manifest.yaml ships in the L2 publish output.";
+                "The manifest is an embedded resource of the L2 assembly — restore its .csproj <EmbeddedResource> item.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 AiSeedChainRejectionCodes.ManifestNotFound, diagnostic, cancellationToken).ConfigureAwait(false);
         }

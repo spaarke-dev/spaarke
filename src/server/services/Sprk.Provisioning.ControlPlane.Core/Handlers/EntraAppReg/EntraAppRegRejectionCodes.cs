@@ -193,6 +193,13 @@ public static class EntraAppRegRejectionCodes
     /// the operator investigates and removes the impostor (or the stale registration), then resumes.
     /// </summary>
     public const string AdoptionRefused = "appreg-adoption-refused";
+
+    /// <summary>
+    /// T255 (INCOMING-141 §5): H3 could not put the <c>acct</c> optional claim on the registration's access tokens, or
+    /// did not read it back afterwards. Without it the stamp BFF denies every first sign-in of a customer employee
+    /// (<c>workforce_acct_claim_missing</c>). Resumable — the step is idempotent.
+    /// </summary>
+    public const string AcctClaimFailed = "appreg-acct-claim-failed";
 }
 
 /// <summary>

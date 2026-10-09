@@ -99,6 +99,7 @@ For each category, generate audit checks:
 **Instruction-file budget (always, non-blocking report)**:
 - Root `CLAUDE.md`: report line count and bytes as injected (block-level HTML comments excluded) against the budget in its maintainer notes (< 200 lines, ≤ 30 KB). Over budget → name the sections that grew since the last review stamp.
 - Every path in root `CLAUDE.md` §17 and in `.claude/rules/*.md` resolves (the `docs/INDEX.md` links too).
+- Run `pwsh -File scripts/quality/Test-InstructionPaths.ps1`: every backticked path in every instruction file resolves. Report new findings; when the change fixes baseline entries, delete those lines from `scripts/quality/instruction-paths.baseline.txt`.
 - Project `CLAUDE.md` in scope: past ~25 KB → recommend pruning per `.claude/skills/project-setup/references/claudemd-template.md`.
 
 **Pattern/constraint changes → validate pointer accuracy**:
@@ -202,7 +203,7 @@ This skill implements the **compact version** of R2's full-repo audit. Key princ
 
 A successful audit:
 - Completes in <30 minutes for typical project diffs (<200 files)
-- Auto-fixes at least 50% of findings
+- Auto-fixes only unambiguous findings (a clear successor exists); reports the auto-fix ratio for information, never as a target
 - Produces an actionable report for the remaining items
 - Updates Last Reviewed stamps on verified files
 - Leaves a commit trail in the project's notes/

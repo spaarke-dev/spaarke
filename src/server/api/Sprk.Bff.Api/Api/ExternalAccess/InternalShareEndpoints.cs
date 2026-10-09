@@ -340,7 +340,8 @@ public static class InternalShareEndpoints
             RootRecordFlags? readFlags = null;
             try
             {
-                var flags = await participations.GetRootRecordFlagsAsync(
+                // Task 174 (owner round 84): Restricted through a parent bars the external-flagged user too.
+                var flags = await participations.GetEffectiveRootRecordFlagsAsync(
                     ExternalGrantRoot.LogicalNameFor(root.Type), new[] { root.Id }, ct);
                 if (flags.TryGetValue(root.Id, out var f) && !f.IsUnreadable)
                     readFlags = f;
@@ -1038,7 +1039,8 @@ public static class InternalShareEndpoints
         {
             try
             {
-                var flags = await participations.GetRootRecordFlagsAsync(
+                // Task 174: the Manage Access display marks what enforcement applies — Restricted through a parent included.
+                var flags = await participations.GetEffectiveRootRecordFlagsAsync(
                     ExternalGrantRoot.LogicalNameFor(root.Type), new[] { root.Id }, ct);
                 restricted = flags.TryGetValue(root.Id, out var f) && !f.IsUnreadable && f.IsRestricted;
             }
@@ -1100,6 +1102,9 @@ public static class InternalShareEndpoints
         bool isSecure;
         try
         {
+            // The record's OWN flag on purpose (task 174's inventory): S5 asks whether removing this share leaves nobody who
+            // can open the record IN DATAVERSE, and that follows the stored ownership — a not-yet-secure child is still owned
+            // by its business unit, whose users can open it. Removing a share never widens access.
             var flags = await participations.GetRootRecordFlagsAsync(logicalName, new[] { root.Id }, ct);
             isSecure = !flags.TryGetValue(root.Id, out var f) || f.IsUnreadable || f.IsSecure;
         }

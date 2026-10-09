@@ -156,6 +156,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [hostType, setHostType] = useState<HostType>('outlook');
   const [itemId, setItemId] = useState<string | undefined>();
+  // Task 121: the email's RFC Message-ID — a different value from `itemId` (the Exchange item id). See loadContext.
+  const [internetMessageId, setInternetMessageId] = useState<string | undefined>();
   const [itemName, setItemName] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
   const [senderEmail, setSenderEmail] = useState<string | undefined>();
@@ -188,6 +190,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         setIsLoading(true);
         setError(null);
         setSkippedAttachments([]);
+        setInternetMessageId(undefined);
 
         // Get host type
         const type = hostAdapter.getHostType();
@@ -243,6 +246,19 @@ export const SaveView: React.FC<SaveViewProps> = ({
           if ('getSentDate' in hostAdapter && typeof hostAdapter.getSentDate === 'function') {
             const date = hostAdapter.getSentDate();
             setSentDate(date);
+          }
+
+          // Task 121: the RFC Message-ID the save sends as `email.internetMessageId` (the pane used to send the item
+          // id there, so a pane-saved .eml had no Message-ID and never linked to its communication). Read through the
+          // same capability-gated seam as task 120's lookup: Outlook read mode only — a compose item has no Message-ID
+          // until it is sent. Not reading it never blocks a save: the request then carries the item id alone.
+          if (hostAdapter.getCapabilities().canResolveEmailIdentity && hostAdapter.getEmailIdentityKeys) {
+            try {
+              const keys = await hostAdapter.getEmailIdentityKeys();
+              setInternetMessageId(keys?.internetMessageId || undefined);
+            } catch (err) {
+              console.warn('[SaveView] Could not read the email Message-ID; saving with the item id only.', err);
+            }
           }
 
           // Task 116a: the body and attachment CONTENT are not read here — `captureEmailContent` below reads them
@@ -421,6 +437,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
       {...(savedState !== undefined ? { savedState } : {})}
       {...(onSavedStateChange ? { onSavedStateChange } : {})}
       {...(itemId !== undefined ? { itemId } : {})}
+      {...(internetMessageId !== undefined ? { internetMessageId } : {})}
       {...(itemName !== undefined ? { itemName } : {})}
       {...(senderEmail !== undefined ? { senderEmail } : {})}
       {...(senderDisplayName !== undefined ? { senderDisplayName } : {})}

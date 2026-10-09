@@ -202,13 +202,39 @@ public sealed class DagAdvancerTests
     {
         // EXEC-01 green path + T218b: H3 + H4b (KV refs + batched app-settings) and H6 (the package) → H9 ready.
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H4", "H4b", "H3", "H5", "H10", "H6");
+            "H0", "H1", "H2a", "H4", "H4b", "H3", "H5", "H10", "H6", "H7b");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
         ready.Should().Contain("H9",
             "with H3 + H4b + H6 landed, H9 (BFF deploy) is unblocked: complete KV refs + batched app-settings, " +
             "and the schema the BFF reads is already in the environment.");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6_UnlocksH7b_AndH9WaitsForIt()
+    {
+        // T256 (INCOMING-145): H7b reads the package's table metadata, so it follows H6 alone. H9 waits for it: an
+        // environment without sprk_noaccessentry (or with NULL secure flags, or no Secure Record anchor) never gets a BFF.
+        var afterH6 = _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running,
+            "H0", "H1", "H2a", "H4", "H4b", "H3", "H5", "H10", "H6"));
+
+        afterH6.Should().Contain("H7b", "[H7b] = { H6 }");
+        afterH6.Should().NotContain("H9", "T256: the BFF deploy waits for the Secure Record setup (and its sprk_noaccessentry check)");
+
+        _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H10"))
+            .Should().NotContain("H7b", "H7b needs the package (H6)");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_H13WaitsForH7b()
+    {
+        // T256: INCOMING-145 §2 — no run passes acceptance without the secure anchor (H13 lists H7b explicitly).
+        DagAdvancer.HandlerDependencies["H13"].Should().Contain("H7b");
+        _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running,
+                "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
+                "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14"))
+            .Should().NotContain("H13", "H7b has not completed");
     }
 
     [Fact]
@@ -255,9 +281,9 @@ public sealed class DagAdvancerTests
     {
         // T245a: H7 writes the SPE container-id env var from InterStepState.SpeContainerId (H8 output).
         // T245b: + H9 — sprk_BffApiBaseUrl is the stamp's own BFF URL (InterStepState.BffApiUrl).
-        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H9", "H6");
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H9", "H6", "H7b");
         var withoutH9 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H6", "H8");
-        var withBoth = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H6", "H8", "H9");
+        var withBoth = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H6", "H7b", "H8", "H9");
 
         _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H7", "H8 has not produced SpeContainerId yet");
         _sut.ComputeReadyHandlers(withoutH9).Should().NotContain("H7", "H9 has not produced the stamp's BFF URL yet");
@@ -273,7 +299,7 @@ public sealed class DagAdvancerTests
 
         _sut.ComputeReadyHandlers(withoutH9).Should().NotContain("H14");
         _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H4b", "H6", "H8", "H9", "H7", "H10", "H11", "H12a", "H12b", "H12c"))
+            "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H4b", "H6", "H7b", "H8", "H9", "H7", "H10", "H11", "H12a", "H12b", "H12c"))
             .Should().Contain("H14");
     }
 
@@ -282,7 +308,7 @@ public sealed class DagAdvancerTests
     {
         // H8 dispatched but not complete — e.g. waiting out the 24h SPE replication window with its root container
         // created and recorded but NOT yet bound (unified-access-control-r2 task 165, owner round 41 item 1).
-        var run = MakeRun(RunStatus.WaitingOnGate, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6");
+        var run = MakeRun(RunStatus.WaitingOnGate, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6", "H7b");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -294,7 +320,7 @@ public sealed class DagAdvancerTests
     [Fact]
     public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H10", "H9", "H6", "H8");
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H10", "H9", "H6", "H7b", "H8");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -306,7 +332,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10");
+            "H5", "H6", "H7b", "H7", "H10");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -319,7 +345,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11");
+            "H5", "H6", "H7b", "H7", "H10", "H11");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -333,7 +359,7 @@ public sealed class DagAdvancerTests
         // H12c needs H12a + H12b + H2a — H12b missing.
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11", "H12a");
+            "H5", "H6", "H7b", "H7", "H10", "H11", "H12a");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -348,7 +374,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11", "H12a", "H12b");
+            "H5", "H6", "H7b", "H7", "H10", "H11", "H12a", "H12b");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -361,7 +387,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c");
+            "H5", "H6", "H7b", "H7", "H10", "H11", "H12a", "H12b", "H12c");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -374,7 +400,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14");
+            "H5", "H6", "H7b", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -387,7 +413,7 @@ public sealed class DagAdvancerTests
     {
         var run = MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
-            "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14", "H13");
+            "H5", "H6", "H7b", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14", "H13");
 
         var ready = _sut.ComputeReadyHandlers(run);
 

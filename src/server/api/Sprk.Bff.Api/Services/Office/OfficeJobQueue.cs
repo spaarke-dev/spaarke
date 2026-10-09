@@ -76,7 +76,8 @@ public class OfficeJobQueue
             EmailMetadata = request.ContentType == SaveContentType.Email && request.Email != null
                 ? new EmailArtifactPayload
                 {
-                    InternetMessageId = request.Email.InternetMessageId,
+                    // Task 121: the same stored message id as the document row (OfficeDocumentPersistence).
+                    InternetMessageId = OfficeEmailEnricher.ResolveStoredMessageId(request.Email),
                     ConversationId = request.Email.ConversationId,
                     Subject = request.Email.Subject,
                     SenderEmail = request.Email.SenderEmail,
