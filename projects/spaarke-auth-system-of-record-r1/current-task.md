@@ -1,6 +1,6 @@
 # Current Task State - spaarke-auth-system-of-record-r1
 
-> **Last Updated**: 2026-10-09 (by context-handoff)
+> **Last Updated**: 2026-10-09 (architecture draft committed; trace check running)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Write the canonical auth architecture document (no POML; owner-directed) |
-| **Step** | 1 of 4: not started — outline agreed with owner |
-| **Status** | ready to start |
-| **Next Action** | Draft `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` (in this worktree) from the verified record + evidence files, using the outline under "Next Actions" step 1; then run one independent check that every statement traces to the record/evidence |
+| **Step** | 2 of 4: draft committed (`06ccb14b1`); independent trace check running (one Fable agent, read-only) |
+| **Status** | in-progress |
+| **Next Action** | When the checker finishes, read `working/x08-architecture-trace-check.md`, apply every WRONG/OVERSTATED/citation fix to `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`, commit + push, then hand to the owner for review. If the agent died, re-launch the check (prompt: verify every statement against record/evidence/code at `8a9ecaac1`, drift to `231c5ab2b`; write findings to x08; no edits) |
 
 ### Files Modified This Session
 All committed and pushed on `work/spaarke-auth-system-of-record-r1` (HEAD `589b2f0ce` + this checkpoint commit). No uncommitted work.
@@ -29,7 +29,7 @@ Owner wants a **canonical auth architecture** that becomes the source for ADRs a
 
 ## Active Task
 
-**Canonical auth architecture doc** — `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`. Not started.
+**Canonical auth architecture doc** — `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`. Draft committed `06ccb14b1` (8 sections + glossary; master drift to `231c5ab2b` reviewed, additive only, §0.3). Trace check in progress → `working/x08-architecture-trace-check.md`.
 
 ## Next Actions
 
