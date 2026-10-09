@@ -41,7 +41,7 @@ public sealed class EntraAppRegOptions
     /// <see cref="IAdminConsentVerifier"/> checks for (per
     /// <see cref="EntraAppRegPermissionCatalog.All"/> — 5 as of task 130).
     /// Renamed from the Wave-C4 scaffold's <c>ExpectedAppRoleCount</c> (which
-    /// conflated this with H10's 14-role app-only catalog — see
+    /// conflated this with H10's app-only catalog — see
     /// EntraAppRegPermissionCatalog.cs file header for the scope correction).
     /// </summary>
     public int ExpectedDelegatedScopeCount { get; set; } = EntraAppRegPermissionCatalog.All.Count;

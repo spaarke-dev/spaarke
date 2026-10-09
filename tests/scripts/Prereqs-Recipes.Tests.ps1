@@ -18,7 +18,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
 $script:ManifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
 $script:Validate = Join-Path $repoRoot 'scripts/provisioning-prereqs/validate.ps1'
 $script:Catalog = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/PinnedModelCatalog.cs'
-$script:GraphRoles = Join-Path $repoRoot 'src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs'
+$script:GraphRoles = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs'
 
 if (-not (Get-Module -ListAvailable -Name powershell-yaml)) { Install-Module powershell-yaml -Scope CurrentUser -Force -Confirm:$false | Out-Null }
 Import-Module powershell-yaml
@@ -180,7 +180,7 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         BeforeEach {
             $script:RoleIds = @(Select-String -Path $script:GraphRoles -Pattern '^\s*private const string Id[A-Za-z]+ = "([0-9a-f-]{36})"' | ForEach-Object { $_.Matches[0].Groups[1].Value })
         }
-        It 'parses a non-empty role catalog from GraphAppRoles.cs' { $script:RoleIds.Count | Should BeGreaterThan 10 }
+        It 'parses the L2 Worker role catalog from ControlPlaneGraphAppRoles.cs (task 261)' { $script:RoleIds.Count | Should BeGreaterThan 5 }
         It 'exits 0 when every catalog role is granted to the L2 UAMI on Graph' {
             Set-Rules $script:Dir az @(@('ad sp show', '0', 'graph-sp\n'), @('appRoleAssignments', '0', (($script:RoleIds -join '\r\n') + '\r\n')))
             (Invoke-Recipe 'PRQ-E-07' $script:Common $script:Dir).Exit | Should Be 0

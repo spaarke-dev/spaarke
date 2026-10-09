@@ -31,9 +31,13 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 11
+manifest_version: 12
 last_updated: 2026-10-09
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 12 (2026-10-09, customer-provisioning-orchestration-r1 T261 / G31): PRQ-E-07 checks the L2 Worker
+# identity's OWN catalog (ControlPlaneGraphAppRoles.cs) instead of the BFF stamp catalog (GraphAppRoles.cs), which now
+# holds only the stamp identity's evidence-backed roles. The L2 set adds AppRoleAssignment.ReadWrite.All (H10, H3) and
+# Application.ReadWrite.OwnedBy (H3), which no prerequisite granted before.
 # manifest_version 11 (2026-10-09, customer-provisioning-orchestration-r1 T262, G36): PRQ-S-06 ADDED (the customer's
 # subscription is a direct member of the spaarke-customers management group, where the common customer policy is
 # assigned — ADR-027). New token {customerManagementGroupId} (spaarke-constants.yaml management_groups.customers.id).
@@ -502,7 +506,7 @@ prereqs:
   - id: PRQ-E-07
     name: L2 UAMI has Graph app-role grants for provisioning-relevant roles
     scope: once_per_env
-    frequency: once per env, refresh on `GraphAppRoles.cs` change
+    frequency: once per env, refresh on `ControlPlaneGraphAppRoles.cs` change
     owner: Spaarke platform admin (via `scripts/provisioning/Grant-ControlPlaneIdentity.ps1`)
     consequence_of_absence: L2 handlers H7/H10/H11/H12c cannot authenticate to Graph; every Graph call 403s silently.
     check_recipe:
@@ -510,7 +514,7 @@ prereqs:
         set -o pipefail
         export MSYS_NO_PATHCONV=1
         cd "$(git rev-parse --show-toplevel)" || exit 1
-        src=src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
+        src=src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs
         [ -f "$src" ] || { echo "$src not found (run from the repo checkout)"; exit 1; }
         expected=$(grep -E '^[[:space:]]*private const string Id[A-Za-z]+ = ' "$src" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tr -d '\r')
         [ -n "$expected" ] || { echo "no app-role ids parsed from $src"; exit 1; }
@@ -523,8 +527,8 @@ prereqs:
         done
         [ "$failed" = 0 ] || exit 1
         echo ok
-      expect: '`ok` - every app-role id in `GraphAppRoles.cs` (the `Id*` constants) is granted to the L2 UAMI on Microsoft Graph; each missing role is printed and the recipe exits 1'
-    remediation: 'Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule.'
+      expect: '`ok` - every app-role id in `ControlPlaneGraphAppRoles.cs` (the `Id*` constants) is granted to the L2 UAMI on Microsoft Graph; each missing role is printed and the recipe exits 1'
+    remediation: "Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8; it grants `ControlPlaneGraphAppRoles.cs`, task 261). The set and the call behind each role: `projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md` §4. Residual risk: `AppRoleAssignment.ReadWrite.All` lets the L2 identity grant any app role to any principal (H10 needs it to grant and remove the stamp identity's Graph roles)."
     related_findings: [c5.8-l2-uami-graph-and-dataverse-grants, T3-graph-app-role-parity]
 
   - id: PRQ-E-08

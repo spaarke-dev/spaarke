@@ -10,9 +10,13 @@
 //   syncs the Microsoft Graph application (app-only) permission catalog
 //   (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally via
 //   IGraphAppRolesRegistry — see that file's header for the L2/BFF
-//   assembly-isolation rationale) onto the UAMI service principal: the 11
-//   Entra-granted roles. The 4 mailbox roles are granted by H14a through
-//   Exchange, scoped to the customer's group (task 251) — never here.
+//   assembly-isolation rationale) onto the UAMI service principal: the
+//   Entra-granted roles (FileStorageContainer.Selected since task 261), and
+//   REMOVES every other Microsoft Graph app role on it (task 261 / G31 — a stamp
+//   in Spaarke's tenant must not hold tenant-wide directory, SharePoint or mail
+//   rights; evidence: notes/t261-stamp-graph-least-privilege.md). The mailbox
+//   roles are granted by H14a through Exchange, scoped to the customer's group
+//   (task 251) — never here.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-13 (H10
@@ -72,8 +76,11 @@
 //   │ T259 App User already in another unit      │ QuarantineRequired        │
 //   │ T2 post-condition mismatch (count != 1)    │ QuarantineRequired        │
 //   │ Graph role grant call(s) failed            │ RetryableWithCleanup      │
+//   │ Removing an extra Graph role failed (T261) │ RetryableWithCleanup      │
 //   │ T3 post-condition partial (still missing   │ QuarantineRequired        │
 //   │ roles after "successful" grant loop)       │                           │
+//   │ T3 extra role still present (T261)         │ QuarantineRequired        │
+//   │ T3 extras re-read failed (T261)            │ Resumable                 │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                 │
 //   │ Run row deleted mid-flight                 │ Resumable                 │
 //   └────────────────────────────────────────────┴───────────────────────────┘
@@ -86,7 +93,12 @@
 //           with every other Wave-C4 handler).
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase == "H10",
-//           IdempotencyKey == appuser-{customerId}). Match ⇒ Success no-op.
+//           IdempotencyKey == appuser-{customerId}-g{catalog fingerprint}). Match ⇒ Success no-op.
+//           The fingerprint (task 261) is a hash of the Entra-granted role ids: a run that
+//           completed H10 under an OLDER catalog (more roles) does not match, so a re-dispatch
+//           of H10 re-runs the reconcile and removes what that catalog granted. Every step is
+//           idempotent. (A run already past H10 is not re-dispatched by the reconciler: for a
+//           stamp provisioned before task 261 use scripts/provisioning/Remove-StampGraphExtraRoles.ps1.)
 //           Key format is customer-only (no version token) per POML
 //           constraint — App User registration is per-customer + version-
 //           independent (parity with H5's dvenv-{customerId}).
@@ -234,7 +246,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         var run = read.Run;
         var etag = read.ETag;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, _rolesRegistry.GetEntraGranted());
 
         // (2) Level-3 idempotency: durable no-op on duplicate.
         if (run.CompletedPhases.Any(cp =>
@@ -427,6 +439,34 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 H10Rejections.GraphRoleGrantFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (12b) Task 261 (G31): REMOVE every Microsoft Graph app role on the stamp identity that is not in the
+        //       Entra-granted set — roles an earlier catalog granted (Directory.ReadWrite.All, User.ReadWrite.All,
+        //       Files.*, Sites.*, the mailbox roles before T251, …) or someone granted by hand. Every stamp lives in
+        //       Spaarke's tenant, so a leftover tenant-wide role reaches Spaarke's own directory. Each removal is
+        //       logged by the granter; assignments on other resources are untouched.
+        var removal = await _roleGranter.RemoveUnexpectedRolesAsync(
+            uamiObjectId, uamiClientId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+        if (removal is GraphAppRoleRemovalOutcome.Failure removalFailure)
+        {
+            var diagnostic =
+                $"Removing Graph app roles outside the stamp set failed: {removalFailure.Diagnostic}" +
+                (removalFailure.FailedRoleValues.Count > 0
+                    ? $" Still assigned: {string.Join(", ", removalFailure.FailedRoleValues)}."
+                    : string.Empty) +
+                " Each removal is idempotent (404 = already gone) — resume re-reads the assignments and removes only what " +
+                "is still extra.";
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                H10Rejections.GraphRoleRemovalFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+        var removedRoles = ((GraphAppRoleRemovalOutcome.Success)removal).RemovedRoleValues;
+        if (removedRoles.Count > 0)
+        {
+            _logger.LogWarning(
+                "H10 removed {RemovedCount} Graph app role(s) outside the stamp set from stamp identity SP {UamiSpId}: {RemovedRoles} " +
+                "(runId={RunId} customerId={CustomerId})",
+                removedRoles.Count, uamiObjectId, string.Join(", ", removedRoles), envelope.RunId, envelope.CustomerId);
+        }
+
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
             uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
@@ -441,6 +481,54 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 "Microsoft Graph resource SP. Do NOT blindly retry.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 H10Rejections.TrapT3VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        // (13b) T3, task 261 — independent re-read: nothing outside the Entra-granted set remains. Microsoft Graph is
+        //       eventually consistent, so a role this very call removed can still be listed for a few seconds: re-read
+        //       with a growing delay before deciding. The final decision is exhaustive — only None passes.
+        var attempts = Math.Max(1, _options.ExtrasRecheckAttempts);
+        GraphAppRoleExtrasResult extras = new GraphAppRoleExtrasResult.Unknown("The extras re-read did not run.");
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            extras = await _roleParityVerifier.FindUnexpectedRolesAsync(
+                uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
+            if (extras is GraphAppRoleExtrasResult.None || attempt == attempts)
+            {
+                break;
+            }
+            if (_options.ExtrasRecheckDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(_options.ExtrasRecheckDelay * attempt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        switch (extras)
+        {
+            case GraphAppRoleExtrasResult.None:
+                break;
+            case GraphAppRoleExtrasResult.Found found when removedRoles.Count > 0:
+                // This call removed roles and the directory still lists extras after the bounded re-read: most likely
+                // replication lag, not a re-granter. Resumable — a retry re-reads and removes what is still there.
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    $"After removing {string.Join(", ", removedRoles)}, the directory still lists Graph app role(s) outside the " +
+                    $"stamp set after {attempts} read(s): {string.Join(", ", found.RoleValues)}. Likely replication lag — resume " +
+                    "re-reads and removes what remains.", cancellationToken).ConfigureAwait(false);
+            case GraphAppRoleExtrasResult.Found found:
+                // Nothing was removed by this call yet extras are listed: the removal pass read an older view, or
+                // something grants them concurrently. Quarantine — find the granter before resuming.
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.TrapT3UnexpectedRoles,
+                    $"T3 verification FAILED: the stamp identity (SP {uamiObjectId}) holds Graph app role(s) outside the stamp " +
+                    $"set that the removal pass did not see: {string.Join(", ", found.RoleValues)}. Something grants them " +
+                    "concurrently (an operator script, another pipeline) — find the granter before resuming; the stamp set is " +
+                    "projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md.",
+                    cancellationToken).ConfigureAwait(false);
+            case GraphAppRoleExtrasResult.Unknown unknown:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    $"Could not confirm that no Graph app role outside the stamp set remains: {unknown.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            default:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.GraphRoleExtrasUnverified,
+                    "The extras re-read returned no recognisable result.", cancellationToken).ConfigureAwait(false);
         }
 
         stopwatch.Stop();
@@ -467,16 +555,19 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             cancellationToken);
 
     /// <summary>
-    /// Computes the deterministic H10 idempotency key: <c>appuser-{customerId}</c>.
-    /// No version token per POML constraint — App User registration is
-    /// per-customer + version-independent (parity with H5's
-    /// <c>dvenv-{customerId}</c>). Exposed internal so unit tests can construct
-    /// expected keys without duplicating the format.
+    /// Computes the deterministic H10 idempotency key: <c>appuser-{customerId}-g{fingerprint}</c>, where the fingerprint
+    /// is the first 8 hex digits of SHA-256 over the sorted, lower-cased Entra-granted app-role ids (task 261). App User
+    /// registration is per-customer and otherwise version-independent (parity with H5's <c>dvenv-{customerId}</c>); the
+    /// Graph role set is the one part that changes, and a change must re-run the reconcile. Exposed internal so unit
+    /// tests can construct expected keys without duplicating the format.
     /// </summary>
-    internal static string BuildIdempotencyKey(string customerId)
+    internal static string BuildIdempotencyKey(string customerId, IReadOnlyList<GraphAppRoleEntry> entraRoles)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
-        return $"appuser-{customerId}";
+        ArgumentNullException.ThrowIfNull(entraRoles);
+        var ids = string.Join("|", entraRoles.Select(r => (r.AppRoleId ?? string.Empty).ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal));
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
+        return $"appuser-{customerId}-g{Convert.ToHexString(hash, 0, 4).ToLowerInvariant()}";
     }
 
     private static bool TryGetNonEmpty(

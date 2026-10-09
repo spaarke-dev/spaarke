@@ -42,9 +42,15 @@
 //         distinct from T3's QuarantineRequired classification (dispatcher-
 //         required: both classifications exercised).
 //   AC-15 Idempotency key format determinism.
-//   AC-16 L2GraphAppRolesRegistry (REAL, not faked) enumerates all 15 roles
-//         with non-null AppRoleId + the well-known Graph resource appId
-//         (14 per r1 task 005 + 1 added by task 144 -- H11 verification).
+//   AC-16 L2GraphAppRolesRegistry (REAL, not faked) is the task 261 stamp set:
+//         FileStorageContainer.Selected (Entra) + Mail.Read/ReadWrite/Send
+//         (Exchange-scoped), all GUIDs populated, no directory-write role.
+//   T261  (G31, owner 2026-10-09): H10 removes every Graph app role outside the
+//         Entra-granted set (passing the stamp's client id so the granter can
+//         check the target), logs it, and does not complete while one remains:
+//         removal failure → RetryableWithCleanup; an extra still present after
+//         removal → QuarantineRequired; the extras re-read failing → Resumable;
+//         nothing extra → Success with the gate Verified.
 //   T259 (ISS-010, owner 2026-10-09): the customer unit is resolved before any
 //         App User and both App Users are requested IN it; its id lands in
 //         InterStepState.CustomerBusinessUnitId; a unit not under the root and
@@ -104,7 +110,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
-        success.IdempotencyKey.Should().Be(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId));
+        success.IdempotencyKey.Should().Be(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture));
 
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
@@ -234,7 +240,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     public async Task AC5_Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
         var run = BuildRun();
-        var expectedKey = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId);
+        var expectedKey = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H10",
@@ -451,35 +457,189 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     // ---------- AC-15 idempotency key format determinism ----------
 
     [Fact]
-    public void AC15_IdempotencyKey_IsDeterministicByCustomerOnly()
+    public void AC15_IdempotencyKey_IsDeterministicByCustomerAndCatalog()
     {
-        var k1 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme");
-        var k2 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme");
-        k1.Should().Be(k2);
-        k1.Should().Be("appuser-acme");
+        var k1 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme", ThreeRoleFixture);
+        var k2 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme", ThreeRoleFixture.Reverse().ToArray());
+        k1.Should().Be(k2, "role order does not matter");
+        k1.Should().MatchRegex("^appuser-acme-g[0-9a-f]{8}$");
 
-        var k3 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other");
-        k3.Should().NotBe(k1);
+        H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other", ThreeRoleFixture).Should().NotBe(k1);
+    }
+
+    [Fact]
+    public async Task T261_ARunCompletedUnderAnOlderCatalog_ReRunsTheReconcile_NotANoOp()
+    {
+        // A stamp whose H10 completed before task 261 recorded the old key ("appuser-acme"); a re-dispatch must not
+        // short-circuit on it, or the 11-role grant would never be removed.
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H10", IdempotencyKey = "appuser-acme", StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+        });
+        var granter = FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" });
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-t261f"), FakeCreator.Success(),
+            FakeVerifier.Verified(UamiSystemUserId), granter, FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        granter.RemovalCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task T261_ExtrasListedJustAfterARemoval_AreReReadWithBackoff_AndPassOnceGone()
+    {
+        // Graph is eventually consistent: the first re-read still lists the role H10 just deleted.
+        var parity = FakeParityVerifier.Verified(3, extrasSequence: new GraphAppRoleExtrasResult[]
+        {
+            new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }),
+            new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }),
+            new GraphAppRoleExtrasResult.None(),
+        });
+        var handler = BuildHandler(new FakeRepository(BuildRun(), etag: "etag-t261g"), FakeCreator.Success(),
+            FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" }),
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        parity.ExtrasCallCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task T261_ExtrasStillListedAfterThisCallRemovedThem_IsResumable_NotQuarantine()
+    {
+        var parity = FakeParityVerifier.Verified(3, extras: new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }));
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261h");
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId),
+            FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" }), parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable, "a healthy stamp must not be quarantined for replication lag");
+        failure.RejectionCode.Should().Be(H10Rejections.GraphRoleExtrasUnverified);
+        parity.ExtrasCallCount.Should().Be(5, "the bounded re-read ran to its limit before deciding");
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
     }
 
     // ---------- AC-16 real L2GraphAppRolesRegistry mirror — all 15 GUIDs ----------
 
     [Fact]
-    public void AC16_L2GraphAppRolesRegistry_EnumeratesAllPopulatedGuids()
+    public void AC16_L2GraphAppRolesRegistry_IsTheTask261StampSet()
     {
-        var registry = new L2GraphAppRolesRegistry();
+        IGraphAppRolesRegistry registry = new L2GraphAppRolesRegistry();
 
         registry.GraphResourceAppId.Should().Be("00000003-0000-0000-c000-000000000000");
 
         var roles = registry.GetAll();
-        roles.Should().HaveCount(15,
-            "GraphAppRoles.cs r3 task 062 catalog is 14 entries + 1 added by task 144 (User.Invite.All, " +
-            "H11 B2BGuest preset)");
+        roles.Select(r => r.Value).Should().BeEquivalentTo(
+            new[] { "FileStorageContainer.Selected", "Mail.Read", "Mail.ReadWrite", "Mail.Send" },
+            "task 261: the stamp identity's evidence-backed set (notes/t261-stamp-graph-least-privilege.md)");
         roles.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.AppRoleId),
-            "all AppRoleId GUIDs must be populated (14 by r1 task 005 on 2026-08-17, +1 by task 144 on " +
-            "2026-08-20) — a null here would silently fire the H10 escalation gate for every future run");
-        roles.Select(r => r.Value).Should().OnlyHaveUniqueItems();
+            "a null AppRoleId would fire the H10 escalation gate for every run");
         roles.Select(r => r.AppRoleId).Should().OnlyHaveUniqueItems("no two roles share an AppRoleId GUID");
+        registry.GetEntraGranted().Select(r => r.Value).Should().Equal(new[] { "FileStorageContainer.Selected" },
+            "the mailbox roles are Exchange-scoped (H14a) — FileStorageContainer.Selected is H10's only Entra grant");
+        roles.Select(r => r.Value).Should().NotContain(new[]
+        {
+            "Directory.ReadWrite.All", "User.ReadWrite.All", "GroupMember.ReadWrite.All", "User.Invite.All",
+            "Files.Read.All", "Files.ReadWrite.All", "Sites.Read.All", "Sites.ReadWrite.All",
+        }, "G31: a stamp in Spaarke's tenant holds no tenant-wide directory or SharePoint role");
+    }
+
+    // ---------- T261 — H10 removes Graph app roles outside the stamp set ----------
+
+    [Fact]
+    public async Task T261_ExtraRoles_AreRemoved_WithTheStampClientId_AndH10Completes()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261a");
+        var granter = FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All", "User.Invite.All" });
+        var parity = FakeParityVerifier.Verified(3);
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId), granter,
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        granter.RemovalCallCount.Should().Be(1);
+        granter.LastRemovalTarget.Should().Be((UamiObjectId, UamiClientId),
+            "the removal names the stamp SP AND its client id, so the granter can refuse a drifted object id");
+        granter.LastAllowedRoles.Should().BeEquivalentTo(ThreeRoleFixture,
+            "the allowed set is exactly the Entra-granted set H10 just granted");
+        parity.ExtrasCallCount.Should().Be(1, "T3 re-reads independently that nothing extra remains");
+        repo.LastWrittenRun!.GateStates[H10Gates.GraphRoleParity].Status.Should().Be(GateState.Verified);
+    }
+
+    [Fact]
+    public async Task T261_RemovalFailure_FailsRetryableWithCleanup_AndH10IsNotComplete()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261b");
+        var granter = FakeGranter.Success(3, removalFailure: new GraphAppRoleRemovalOutcome.Failure(
+            "DELETE appRoleAssignments/x failed: 403 Forbidden.", new[] { "Files.Read.All" }, new[] { "Directory.ReadWrite.All" }));
+        var parity = FakeParityVerifier.Verified(3);
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId), granter,
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.RetryableWithCleanup);
+        failure.RejectionCode.Should().Be(H10Rejections.GraphRoleRemovalFailed);
+        failure.Diagnostic.Should().Contain("Directory.ReadWrite.All");
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty("H10 is not complete while an extra role remains");
+        parity.CallCount.Should().Be(0, "T3 does not run before the removal succeeded");
+    }
+
+    [Fact]
+    public async Task T261_ExtraListedThatTheRemovalPassDidNotSee_IsQuarantined()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261c");
+        var parity = FakeParityVerifier.Verified(3, extras: new GraphAppRoleExtrasResult.Found(new[] { "Sites.ReadWrite.All" }));
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.TrapT3UnexpectedRoles);
+        failure.Diagnostic.Should().Contain("Sites.ReadWrite.All");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T261_ExtrasReReadFails_IsResumable_NotSuccess()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261d");
+        var parity = FakeParityVerifier.Verified(3, extras: new GraphAppRoleExtrasResult.Unknown("GET appRoleAssignments failed: 503"));
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H10Rejections.GraphRoleExtrasUnverified);
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty("no verdict is not a pass");
+    }
+
+    [Fact]
+    public async Task T261_EscalationGate_StillFiresBeforeAnyRemoval()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261e");
+        var granter = FakeGranter.Success(1);
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId), granter,
+            FakeParityVerifier.Verified(1),
+            FakeRegistry.WithRoles(new[] { new GraphAppRoleEntry("FileStorageContainer.Selected", null) }));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.RejectionCode.Should().Be(H10Rejections.EscalationGateNullAppRoleId);
+        granter.RemovalCallCount.Should().Be(0, "an incomplete catalog never drives a removal");
     }
 
     // ---------- T259 customer business unit (ISS-010) ----------
@@ -606,7 +766,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         FakeParityVerifier parityVerifier,
         FakeRegistry registry)
     {
-        var options = Options.Create(new H10DataverseAppUserGraphParityOptions());
+        var options = Options.Create(new H10DataverseAppUserGraphParityOptions { ExtrasRecheckDelay = TimeSpan.Zero });
         return new H10DataverseAppUserGraphParityHandler(
             repo, creator, verifier, granter, parityVerifier, registry, options,
             NullLogger<H10DataverseAppUserGraphParityHandler>.Instance);
@@ -747,12 +907,23 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     private sealed class FakeGranter : IGraphAppRoleGranter
     {
         private readonly GraphAppRoleGrantOutcome _outcome;
+        private readonly GraphAppRoleRemovalOutcome _removal;
         public int CallCount { get; private set; }
         public string? LastUamiObjectId { get; private set; }
+        public int RemovalCallCount { get; private set; }
+        public (string ObjectId, string ClientId)? LastRemovalTarget { get; private set; }
+        public IReadOnlyList<GraphAppRoleEntry>? LastAllowedRoles { get; private set; }
 
-        private FakeGranter(GraphAppRoleGrantOutcome outcome) => _outcome = outcome;
+        private FakeGranter(GraphAppRoleGrantOutcome outcome, GraphAppRoleRemovalOutcome? removal = null)
+        {
+            _outcome = outcome;
+            _removal = removal ?? new GraphAppRoleRemovalOutcome.Success(Array.Empty<string>());
+        }
 
-        public static FakeGranter Success(int grantedCount) => new(new GraphAppRoleGrantOutcome.Success(grantedCount));
+        public static FakeGranter Success(
+            int grantedCount, IReadOnlyList<string>? removed = null, GraphAppRoleRemovalOutcome? removalFailure = null)
+            => new(new GraphAppRoleGrantOutcome.Success(grantedCount),
+                removalFailure ?? new GraphAppRoleRemovalOutcome.Success(removed ?? Array.Empty<string>()));
 
         public static FakeGranter Failure(string diagnostic, IReadOnlyList<string> failedRoles)
             => new(new GraphAppRoleGrantOutcome.Failure(diagnostic, failedRoles));
@@ -765,16 +936,37 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             LastUamiObjectId = uamiServicePrincipalObjectId;
             return Task.FromResult(_outcome);
         }
+
+        public Task<GraphAppRoleRemovalOutcome> RemoveUnexpectedRolesAsync(
+            string uamiServicePrincipalObjectId, string uamiClientId, string tenantId,
+            IReadOnlyList<GraphAppRoleEntry> allowedRoles, CancellationToken ct)
+        {
+            RemovalCallCount++;
+            LastRemovalTarget = (uamiServicePrincipalObjectId, uamiClientId);
+            LastAllowedRoles = allowedRoles;
+            return Task.FromResult(_removal);
+        }
     }
 
     private sealed class FakeParityVerifier : IGraphAppRoleParityVerifier
     {
         private readonly GraphAppRoleParityResult _result;
+        private readonly GraphAppRoleExtrasResult _extras;
+        private readonly Queue<GraphAppRoleExtrasResult>? _sequence;
         public int CallCount { get; private set; }
+        public int ExtrasCallCount { get; private set; }
 
-        private FakeParityVerifier(GraphAppRoleParityResult result) => _result = result;
+        private FakeParityVerifier(GraphAppRoleParityResult result, GraphAppRoleExtrasResult? extras = null,
+            IEnumerable<GraphAppRoleExtrasResult>? sequence = null)
+        {
+            _result = result;
+            _extras = extras ?? new GraphAppRoleExtrasResult.None();
+            _sequence = sequence is null ? null : new Queue<GraphAppRoleExtrasResult>(sequence);
+        }
 
-        public static FakeParityVerifier Verified(int count) => new(new GraphAppRoleParityResult.Verified(count));
+        public static FakeParityVerifier Verified(int count, GraphAppRoleExtrasResult? extras = null,
+            IEnumerable<GraphAppRoleExtrasResult>? extrasSequence = null)
+            => new(new GraphAppRoleParityResult.Verified(count), extras, extrasSequence);
 
         public static FakeParityVerifier Partial(IReadOnlyList<string> missing, int granted, int expected)
             => new(new GraphAppRoleParityResult.Partial(missing, granted, expected));
@@ -785,6 +977,14 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         {
             CallCount++;
             return Task.FromResult(_result);
+        }
+
+        public Task<GraphAppRoleExtrasResult> FindUnexpectedRolesAsync(
+            string uamiServicePrincipalObjectId, string tenantId,
+            IReadOnlyList<GraphAppRoleEntry> allowedRoles, CancellationToken ct)
+        {
+            ExtrasCallCount++;
+            return Task.FromResult(_sequence is { Count: > 0 } ? _sequence.Dequeue() : _extras);
         }
     }
 

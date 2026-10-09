@@ -779,8 +779,8 @@ builder.Services.AddScoped<H8SpeContainerHandler>();
 // (T2 + T3 silent-fail trap owner) + FIVE collaborator seams
 // (IGraphAppRolesRegistry = L2GraphAppRolesRegistry, a compiled mirror of
 // Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles — L2 cannot reference the BFF
-// assembly per ADR-010 / project MUST rule, so the catalog (15 roles as of
-// task 144) is duplicated as its own DI-registered source of truth; IDataverseAppUserCreator
+// assembly per ADR-010 / project MUST rule, so the catalog (the stamp set, 4 roles
+// since task 261) is duplicated as its own DI-registered source of truth; IDataverseAppUserCreator
 // = DataverseWebApiAppUserCreator issues real Dataverse Web API systemusers
 // upsert + role-association calls for BOTH the BFF app-reg and the UAMI;
 // IDataverseAppUserVerifier = DataverseWebApiAppUserVerifier is the INDEPENDENT

@@ -200,7 +200,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-03 | L2 UAMI Storage Blob Data Reader on artifacts storage | Spaarke admin | H2a/H9 artifact download 403 |
 | PRQ-E-04 | L2 UAMI AcrPull on platform ACR | Spaarke admin | Sidecar image pull fails at H14a dispatch |
 | ~~PRQ-E-06~~ | 🔴 **RETIRED 2026-09-30 (T226)** — was *"L2 UAMI service-specific RBAC on 6 shared source services"* (for the H4-shared handler) | — | **None.** No handler reads a shared service's keys; H4b never depended on these roles. |
-| PRQ-E-07 | L2 UAMI Graph app-role grants | Spaarke admin (script) | L2 H7/H10/H11/H12c 403 silently on every Graph call |
+| PRQ-E-07 | L2 UAMI Graph app-role grants — `ControlPlaneGraphAppRoles.cs` (task 261), granted by `Grant-ControlPlaneIdentity.ps1` | Spaarke admin (script) | H3/H10/H11/H14b 403 on their Graph calls (H3 and H10 need `Application.ReadWrite.OwnedBy` / `AppRoleAssignment.ReadWrite.All`) |
 | PRQ-E-08 | L2 UAMI Dataverse App User (Path X) on admin env | Spaarke admin | L2 cannot read/write `sprk_dataverseenvironment` registry rows |
 | PRQ-E-09 | Platform KV secrets pre-seeded | Spaarke admin (script) | L2 config validation returns garbage strings (T1-family silent fail) |
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
