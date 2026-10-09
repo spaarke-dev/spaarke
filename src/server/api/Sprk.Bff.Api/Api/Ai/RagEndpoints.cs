@@ -226,7 +226,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.Query))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Query is required",
@@ -236,7 +236,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.Options?.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required in options",
@@ -327,7 +327,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(document.Id))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Document ID is required",
@@ -337,7 +337,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(document.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required",
@@ -347,7 +347,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(document.Content))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Content is required",
@@ -405,7 +405,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(query.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId query parameter is required",
@@ -451,7 +451,7 @@ public static class RagEndpoints
     {
         if (string.IsNullOrWhiteSpace(request.Text))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Text is required",
@@ -520,7 +520,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required",
@@ -530,7 +530,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.DriveId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "DriveId is required",
@@ -540,7 +540,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.ItemId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "ItemId is required",
@@ -550,7 +550,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.FileName))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "FileName is required",
@@ -1101,7 +1101,7 @@ public static class RagEndpoints
         // Validate request
         if (request.DocumentIds == null || request.DocumentIds.Count == 0)
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "DocumentIds is required and must contain at least one document ID",
@@ -1111,7 +1111,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required",
@@ -1432,7 +1432,7 @@ public static class RagEndpoints
         // Validate required fields
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required",
@@ -1442,7 +1442,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.DriveId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "DriveId is required",
@@ -1452,7 +1452,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.ItemId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "ItemId is required",
@@ -1462,7 +1462,7 @@ public static class RagEndpoints
 
         if (string.IsNullOrWhiteSpace(request.FileName))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "FileName is required",
@@ -1552,7 +1552,7 @@ public static class RagEndpoints
         // Validate required fields
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "TenantId is required",
@@ -1641,7 +1641,7 @@ public static class RagEndpoints
     {
         if (string.IsNullOrWhiteSpace(jobId))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Request",
                 Detail = "Job ID is required",
@@ -1653,7 +1653,7 @@ public static class RagEndpoints
 
         if (status == null)
         {
-            return Results.NotFound(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Not Found",
                 Detail = $"Bulk indexing job '{jobId}' not found",
