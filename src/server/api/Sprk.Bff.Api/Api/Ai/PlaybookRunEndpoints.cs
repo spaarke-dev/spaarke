@@ -241,7 +241,7 @@ public static class PlaybookRunEndpoints
             var status = await orchestrationService.GetRunStatusAsync(runId, cancellationToken);
             if (status == null)
             {
-                return Results.NotFound(new { error = $"Run {runId} not found" });
+                return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
             }
 
             logger.LogDebug("Retrieved status for run {RunId}: {State}", runId, status.State);
@@ -351,7 +351,7 @@ public static class PlaybookRunEndpoints
                 var status = await orchestrationService.GetRunStatusAsync(runId, cancellationToken);
                 if (status == null)
                 {
-                    return Results.NotFound(new { error = $"Run {runId} not found" });
+                    return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
                 }
 
                 // Run exists but wasn't cancelled (already complete)
@@ -436,7 +436,7 @@ public static class PlaybookRunEndpoints
             var detail = await orchestrationService.GetRunDetailAsync(runId, cancellationToken);
             if (detail == null)
             {
-                return Results.NotFound(new { error = $"Run {runId} not found" });
+                return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
             }
 
             logger.LogDebug(

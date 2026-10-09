@@ -163,14 +163,22 @@ public static partial class ProblemDetailsHelper
     /// <c>error</c> member is kept as an extension with the same text so any reader of it still works.
     /// </summary>
     /// <remarks>
-    /// Only for responses written BEFORE an SSE stream starts. An error inside a started stream is an
-    /// SSE event, a different contract.
+    /// Only for plain HTTP responses (for a streaming route, ones written BEFORE the SSE stream starts).
+    /// An error inside a started stream is an SSE event, a different contract.
     /// </remarks>
-    public static IResult FromLegacyError(int statusCode, string message) =>
-        Results.Problem(
-            detail: message,
-            statusCode: statusCode,
-            extensions: new Dictionary<string, object?> { ["error"] = message });
+    /// <param name="statusCode">The HTTP status the route already returned.</param>
+    /// <param name="message">The old <c>error</c> text; becomes <c>detail</c>.</param>
+    /// <param name="correlationId">Kept as a <c>correlationId</c> extension where the old body carried one.</param>
+    public static IResult FromLegacyError(int statusCode, string message, string? correlationId = null)
+    {
+        var extensions = new Dictionary<string, object?> { ["error"] = message };
+        if (correlationId is not null)
+        {
+            extensions["correlationId"] = correlationId;
+        }
+
+        return Results.Problem(detail: message, statusCode: statusCode, extensions: extensions);
+    }
 
     /// <summary>
     /// Build a 403 ProblemDetails carrying a deny code and, optionally, an explanation the caller can

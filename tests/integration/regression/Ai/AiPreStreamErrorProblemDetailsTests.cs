@@ -95,7 +95,33 @@ public class AiPreStreamErrorProblemDetailsTests
             return p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null;
         }).ToArray();
 
-        await (Task)info.Invoke(null, args)!;
+        var task = (Task)info.Invoke(null, args)!;
+        await task;
+
+        // Task<IResult> handlers return their response instead of writing it: execute it the way the
+        // endpoint pipeline does, so the body and content type can be asserted the same way.
+        if (task.GetType().GetProperty("Result")?.GetValue(task) is IResult result)
+        {
+            await result.ExecuteAsync(httpContext);
+        }
+    }
+
+    /// <summary>A ChatSessionManager whose repository knows <see cref="SessionId"/> (with no outputs).</summary>
+    private static ChatSessionManager KnownSessionManager()
+    {
+        var repo = new Mock<IChatDataverseRepository>();
+        var now = DateTimeOffset.UtcNow;
+        repo.Setup(r => r.GetSessionAsync(TenantId, SessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatSession(
+                SessionId: SessionId,
+                TenantId: TenantId,
+                DocumentId: null,
+                PlaybookId: null,
+                CreatedAt: now,
+                LastActivity: now,
+                Messages: Array.Empty<ChatMessage>())
+            { OwnerOid = TestSessionOwner.Oid });
+        return new ChatSessionManager(new Mock<ITenantCache>().Object, repo.Object, NullLogger<ChatSessionManager>.Instance);
     }
 
     private static async Task AssertProblemAsync(HttpContext httpContext, HttpStatusCode status, string detail)
@@ -224,5 +250,99 @@ public class AiPreStreamErrorProblemDetailsTests
         await InvokeAsync(typeof(AnalysisEndpoints), "ExecuteAnalysis", ctx,
             new AnalysisExecuteRequest { DocumentIds = [Guid.NewGuid()] }, Analysis(enabled: true));
         await AssertProblemAsync(ctx, HttpStatusCode.BadRequest, AnalysisEndpoints.PlaybookIdRequiredMessage);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // The same defect on the plain (non-streaming) 404s in these three files: Results.NotFound(new
+    // { error }) wrote application/json without title/status, so the client saw "HTTP 404".
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SwitchContext_UnknownSession_Is404Problem()
+    {
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(ChatEndpoints), "SwitchContextAsync", ctx,
+            SessionId, new ChatSwitchContextRequest(null, null), EmptySessionManager());
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Session {SessionId} not found");
+    }
+
+    [Fact]
+    public async Task DeleteSession_UnknownSession_Is404Problem()
+    {
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(ChatEndpoints), "DeleteSessionAsync", ctx, SessionId, EmptySessionManager());
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Session {SessionId} not found");
+    }
+
+    [Fact]
+    public async Task GetComposeOutputs_UnknownSession_Is404Problem()
+    {
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(ChatEndpoints), "GetComposeOutputsAsync", ctx, SessionId, EmptySessionManager());
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Session {SessionId} not found");
+    }
+
+    [Fact]
+    public async Task SupersedeComposeOutput_UnknownRef_Is404Problem()
+    {
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(ChatEndpoints), "SupersedeComposeOutputAsync", ctx,
+            SessionId, new ComposeSupersedeRequest("binding-x@t1"), KnownSessionManager());
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound,
+            $"No compose output 'binding-x@t1' found in session {SessionId}.");
+    }
+
+    [Fact]
+    public async Task GetRunStatus_UnknownRun_Is404Problem()
+    {
+        var runId = Guid.NewGuid();
+        var orchestration = new Mock<IPlaybookOrchestrationService>();
+        orchestration.Setup(o => o.GetRunStatusAsync(runId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlaybookRunStatus?)null);
+
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(PlaybookRunEndpoints), "GetRunStatus", ctx, runId, orchestration.Object);
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Run {runId} not found");
+    }
+
+    [Fact]
+    public async Task CancelRun_UnknownRun_Is404Problem()
+    {
+        var runId = Guid.NewGuid();
+        var orchestration = new Mock<IPlaybookOrchestrationService>();
+        orchestration.Setup(o => o.CancelAsync(runId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        orchestration.Setup(o => o.GetRunStatusAsync(runId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlaybookRunStatus?)null);
+
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(PlaybookRunEndpoints), "CancelRun", ctx, runId, orchestration.Object);
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Run {runId} not found");
+    }
+
+    [Fact]
+    public async Task GetRunDetail_UnknownRun_Is404Problem()
+    {
+        var runId = Guid.NewGuid();
+        var orchestration = new Mock<IPlaybookOrchestrationService>();
+        orchestration.Setup(o => o.GetRunDetailAsync(runId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Sprk.Bff.Api.Models.Ai.PlaybookRunDetail?)null);
+
+        var ctx = NewContext(withTenant: true);
+        await InvokeAsync(typeof(PlaybookRunEndpoints), "GetRunDetail", ctx, runId, orchestration.Object);
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, $"Run {runId} not found");
+    }
+
+    [Fact]
+    public async Task PromoteSession_UnknownSession_Is404Problem_KeepingCorrelationId()
+    {
+        var ctx = NewContext(withTenant: true);
+        ctx.TraceIdentifier = "corr-promote-404";
+        await InvokeAsync(typeof(AnalysisEndpoints), "PromoteSession", ctx,
+            new AnalysisPromoteRequest(SessionId, "My analysis"), EmptySessionManager());
+        await AssertProblemAsync(ctx, HttpStatusCode.NotFound, "Session not found");
+
+        ctx.Response.Body.Position = 0;
+        var body = await JsonSerializer.DeserializeAsync<JsonElement>(ctx.Response.Body);
+        body.GetProperty("correlationId").GetString().Should().Be("corr-promote-404");
     }
 }

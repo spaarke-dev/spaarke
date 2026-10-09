@@ -1078,7 +1078,7 @@ public static class AnalysisEndpoints
         if (session is null)
         {
             // Nothing has been written yet — a missing/expired session cannot orphan anything.
-            return Results.NotFound(new { error = "Session not found", correlationId });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, "Session not found", correlationId);
         }
 
         // Guard: a session already bound to an Analysis MUST NOT be promoted again — promotion is a
@@ -1202,7 +1202,7 @@ public static class AnalysisEndpoints
                 "Promote: session {SessionId} disappeared before bind — compensating by deleting Analysis {AnalysisId} (corr={CorrelationId})",
                 request.SessionId, analysisId, correlationId);
             await CompensatePromoteAnalysisDeleteAsync(entityService, analysisId, correlationId, logger);
-            return Results.NotFound(new { error = "Session not found", correlationId });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, "Session not found", correlationId);
         }
 
         logger.LogInformation(

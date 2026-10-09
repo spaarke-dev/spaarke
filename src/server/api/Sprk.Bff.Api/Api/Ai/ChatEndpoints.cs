@@ -1367,7 +1367,7 @@ public static class ChatEndpoints
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
         if (session is null)
         {
-            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Session {sessionId} not found");
         }
 
         // Validate additional document IDs cap (max 5)
@@ -1499,7 +1499,7 @@ public static class ChatEndpoints
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
         if (session is null)
         {
-            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Session {sessionId} not found");
         }
 
         logger.LogInformation(
@@ -1580,7 +1580,7 @@ public static class ChatEndpoints
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
         if (session is null)
         {
-            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Session {sessionId} not found");
         }
 
         var outputs = ProjectComposeOutputs(session.Outputs);
@@ -1662,7 +1662,7 @@ public static class ChatEndpoints
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
         if (session is null)
         {
-            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Session {sessionId} not found");
         }
 
         var result = SupersedeComposeOutput(session.Outputs, request.SupersedesRef);
@@ -1670,10 +1670,9 @@ public static class ChatEndpoints
         {
             case ComposeSupersedeOutcome.NotFound:
                 // Honest failure — no compose entry addressable at that ref.
-                return Results.NotFound(new
-                {
-                    error = $"No compose output '{request.SupersedesRef}' found in session {sessionId}.",
-                });
+                return ProblemDetailsHelper.FromLegacyError(
+                    StatusCodes.Status404NotFound,
+                    $"No compose output '{request.SupersedesRef}' found in session {sessionId}.");
 
             case ComposeSupersedeOutcome.NoOp:
                 // Idempotent: the ref was already superseded (or is itself a retraction). No write.
