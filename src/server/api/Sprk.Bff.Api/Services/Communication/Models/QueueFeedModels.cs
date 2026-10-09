@@ -96,7 +96,7 @@ public static class QueueFeedItemKinds
 /// <param name="TaskFinalDueDate">Create-task FR-E5 field. NOT extracted — null in the feed; human-supplied at apply.</param>
 /// <param name="TaskAssignedTo">Create-task FR-E5 field (the task Owner / <c>ownerid</c> systemuser). NOT extracted —
 /// null in the feed; human-supplied at apply.</param>
-/// <param name="TaskStatus">Create-task FR-E5 field (<c>sprk_eventstatus</c> Choice value, e.g. Completed=2 for the
+/// <param name="TaskStatus">Create-task FR-E5 field (<c>sprk_event.statuscode</c> value, e.g. Completed=659490002 for the
 /// create-and-complete case). NOT extracted — null in the feed; human-supplied at apply.</param>
 /// <param name="TaskCompletedDate">Create-task FR-E5 field. NOT extracted — null in the feed; human-supplied at apply.</param>
 public sealed record QueueFeedItem(

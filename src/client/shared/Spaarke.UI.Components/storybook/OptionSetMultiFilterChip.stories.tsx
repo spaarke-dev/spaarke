@@ -52,7 +52,7 @@ const picklistMetadata: EntityMetadata = {
 };
 
 /**
- * Status example — `sprk_eventstatus` Status attribute with hex colors. Colors
+ * Status example — `statuscode` Status attribute with hex colors. Colors
  * here mirror typical Spaarke status-band conventions (green / blue / red).
  * `color` strings are DATA per the OptionSetOption contract — exempt from
  * NO-RAW-HEX.
@@ -63,7 +63,7 @@ const statusMetadata: EntityMetadata = {
   attributes: {
     sprk_eventid: { attributeType: 'String', isPrimaryId: true },
     sprk_eventname: { attributeType: 'String', isPrimaryName: true },
-    sprk_eventstatus: {
+    statuscode: {
       attributeType: 'Status',
       optionSet: [
         { value: 1, label: 'Active', color: '#107C10' },
@@ -187,7 +187,7 @@ export const Status = (args: StoryArgs) => {
   return renderShell(
     args.theme,
     <OptionSetMultiFilterChip
-      columnLogicalName="sprk_eventstatus"
+      columnLogicalName="statuscode"
       entityMetadata={statusMetadata}
       value={value}
       onChange={setValue}
@@ -248,7 +248,7 @@ export const AllCleared = (args: StoryArgs) => {
         theme={portalTheme}
       />
       <OptionSetMultiFilterChip
-        columnLogicalName="sprk_eventstatus"
+        columnLogicalName="statuscode"
         entityMetadata={statusMetadata}
         value={s}
         onChange={setS}

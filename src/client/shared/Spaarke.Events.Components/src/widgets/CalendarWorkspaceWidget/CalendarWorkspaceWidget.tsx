@@ -157,23 +157,25 @@ declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event status values (mirror sprk_event_ribbon_commands.js — task 115)
+// Event status = sprk_event.statuscode (D-28, task 066: the second status column is deprecated and no longer
+// filtered on). The values are the LIVE option set (Spaarke.Dataverse.EventStatusCode); the BFF test
+// EventStatusDeprecationTests pins them against the data-model row verified from the live describe.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const EventStatus = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
-  REASSIGNED: 6,
-  ARCHIVED: 7,
+  DRAFT: 1,
+  OPEN: 659490001,
+  COMPLETED: 659490002,
+  CLOSED: 659490003,
+  ON_HOLD: 659490006,
+  REASSIGNED: 659490007,
+  NO_FURTHER_ACTION: 2,
+  CANCELLED: 659490004,
+  TRANSFERRED: 659490005,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Status options (Task 130) — hard-coded because sprk_eventstatus is an
-// integer field with no Dataverse choice metadata attached.
+// Event Status options (Task 130) — hard-coded: the host filter has no option-set metadata for statuscode.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface IStatusOption {
@@ -187,9 +189,10 @@ const STATUS_OPTIONS: IStatusOption[] = [
   { value: EventStatus.COMPLETED, label: 'Completed' },
   { value: EventStatus.CLOSED, label: 'Closed' },
   { value: EventStatus.ON_HOLD, label: 'On Hold' },
-  { value: EventStatus.CANCELLED, label: 'Cancelled' },
   { value: EventStatus.REASSIGNED, label: 'Reassigned' },
-  { value: EventStatus.ARCHIVED, label: 'Archived' },
+  { value: EventStatus.NO_FURTHER_ACTION, label: 'No Further Action' },
+  { value: EventStatus.CANCELLED, label: 'Cancelled' },
+  { value: EventStatus.TRANSFERRED, label: 'Transferred' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -631,7 +634,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
     if (applied.eventStatusValue !== null) {
       conditions.push({
-        attribute: 'sprk_eventstatus',
+        attribute: 'statuscode',
         operator: 'eq',
         value: applied.eventStatusValue,
       });

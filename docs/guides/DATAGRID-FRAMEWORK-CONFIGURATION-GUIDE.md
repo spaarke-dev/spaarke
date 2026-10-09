@@ -224,7 +224,7 @@ When the host (a workspace widget, a Code Page with custom filter chrome, etc.) 
   configId="…"
   hostFilters={[
     { attribute: 'sprk_eventtype_ref', operator: 'eq',      value: applied.eventTypeId },
-    { attribute: 'sprk_eventstatus',   operator: 'in',      value: applied.statusValues },
+    { attribute: 'statuscode',        operator: 'in',      value: applied.statusValues },
     { attribute: applied.dateField,    operator: 'between', value: [applied.from, applied.to] },
   ]}
   onRecordsLoaded={records => deriveCalendarDots(records)}
