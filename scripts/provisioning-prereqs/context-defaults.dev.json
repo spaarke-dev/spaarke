@@ -122,7 +122,7 @@
       "source": "runtime-context",
       "shape": "Customer Dataverse environment URL",
       "populatedBy": "intake dataverseEnvUrl — the environment the operator created (PRQ-C-09), canonical https://{host}/ with a trailing slash (T228)",
-      "note": "Only appears in per-customer once_per_customer scoped prereqs (deferred to H0 server-side per EXEC-10)."
+      "note": "Only appears in once_per_customer prereqs — run by the skill's customer pass (Step 1e-ter, 2026-10-09)."
     },
     "adminDvUrl": {
       "availability": "env",
@@ -136,28 +136,28 @@
       "source": "intake",
       "shape": "Azure subscription GUID — the customer stamp's own subscription",
       "populatedBy": "intake.schema.json subscriptionId (ADR-027: one subscription per customer)",
-      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — documented for operators, not substituted by Step 0.5b."
+      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — substituted by the skill's customer pass (Step 1e-ter)."
     },
     "stampEnvironment": {
       "availability": "customer",
       "source": "intake",
       "shape": "dev | staging | prod — the customer stamp's environment segment (customer.bicep environmentName)",
       "populatedBy": "nonSecretParameters environmentName (default 'prod', owner D6)",
-      "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — not substituted by Step 0.5b."
+      "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — the customer pass (Step 1e-ter) substitutes L2's default 'prod'; the intake has no override."
     },
     "environmentSecurityGroupId": {
       "availability": "customer",
       "source": "intake",
       "shape": "Object id (GUID) of the security group sprk-{customerId}-users",
       "populatedBy": "intake.schema.json environmentSecurityGroupId property (skill Step 1e-bis); the operator creates the group and sets it on the environment (PRQ-C-10)",
-      "note": "PRQ-C-10 is once_per_customer — documented for the operator, not run by Step 0.5b. Required for B2BGuest (every Model 1 run)."
+      "note": "PRQ-C-10 is once_per_customer — run by the skill's customer pass (Step 1e-ter). Required for B2BGuest (every Model 1 run)."
     },
     "exchangePolicyScopeGroupId": {
       "availability": "customer",
       "source": "intake",
       "shape": "Email address or object id of a mail-enabled security group",
       "populatedBy": "intake.schema.json exchangePolicyScopeGroupId property (skill Step 1e-bis); the group is created by the stamp tenant's Exchange admin (PRQ-C-08)",
-      "note": "PRQ-C-08 is once_per_customer — documented for the Exchange admin, not run by Step 0.5b."
+      "note": "PRQ-C-08 is once_per_customer — run by the skill's customer pass (Step 1e-ter)."
     }
   }
 }

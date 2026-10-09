@@ -362,15 +362,32 @@ Describe 'validate.ps1 (the recipe lints)' {
     }
     It 'fails a manifest whose tenant-scope recipe uses an env-only token, an undefined bash variable, a PowerShell cmdlet or no exit 1' {
         $bad = Join-Path ([IO.Path]::GetTempPath()) ("bad-" + [guid]::NewGuid().ToString('N') + '.yaml')
-        $text = (Get-Content -Raw $script:ManifestPath) -replace "`r`n", "`n" -replace '(?s)(- id: PRQ-T-06\n.*?cli: \|\n)(.*?)(\n      expect:)', ('$1        az ad sp list --display-name "{env}" | Select-String "$undefinedVar"$3')
+        # A synthetic tenant-scope entry (no active once_per_tenant recipe is left since T-01..T-05 moved to
+        # once_per_env and T-06 retired, 2026-10-09), inserted before PRQ-T-05 so it sits inside the prereqs list.
+        $synthetic = @'
+  - id: PRQ-X-99
+    name: synthetic lint fixture
+    scope: once_per_tenant
+    frequency: once
+    owner: test
+    consequence_of_absence: none
+    check_recipe:
+      cli: |
+        az ad sp list --display-name "{env}" | Select-String "$undefinedVar"
+      expect: n/a
+    remediation: none
+
+'@ -replace "`r`n", "`n"
+        $text = (Get-Content -Raw $script:ManifestPath) -replace "`r`n", "`n"
+        $text = $text.Replace("  - id: PRQ-T-05`n", $synthetic + "  - id: PRQ-T-05`n")
         [IO.File]::WriteAllText($bad, $text)
         try {
             $out = & pwsh -NoProfile -File $script:Validate -ManifestPath $bad 2>&1 | Out-String
             $LASTEXITCODE | Should Be 1
-            $out | Should Match 'PRQ-T-06: recipe uses \{env\}'
-            $out | Should Match 'PRQ-T-06: recipe references \$undefinedVar'
-            $out | Should Match 'PRQ-T-06: recipe has no explicit .exit 1.'
-            $out | Should Match "PRQ-T-06: recipe runs under bash -c but uses the PowerShell cmdlet 'Select-String'"
+            $out | Should Match 'PRQ-X-99: recipe uses \{env\}'
+            $out | Should Match 'PRQ-X-99: recipe references \$undefinedVar'
+            $out | Should Match 'PRQ-X-99: recipe has no explicit .exit 1.'
+            $out | Should Match "PRQ-X-99: recipe runs under bash -c but uses the PowerShell cmdlet 'Select-String'"
         }
         finally { Remove-Item $bad -ErrorAction SilentlyContinue }
     }

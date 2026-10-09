@@ -158,34 +158,34 @@ prereqs:
     remediation: See `docs/guides/office-addins-deployment-checklist.md`.
 
   - id: PRQ-T-05
-    name: Copilot bot Entra app-reg exists (if M365 Copilot integration in scope)
+    name: 'RETIRED — Copilot bot Entra app-reg (superseded by the T257 design: one shared OAuth client app, no bot)'
     scope: once_per_env
-    frequency: once (optional per profile)
-    owner: Spaarke platform admin
-    consequence_of_absence: M365 Copilot / declarative-agent surface non-functional; other surfaces unaffected.
-    check_recipe:
-      cli: |
-        set -o pipefail
-        id=$(az ad app list --filter "displayName eq 'Spaarke Copilot Bot {env}'" --query "[0].appId" -o tsv | tr -d '\r') || exit 1
-        [ -n "$id" ] || { echo "NOT_FOUND: Entra app registration 'Spaarke Copilot Bot {env}'"; exit 1; }
-        echo "ok $id"
-      expect: non-empty GUID
-    remediation: See `docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md`.
+    status: retired
+    retired_on: 2026-10-09
+    retired_by: customer-provisioning-orchestration-r1 T207 close-out
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. The per-customer Copilot agent (T257) uses OAuth with one shared, secret-free client app pre-authorized on
+      every customer BFF; there is no "Spaarke Copilot Bot {env}" app registration. T257 adds its own prerequisites once
+      the owner accepts its design.
+    remediation: |
+      Nothing to do. See projects/customer-provisioning-orchestration-r1/notes/t257-copilot-agent-design.md.
+    related_findings: [T257]
 
   - id: PRQ-T-06
-    name: Power BI service principal (tenant Power BI service admin)
+    name: 'RETIRED — Power BI service principal (BI is out of scope for r1; owner 2026-09-28)'
     scope: once_per_tenant
-    frequency: once (only if tenant uses Power BI Embedded)
-    owner: Power BI tenant admin
-    consequence_of_absence: Power BI Embedded reports show unauthorized; H12b Power BI seed skipped.
-    check_recipe:
-      cli: |
-        set -o pipefail
-        id=$(az ad sp list --display-name "Power BI Service" --query "[0].id" -o tsv | tr -d '\r') || exit 1
-        [ -n "$id" ] || { echo "NOT_FOUND: service principal 'Power BI Service'"; exit 1; }
-        echo "ok $id"
-      expect: non-empty GUID
-    remediation: Power BI Admin Portal → Tenant settings → Service principals.
+    status: retired
+    retired_on: 2026-10-09
+    retired_by: customer-provisioning-orchestration-r1 T207 close-out
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None in r1: no handler seeds Power BI; a per-customer Power BI F-SKU comes later (owner 2026-09-28: no BI in MVP).
+    remediation: |
+      Nothing to do in r1. Re-add with a real handler when BI is built.
+    related_findings: [D-BI-2026-09-28]
 
   # RETIRED 2026-09-28 by unified-access-control-r2 (D-12 + D-13).
   #
@@ -647,7 +647,7 @@ prereqs:
     related_findings: [A38a-secret-free-marker, T225b-G21]
 
   - id: PRQ-E-13
-    name: '`sprk_dataverseenvironment` placeholder record exists for the customer (its record id is the run''s `environmentId`)'
+    name: "`sprk_dataverseenvironment` placeholder record exists for the customer (its record id is the run's `environmentId`)"
     scope: once_per_customer # per customer being provisioned; created BEFORE POST /api/runs. The E- id is kept for reference stability. (T226: the annotated scope string failed validate.ps1; it already kept the skill from running this check, as once_per_customer does.)
     frequency: per customer, per new run
     owner: operator (via skill Step 1 intake — task 203 wires the create step)
@@ -663,7 +663,7 @@ prereqs:
         body=$(curl -sS -f -G -H "Authorization: Bearer $tok" -H "Accept: application/json" --data-urlencode "\$filter=sprk_customerid eq '{customerId}'" --data-urlencode "\$select=sprk_dataverseenvironmentid" "$res/api/data/v9.2/sprk_dataverseenvironments") || { echo "registry query failed on $res"; exit 1; }
         echo "$body" | grep -Eq '"sprk_dataverseenvironmentid": *"[0-9a-fA-F-]{36}"' || { echo "no sprk_dataverseenvironment row with sprk_customerid '{customerId}' on $res"; exit 1; }
         echo ok
-      expect: '`ok` - exactly the registry row keyed by `sprk_customerid` exists on the admin env (its `sprk_dataverseenvironmentid` is the run''s `environmentId`)'
+      expect: "`ok` - exactly the registry row keyed by `sprk_customerid` exists on the admin env (its `sprk_dataverseenvironmentid` is the run's `environmentId`)"
     remediation: '`pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).'
     related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
 
@@ -747,7 +747,7 @@ prereqs:
         done
         [ "$failed" = 0 ] || exit 1
         echo ok
-      expect: '`ok` - the stamp''s Service Bus namespace, storage account and the three Cognitive Services subdomains (openai, docintel, contentsafety) are all available; each unavailable name is printed with Azure''s reason and the recipe exits 1. A run that already deployed some of them (resume) reports them unavailable - run this before the first attempt only'
+      expect: "`ok` - the stamp's Service Bus namespace, storage account and the three Cognitive Services subdomains (openai, docintel, contentsafety) are all available; each unavailable name is printed with Azure's reason and the recipe exits 1. A run that already deployed some of them (resume) reports them unavailable - run this before the first attempt only"
     remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).'
     related_findings: [F10]
 
@@ -832,7 +832,7 @@ prereqs:
         t=$(pwsh -NoProfile -Command "Connect-ExchangeOnline -ShowBanner:\$false -ErrorAction Stop; (Get-DistributionGroup -Identity '{exchangePolicyScopeGroupId}' -ErrorAction Stop).RecipientTypeDetails" | tr -d '\r' | sed -n '$p') || { echo "Exchange Online query for '{exchangePolicyScopeGroupId}' failed"; exit 1; }
         [ "$t" = "MailUniversalSecurityGroup" ] || { echo "group '{exchangePolicyScopeGroupId}' is '$t', not MailUniversalSecurityGroup"; exit 1; }
         echo ok
-      expect: '`ok` - RecipientTypeDetails is `MailUniversalSecurityGroup`. Its members being exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox) is the Exchange admin''s decision and is not asserted'
+      expect: "`ok` - RecipientTypeDetails is `MailUniversalSecurityGroup`. Its members being exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox) is the Exchange admin's decision and is not asserted"
     remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security -Members <mailboxes>` in Exchange Online PowerShell, then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. Membership is the customer''s access decision — which mailboxes the app may use — so L2 never creates or edits it (owner decision 2026-10-01, T245c).'
     related_findings: [T245c, T4]
 
@@ -878,7 +878,7 @@ prereqs:
         [ "$name" = "sprk-{customerId}-users" ] || { echo "group is '$name', must be sprk-{customerId}-users"; exit 1; }
         [ "$sec" = true ] || { echo "group sprk-{customerId}-users is not security-enabled"; exit 1; }
         echo ok
-      expect: '`ok` - the group is named `sprk-{customerId}-users` and is security-enabled. NOT asserted here: that it is the environment''s security group - the skill (Step 1e-bis) reads linkedEnvironmentMetadata.securityGroupId from the Power Platform admin API (or: admin center -> Environments -> the environment -> Edit -> Security group). H11 can check only the name - L2 is not a Power Platform admin'
+      expect: "`ok` - the group is named `sprk-{customerId}-users` and is security-enabled. NOT asserted here: that it is the environment's security group - the skill (Step 1e-bis) reads linkedEnvironmentMetadata.securityGroupId from the Power Platform admin API (or: admin center -> Environments -> the environment -> Edit -> Security group). H11 can check only the name - L2 is not a Power Platform admin"
     remediation: |
       1. Entra admin center → Groups → New group: type Security, name `sprk-{customerId}-users`, membership Assigned,
          no members (H11 adds each guest as a DIRECT member — Dataverse ignores nested groups).
@@ -900,7 +900,7 @@ prereqs:
         echo "$out" | grep -qi "{stampSubscriptionId}" || { echo "billing policy output does not name the stamp subscription {stampSubscriptionId}:"; echo "$out"; exit 1; }
         echo "$out" | grep -qw "Enabled" || { echo "billing policy is not shown as Enabled:"; echo "$out"; exit 1; }
         echo ok
-      expect: '`ok` - the environment''s billing policy output names the stamp subscription {stampSubscriptionId} and shows `Enabled` (the output shape of this preview command is not yet verified live - T186; anchor to the status field once it is); cross-check with `pac licensing list-billing-policies`'
+      expect: "`ok` - the environment's billing policy output names the stamp subscription {stampSubscriptionId} and shows `Enabled` (the output shape of this preview command is not yet verified live - T186; anchor to the status field once it is); cross-check with `pac licensing list-billing-policies`"
     remediation: |
       Power Platform admin center → Billing → Billing policies → New billing policy: name `sprk-{customerId}-payg`, the
       customer's stamp subscription {stampSubscriptionId} and its stamp resource group, region = the environment's

@@ -325,30 +325,37 @@ Per SESSION 15 Wave 4 (SKILL-08 + PLX-01..14 + PRQ-06):
 
 ```powershell
 # --- Load Spaarke constants (PLX-13) ---
+$repoRoot = git rev-parse --show-toplevel
 $constantsPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/spaarke-constants.yaml'
 $constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
 
 # --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
 $graphAppId       = $constants.microsoft_constants.graphAppId
-$subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; Step 2.5 rebinds it to the customer's (T228)
-$l2UamiName       = $constants.name_templates.l2UamiName -replace '\{env\}', $env
-$platformRg       = $constants.name_templates.platformResourceGroup -replace '\{env\}', $env
-$l2UamiJson       = az identity show -g $platformRg -n $l2UamiName -o json | ConvertFrom-Json
-$l2UamiPrincipalId = $l2UamiJson.principalId
-$l2UamiClientId    = $l2UamiJson.clientId
-$l2UamiSpId        = az ad sp show --id $l2UamiClientId --query id -o tsv
-$sbNamespace       = $constants.name_templates.sbNamespace -replace '\{env\}', $env
-$artifactsStorage  = az storage account show -g $platformRg -n ($constants.name_templates.artifactsStorageName -replace '\{env\}', $env) --query id -o tsv 2>$null
-$acrId             = az acr show -g $platformRg -n ($constants.name_templates.acrName -replace '\{env\}', $env) --query id -o tsv 2>$null
-$kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
-$containerTypeId   = $constants.per_env_constants.$env.containerTypeId
-$adminDvUrl        = $constants.name_templates.registryDvUrl.$env
+$subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; the customer pass (Step 1e-ter) uses {stampSubscriptionId} (T228)
 $openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
 
-# Sanity: per_env_constants that require operator population MUST be set
-if (-not $containerTypeId) {
-  Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
-  exit 1
+# Everything below needs $env. Interactive mode reaches Step 0.5 before Step 1d assigns it; once_per_env is
+# skipped then (see $scopesToCheck), so these stay $null and no az call runs with an empty resource name (T207).
+$l2UamiPrincipalId = $null; $l2UamiClientId = $null; $l2UamiSpId = $null; $sbNamespace = $null
+$artifactsStorage = $null; $acrId = $null; $kvResourceId = $null; $containerTypeId = $null; $adminDvUrl = $null
+if ($env) {
+  $l2UamiName        = $constants.name_templates.l2UamiName -replace '\{env\}', $env
+  $platformRg        = $constants.name_templates.platformResourceGroup -replace '\{env\}', $env
+  $l2UamiJson        = az identity show -g $platformRg -n $l2UamiName -o json | ConvertFrom-Json
+  $l2UamiPrincipalId = $l2UamiJson.principalId
+  $l2UamiClientId    = $l2UamiJson.clientId
+  $l2UamiSpId        = az ad sp show --id $l2UamiClientId --query id -o tsv
+  $sbNamespace       = $constants.name_templates.sbNamespace -replace '\{env\}', $env
+  $artifactsStorage  = az storage account show -g $platformRg -n ($constants.name_templates.artifactsStorageName -replace '\{env\}', $env) --query id -o tsv 2>$null
+  $acrId             = az acr show -g $platformRg -n ($constants.name_templates.acrName -replace '\{env\}', $env) --query id -o tsv 2>$null
+  $kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
+  $containerTypeId   = $constants.per_env_constants.$env.containerTypeId
+  $adminDvUrl        = $constants.name_templates.registryDvUrl.$env
+  # Sanity: per_env_constants that require operator population MUST be set
+  if (-not $containerTypeId) {
+    Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
+    exit 1
+  }
 }
 # Task 245b / 248: the L2 Worker must also carry this container type's OWNING app
 # (SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId — Bicep param
@@ -359,84 +366,80 @@ if (-not $containerTypeId) {
 #   spe-owner-token-failed            → the owning app's FIC / consent (SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md);
 #   spe-container-type-not-registered → register the container type as the owning app (same runbook).
 
-$repoRoot = git rev-parse --show-toplevel
 $manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Yaml
+
+# `bash` on a Windows PowerShell PATH can be the WSL stub ("no installed distributions") — in System32 OR in
+# %LOCALAPPDATA%\Microsoft\WindowsApps (seen 2026-10-09). Prefer Git for Windows' own bash; elsewhere the PATH bash.
+$gitBash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin/bash.exe'
+$bashExe = if (Test-Path $gitBash) { $gitBash } else {
+  (Get-Command bash -All -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch 'System32|WindowsApps' } | Select-Object -First 1).Source }
+if (-not $bashExe) { Write-Error "[skill-config] No usable bash (Git Bash on Windows; bash on Linux/macOS)."; exit 1 }
+$env:MSYS_NO_PATHCONV = '1'   # Git Bash rewrites a leading /subscriptions/... argument
+
+# The token map. Step 1e-ter adds the customer (intake) tokens and runs once_per_customer with the same function.
+$prereqTokens = [ordered]@{
+  env = $env; openAiRegion = $openAiRegionResolved; region = $openAiRegionResolved; subId = $subId; sub = $subId
+  l2UamiPrincipalId = $l2UamiPrincipalId; l2UamiClientId = $l2UamiClientId; l2UamiSpId = $l2UamiSpId
+  graphAppId = $graphAppId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
+  kvResourceId = $kvResourceId; containerTypeId = $containerTypeId; adminDvUrl = $adminDvUrl
+}
+# Tokens that must not be empty when a recipe uses them. artifactsStorageId / acrId / kvResourceId are exempt:
+# E-01..E-04 and E-10 report "not found" themselves.
+$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId',
+                       'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId')
+
+function Invoke-PrereqPass([string[]]$Scopes, $Tokens) {
+  $passResults = @()
+  foreach ($prereq in $manifest.prereqs) {
+    if ($prereq.scope -notin $Scopes) { continue }
+    # Retired entries keep their id (so references do not dangle) but carry no check_recipe;
+    # without this skip, `bash -c ""` exits 0 and a retired prerequisite reports as a passed check.
+    if ($prereq.status -eq 'retired') { continue }
+
+    # Full substitution chain (SKILL-08 + PLX-01..10; the customer tokens in Step 1e-ter). Missing token →
+    # literal-in-cli (caught by the PLX-14 check below).
+    $recipe = $prereq.check_recipe.cli
+    foreach ($t in $Tokens.Keys) { $recipe = $recipe -replace ('\{' + $t + '\}'), [string]$Tokens[$t] }
+
+    # --- PLX-14 author-time sanity check ---
+    # If any {token} literal survives substitution, the substitution chain is out of date vs the manifest.
+    if ($recipe -match '\{[a-zA-Z_][a-zA-Z_0-9]*\}') {
+      Write-Error "[skill-config] Recipe for $($prereq.id) references unresolved placeholder '$($Matches[0])'. Extend the token map at .claude/skills/provision-environment/SKILL.md § Step 0.5b with a derivation for this token, or verify it belongs in spaarke-constants.yaml per_env_constants.$env.*."
+      $passResults += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $false; ExitCode = -1; Output = "[skill-config] unresolved placeholder: $($Matches[0])"; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
+      continue
+    }
+    # A token that resolved to NOTHING is as bad as one left literal: `az ... -n ""` fails cryptically or, worse,
+    # matches everything (T207).
+    $emptyTok = $mustResolveTokens | Where-Object { $Tokens.Contains($_) -and -not $Tokens[$_] -and $prereq.check_recipe.cli -match ('\{' + $_ + '\}') } | Select-Object -First 1
+    if ($emptyTok) {
+      Write-Error "[skill-config] Recipe for $($prereq.id) uses {$emptyTok}, which resolved to an empty value."
+      $passResults += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $false; ExitCode = -1; Output = "[skill-config] empty token: $emptyTok"; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
+      continue
+    }
+
+    Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
+
+    # Run the recipe via `bash -c` (recipes use for/if/exit shell syntax that Invoke-Expression does not handle).
+    # PASS/FAIL SIGNAL IS THE RECIPE'S EXIT CODE (not output shape). Recipes MUST explicitly `exit 1` on any
+    # failure condition (task 206 contract; validate.ps1 lints it). Silent empty output never passes.
+    $output = & $bashExe -c $recipe 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+
+    $passResults += @{
+      Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = ($exitCode -eq 0); ExitCode = $exitCode
+      Output = $output.Trim(); Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation
+    }
+  }
+  return ,$passResults
+}
 
 # Determine which scopes are checkable this early
 $scopesToCheck = @('once_per_tenant', 'once_per_subscription')
 if ($env) { $scopesToCheck += 'once_per_env' }  # $env from arg or batch intake
-# Per EXEC-10 / PRQ-05: once_per_customer prereqs are deferred to server-side H0
-# (they reference {customerId} which is only known post-intake; scope-mismatch prereqs
-# like the deleted PRQ-E-13 have been removed from prereqs.yaml in Wave 3).
+# once_per_customer needs intake values ({customerId}, {stampSubscriptionId}, {dvUrl}, ...): Step 1e-ter runs it.
 
-$results = @()
-foreach ($prereq in $manifest.prereqs) {
-  if ($prereq.scope -notin $scopesToCheck) { continue }
-  # Retired entries keep their id (so references do not dangle) but carry no check_recipe;
-  # without this skip, `bash -c ""` exits 0 and a retired prerequisite reports as a passed check.
-  if ($prereq.status -eq 'retired') { continue }
-
-  # Full substitution chain (SKILL-08 + PLX-01..10). Missing token → literal-in-cli
-  # (caught by the regex sanity check below).
-  $recipe = $prereq.check_recipe.cli `
-    -replace '\{env\}',                $env `
-    -replace '\{openAiRegion\}',       $openAiRegionResolved `
-    -replace '\{region\}',             $openAiRegionResolved `
-    -replace '\{subId\}',              $subId `
-    -replace '\{sub\}',                $subId `
-    -replace '\{l2UamiPrincipalId\}',  $l2UamiPrincipalId `
-    -replace '\{l2UamiClientId\}',     $l2UamiClientId `
-    -replace '\{l2UamiSpId\}',         $l2UamiSpId `
-    -replace '\{graphAppId\}',         $graphAppId `
-    -replace '\{sbNamespace\}',        $sbNamespace `
-    -replace '\{artifactsStorageId\}', $artifactsStorage `
-    -replace '\{acrId\}',              $acrId `
-    -replace '\{kvResourceId\}',       $kvResourceId `
-    -replace '\{containerTypeId\}',    $containerTypeId `
-    -replace '\{adminDvUrl\}',         $adminDvUrl
-
-  # --- PLX-14 author-time sanity check ---
-  # If any {token} literal survives substitution, the SKILL substitution chain
-  # is out of date vs the manifest. Fail LOUD with the offending token instead of
-  # invoking bash -c with a corrupt CLI.
-  if ($recipe -match '\{[a-zA-Z_][a-zA-Z_0-9]*\}') {
-    Write-Error "[skill-config] Recipe for $($prereq.id) references unresolved placeholder '$($Matches[0])'. Extend the substitution block at .claude/skills/provision-environment/SKILL.md § Step 0.5b (currently at ~line 200) with a derivation for this token, or verify it belongs in spaarke-constants.yaml per_env_constants.$env.*."
-    $passed = $false
-    $output = "[skill-config] unresolved placeholder: $($Matches[0])"
-    $results += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $passed; ExitCode = -1; Output = $output; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
-    continue
-  }
-
-  Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
-
-  # Run the recipe via `bash -c` (portable across az CLI + shell for-loops that
-  # many recipes use — PRQ-S-03, PRQ-E-06 all include for/if/exit shell syntax
-  # that PowerShell's Invoke-Expression does NOT natively handle). Git Bash
-  # ships with `git` on Windows; `bash` is native on Linux/macOS.
-  #
-  # PASS/FAIL SIGNAL IS THE RECIPE'S EXIT CODE (not output shape).
-  # Recipes MUST explicitly `exit 1` on any failure condition. Silent empty
-  # output no longer implicitly passes — this closed the SESSION 12 gap where
-  # PRQ-C-02 (OpenAI model catalog check) silently passed. Wave 3 (SESSION 15)
-  # applied the exit-1 contract across every recipe per task 206 + PRQ-03 (each
-  # recipe now recomputes its assertion inline).
-  $output = & bash -c $recipe 2>&1 | Out-String
-  $exitCode = $LASTEXITCODE
-
-  $passed = ($exitCode -eq 0)
-
-  $results += @{
-    Id = $prereq.id
-    Name = $prereq.name
-    Scope = $prereq.scope
-    Passed = $passed
-    ExitCode = $exitCode
-    Output = $output.Trim()
-    Consequence = $prereq.consequence_of_absence
-    Remediation = $prereq.remediation
-  }
-}
+$results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
 ```
 
 **Recipe author contract** (BINDING for every entry in `prereqs.yaml`):
@@ -449,6 +452,7 @@ foreach ($prereq in $manifest.prereqs) {
   - Interpolated from name_templates: `{sbNamespace}`
   - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
+  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
 
 #### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type (added 2026-08-30 task 213.6; BFF-app checks removed by T227a)
@@ -1136,6 +1140,33 @@ while ($communicationDefaultMailbox -cnotmatch '^[^@\s]+@[^@\s]+\.[^@\s]+\z' -or
   $communicationDefaultMailbox = Read-Host 'communicationDefaultMailbox (local@domain.tld)'
 }
 ```
+
+#### 1e-ter. Customer prerequisites — the `once_per_customer` pass (T207 close-out, 2026-10-09)
+
+Now that the intake names the customer, run the `once_per_customer` recipes (the customer's subscription, its
+Dataverse environment, the environment security group, the Exchange scope group, quotas) with the same function and
+the same HARD STOP rules as Step 0.5 — BEFORE Step 1f writes anything. Skipped only with `-SkipStep0_5` /
+`"skipExternalPrereqs": true` (recorded in Step 7, as for Step 0.5).
+
+```powershell
+if (-not $SkipStep0_5) {
+  $customerTokens = [ordered]@{}
+  foreach ($k in $prereqTokens.Keys) { $customerTokens[$k] = $prereqTokens[$k] }
+  $customerTokens.customerId                 = $customerId
+  $customerTokens.stampSubscriptionId        = $subscriptionId                 # Step 1b-bis (T228)
+  $customerTokens.stampEnvironment           = 'prod'                          # L2's default environmentName (owner D6); the intake has no override
+  $customerTokens.dvUrl                      = $dataverseEnvUrl                # Step 1b-bis — canonical, trailing slash
+  $customerTokens.exchangePolicyScopeGroupId = $exchangePolicyScopeGroupId     # Step 1e-bis (PRQ-C-08)
+  $customerTokens.environmentSecurityGroupId = $environmentSecurityGroupId     # Step 1e-bis (PRQ-C-10; B2BGuest)
+  $customerResults = Invoke-PrereqPass -Scopes @('once_per_customer') -Tokens $customerTokens
+  # Report exactly as Step 0.5d: a checklist; any Passed = $false → HARD STOP with id, output, consequence and the
+  # remediation link into docs/guides/PROVISIONING-PREREQUISITES.md#<id>. Nothing has been written yet.
+}
+```
+
+Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
+sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-E-15's Exchange half and PRQ-C-10's
+"group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
 
 #### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
 

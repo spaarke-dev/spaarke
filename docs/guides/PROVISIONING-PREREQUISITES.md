@@ -19,7 +19,12 @@
 > scope, so they could never resolve there). `validate.ps1` now lints every recipe for the defect classes above
 > (token available at the step that runs its scope, no undefined bash variable, explicit `exit 1`, no PowerShell cmdlet
 > under bash, no parenthesis in an `az` argument, no `grep -i -F`), and `tests/scripts/Prereqs-Recipes.Tests.ps1` runs
-> the recipes against fake `az` / `curl` / `pac` and proves each exits 1 on the defect it exists to catch.>
+> the recipes against fake `az` / `curl` / `pac` and proves each exits 1 on the defect it exists to catch.
+> **Same version, 2026-10-09:** `PRQ-T-05` (Copilot bot app — superseded by the T257 design: one shared OAuth client
+> app, no bot) and `PRQ-T-06` (Power BI service principal — BI is out of scope for r1) **retired**. The skill now RUNS
+> the `once_per_customer` recipes: Step 1e-ter, after the intake names the customer and before Step 1f writes anything,
+> with the same HARD STOP as Step 0.5 (previously no step ran them).
+>
 > **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
 > users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
 > `sprk-{customerId}-users` — intake `environmentSecurityGroupId`), `PRQ-C-11` **added** (the environment linked to a
