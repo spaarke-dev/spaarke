@@ -44,5 +44,5 @@
 
 ## Queued (not started)
 
-- **123** (ISS-010 triage enabled filter + ISS-002 counters; on this branch), **125** (ISS-001 AI action mirror drift; live writes need approval), **134** (blocked on uac-r2), **114** (#1480 merged 05:32Z, Console auto-deployed — live checklist now startable), **126** (blocked on uac-r2).
+- **123** (ISS-010 triage enabled filter + ISS-002 counters; on this branch), **125** (ISS-001 AI action mirror drift; live writes need approval), **134** (blocked on uac-r2), **114** (#1480 merged 05:32Z, Console auto-deployed; still waits on 111 #1415 and 121), **126** (blocked on uac-r2).
 - **Critical path:** 039 live gate → 037 → 031 (098 ✅, 106 ✅).
