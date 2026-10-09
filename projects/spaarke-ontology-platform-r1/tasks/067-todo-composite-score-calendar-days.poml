@@ -4,7 +4,7 @@
     <title>To Do composite score on calendar days, one shared function</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>081, 098 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the ranking of every To Do board (a user-visible re-rank).</rigor-reason>
     <model-tier>sonnet</model-tier>

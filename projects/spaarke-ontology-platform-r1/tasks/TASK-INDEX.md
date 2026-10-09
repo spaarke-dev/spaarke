@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (56 ✅ · 3 🔄 · 44 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
+> (spec §9) · **116 tasks** across 14 phases (56 ✅ · 6 🔄 · 41 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -247,8 +247,8 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 063 | [First Know-promotion rule](063-first-know-promotion-rule.poml) | STANDARD | sonnet/medium | 061, 036, 046 | F | Offers **Assign Work (D-51)**; needs a (matter, budget) verified join — escalates |
 | 🔲 [open] 064 | [Replace the Briefing tab](064-replace-briefing-tab-with-worklist.poml) | FULL | sonnet/high | 062, 063, 055, 059, 065 | — | Only once BOTH lanes exist. **Amended**: HANDOFF §1.4 as the cutover check |
 | ✅ [done] 065 | [Daily Briefing reads `sprk_duedate`](065-briefing-reads-sprk-duedate.poml) | FULL | sonnet/high | 098 | R | **D-27**; other `sprk_finalduedate` readers listed, not changed |
-| 🔲 [open] 066 | [Deprecate `sprk_eventstatus`: inventory, move readers to `statuscode`](066-deprecate-sprk-eventstatus-inventory.poml) | FULL | sonnet/high | 098 | — | **D-28**. Column removal needs the owner after the inventory |
-| 🔲 [open] 067 | [To Do composite score on calendar days, one shared function](067-todo-composite-score-calendar-days.poml) | FULL | sonnet/high | 081, 098 | R | **D-29**; boards re-rank once |
+| 🔄 [wip] 066 | [Deprecate `sprk_eventstatus`: inventory, move readers to `statuscode`](066-deprecate-sprk-eventstatus-inventory.poml) | FULL | sonnet/high | 098 | — | **D-28**. Column removal needs the owner after the inventory |
+| 🔄 [wip] 067 | [To Do composite score on calendar days, one shared function](067-todo-composite-score-calendar-days.poml) | FULL | sonnet/high | 081, 098 | R | **D-29**; boards re-rank once |
 
 ### Phase 7 — Inquiry and the classifier
 
@@ -287,7 +287,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 120 | [ISS-018: restore the notification playbooks (id lists, Condition operands, item templates, Due Soon, scheduler)](120-notification-playbooks-iss018-fix.poml) | FULL | **opus**/high | — | F | **D-77..D-80**: no notification has been delivered in dev since at least 2026-07-11 (#1452). Own PR; dev deploy needs separate owner approval |
 | ⏸️ [deferred] 121 | [D-81: LegalWorkspace 106 date filters live on dev with no tenant-wide publish; settle the LW deploy path + scoped solution import](121-legalworkspace-deploy-without-tenant-publish.poml) | FULL | sonnet/high | — | — | Fact-finding first: LW source is compiled into the Console (`sprk_corporateworkspace` retired; the Custom Page's PCF source is gone), so D-75 may already have shipped it. Script fix = own PR. **Import: owner approval required.** 114 depends on it |
 | ⏸️ [deferred] 122 | [D-81: external SPA dev deploy (Static Web App) with 056/098/106/111; close #1428](122-external-spa-dev-deploy.poml) | FULL | sonnet/high | — | — | Target is SWA `green-dune-…` via `deploy-external-spa.yml` (CIAM values non-secret, in the workflow + `config/environments.json`); last run 07:11Z predates 056/106. **Dispatch: owner approval required** (ship list) |
-| 🔲 [open] 123 | [ISS-010 #1387 triage category honours enabled/active; ISS-002 #1049 every $choices degrade path counted + Error](123-triage-category-resolution-and-choices-visibility.poml) | FULL | sonnet/high | — | J | **Branch** (builds on 072's `AdditionalFilterFor` + `ChoicesResolutionTelemetry`). **Alert rule: owner approval required** |
+| 🔄 [wip] 123 | [ISS-010 #1387 triage category honours enabled/active; ISS-002 #1049 every $choices degrade path counted + Error](123-triage-category-resolution-and-choices-visibility.poml) | FULL | sonnet/high | — | J | **Branch** (builds on 072's `AdditionalFilterFor` + `ChoicesResolutionTelemetry`). **Alert rule: owner approval required** |
 | ✅ [done] 124 | [ISS-017 #1447 GridOverviewHandler `{{today}}` = caller's day (D-25), own PR](124-grid-overview-today-user-local-own-pr.poml) | FULL | sonnet/high | — | J | Reuse `DataverseUserTimeZone` (copy `EventCompletionDate.cs`) |
 | ⏸️ [deferred] 125 | [ISS-001 #1048 drifted AI action mirrors + `Create_Task_From_Email` 400s](125-action-mirror-drift-suggest-followups-create-task.poml) | FULL | sonnet/high | — | J | Diagnosis read-only; **any `sprk_analysisaction` write: owner approval required** |
 | 🔲 [open] 126 | [ISS-009 #1399 G5 AppendTo for business-owned lookup targets (uac-r2's rule), own PR](126-appendto-business-owned-lookup-targets-uac.poml) | FULL | **opus**/high | — | — | Gate: #1391 merged + uac-r2 names the rule on #1355; same file as 048 · **[uac]** |

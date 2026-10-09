@@ -165,3 +165,7 @@ Owner D-100: retire the notification playbooks (the Daily Briefing does not read
 ## 2026-10-09 - D-108: writer role grants (spaarkedev1, main session)
 
 Spaarke Ontology Service (root copy `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`): 46 -> 50 privileges at 15:04:10Z (`AddPrivilegesRole`, HTTP 204): Append budget revision, AppendTo budget, AppendTo User, Assign budget revision, all Global. Before/after read back with `RetrieveRolePrivilegesRole`: only those four added. Details: notes/security-roles.md.
+
+## 2026-10-09 - D-109: Read on budget revision (spaarkedev1, main session)
+
+Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). Secure Record Owner +`prvReadsprk_BudgetRevision` Basic via `Set-SecureRecordOwnerRolePrivileges.ps1` (-Apply 28 -> 33, SharePoint four stripped -> 29, -Verify PASS), negative control 403 before, positive control 201 x2 after (probes deleted). Details: notes/security-roles.md.

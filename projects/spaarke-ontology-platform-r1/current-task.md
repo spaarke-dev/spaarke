@@ -2,28 +2,30 @@
 
 > **Last Updated**: 2026-10-09 (main session, after D-106). State only — history is in git log, task `<completion>`
 > blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: ontology critical
-> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-106). Issues for after the
+> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-108; **D-107** = merge reviewed ontology PRs into the project branch when green). Issues for after the
 > project: [`notes/defer-issues.md`](notes/defer-issues.md) (D-106 section). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 3 🔄 (044, 051, 070), 44 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
+| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **56 ✅**, 6 🔄 (044, 051, 070, 066, 067, 123), 41 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
 | **Branch** | `docs/ontology-platform-design` (draft #1111), synced with master 2026-10-09 (`217b8f3c6`). Signal-ownership invariant is **I-17**. |
 | **Rule** | **D-106:** fix an issue only if ontology functionality needs it; document everything else in `notes/defer-issues.md` (D-106 section, GitHub link) for post-project review. Every sub-agent/reviewer prompt carries it. No demo/non-dev work. |
 | **Critical path** | **#1390 (039) waits on uac-r2 approval** → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064 Briefing cutover. Decision path: 040 (after 039) + 044 + 046 + 070 → 043 commit route → 058 wizard → 045. |
-| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → owner merge question. Re-ask uac-r2 on #1355 if no answer. |
+| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → merge per D-107 (project branch) or owner (master). After merges, pull the project branch. Next wave when lanes free: **043** (needs 040 ← 039, so still blocked), **066**, **067**, **123**; 046/048/126 wait on uac-r2. Ontology PRs target `docs/ontology-platform-design` (CLAUDE.md §6). |
 
 ## Running now (SendMessage resumes an agent by ID)
 
 | ID | What | Then |
 |---|---|---|
-| `afc4660035026f317` | **044** decision executors (`C:\wts-044`) | PR → independent review → owner merge |
-| `ae92bd3b6793849a2` | **070** Inquiry Action + Binding (`C:\wts-070`) | PR → review → owner merge |
-| `ab96aa06581dc8e9d` | **051** the one row component (`C:\wts-051`, xhigh) | PR → review → owner merge |
-| `afa95b62d109541c3` (author) / `afead9298bddac72a` (reviewer) | **130** #1467 round 9 = F1 (`systemform.modifiedon` 400 blocks every entity deploy) + F2 (own subcomponents seen as collateral) only; F3/K1-K3 → issues F-8 | Light re-check → CI → merge-tree → **merge (D-102 approved)** → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) |
-| `aca557cdbb835f49c` | **111** #1415: merge master after #1480, keep named sizes + in-app hosting | CI → re-check → owner merge (D-26/D-70 commitment) |
+| `afc4660035026f317` (author) / `a85de685334513317` (reviewer) | **044** #1515 round 2 (`576517b0f`: PascalCase nav names, `PreflightAsync` on every executor, revision owner via resolver + `sprk_budgetrevision` lineage/config entries, census) in re-check | **Merge only after uac-r2 OKs the lineage/config entries** (#1355 comment 6083936041) + green CI (D-107). Live proof needs: a low-privilege user token + zz-044 test matter/budget (+ a Secure one) → owner decision |
+| `a9ff474067cdc0aa5` / `a6a2b6b48dc7c9a1e` / `ae631a5184b49f2f7` | **066** eventstatus inventory (`C:\wts-066`) · **067** To Do score (`C:\wts-067`) · **123** triage enabled/active, ISS-010 only (`C:\wts-123`) — all off the project branch | PR → independent review → merge per D-107 |
+| bg `bm3gs401l` | **070** #1512 approved (`2103825d8`) | Merges into the project branch when CI green (D-107) |
+| bg `bkwmnqywt` | **051** #1513 approved (`3dcc6240a`) | Merges into the project branch when CI green (D-107) |
+| bg `bz01xg8cg` | **130** #1467 approved (`cc8f49fa5`) | Merges into master when CI green (D-102) → apply `notes/task-130-skill-amendments.md` to the 3 skills + drop the 3 allow-list lines (same commit) → owner: 4 live proofs |
+
+Merged today: **#1415** (111 code, master `47ffb8537`); **#1480** (113). Writer role grants **D-108** applied in dev 15:04Z.
 
 ## Waiting on others
 
