@@ -119,10 +119,10 @@ param requireSecretFreeIdentity = true
 // COPILOT AGENT CLIENT (T257)
 // ============================================================================
 
-// The shared "Spaarke Copilot Agent" client (public, PKCE, no secret). Empty until the operator creates it
-// (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); then set its application (client) id here and redeploy, and H3
-// pre-authorizes it on every customer BFF app it provisions or reconciles from then on.
-param copilotAgentClientAppId = ''
+// The shared Copilot agent client for this control plane: "Spaarke Copilot Agent - Dev" (public, PKCE, no secret;
+// created 2026-10-09 with owner OK, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12; admin consent openid/profile/
+// offline_access). H3 pre-authorizes it on every customer BFF app it provisions or reconciles.
+param copilotAgentClientAppId = '3a36eac4-10c5-4b90-9a83-913138a466af'
 
 // ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)

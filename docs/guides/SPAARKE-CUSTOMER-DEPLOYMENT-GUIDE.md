@@ -1382,8 +1382,9 @@ That catalog holds only the agents for Spaarke's own environments (`scripts/Depl
 **How it reaches only that customer's BFF:**
 - The agent signs the user in to **Spaarke's** tenant. This is the same guest identity the add-ins use (`tid` =
   Spaarke, `acct` = 1).
-- Sign-in uses OAuth 2.0 + PKCE through one shared client app, "Spaarke Copilot Agent". It is a public client with no
-  secret.
+- Sign-in uses OAuth 2.0 + PKCE through one shared client app per control-plane environment, "Spaarke Copilot Agent -
+  {Env}" (naming: `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` §Entra ID App Registrations). It is a public
+  client with no secret. Dev: "Spaarke Copilot Agent - Dev", `3a36eac4-10c5-4b90-9a83-913138a466af` (created 2026-10-09).
 - The client gets a token for `api://{customerBffAppId}/user_impersonation`. H3 pre-authorizes the client on every
   customer BFF app, so no user sees a consent prompt.
 - Each customer has its own **auth config**, which binds that scope and the BFF's base URL. A package can't reach
@@ -1397,7 +1398,9 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
 
 **One-time platform setup (operator, Spaarke's tenant).** Each step is a live action and needs the owner's OK.
 
-1. **Create the client app "Spaarke Copilot Agent"** in the Entra admin center:
+1. **Create the client app "Spaarke Copilot Agent - {Env}"** (e.g. `Spaarke Copilot Agent - Dev`) in the Entra admin center
+   or through Graph (`POST /applications`, then `POST /oauth2PermissionGrants` with `consentType: AllPrincipals` for the
+   admin consent — this works where `az ad app permission admin-consent` does not):
    - single tenant (Spaarke);
    - platform **Single-page application**, redirect URI `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`;
    - **no client secret and no certificate** (ADR-028 A4; the project's no-secret rule);
