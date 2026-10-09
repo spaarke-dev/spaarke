@@ -725,10 +725,17 @@ public static class PlaybookEndpoints
         catch (ProtectedPlaybookCanvasSyncException ex)
         {
             logger.LogWarning("Canvas save refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            // Unverifiable = the guard could not read Dataverse (transient): 503, retryable. Otherwise the
+            // playbook is a repo-deployed system playbook: 409 with a stable errorCode for the Designer.
+            var unverifiable = ex.Reason == ProtectedPlaybookReason.Unverifiable;
             return Results.Problem(
-                statusCode: 409,
-                title: "Playbook is read-only",
-                detail: ex.Message);
+                statusCode: unverifiable ? 503 : 409,
+                title: unverifiable ? "Playbook could not be verified" : "Playbook is read-only",
+                detail: ex.Message,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = unverifiable ? "playbook_canvas_unverifiable" : "playbook_read_only"
+                });
         }
         catch (Exception ex)
         {
