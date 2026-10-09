@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{4b9ee5d1-9024-f111-88b4-7c1e525abd8b}</WebResourceId>
+  <Name>sprk_/icons/entity/aimodel.svg</Name>
+  <DisplayName>sprk_aimodel Icon</DisplayName>
+  <Description>Fluent UI icon: Sparkle20Regular - AI model — model configuration for analysis pipelines</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentityaimodelsvg4B9EE5D1-9024-F111-88B4-7C1E525ABD8B</FileName>
+</WebResource>

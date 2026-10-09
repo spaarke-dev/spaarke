@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{f8dc39d6-3c85-f111-8076-7ced8ddc4a05}</WebResourceId>
+  <Name>sprk_/scripts/communications_grid_onload.js</Name>
+  <DisplayName>Communications Grid onLoad</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_scriptscommunications_grid_onloadjsF8DC39D6-3C85-F111-8076-7CED8DDC4A05</FileName>
+</WebResource>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Every stamp BFF starts and serves its clients: provisioning sets Cors__AllowedOrigins (Dataverse + shared M365 client origins); H3 gives the customer's BFF app registration the SPA redirects for its own Dataverse origin(s) and pre-authorizes the shared add-in client</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D9/D11; owner input 2026-10-07)</phase>
+    <gate>after 233 (✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handlers H3/H4b + settings catalog + an Entra app-registration shape; auth-adjacent (token audience, pre-authorization, redirect URIs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/app-registration change applied to every customer; a wrong redirect or pre-authorization breaks sign-in for all of them.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints/provisioning.md and the provision-environment skill (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, model1-dedicated, testing</tags>
+    <deps>233</deps>
+  </metadata>
+
+  <prompt>Make a provisioned customer BFF start, accept calls from its own Dataverse code pages, and be reachable by the shared M365 clients.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Microsoft Graph application objects, settings catalog).</role>
+
+  <goal>
+    After a provisioning run: the customer's BFF starts (its `Cors:AllowedOrigins` is set); its own Dataverse code pages
+    sign in through the customer's BFF app registration (H7's default `sprk_MsalClientId`); and the shared add-in client
+    can request that BFF's scope without a consent prompt. Re-runs are idempotent.
+  </goal>
+
+  <context>
+    <background>
+      `notes/t240-plan.md` F1–F3: CorsModule throws at startup outside Development/Testing when `Cors:AllowedOrigins` is
+      empty and no provisioning step sets it; H3 registers no SPA redirect and no preAuthorizedApplications; code pages
+      use the Dataverse org origin as their redirect. The add-in client is `c1258e2d…` "Spaarke Office Add-in"
+      (single-tenant, Spaarke's tenant). Dev's BFF lists the Dataverse, Power Pages, add-in and Teams origins by hand, and
+      its app pre-authorizes 9 clients (t240-plan F9). Production client origins (t240-plan "Production client origins"):
+      the add-in moves to a Spaarke custom domain (recommended `addins.spaarke.com`, owner decision pending); the Teams tab
+      is the External Access SPA, whose origin and sign-in shape come from spaarke-SPA-external-access-platform-r3.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CorsModule.cs (contract only — not changed)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (per_env_settings); the H4b catalog reader + its value-source resolution; HandlerRunInputs (run-context contract)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/{GraphAppRegistrationProvisioner,EntraAppRegOptions,H3EntraAppRegHandler}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs (H13 CORS probe)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H3 row claims add-in SPA redirects); .claude/constraints/provisioning.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t240-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/g14-shared-clients-auth-chain.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="cors">Origins are exact (scheme + host, no path, no trailing slash, https only). The customer's Dataverse origin and its `.api.` variant come from the run (H5's DataverseEnvUrl); the shared client origins are platform values (per platform environment), never per-customer intake.</constraint>
+    <constraint source="isolation">H3 changes only the customer's own BFF app registration. It never edits a shared Spaarke app (the add-in client, SDAP-PCF-CLIENT).</constraint>
+    <constraint source="live">No live Entra or App Service change in this task; tests run against hand-written fakes (never Mock&lt;HttpMessageHandler&gt;).</constraint>
+    <constraint source="scope">Shared client origins and pre-authorized client ids are platform configuration lists. Prod values not yet decided stay empty (the BFF still starts on its Dataverse origins); no value is guessed. Teams' first-party client ids are added only if spaarke-SPA-external-access-platform-r3 confirms Teams SSO with the BFF as resource.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">CORS: catalog entries for `Cors__AllowedOrigins__N` (customer Dataverse origin + `.api.` variant, normalized; shared client origins from a platform option), resolved by H4b; run-context contract kept; tests.</step>
+    <step order="2">H3: `spa.redirectUris` = the customer's Dataverse origin(s) (idempotent merge); `api.preAuthorizedApplications` for the configured shared client app ids on the `user_impersonation` scope (idempotent); tests.</step>
+    <step order="3">H13: the CORS probe still passes for the Dataverse origin; add a probe for one shared client origin if configured.</step>
+    <step order="4">Docs: guide H3/H4b rows, inventory, provisioning.md; the skill's settings list. Verify (ControlPlane, ArchTests, Worker/Api 0 warnings); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A run's H4b settings include `Cors__AllowedOrigins__0..N`: the customer's Dataverse origin (no trailing slash), its `.api.` variant, and every configured shared client origin; none for an unconfigured origin.</criterion>
+    <criterion testable="true">H3 PATCHes the customer's app registration with those SPA redirect URIs and pre-authorizes each configured client app id on `user_impersonation`; a second run sends no change; it never PATCHes another application.</criterion>
+    <criterion testable="true">An invalid or non-https origin is refused by the run before H4b writes it (named failure).</criterion>
+    <criterion testable="true">ControlPlane tests and ArchTests pass; Worker/Api build with 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Answered 2026-10-07: no production add-in site exists yet (custom domain pending the owner); the Teams/External Access origin is pending spaarke-SPA-external-access-platform-r3. Build the configuration; do not invent prod values.</trigger>
+    <trigger>Graph refuses preAuthorizedApplications for a client in this shape — stop and report.</trigger>
+  </escalation>
+
+  <notes>
+    <note date="2026-10-07">FOLLOW-UP FIX: word-add-in-r1 created a separate PRODUCTION add-in app, "Spaarke Office Add-in (Production)" 1958aec2-0218-495e-8e3c-37133e9b8357 (master cbee69b68); c1258e2d is the dev identity, which calls only the dev BFF. The Worker Bicep default preAuthorizedClientAppIds is now 1958aec2 (customer stamps are production); platform-controlplane.json rebuilt; guide H3 + §7.3 and the inventory corrected. 1958aec2 is single-tenant too, so the multi-tenant recommendation (coordination -4 addendum) covers both apps.</note>
+    <note date="2026-10-07">COMPLETED. Commits b0e244c17 (steps 1-4) + the review-fix commit. ControlPlane 2307/0 (1 skip), ArchTests 841/841, Api/Worker 0 warnings, catalog generator -Verify OK, platform-controlplane.json rebuilt in sync.</note>
+    <note date="2026-10-07">LIVE ACTIONS (owner-approved, outside the code): Static Web Apps swa-spaarke-office-addins-prod and swa-spaarke-external-spa-prod in rg-spaarke-shared-prod; custom domains addins.spaarke.com and external.spaarke.com (owner added the Namecheap CNAMEs); both Ready with managed certificates. Recorded in notes/t240-plan.md.</note>
+    <note date="2026-10-07">DEVIATIONS (directional steps; acceptance criteria amended here): (a) AC1 — no Dataverse origin or `.api.` variant in Cors__AllowedOrigins: CorsModule already admits *.dynamics.com / *.powerapps.com by suffix, so those entries would change nothing; the list carries the two shared client sites as manifest literals, which keeps it non-empty (the startup failure). (b) Constraint "shared origins per platform environment" — one global literal list: every stamp is reached by the same production client sites (K4: dev/staging stamps get the production origins; no failure today). (c) AC3 — origins are build-time literals, so the refusal is a build-time test (FilePerEnvSettingsManifestTests: exact https origins) plus CorsModule's own startup check, not a run-time H4b failure. (d) Step 3 — no H13 probe for a shared origin: H4b's and H13's /healthz already prove the BFF started with a valid list, and the values are pinned by the manifest test.</note>
+    <note date="2026-10-07">FOUND + FIXED IN SCOPE: (1) F1 — the Worker never set EntraAppRegOptions__SpaarkeTenantId, so every Model 1 run (profile spaarke-hosted-model2) failed at H3's FIC step; the Worker Bicep sets it from tenant().tenantId. (2) F1 (review, tenant isolation, pre-existing) — H3 adopted ANY registration named spaarke-bff-api-{customerId}; now refused unless exactly one match, no secret/certificate, no foreign FIC, no owner but the control plane (AdoptionRefusal + appreg-adoption-refused). Live read: the legacy spaarke-bff-api-prod (no owners, 1 client secret) would now be refused for a customer id 'prod'. (3) F2 — config-key names in diagnostics (EntraAppReg: -> EntraAppRegOptions:), stale option docs, dead shell-out options, comments citing a deleted file, swapped test comments; null request lists now mean "leave untouched"; Guid.Empty refused; preAuthorizedClientAppIds threaded through platform-controlplane.bicep.</note>
+    <note date="2026-10-07">KNOWN LIMITS / FILED: ISS-003 (#1376) — one registration per customer: a second environment would overwrite the first's redirect/FIC (D6 keeps one environment per customer; binding note in provisioning.md). ISS-004 (#1377) — any Spaarke-tenant user can get any customer BFF token; data access still bounded by the stamp; consider appRoleAssignmentRequired. K2 — a stale read right after the reconcile PATCH fails resumable (appreg-client-access-failed). K3 — runs that completed H3 before this change are not re-applied (none could, SpaarkeTenantId was missing). The acct optional claim on the registration stays with T255.</note>
+  </notes>
+</task>

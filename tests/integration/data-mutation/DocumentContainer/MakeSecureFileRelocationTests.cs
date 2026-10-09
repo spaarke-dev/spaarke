@@ -182,6 +182,7 @@ public class MakeSecureFileRelocationTests : IClassFixture<ProvisionProjectTestF
                 () => world, new FakeRecordShareTable(), null!));
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(() => world, new FakeRecordShareTable()));
             services.AddScoped(_ => rig.Relocator);
+            services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => world)); // task 173: as the host registers it
             var provider = services.BuildServiceProvider();
             foreach (var (key, value) in SecureChildShareWorld.Configuration().AsEnumerable())
                 _configuration[key] = value;

@@ -75,8 +75,8 @@ await initAuth({
     │     └─ 5. Parse AI output → PreFillResponse          │
     └──────┬──────────────┬──────────────┬─────────────────┘
            │              │              │
-    SpeFileStore     ITextExtractor   Playbook
-    (staging)        (PDF/DOCX/XLSX)  (Azure OpenAI)
+                     ITextExtractor   Playbook
+                     (PDF/DOCX/XLSX)  (Azure OpenAI)
 ```
 
 ### Key Components
@@ -88,7 +88,7 @@ await initAuth({
 | **formTypes.ts** | Same directory | `IAiPrefillRequest`, `IAiPrefillResponse`, `IAiPrefillFields` |
 | **WorkspaceMatterEndpoints.cs** | `src/server/api/Sprk.Bff.Api/Api/Workspace/` | `POST /api/workspace/matters/pre-fill` endpoint |
 | **PreFillResponse.cs** | `src/server/api/Sprk.Bff.Api/Api/Workspace/Models/` | BFF response record |
-| **MatterPreFillService.cs** | `src/server/api/Sprk.Bff.Api/Services/Workspace/` | Orchestrates file staging, text extraction, AI invocation |
+| **MatterPreFillService.cs** | `src/server/api/Sprk.Bff.Api/Services/Workspace/` | Orchestrates in-memory text extraction and AI invocation (no file staging — task 227f) |
 | **IPlaybookOrchestrationService** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | Playbook execution engine |
 
 ---
@@ -148,10 +148,6 @@ Receive multipart/form-data files
     │   • Extension in [.pdf, .docx, .xlsx]
     │   • Content-Type matches (defence-in-depth)
     │   • File size ≤ 10 MB each
-    │
-    ├─ [Stage] Upload to SpeFileStore
-    │   • Prefix: ai-prefill/{requestId}/{fileName}
-    │   • Falls back to in-memory extraction if staging unavailable
     │
     ├─ [Extract] ITextExtractor.ExtractAsync()
     │   • Supports PDF, DOCX, XLSX
@@ -310,7 +306,6 @@ IPlaybookOrchestrationService.ExecuteAsync()
 | Setting | Config Key | Default Value |
 |---------|-----------|---------------|
 | Playbook ID | *(none — FR-P3-01)* resolved via `sprk_playbookconsumer` Binding row, consumerType `matter-pre-fill` / `project-pre-fill` (dev rows: `e5f37faa-2c70-f111-ab0e-7ced8ddc4cc6`, `ab7ac1c5-2c70-f111-ab0e-7ced8ddc4cc6`) | per-environment Binding row |
-| Staging Container | `SharePointEmbedded:StagingContainerId` | Environment-specific |
 | Text Limit | Hardcoded | 80KB (~20K tokens) |
 | Execution Timeout | Hardcoded | 45 seconds |
 | Max Parallel Nodes | Hardcoded | 3 |
@@ -322,7 +317,6 @@ IPlaybookOrchestrationService.ExecuteAsync()
 | Failure | Severity | Behavior |
 |---------|----------|----------|
 | Invalid file type/size | Hard reject | 400 ProblemDetails to client |
-| SPE staging fails | Fallback | In-memory extraction continues |
 | Text extraction fails | Soft | Skip file, try remaining files |
 | All text extraction fails | Soft | Empty PreFillResponse (confidence=0) |
 | Playbook timeout (45s) | Soft | Return empty PreFillResponse |
@@ -513,9 +507,6 @@ sprk_playbookscope (Dataverse entity)
 {
   "Workspace": {
     "PreFillPlaybookId": "18cf3cc8-02ec-f011-8406-7c1e520aa4df"
-  },
-  "SharePointEmbedded": {
-    "StagingContainerId": "b!..."
   }
 }
 ```

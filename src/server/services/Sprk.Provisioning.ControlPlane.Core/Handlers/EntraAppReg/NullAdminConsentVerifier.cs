@@ -38,7 +38,7 @@
 //   Emits a single Warning-level log per invocation so operators running the
 //   scaffold notice the null placeholder is active before Wave C5 replaces
 //   it. Suppressed to Debug once the real impl ships (bicep app-setting
-//   `EntraAppReg:UseNullConsentVerifier = false`).
+//   `EntraAppRegOptions:UseNullConsentVerifier = false`).
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;

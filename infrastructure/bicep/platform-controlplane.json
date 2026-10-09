@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7859057405814127405"
+      "templateHash": "7828909415565352353"
     }
   },
   "parameters": {
@@ -115,6 +115,15 @@
       "defaultValue": [],
       "metadata": {
         "description": "SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app."
+      }
+    },
+    "preAuthorizedClientAppIds": {
+      "type": "array",
+      "defaultValue": [
+        "1958aec2-0218-495e-8e3c-37133e9b8357"
+      ],
+      "metadata": {
+        "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c)."
       }
     },
     "customerRunGuardEnabled": {
@@ -1178,7 +1187,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2515857833466178412"
+              "templateHash": "9198315704373949356"
             }
           },
           "parameters": {
@@ -1298,6 +1307,70 @@
               }
             }
           },
+          "variables": {
+            "appSettings": [
+              {
+                "name": "AzureAd__Audience",
+                "value": "[parameters('jwtAudience')]"
+              },
+              {
+                "name": "AzureAd__TenantId",
+                "value": "[parameters('jwtTenantId')]"
+              },
+              {
+                "name": "AzureAd__ClientId",
+                "value": "[parameters('controlPlaneAppRegClientId')]"
+              },
+              {
+                "name": "AzureAd__Instance",
+                "value": "[parameters('aadLoginEndpoint')]"
+              },
+              {
+                "name": "Cosmos__AccountEndpoint",
+                "value": "[parameters('cosmosAccountEndpoint')]"
+              },
+              {
+                "name": "Cosmos__DatabaseName",
+                "value": "[parameters('cosmosDatabaseName')]"
+              },
+              {
+                "name": "Cosmos__ContainerName",
+                "value": "[parameters('cosmosRunsContainerName')]"
+              },
+              {
+                "name": "ServiceBus__FullyQualifiedNamespace",
+                "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
+              },
+              {
+                "name": "ServiceBus__QueueName",
+                "value": "[parameters('serviceBusQueueName')]"
+              },
+              {
+                "name": "AZURE_CLIENT_ID",
+                "value": "[parameters('uamiClientId')]"
+              },
+              {
+                "name": "ManagedIdentity__ClientId",
+                "value": "[parameters('uamiClientId')]"
+              },
+              {
+                "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
+                "value": "[parameters('adminDataverseEnvironmentUrl')]"
+              },
+              {
+                "name": "CustomerRunGuard__Enabled",
+                "value": "[string(parameters('customerRunGuardEnabled'))]"
+              },
+              {
+                "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                "value": "[parameters('appInsightsConnectionString')]"
+              },
+              {
+                "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+                "value": "~3"
+              }
+            ]
+          },
           "resources": [
             {
               "type": "Microsoft.Web/sites",
@@ -1323,68 +1396,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": [
-                    {
-                      "name": "AzureAd__Audience",
-                      "value": "[parameters('jwtAudience')]"
-                    },
-                    {
-                      "name": "AzureAd__TenantId",
-                      "value": "[parameters('jwtTenantId')]"
-                    },
-                    {
-                      "name": "AzureAd__ClientId",
-                      "value": "[parameters('controlPlaneAppRegClientId')]"
-                    },
-                    {
-                      "name": "AzureAd__Instance",
-                      "value": "[parameters('aadLoginEndpoint')]"
-                    },
-                    {
-                      "name": "Cosmos__AccountEndpoint",
-                      "value": "[parameters('cosmosAccountEndpoint')]"
-                    },
-                    {
-                      "name": "Cosmos__DatabaseName",
-                      "value": "[parameters('cosmosDatabaseName')]"
-                    },
-                    {
-                      "name": "Cosmos__ContainerName",
-                      "value": "[parameters('cosmosRunsContainerName')]"
-                    },
-                    {
-                      "name": "ServiceBus__FullyQualifiedNamespace",
-                      "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
-                    },
-                    {
-                      "name": "ServiceBus__QueueName",
-                      "value": "[parameters('serviceBusQueueName')]"
-                    },
-                    {
-                      "name": "AZURE_CLIENT_ID",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "ManagedIdentity__ClientId",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
-                      "value": "[parameters('adminDataverseEnvironmentUrl')]"
-                    },
-                    {
-                      "name": "CustomerRunGuard__Enabled",
-                      "value": "[string(parameters('customerRunGuardEnabled'))]"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
-                      "value": "~3"
-                    }
-                  ]
+                  "appSettings": "[variables('appSettings')]"
                 }
               }
             },
@@ -1410,7 +1422,8 @@
                   "http20Enabled": true,
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
-                  "healthCheckPath": "/healthz"
+                  "healthCheckPath": "/healthz",
+                  "appSettings": "[variables('appSettings')]"
                 }
               },
               "dependsOn": [
@@ -1526,6 +1539,9 @@
           "speContainerTypeOwners": {
             "value": "[parameters('speContainerTypeOwners')]"
           },
+          "preAuthorizedClientAppIds": {
+            "value": "[parameters('preAuthorizedClientAppIds')]"
+          },
           "customerRunGuardTenantId": {
             "value": "[variables('effectiveJwtTenantId')]"
           },
@@ -1552,7 +1568,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13662544885713775605"
+              "templateHash": "845271668656563014"
             }
           },
           "parameters": {
@@ -1718,6 +1734,15 @@
                 "description": "SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run's intake containerTypeId; ownerAppId = the owning app registration's client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker's UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0's SpeOwnerCredential probe, H8 (container creation) and H13's T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice."
               }
             },
+            "preAuthorizedClientAppIds": {
+              "type": "array",
+              "defaultValue": [
+                "1958aec2-0218-495e-8e3c-37133e9b8357"
+              ],
+              "metadata": {
+                "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c)."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -1755,7 +1780,8 @@
                 "value": "true"
               }
             ],
-            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]"
+            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]",
+            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('preAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', parameters('preAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
           },
           "resources": [
             {
@@ -1782,7 +1808,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'), variables('entraAppRegSettings'))]"
                 }
               }
             },
@@ -2377,73 +2403,6 @@
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
       ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "controlplane-subscription-rbac",
-      "location": "[deployment().location]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "principalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.46.1.21595",
-              "templateHash": "17238208266467465798"
-            }
-          },
-          "parameters": {
-            "principalId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep outputs) granted Contributor on this subscription. Pass empty to skip the grant (what-if isolation only -- a real deploy always needs it)."
-              }
-            }
-          },
-          "variables": {
-            "contributorRoleId": "b24988ac-6180-42a0-ab88-20f7382dd24c"
-          },
-          "resources": [
-            {
-              "condition": "[not(empty(parameters('principalId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(subscription().id, parameters('principalId'), variables('contributorRoleId'))]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('contributorRoleId'))]",
-                "principalId": "[parameters('principalId')]",
-                "principalType": "ServicePrincipal",
-                "description": "L2 control-plane UAMI ensures customer RGs + runs subscription-scope ARM deployments (H2a ArmDeploymentRunner) -- Wave G-8 Batch 2, audit defect #2"
-              }
-            }
-          ],
-          "outputs": {
-            "subscriptionId": {
-              "type": "string",
-              "value": "[subscription().subscriptionId]"
-            },
-            "contributorRoleAssignmentName": {
-              "type": "string",
-              "value": "[if(not(empty(parameters('principalId'))), guid(subscription().id, parameters('principalId'), variables('contributorRoleId')), '')]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
-      ]
     }
   ],
   "outputs": {
@@ -2626,10 +2585,6 @@
     "acrLoginServer": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-acr'), '2025-04-01').outputs.loginServer.value]"
-    },
-    "subscriptionContributorRoleAssignmentName": {
-      "type": "string",
-      "value": "[reference(subscriptionResourceId('Microsoft.Resources/deployments', 'controlplane-subscription-rbac'), '2025-04-01').outputs.contributorRoleAssignmentName.value]"
     }
   }
 }

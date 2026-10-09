@@ -115,8 +115,11 @@
  *   its menu is the unchanged Standard / Limited / Restricted list, so the
  *   secure display never rewrites the stored value.
  * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
- *   on a form whose table has no such column (the retired
- *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ *   on a form whose table has no such column; unbound → no pill. (Corrected for
+ *   task 173, owner round 81: `sprk_communication.sprk_accesspermission` is NOT
+ *   retired - on a child table the column is a display copy of the parent's
+ *   value, written by the BFF and locked on the form while the record has a
+ *   parent; no TrackingFieldTrio is placed on Communication.)
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
@@ -260,9 +263,10 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environme
 // sprk_matter and sprk_workassignment carry the identical option set (verified
 // live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
 // same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
-// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
-// column is retired (task 138, owner Q6): a communication inherits its parent's
-// permission and has no value of its own.
+// shared `TrackingFieldTrio` core (FR-14). The same global choice backs the
+// column on To Do, Event, Communication and Document, where it is a display copy
+// of the parent's value that enforcement never reads (task 173, owner round 81;
+// it was to be retired by task 138). No TrackingFieldTrio is placed on Communication.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
@@ -914,7 +918,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * Maps the bound record's raw `sprk_accesspermission` value (a root's own; on a To Do or Event the display copy of
+   * its parent's, task 173) AND its `sprk_issecure` flag (task 043, spec
    * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
    * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
    * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules

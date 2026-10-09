@@ -46,7 +46,7 @@
 //         continues until the overall deadline.
 //
 // AUTH PROFILE ASSUMPTION (parity with PacOrgSettingsContractApplier +
-// pre-Wave-G-4 PacCliSolutionVerifier):
+// retired pac-based solution verifier):
 //   pac CLI requires an authenticated profile pointing at the target env.
 //   This installer does NOT invoke `pac auth create` itself — it assumes
 //   the upstream L2 environment (either the App Service's UAMI-bound pac

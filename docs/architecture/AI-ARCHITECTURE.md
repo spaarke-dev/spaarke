@@ -1,6 +1,6 @@
 # Spaarke AI Architecture
 
-> **Last Updated**: 2026-07-08 (operator-commissioned doc assessment fixes — analysis-execution flow reconciled with ADR-039 as-built, handler-hierarchy disposition, canonical eval-count rule, r2 superseded-soon pointers)
+> **Last Updated**: 2026-10-06 (Safety Pipeline "Required configuration" table corrected — Content Safety is keyless, endpoint required with no default; task 246); 2026-07-08 (operator-commissioned doc assessment fixes — analysis-execution flow reconciled with ADR-039 as-built, handler-hierarchy disposition, canonical eval-count rule, r2 superseded-soon pointers)
 > **Last Reviewed**: 2026-07-07
 > **Reviewed By**: spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03)
 > **Status**: Current
@@ -456,7 +456,7 @@ The safety perimeter comprises four services that run pre-LLM and post-LLM to de
 
 | Service | Path | Stage | Purpose |
 |---------|------|-------|---------|
-| PromptShieldService | `Services/Ai/Safety/PromptShieldService.cs` | Pre-LLM | Calls Azure AI Content Safety Prompt Shields API to detect prompt injection (user and document attacks). 100ms hard timeout; fail-open on 429/5xx/timeout. |
+| PromptShieldService | `Services/Ai/Safety/PromptShieldService.cs` | Pre-LLM | Calls Azure AI Content Safety Prompt Shields API to detect prompt injection (user and document attacks). Hard deadline `AiSafety:PromptShield:TimeoutMs` (default 500 ms); fail-open on 429/5xx/timeout. |
 | GroundednessCheckService | `Services/Ai/Safety/GroundednessCheckService.cs` | Post-LLM | Retroactive groundedness annotation via Azure AI Content Safety. Scores claims against source documents. |
 | CitationVerificationService | `Services/Ai/Safety/Citations/CitationVerificationService.cs` | Post-LLM | Verifies citation references against `IVerificationProvider` implementations (e.g. InternalIndexProvider for spaarke-rag-references). |
 | PrivilegeGroupResolver | `Services/Ai/Security/PrivilegeGroupResolver.cs` | Pre-LLM | Resolves the user's Dataverse security role memberships to determine which tools and capabilities are authorized. |
@@ -469,8 +469,9 @@ The safety perimeter comprises four services that run pre-LLM and post-LLM to de
 
 | Setting | Description |
 |---------|-------------|
-| `AiSafety:ContentSafety:Endpoint` | Azure AI Content Safety endpoint (default: `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/`) |
-| `AiSafety:ContentSafety:ApiKey` | Content Safety API key (supports Key Vault rotation) |
+| `AiSafety:ContentSafety:Endpoint` | Azure AI Content Safety endpoint. **Required** outside Development/Testing: the BFF refuses to start without it, and there is no default. Shared dev: `https://spaarke-openai-dev.cognitiveservices.azure.com/` (the multi-service AIServices account). Customer stamps: their own `sprk-{customer}-{env}-contentsafety` account, set by `customer.bicep` and re-applied by H4b. |
+| `AiSafety:ContentSafety:ManagedIdentity:Enabled` | `true` in deployed environments: the BFF calls Content Safety with its managed identity, which needs **Cognitive Services User** on the account ("Cognitive Services OpenAI User" does not cover Content Safety). |
+| `AiSafety:ContentSafety:ApiKey` | Local development only; read only when set. Deployed environments use managed identity and store no Content Safety key. |
 
 ---
 

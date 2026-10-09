@@ -27,6 +27,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Xunit;
 using WorkerProgram = WorkerHost::Program;
 
@@ -61,6 +62,35 @@ public sealed class WorkerL2OwnedOptionsBootTests
         var act = () => factory.Services;
 
         act.Should().Throw<InvalidOperationException>().WithMessage($"*ContainerTypeOwners:0*{blankSetting}*");
+    }
+
+    [Fact]
+    public void BlankGuestRoleName_FailsHostStart()
+    {
+        // T232: a blank role name would otherwise surface only in the first Model 1 run's H11, after H0–H10.
+        using var factory = new L2OptionsWorkerTestFactory(b =>
+        {
+            WithCompleteOwner(b);
+            b.UseSetting("H11UserProvisioningOptions:GuestSecurityRoleNames:0", " ");
+        });
+
+        var act = () => factory.Services;
+
+        act.Should().Throw<OptionsValidationException>().WithMessage("*GuestSecurityRoleNames*");
+    }
+
+    [Fact]
+    public void ConfiguredGuestRole_StartsHost_AndReplacesTheDefault()
+    {
+        using var factory = new L2OptionsWorkerTestFactory(b =>
+        {
+            WithCompleteOwner(b);
+            b.UseSetting("H11UserProvisioningOptions:GuestSecurityRoleNames:0", "Spaarke Guest");
+        });
+
+        var options = factory.Services.GetRequiredService<IOptions<H11UserProvisioningOptions>>().Value;
+
+        options.EffectiveGuestSecurityRoleNames.Should().Equal("Spaarke Guest");
     }
 
     [Fact]

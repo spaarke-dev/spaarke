@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{9977d599-4763-f111-ab0c-000d3a4d8152}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" preview="1" icon="1">
+        <row name="result" id="sprk_todoid">
+          <cell name="sprk_name" width="300" />
+          <cell name="statuscode" width="120" />
+          <cell name="sprk_duedate" width="120" />
+          <cell name="sprk_assignedto" width="111" />
+          <cell name="createdon" width="120" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false">
+        <entity name="sprk_todo">
+          <attribute name="sprk_todoid" />
+          <attribute name="sprk_name" />
+          <attribute name="statuscode" />
+          <attribute name="sprk_duedate" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <attribute name="sprk_assignedto" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All To Dos" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="All To Dos regardless of state (Active + Inactive). Used as the 'All' option in the To Dos subgrid view picker on parent forms (FR-17)." languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>

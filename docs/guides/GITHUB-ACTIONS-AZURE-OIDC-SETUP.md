@@ -29,7 +29,7 @@ GitHub's assertion changes depending on **how the job runs**. A job that declare
 | Subject | Needed by |
 |---|---|
 | `repo:spaarke-dev/spaarke:ref:refs/heads/master` | `publish-provisioning-arm-artifacts`, `build-provisioning-sidecar`, `publish-dataverse-solutions-manifest` |
-| `repo:spaarke-dev/spaarke:pull_request` | none today — its only user, `deploy-infrastructure`'s PR what-if, was retired by task 249 (2026-10-02); harmless to keep |
+| `repo:spaarke-dev/spaarke:pull_request` | none today — its only user, `deploy-infrastructure`'s PR what-if, was retired by task 249 (2026-10-02). **Not harmless (2026-10-08, T218d review):** any same-repo pull request can edit a workflow and sign in as this app with all of its Azure roles before review. Remove it (owner decision pending; credential `gh-pull_request`), and skip it in the loop below. |
 | `repo:spaarke-dev/spaarke:environment:dev` | `deploy-spaarke-ai` |
 | `repo:spaarke-dev/spaarke:environment:staging` | `deploy-bff-api` |
 | `repo:spaarke-dev/spaarke:environment:production` | `deploy-bff-api`, `deploy-spaarke-ai` |

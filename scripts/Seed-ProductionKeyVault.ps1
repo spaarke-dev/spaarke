@@ -1,9 +1,12 @@
+# LEGACY (2026-10-06, T227c): targets the retired shared production stack
+# (docs/assessments/azure-prod-stack-decommission-2026-08-31.md), not customer stamps. Stamp settings and secrets
+# come from scripts/canonical-secret-catalog (H4 / H4b); its SPE container ids are plain H4b settings, not KV secrets.
 <#
 .SYNOPSIS
     Seed the production Key Vault with required secrets for BFF API startup.
 
 .DESCRIPTION
-    Populates sprk-platform-prod-kv with the minimum set of secrets required for
+    Populates the named production Key Vault (sprk-{env}-kv) with the minimum set of secrets required for
     the BFF API to start successfully. Uses real values where available (from existing
     App Service settings) and placeholder values where services are not yet provisioned.
 
@@ -14,22 +17,24 @@
     Prerequisite: Caller must have "Key Vault Secrets Officer" or equivalent RBAC role.
 
 .PARAMETER VaultName
-    Key Vault name. Default: sprk-platform-prod-kv
+    Key Vault name (required; canonical form sprk-{env}-kv — e.g. sprk-prod-kv).
 
 .PARAMETER SkipExisting
     Skip secrets that already exist in the vault. Default: $true
 
 .EXAMPLE
-    .\Seed-ProductionKeyVault.ps1
+    .\Seed-ProductionKeyVault.ps1 -VaultName sprk-prod-kv
     # Seed all required secrets with defaults
 
 .EXAMPLE
-    .\Seed-ProductionKeyVault.ps1 -SkipExisting:$false
+    .\Seed-ProductionKeyVault.ps1 -VaultName sprk-prod-kv -SkipExisting:$false
     # Overwrite all secrets (use when updating values)
 #>
 
 param(
-    [string]$VaultName = "sprk-platform-prod-kv",
+    # No default (T230a, 2026-10-06): the former default `sprk-platform-prod-kv` is a non-canonical vault name
+    # (AZURE-RESOURCE-NAMING-CONVENTION.md R3); name the target vault explicitly — `sprk-{env}-kv`.
+    [Parameter(Mandatory)][string]$VaultName,
     [string]$DataverseUrl = $env:DATAVERSE_URL,
     [bool]$SkipExisting = $true
 )

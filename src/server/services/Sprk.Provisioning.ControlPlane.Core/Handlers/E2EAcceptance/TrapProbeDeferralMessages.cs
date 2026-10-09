@@ -3,8 +3,8 @@
 //
 // Static messages used by <see cref="CompositeTrapVerifier"/> when a given
 // <see cref="TrapKind"/> has no registered <see cref="ITrapProbe"/>. Preserved
-// effectively equivalent to the retired <see cref="PlaceholderTrapVerifier"/>'s
-// deferral diagnostic so log-scraping tooling behaviour is unchanged pre/post
+// effectively equivalent to the retired PlaceholderTrapVerifier's (deleted by
+// task 230a) deferral diagnostic so log-scraping tooling behaviour is unchanged pre/post
 // migration to the composite pattern.
 //
 // Added by task 185 (Phase C'' Wave G-7 Batch G-7D) alongside

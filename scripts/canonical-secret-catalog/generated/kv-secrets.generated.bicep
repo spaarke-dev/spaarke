@@ -269,26 +269,6 @@ resource kv_compose_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-0
   }
 }
 
-// ContentSafety-ApiKey — Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'ContentSafety-ApiKey')) {
-  parent: keyVault
-  name: 'ContentSafety-ApiKey'
-  properties: {
-    value: secretValues['ContentSafety-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-run-parameter'
-  }
-  tags: {
-    canonicalName: 'ContentSafety-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // Dataverse-ClientSecret — OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track).
 // BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — NOT declared as an ARM
 // resource: ARM cannot skip-if-exists, so this secret is managed exclusively out-of-band
@@ -355,66 +335,6 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// SPE-CommunicationArchiveContainerId — SPE communication-archive container ID (archived email / communication payloads).
-resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-CommunicationArchiveContainerId')) {
-  parent: keyVault
-  name: 'SPE-CommunicationArchiveContainerId'
-  properties: {
-    value: secretValues['SPE-CommunicationArchiveContainerId']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-bicep-output'
-  }
-  tags: {
-    canonicalName: 'SPE-CommunicationArchiveContainerId'
-    category: 'spe'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
-// SPE-ContainerTypeId — SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
-resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-ContainerTypeId')) {
-  parent: keyVault
-  name: 'SPE-ContainerTypeId'
-  properties: {
-    value: secretValues['SPE-ContainerTypeId']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-topology-constants'
-  }
-  tags: {
-    canonicalName: 'SPE-ContainerTypeId'
-    category: 'spe'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
-// SPE-DefaultContainerId — SPE default container ID (per-customer root container for uploaded files).
-resource kv_sPE_DefaultContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-DefaultContainerId')) {
-  parent: keyVault
-  name: 'SPE-DefaultContainerId'
-  properties: {
-    value: secretValues['SPE-DefaultContainerId']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-bicep-output'
-  }
-  tags: {
-    canonicalName: 'SPE-DefaultContainerId'
-    category: 'spe'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // TenantId — Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
 resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'TenantId')) {
   parent: keyVault
@@ -452,13 +372,9 @@ output canonicalSecretNames array = [
   'Communication-WebhookUrl'
   'Compose-Webhook-ClientState'
   'Compose-Webhook-SigningKey'
-  'ContentSafety-ApiKey'
   'Dataverse-ClientSecret'
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'
-  'SPE-CommunicationArchiveContainerId'
-  'SPE-ContainerTypeId'
-  'SPE-DefaultContainerId'
   'TenantId'
 ]

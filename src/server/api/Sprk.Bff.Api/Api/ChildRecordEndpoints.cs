@@ -229,6 +229,10 @@ public static class ChildRecordEndpoints
                 "the stamp job completes it within one cycle", entity, id, restamp.Failures.Count);
         }
 
+        // Task 173 (owner round 81): a To Do, Event, Communication or Document filed under a record shows that record's
+        // Access Permission from the moment it exists (a parentless one keeps the value its creator chose). Never thrown.
+        await restamper.RefreshInheritedAccessPermissionAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
+
         // Task 149's mirror, inline (task 147 r1): a child created under a secure record is shared with the record's
         // sharees now, not at the next two-minute reconcile. The create stands either way; a mirror that did not finish is
         // completed by SecureChildShareReconciliationJob (owner round 11 item 2).
@@ -353,6 +357,11 @@ public static class ChildRecordEndpoints
                 "[CHILD-RECORD] updated {Entity} {Id}, but the core-ancestor re-stamp did not finish (failures={Failures}); " +
                 "the stamp job completes it within one cycle", entity, id, restamp.Failures.Count);
         }
+
+        // Task 173 (owner rounds 81/84): after a re-file, or a caller's own update of the column on a record that has a
+        // parent (locked on the form), the row shows what its parents give it now. A parentless row is left as written.
+        if (outcome.Written || mapped.Item!.Columns.Contains(InheritedAccessPermission.Column, StringComparer.OrdinalIgnoreCase))
+            await restamper.RefreshInheritedAccessPermissionAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
 
         if (outcome.Written)
         {

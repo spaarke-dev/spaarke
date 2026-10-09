@@ -28,6 +28,7 @@ using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Sprk.Bff.Api.Services.Identity;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -293,6 +294,10 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
             services.AddSingleton<ICommunicationChannelSender>(MessageSender);
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton(Documents.Object);
+            // T227d: app-only SPE reads pass the ownership guard; these tests are about record authorization, so the guard
+            // admits every container (tests/integration/tenant covers its refusals).
+            services.RemoveAll<SpeContainerOwnershipGuard>();
+            services.AddSingleton(sp => TestSpeOwnership.AllowAll(sp.GetRequiredService<IGraphClientFactory>()));
             services.RemoveAll<ICommunicationDataverseService>();
             services.AddSingleton(CommunicationData.Object);
             services.RemoveAll<IAssociationRung>();
