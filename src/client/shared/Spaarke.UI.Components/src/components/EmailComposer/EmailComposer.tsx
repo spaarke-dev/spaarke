@@ -1124,6 +1124,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     // An unresolved record link is refused with an inline message (below) — it is already on screen,
     // so it is not reported again through onError or the failure dialog.
     let refusedInline = false;
+    let response: { communicationId: string };
     try {
       // Task 098: swap linked document attachments' URL for the Spaarke record link. A link the host
       // cannot produce is omitted AND the send is refused with a message the author can act on —
@@ -1145,13 +1146,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         throw new Error(message);
       }
       const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
-      const response = await sendCommunication(request, {
+      response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
       });
       dispatch({ type: 'END_SEND' });
-      props.onSent?.(response);
-      return response;
     } catch (err) {
       dispatch({ type: 'END_SEND' });
       if (refusedInline) throw err;
@@ -1165,6 +1164,14 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       }
       throw failure;
     }
+    // The email is delivered. A host `onSent` that throws is the host's bug, not a failed send: it must never
+    // reach the "Email not sent" path (or reject send()), so it is only logged.
+    try {
+      props.onSent?.(response);
+    } catch (hostErr) {
+      console.error('[EmailComposer] onSent handler threw after a successful send:', hostErr);
+    }
+    return response;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
 
@@ -1205,6 +1212,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   }, [state.validation.errors]);
 
   const canSend = state.to.length > 0 && !!state.subject.trim() && !state.isSending;
+  // Whether the host wired draft persistence (no BFF draft endpoint exists yet) — see the Save Draft handler.
+  const draftSaveAvailable = !!props.onSaveDraftRequest;
 
   // ── Render ──────────────────────────────────────────────────────────────
   const mountClass = props.mount === 'page' ? styles.page : props.mount === 'dialog' ? styles.dialog : styles.inline;
@@ -1539,12 +1548,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSavingDraft={state.isSavingDraft}
         isDraftRecord={props.isDraftRecord}
         onSaveDraft={() => {
-          // A failed Save Draft is told to the user like a failed send (there is no draft onError yet;
-          // callers awaiting composerRef.current.saveDraft() directly still get the rejection).
+          // A failed Save Draft ALWAYS tells the user — `sendFailureDisplay` governs send only, and there is
+          // no draft onError a host could show it from (callers awaiting composerRef.current.saveDraft()
+          // directly still get the rejection). Without `onSaveDraftRequest` the save cannot work here; the owner
+          // has not yet chosen between this message and hiding the button — to hide it, gate the action bar's
+          // Save Draft on `draftSaveAvailable` instead.
           saveDraft().catch((err: unknown) => {
-            if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
-              setFailureNotice(describeDraftSaveFailure(err, !props.onSaveDraftRequest));
-            }
+            if (mountedRef.current) setFailureNotice(describeDraftSaveFailure(err, !draftSaveAvailable));
           });
         }}
         onCancel={() => props.onCancel?.()}

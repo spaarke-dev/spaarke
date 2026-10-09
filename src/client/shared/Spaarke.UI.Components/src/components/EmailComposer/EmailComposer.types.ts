@@ -594,7 +594,8 @@ export interface IEmailComposerProps {
    * - `'host'`: the host shows the failure itself (a toast / MessageBar driven by `onError`, or the
    *   rejection of an imperative `send()`). Set it ONLY when the host really renders that message —
    *   an `onError` that just logs leaves the user with nothing.
-   * Also governs the Save Draft button's failure dialog.
+   * Governs SEND only: a failed Save Draft always shows its own "Draft not saved" message (there is no
+   * draft `onError` a host could show it from).
    */
   sendFailureDisplay?: 'dialog' | 'host';
   onSaveDraft?: (result: { communicationId: string }) => void;

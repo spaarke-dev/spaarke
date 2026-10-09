@@ -167,3 +167,66 @@ describe('SendEmailDialog — onError is a notification; sendFailureDisplay="hos
     expect(screen.getByRole('alertdialog', { name: 'New Email' })).toBeInTheDocument();
   });
 });
+
+describe('Save Draft always tells the user — sendFailureDisplay governs SEND only (review F2)', () => {
+  it('sendFailureDisplay="host" → a failed Save Draft still shows "Draft not saved"', async () => {
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <SendEmailDialog
+          open
+          onClose={jest.fn()}
+          authenticatedFetch={jest.fn() as unknown as AuthenticatedFetchFn}
+          bffBaseUrl={BFF}
+          initialTo={['alice@example.com']}
+          initialSubject={SUBJECT}
+          initialBody={BODY}
+          initialBodyFormat="PlainText"
+          onError={jest.fn()}
+          sendFailureDisplay="host"
+        />
+      </FluentProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Draft not saved' });
+    expect(dialog.textContent).toContain("Saving a draft isn't available here yet.");
+  });
+});
+
+describe('a delivered email is never reported as failed (review K2)', () => {
+  it('a host onSent that throws → no "Email not sent" dialog and no onError; the error is logged', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const onError = jest.fn();
+    const onSent = jest.fn(() => {
+      throw new Error('host bookkeeping failed');
+    });
+    const authenticatedFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ communicationId: 'comm-1' }),
+    } as Response);
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <SendEmailDialog
+          open
+          onClose={jest.fn()}
+          authenticatedFetch={authenticatedFetch as unknown as AuthenticatedFetchFn}
+          bffBaseUrl={BFF}
+          initialTo={['alice@example.com']}
+          initialSubject={SUBJECT}
+          initialBody={BODY}
+          initialBodyFormat="PlainText"
+          onSent={onSent}
+          onError={onError}
+        />
+      </FluentProvider>
+    );
+    clickSend();
+
+    await waitFor(() => expect(onSent).toHaveBeenCalledWith('comm-1'));
+    await new Promise(r => setTimeout(r, 0));
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog', { name: /not sent|may not have been sent/i })).toBeNull();
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});

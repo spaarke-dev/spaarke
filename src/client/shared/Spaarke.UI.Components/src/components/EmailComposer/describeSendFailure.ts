@@ -170,11 +170,20 @@ export function describeSendFailure(err: unknown): ISendFailureDescription {
       SIGN_IN_EXPIRED,
       'Your draft is still here, but refreshing clears it — copy anything you want to keep first.'
     );
-  } else if (e.status === 403) {
+  } else if (e.status === 403 && /^FROM_/.test(e.code)) {
+    // The sender mailbox was refused (`FROM_NOT_APPROVED` / `FROM_REQUIRED` — EmailComposer.types.ts).
     message = join(
       "You don't have permission to send this email from the selected mailbox.",
       detail,
       'Choose a different From mailbox or ask your administrator for access.',
+      DRAFT_KEPT
+    );
+  } else if (e.status === 403) {
+    // Any other refusal (a document or record the sender cannot use, a missing role) — don't guess the mailbox.
+    message = join(
+      "You don't have permission to send this email.",
+      detail,
+      'If you should have access, ask your administrator.',
       DRAFT_KEPT
     );
   } else if (e.status === 404) {

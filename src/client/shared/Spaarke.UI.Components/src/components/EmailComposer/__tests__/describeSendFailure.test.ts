@@ -69,6 +69,13 @@ describe('describeSendFailure — one row per status', () => {
     );
   });
 
+  it('403 (not a sender refusal) → no permission + detail, without guessing the mailbox', () => {
+    expect(describeSendFailure(sce(403, 'You do not have access to this document.')).message).toBe(
+      "You don't have permission to send this email. You do not have access to this document. " +
+        `If you should have access, ask your administrator. ${DRAFT_KEPT}`
+    );
+  });
+
   it('404 → record or mailbox not found + detail', () => {
     expect(describeSendFailure(sce(404, 'Matter 1234 was not found')).message).toBe(
       "The record or mailbox this email depends on couldn't be found. It may have been deleted or moved. " +

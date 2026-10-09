@@ -14,7 +14,7 @@ import { MailRegular, OpenRegular, SaveRegular } from '@fluentui/react-icons';
 // The SAME compose engine the Spaarke email page mounts (`EmailComposerSlot` → `SendEmailPage` → `EmailComposer`),
 // through its pane wrapper `SendEmailPane` (ADR-045). Resolved by an exact webpack/jest alias to the shared
 // source — see webpack.config.js; types from `shared/types/spaarke-send-email-pane.d.ts`.
-import { SendEmailPane } from '@spaarke/ui-components/send-email-pane';
+import { SendEmailPane, describeSendFailure } from '@spaarke/ui-components/send-email-pane';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { openRecord } from '../../services/openRecordLauncher';
 import type { SendEmailRelatedRecordInput } from '../../services/sendEmailService';
@@ -184,8 +184,11 @@ export const EmailView: React.FC<EmailViewProps> = ({
       // ("not sent" / "may not have been sent" / "sent, but not recorded"); since 2026-10-09 the engine also
       // forwards them here (normalized to status 0), so leave the observer's outcome in place.
       if (err.status === 0) return;
-      // The server's own reason (ProblemDetails `detail`) — never a bare status code.
-      const text = `Email not sent: ${err.detail || err.message}`;
+      // A refusal the server answered. The pane fetch RETURNS non-2xx responses, so `detail` can be a raw body
+      // (an App Service HTML error page) or "HTTP 500": the shared wording keeps the server's reason when it is
+      // a real sentence and never shows the raw body or a bare status.
+      const failure = describeSendFailure(err);
+      const text = `${failure.title}: ${failure.message}${failure.reference ? ` Reference: ${failure.reference}` : ''}`;
       setOutcome({ kind: 'error', message: text });
       announce(text, 'assertive');
     },

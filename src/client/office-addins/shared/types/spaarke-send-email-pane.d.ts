@@ -120,6 +120,19 @@ declare module '@spaarke/ui-components/send-email-pane' {
     className?: string;
   }
 
+  /** `EmailComposer/describeSendFailure.ts` — `ISendFailureDescription`. */
+  export interface ISendFailureDescription {
+    title: string;
+    message: string;
+    reference?: string;
+  }
+
+  /**
+   * `EmailComposer/describeSendFailure.ts` — the engine's failed-send wording (re-exported by the pane wrapper):
+   * status/code + the server's meaningful `detail`; never raw JSON/HTML or "HTTP n".
+   */
+  export function describeSendFailure(err: unknown): ISendFailureDescription;
+
   /** The shared pane wrapper over the send engine (`forwardRef` component). */
   export const SendEmailPane: React.ForwardRefExoticComponent<ISendEmailPaneProps & React.RefAttributes<unknown>>;
 }
