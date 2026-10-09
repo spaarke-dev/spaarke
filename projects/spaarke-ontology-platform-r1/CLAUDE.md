@@ -151,6 +151,8 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 
 ## 6. Gotchas — do not re-learn
 
+- 2026-10-09 — **Ontology code lives on the project branch, not master.** `Services/Signals/**` (writer, catalog, plan service, validators) exists only on `docs/ontology-platform-design` (draft #1111) and reaches master with #1111. Ontology task lanes branch from `origin/docs/ontology-platform-design` and open PRs with `--base docs/ontology-platform-design`; publish-size deltas are measured against that branch. Only non-ontology fixes (other areas' code) go to master. 044/051/070 were first launched off master by mistake (corrected same day).
+
 - 2026-10-02 — **MCP `create_table` can't set the publisher** (env default prefix `new`); logical names are immutable → delete-and-recreate. Use the Web API recipe.
 - 2026-10-02 — Omitting `DateTimeBehavior` breaks filtered-view generation; every later relationship on the entity fails with an error naming the *datetime*.
 - 2026-10-02 — Things that look generic are not: `ILiveFactResolver` predicates are a closed `switch`; `ISignalRule` (Finance `SignalEvaluationService`) is a private nested interface; `GenerateDeterministicId(matterId, type)` can't take a polymorphic subject. `notExists` now exists only in `PredicateCompiler` (task 021). "Already generic" ≠ "no new code".
