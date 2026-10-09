@@ -238,3 +238,48 @@ The gates below were run by the task-173 agent through the Dataverse Web API and
   - the TrackingFieldTrio pill change is put back while locked;
   - no console errors;
   - dark mode is readable.
+
+## 174 live gate (2026-10-09)
+
+Task 174: enforcement uses the parent-derived access. PR #1481 merged as `e78c47149`; TrackingFieldTrio 1.0.43 imported. The gate ran 05:53:41–05:55:50Z.
+
+**Environment and identities**
+- Targets: spaarke-bff-dev (healthz 200) and spaarkedev1.
+- admin (`az` default) did the set-up and the read-back.
+- testuser1 (`AZURE_CONFIG_DIR=C:/tmp/az-uac-child`) did the reads.
+- Tokens: `api://1e40baad…/.default` for the BFF; the admin `az` token for Dataverse.
+- No app-setting, Entra or Key Vault access, and no `sprk-prod-kv` read.
+- Script and raw log: session scratchpad `gate174/gate174.py` and `run1.out`.
+
+**The contact.** testuser1's linked contact `ac6d7b68…` stands in for a CIAM contact, because the agent cannot obtain a CIAM token. The workforce token is admitted on the external plane (B4-06), and the read is composed from that contact's grants. The cancellation is the same direct-only predicate over the effective flags on both planes.
+
+**The read.** `GET /api/v1/external/workassignments/{id}/todos` as testuser1. It is gated on the caller's composed work-assignment set, the same read #1410's gate used. The form banner was not used (#1488).
+
+**The secure parent.** There is no secure matter in dev, so a throwaway matter M was made secure by setting `sprk_issecure` directly. There was no provisioning, so no SPE container was created. M was secure for 7 s (05:55:26–05:55:33Z), inside one */5 window (boundary + 25 s), and then restored, so no inheritance job saw it.
+
+**Throwaway records** (all created as admin; names `zz-174-gate*`):
+- **O** `11f372c6…`: an organization.
+- **J** `18f372c6…`: membership of `ac6d7b68…` in O (active, no dates).
+- **M** `d1767dc7…`: a matter, not secure, Standard.
+- **P** `26548bc7…`: a project filed under M by the pair, not secure.
+- **W1** `1cf372c6…`: a work assignment filed under M (`sprk_regardingmatter`). Own flags: `sprk_issecure` false, Access Permission Standard (100000000).
+- **W2** `28548bc7…`: a work assignment filed under P.
+- **G** `64c0b0cc…`: an org-wide Collaborate grant on W1 for O, written through `POST /api/v1/external-access/grant`. The answer was 200, `grantedAccessLevel` 100000001, not narrowed.
+
+**Clean-up.**
+- All seven rows were deleted (204), in the order G, W2, W1, P, M, J, O, and each read back **404** (05:55:41–50Z).
+- M's flag had already been restored before it was deleted.
+- A final sweep found 0 `zz-174` matters, projects, work assignments or organizations; 0 memberships for `ac6d7b68…`; its active grants back at 2 (as before); and 0 secure matters.
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 1 | Set-up: a NOT-flagged, Standard work assignment under a matter; an org-wide Collaborate grant for an organization the contact belongs to | **PASS** | W1 own flags `sprk_issecure` false, `sprk_accesspermission` 100000000. Grant `64c0b0cc…` → 200. |
+| 2 | Read path, before / after the parent is secure | **PASS** | M not secure: **200** `{"value": []}` (05:53:58Z).<br>M secure: **403** `{"title":"Forbidden","status":403,"detail":"You do not have access to this work assignment"}` (05:55:33Z). W1's own `sprk_issecure` read **false** at that moment (3 s after M was set). The org-inherited grant is cancelled by the parent's Secure (direct-only).<br>M restored: **200** again (05:55:36Z). |
+| 3 | `GET /api/v1/records/sprk_workassignment/{id}/no-access` (064, the banner's source) | **PASS** | Before: W1 → 200 `secure:"doesNotApply"`, `accessPermission:"standard"`, `inheritedFrom:null`.<br>After: W1 → 200 `secure:"applies"`, `accessPermission:"standard"`, `inheritedFrom:{recordType:"sprk_matter", recordId:"d1767dc7…", name:"zz-174-gate M …"}` (the direct parent).<br>After: W2 (W2 → P → M) → 200 `secure:"applies"`, `inheritedFrom:{recordType:"sprk_project", recordId:"26548bc7…", name:"zz-174-gate P middle …"}`. This is the DIRECT parent; M's id appears nowhere in the body (F1-d). |
+| 4 | Clean-up | **PASS** | 7 × 204 → 404; M's flag restored (204) before deletion; the sweep is clean (above). |
+
+**Defects found:** none.
+
+**Not covered live:** a real CIAM sign-in, because no CIAM token is available to the agent. The CIAM half is the same composition and veto code (`ComposeContactPlaneAsync`). Offline it is pinned by `EffectiveAccessFollowsParentTests` (CIAM contact plane) and by the seeding proofs in `task-174-effective-access-follows-parent.md`.
+
+**174 can be marked done** once the owner accepts the testuser1 stand-in for the CIAM contact.
