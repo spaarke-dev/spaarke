@@ -2,19 +2,19 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 45 — **PR #1365 MERGED** (`1ef1b0949`, 22:05Z) after fixing 2 CI test failures; master verified. Waiting on owner items 2 and 3.
+> **Last Updated**: 2026-10-09 SESSION 45 — PR #1365 merged (`1ef1b0949`); first SpaarkeMaster CI publish (1.2.0.0); **218f ✅**; #1446 + #1401 closed. Next: T250.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **218f**'s last acceptance check (AC2), after the first SpaarkeMaster publish (owner item 2). |
-| **Step** | SESSION 45: CI on `93c805fbd` failed 2 tests, both fixed in `2c5cac232` (merged at `73e83d50f`) — DataverseRecordShareWireTests (master's uac-r2 test used the pre-guard SpeContainerMembershipService constructor) and LoadTests EnqueueLatencyScenario (NativeAccount Model1 intake, refused since T232). Master merged again (9 commits, clean); solution build 0 errors; ArchTests 841/841; UAC tests 231/231; LoadTests 5/5; `.ForApp(` 31. CI on `73e83d50f`: 33 pass, 7 skip, 0 fail. Trial merge with 13 newer master commits clean, no new `.ForApp(`. **Merged `1ef1b0949`.** Master verified: build 0 errors, ArchTests 841/841, `.ForApp(` 31, guard present. Push-triggered runs on master (Deploy SpaarkeAi → DEV, Publish Provisioning ARM Artifacts, CI, Bicep, prereqs) were queued at 22:06Z. |
-| **Status** | blocked on the owner (items 2, 3). |
-| **Next Action** | (1) Owner OK → run `publish-dataverse-solutions-manifest.yml` on master with `publish: true`; watch it to green (manifest read-back). (2) 218f AC2 (below), close 218f, close #1401 (ISS-005 → Resolved), sync the board. (3) Owner OK → delete the `gh-pull_request` FIC on `8c85a481-…` (#1446), close ISS-007. (4) Check the master push runs listed above finished green. (5) Then T250. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`, merged into master at `1ef1b0949`; 0 behind. |
+| **Task** | **T250** (next in order) — not started. Check first whether master `bb8ba7251` (SPE Admin as the BFF MI, sdap-SPE-admin-app-r2) supersedes it; if so, raise with the owner before any work. |
+| **Step** | SESSION 45 done: PR #1365 merged after fixing 2 CI tests (`2c5cac232`); master verified (build 0 errors, ArchTests 841/841, `.ForApp(` 31). Owner OK → publish run 37864623352 succeeded (buildId 2026.10.09-13, sha 45202953f; `latest.previous` = the 2026-08-21 hand-made manifest). 218f AC2 passed (demo plan: Update 1.0.0.0 -> 1.2.0.0 unmanaged) → 218f ✅, ISS-005 + #1401 closed. Owner OK → `gh-pull_request` FIC deleted from `8c85a481-…`, OIDC guide updated, ISS-007 + #1446 closed. Deploy SpaarkeAi was red on master since 2026-10-04 (ribbon build: barrel imports); master fixed it in parallel (`35e9e244d`, #1412) — our identical fix was dropped in the merge. |
+| **Status** | ready — between tasks. |
+| **Next Action** | (1) Start T250 via task-execute (supersession check first, see Task). (2) The owner may want a real SpaarkeMaster 1.2.0.0 import into demo (`Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged`, live — owner OK per action); not required by any task. |
+| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed; 0 behind master; carries the 218f close-out + checkpoints not yet on master (next PR). |
 | **Main repo** | `C:\code_files\spaarke` master NOT fast-forwarded (still `b0a78f880`): another session's uncommitted researcher-memory edits (`.claude/agent-memory/researcher/MEMORY.md` + 2 files) block it. Left untouched — the owner decides. |
-| **Order after the merge** | first SpaarkeMaster publish (owner OK) → 218f close → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
+| **Order** | T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner re-test, add-in 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → **T186** (first run: a NEW environment to execute/test/confirm E2E). |
 
 ### Files changed this session (all committed and pushed)
 - Package: `src/dataverse/solutions/SpaarkeMaster/**` (1.2.0.0 export), `docs/data-model/package-scope.json`, `docs/data-model/spaarke-components-inventory.json`.
@@ -24,15 +24,12 @@
 - Governance/docs: ADR-028 A6, ADR-027 MUSTs, skills `provision-environment` + `deploy-new-release`, constraints `provisioning.md`, CHANGELOG, many docs (T235 sweep, RAG guidance).
 
 ### Critical context
-- **218f AC2 (the only open check):** after the first publish, run `./scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -PackageType unmanaged -WhatIf` → must print "Update SpaarkeMaster 1.0.0.0 -> 1.2.0.0 (unmanaged …)" and the pac command. Then mark 218f ✅ (POML + TASK-INDEX + drift check) and close #1401 (move ISS-005 to Resolved).
-- **The store today** (`sprkcpartifactsdev/provisioning-artifacts`): only the hand-made 2026-08-21 `dataverse-solutions-latest.json` (SpaarkeMaster 1.1.0.0, old shape) + `dataverse-solutions/2026.08.21-h3-manual-1/SpaarkeMaster.zip`. H6 and the import script both refuse it until the CI publish.
+- **The store** (`sprkcpartifactsdev/provisioning-artifacts`): `dataverse-solutions-latest.json` → SpaarkeMaster 1.2.0.0 (managed + unmanaged, SHA-256); `latest.previous` = the hand-made 2026-08-21 manifest (rollback pointer). H6 and `Import-SpaarkeMasterPackage.ps1` now accept it.
 - **Demo:** SpaarkeMaster 1.0.0.0 **unmanaged** + hand-installed dev-team solutions → `solutionPackageType` unmanaged (switch = rebuild, owner decision). Dev: `none` (authoring).
 
 ## Owner items
 
-1. **PR #1365 — MERGED** 2026-10-08 (`1ef1b0949`). Its push runs deploy the Console to DEV and publish ARM artifacts to `sprkcpartifactsdev`; production only by manual dispatch.
-2. **First real SpaarkeMaster publish** (after the merge): `publish-dataverse-solutions-manifest.yml` on master with `publish: true` — uploads 1.2.0.0 + manifest, keeps the hand-made manifest as `latest.previous`. Needed by T186 and 218f AC2. **Ask for OK.**
-3. **#1446 (ISS-007)**: delete the unused `gh-pull_request` federated credential on `github-actions-spe-infrastructure` (`8c85a481-…`) — verified 2026-10-08 that no workflow signs in on pull requests. Entra write. **Ask for OK.**
+1. **Done 2026-10-08:** PR #1365 merged; first SpaarkeMaster publish; #1446 FIC deleted.
 4. **T240b live re-test** with add-in package 1.1.2 (owner, test tenant Dewey Cheatham `deweycheatham.onmicrosoft.com`; guest `ralph@deweycheatham.onmicrosoft.com`; Diagnostics view should show `acct` 1).
 5. **G36** (ADR-027 management group), **G31** (H10 tenant-wide Directory/User write roles) — awaiting decisions; do NOT act.
 6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
