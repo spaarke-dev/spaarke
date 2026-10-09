@@ -61,9 +61,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <see cref="IRetrievalAccessTrim"/> before it reaches the text, the citations or the widget, so a caller sees only
 /// documents they can Read. The caller is <see cref="ChatInvocationContext.UserId"/> on the chat path and
 /// <see cref="ToolExecutionContext.CallerObjectId"/> (the run principal) on the playbook path; without one, no rows
-/// are returned and the result says so. SearchDocuments is bound to the chat's host parent when there is one (as
-/// SearchDiscovery already was). When task 164 drops the host, both methods search the tenant but stay limited to
-/// what the trim lets through; retrieval never returns an untrimmed tenant-wide page.
+/// are returned and the result says so. SearchDocuments searches the tenant (never bound to the host; the trim is the
+/// access control). SearchDiscovery binds to the host only for matter, project and invoice hosts; any other host, or
+/// none (task 164 drops it), gets the trimmed tenant search. Retrieval never returns an untrimmed tenant-wide page.
 /// </para>
 /// <para>
 /// <strong>Invocation contexts</strong>: <see cref="InvocationContextKind.Both"/>. Playbook
@@ -280,7 +280,8 @@ public sealed class DocumentSearchHandler : IToolHandler
             var args = ParseChatArgs(context.ToolArgumentsJson);
 
             // SearchDocuments uses knowledge-source-ID scoping (when bound to a playbook).
-            // Both methods use parent-entity scoping when the chat carries a host record (task 176 goal 4).
+            // SearchDiscovery uses parent-entity scoping for a matter/project/invoice host; SearchDocuments never does
+            // (task 176 fix round 2). Both are trimmed to what the caller can read.
             IReadOnlyList<string>? knowledgeSourceIds =
                 context.KnowledgeScope?.RagKnowledgeSourceIds is { Count: > 0 } ids
                     ? ids
@@ -353,7 +354,7 @@ public sealed class DocumentSearchHandler : IToolHandler
         if (string.Equals(method, MethodSearchDocuments, StringComparison.Ordinal))
         {
             return await ExecuteSearchDocumentsAsync(
-                tenantId, query!, topK ?? DefaultDocumentsTopK, knowledgeSourceIds, parentEntityType, parentEntityId,
+                tenantId, query!, topK ?? DefaultDocumentsTopK, knowledgeSourceIds,
                 callerObjectId, tool, emitWidget, startedAt, stopwatch, correlationLogId, cancellationToken);
         }
 
@@ -375,8 +376,6 @@ public sealed class DocumentSearchHandler : IToolHandler
         string query,
         int topK,
         IReadOnlyList<string>? knowledgeSourceIds,
-        string? parentEntityType,
-        string? parentEntityId,
         string? callerObjectId,
         AnalysisTool tool,
         bool emitWidget,
@@ -386,8 +385,10 @@ public sealed class DocumentSearchHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var clampedTopK = Math.Clamp(topK, 1, MaxTopK);
-        var (scopeType, scopeId) = CanonicalParentScope(parentEntityType, parentEntityId);
 
+        // Task 176 fix round 2 (main-session decision; supersedes POML goal 4 for SearchDocuments): NOT bound to
+        // the host. The trim is the access control, and binding only cost findability: a work-assignment host found
+        // nothing, and after #1517 a matter host would miss documents filed under its work assignments.
         var options = new RagSearchOptions
         {
             TenantId = tenantId,
@@ -395,10 +396,7 @@ public sealed class DocumentSearchHandler : IToolHandler
             KnowledgeSourceIds = knowledgeSourceIds,
             UseSemanticRanking = true,
             UseVectorSearch = true,
-            UseKeywordSearch = true,
-            // Task 176 goal 4: bound to the chat's host record when there is one, as SearchDiscovery is.
-            ParentEntityType = scopeType,
-            ParentEntityId = scopeId
+            UseKeywordSearch = true
         };
 
         var (response, trim) = await _accessTrim.SearchReadableAsync(
@@ -760,26 +758,23 @@ public sealed class DocumentSearchHandler : IToolHandler
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The <c>parentEntityType</c> values the document index stores (ParentEntityContext.EntityTypes, plus
-    /// <c>workassignment</c>, which the task-177 parent resolver writes). A host of any other type (a document, an
-    /// analysis output, an event, …) has no chunks filed under it, so binding to it would always return nothing.
+    /// The host types SearchDiscovery binds to: the parent types the document index holds TODAY (matter, project,
+    /// invoice; task 176 fix round 2, main-session decision). <c>workassignment</c> is excluded until existing chunks
+    /// are backfilled with it (task 177 writes it only for new indexing). A host of any other type (a work assignment,
+    /// a document, an analysis output, an event, …) gets the trimmed tenant search instead of an always-empty one.
     /// </summary>
     private static readonly HashSet<string> IndexedParentTypes = new(StringComparer.Ordinal)
     {
         ParentEntityContext.EntityTypes.Matter,
         ParentEntityContext.EntityTypes.Project,
         ParentEntityContext.EntityTypes.Invoice,
-        ParentEntityContext.EntityTypes.ServiceRequest,
-        ParentEntityContext.EntityTypes.Account,
-        ParentEntityContext.EntityTypes.Contact,
-        "workassignment",
     };
 
     /// <summary>
-    /// The parent scope to filter on: both values or neither. The host type is normalized to the index's form
-    /// (<c>sprk_matter</c> → <c>matter</c>, <c>sprk_workassignment</c> → <c>workassignment</c>) and the scope is applied
-    /// ONLY when the index stores that type and the id is a GUID; otherwise the search is the trimmed tenant search,
-    /// the same as a dropped host (task 176 goal 4, verifier F2). A GUID id is written bare and lowercase (ADR-044).
+    /// The SearchDiscovery parent scope: both values or neither. The host type is normalized to the index's form
+    /// (<c>sprk_matter</c> → <c>matter</c>) and the scope is applied ONLY for a type in <see cref="IndexedParentTypes"/>
+    /// with a GUID id; otherwise the search is the trimmed tenant search, the same as a dropped host. A GUID id is
+    /// written bare and lowercase (ADR-044).
     /// </summary>
     internal static (string? Type, string? Id) CanonicalParentScope(string? parentEntityType, string? parentEntityId)
     {

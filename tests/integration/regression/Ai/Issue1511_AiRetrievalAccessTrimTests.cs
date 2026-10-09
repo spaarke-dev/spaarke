@@ -293,11 +293,8 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
         RagKnowledgeSourceIds: [], InlineContent: null, SkillInstructions: null, ActiveDocumentId: null,
         ParentEntityType: host.EntityType, ParentEntityId: host.EntityId);
 
-    [Theory]
-    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_matter", "matter")]
-    [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_matter", "matter")]
-    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_workassignment", "workassignment")]
-    public async Task WithAnIndexedHost_BothMethodsAreBoundToTheHostParent(string method, string hostType, string indexedType)
+    [Fact]
+    public async Task WithAMatterHost_SearchDiscoveryIsBoundToTheMatter()
     {
         RagSearchOptions? sent = null;
         _rag.Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
@@ -305,21 +302,28 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             .ReturnsAsync(new RagSearchResponse { Query = "q", Results = Array.Empty<RagSearchResult>(), TotalCount = 0 });
         var hostId = Guid.NewGuid();
         // Production normalization: ChatHostContext runs EntityTypeNormalizer on the type the client sent.
-        var host = new ChatHostContext(hostType, "{" + hostId.ToString().ToUpperInvariant() + "}");
-        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), $"{{\"method\":\"{method}\"}}");
+        var host = new ChatHostContext("sprk_matter", "{" + hostId.ToString().ToUpperInvariant() + "}");
+        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), "{\"method\":\"SearchDiscovery\"}");
 
         await DocumentSearch().ExecuteChatAsync(Chat(scope: ScopeFor(host)), tool, CancellationToken.None);
 
-        sent!.ParentEntityType.Should().Be(indexedType, because: "the filter uses the type the index stores");
+        sent!.ParentEntityType.Should().Be("matter", because: "the filter uses the type the index stores");
         sent.ParentEntityId.Should().Be(hostId.ToString("D"), because: "ADR-044: the AI Search eq filter needs the bare lowercase id");
     }
 
+    /// <summary>
+    /// Fix round 2 (main-session decision): SearchDocuments is never bound to the host (the trim is the access
+    /// control), and a work-assignment host is not bound for either method until the index is backfilled.
+    /// </summary>
     [Theory]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_matter")]
+    [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_workassignment")]
+    [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_workassignment")]
     [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_analysisoutput")]
     [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_analysisoutput")]
     [InlineData(DocumentSearchHandler.MethodSearchDocuments, "sprk_document")]
     [InlineData(DocumentSearchHandler.MethodSearchDiscovery, "sprk_document")]
-    public async Task WithAHostTheIndexDoesNotStore_SearchIsTheTrimmedTenantSearch_NotEmpty(string method, string hostType)
+    public async Task UnboundHosts_GetTheTrimmedTenantSearch_NotAnEmptyOne(string method, string hostType)
     {
         RagSearchOptions? sent = null;
         _rag.Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
@@ -339,7 +343,7 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
 
         var result = await DocumentSearch().ExecuteChatAsync(Chat(scope: ScopeFor(host)), tool, CancellationToken.None);
 
-        sent!.ParentEntityType.Should().BeNull(because: $"no chunk is filed under a {hostType}, so binding would always return nothing");
+        sent!.ParentEntityType.Should().BeNull(because: $"{method} is not bound to a {hostType} host");
         sent.ParentEntityId.Should().BeNull();
         Everything(result).Should().NotContain(Secret);
         JsonSerializer.Serialize(result.Data).Should().Contain(Visible[..20],
@@ -398,6 +402,38 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
         json.Should().NotContain(Secret, because: "no observation the caller cannot read reaches the cohort");
         json.Should().Contain(Visible + "-D").And.Contain(Visible + "-E");
         _userClient.ReadSets.Should().Contain("sprk_matters").And.Contain("sprk_documents");
+    }
+
+    /// <summary>K2 hardening (fix round 2): an observation with two document refs needs BOTH to be readable.</summary>
+    [Fact]
+    public async Task Observation_WithAReadableAndARestrictedDocumentRef_IsDropped()
+    {
+        var readableMatter = Guid.NewGuid();
+        _userClient.Allow("sprk_matters", readableMatter.ToString("D"));
+        var doc = new Azure.Search.Documents.Models.SearchDocument
+        {
+            ["id"] = "o-two-docs",
+            ["tenantId"] = "tenant-1",
+            ["artifactType"] = "observation",
+            ["subject"] = $"matter:{readableMatter}",
+            ["predicate"] = "settlementAmount",
+            ["valueJson"] = Secret + "-TWO",
+            ["evidence"] = new object[]
+            {
+                new Azure.Search.Documents.Models.SearchDocument { ["refType"] = "document", ["ref"] = ReadableDoc.ToString() },
+                new Azure.Search.Documents.Models.SearchDocument { ["refType"] = "document", ["ref"] = SecureDoc.ToString() },
+            },
+            ["scope"] = new Azure.Search.Documents.Models.SearchDocument
+            {
+                ["entityType"] = "matter", ["entityId"] = readableMatter.ToString(),
+            },
+        };
+
+        var json = await RunIndexRetrieveAsync(
+            "{\"artifactType\":\"observation\",\"predicate\":\"settlementAmount\",\"requireEvidence\":false}",
+            Azure.Search.Documents.Models.SearchModelFactory.SearchResult(doc, 0.9, null));
+
+        json.Should().NotContain(Secret, because: "one readable document ref no longer vouches for a restricted one");
     }
 
     /// <summary>Owner decision (option b): a Precedent is kept only when the caller can read EVERY supporting matter.</summary>

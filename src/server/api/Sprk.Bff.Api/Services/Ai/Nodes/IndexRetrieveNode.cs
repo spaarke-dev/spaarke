@@ -53,9 +53,9 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// returned Observations from EVERY matter in the tenant, secure ones included (predict-matter-cost's cohort reaches
 /// <c>POST /api/insights/ask</c>). Every retrieved row is now trimmed through <see cref="IRetrievalAccessTrim"/> as the run
 /// principal (<see cref="NodeExecutionContext.CallerObjectId"/>), from a 2x candidate pool, against the record that
-/// decides it: the row's SOURCE DOCUMENT when its <c>document</c> evidence names one (a bare <c>sprk_document</c> id,
-/// or <c>spe://drive/{d}/item/{i}</c> matched on <c>sprk_driveitemid</c>), so a restricted document under a readable
-/// matter is caught; otherwise its scope record (matter / project / invoice / work assignment). A row with neither is
+/// decides it: EVERY source document its <c>document</c> evidence names (a bare or <c>file://</c> <c>sprk_document</c>
+/// id, or <c>spe://drive/{d}/item/{i}</c> matched on <c>sprk_driveitemid</c>), so a restricted document under a
+/// readable matter is caught; otherwise its scope record (matter / project / invoice / work assignment). A row with neither is
 /// dropped. A Precedent is kept only when the caller can read EVERY supporting matter (owner decision, option b); one
 /// with no supporting-matter evidence, or an unreadable one, is dropped. One batched check per page. With no run principal (app-only, scheduled) nothing is returned, and the EvidenceGuard then applies.
 /// </para>
@@ -494,7 +494,7 @@ public sealed class IndexRetrieveNode : INodeExecutor
     /// <summary>
     /// Every record the caller must be able to read to see this artifact (task 176). A Precedent needs ALL of its
     /// supporting matters (<c>supporting-matter</c> evidence, <c>matter://{id}</c>; owner decision, option b); any
-    /// other artifact needs the single record from <see cref="AccessRecordOf"/>. Empty means the row is dropped.
+    /// other artifact needs EVERY one of its <c>document</c> evidence refs, or, with none, its scope record. Empty means the row is dropped.
     /// </summary>
     internal static IReadOnlyList<RetrievalRecordKey> AccessRecordsOf(IDictionary<string, object> doc, InsightRowProjection row)
     {
@@ -524,7 +524,31 @@ public sealed class IndexRetrieveNode : INodeExecutor
             return matters;
         }
 
-        return AccessRecordOf(doc, row) is { } single ? new[] { single } : Array.Empty<RetrievalRecordKey>();
+        // Any other artifact: EVERY document evidence ref must be readable (task 176 fix round 2, K2 hardening: one
+        // readable ref no longer vouches for a second, restricted one). A document ref that names no checkable
+        // document drops the row. With no document evidence at all, the scope record decides.
+        var documents = new List<RetrievalRecordKey>();
+        foreach (var entry in EvidenceEntries(doc))
+        {
+            if (!string.Equals(Get(entry, "refType"), "document", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (DocumentKeyOf(Get(entry, "ref")) is not { } key)
+            {
+                return Array.Empty<RetrievalRecordKey>();
+            }
+
+            documents.Add(key);
+        }
+
+        if (documents.Count > 0)
+        {
+            return documents;
+        }
+
+        return ScopeRecordOf(row) is { } scope ? new[] { scope } : Array.Empty<RetrievalRecordKey>();
     }
 
     private static IEnumerable<IDictionary<string, object>> EvidenceEntries(IDictionary<string, object> doc)
@@ -547,37 +571,31 @@ public sealed class IndexRetrieveNode : INodeExecutor
         entry.TryGetValue(key, out var v) ? v?.ToString() : null;
 
     /// <summary>
-    /// The record that decides whether a caller may see this artifact (task 176): its first <c>document</c> evidence ref
-    /// that names a document (bare <c>sprk_document</c> id, or an <c>spe://</c> item), else its scope record
-    /// (<c>scope.entityType</c> + <c>scope.entityId</c>, or the legacy <c>scope.matterId</c>). Null when there is
-    /// neither, and the row is then dropped.
+    /// A <c>document</c> evidence ref as a checkable record: a bare <c>sprk_document</c> id, the ingest fallback
+    /// <c>file://{sprk_document id}</c> (FilesIndexIngestDocumentSource), or an <c>spe://</c> item.
     /// </summary>
-    internal static RetrievalRecordKey? AccessRecordOf(IDictionary<string, object> doc, InsightRowProjection row)
+    private static RetrievalRecordKey? DocumentKeyOf(string? reference)
     {
-        foreach (var entry in EvidenceEntries(doc))
+        reference = reference?.Trim();
+        if (reference is not null && reference.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.Equals(Get(entry, "refType"), "document", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var reference = Get(entry, "ref")?.Trim();
-            if (RetrievalRecordKey.Document(reference) is { } byId)
-            {
-                return byId;
-            }
-
-            if (reference is not null
-                && SpeDocumentRef.Match(reference) is { Success: true } spe
-                && RetrievalRecordKey.DocumentByDriveItem(spe.Groups["itemId"].Value) is { } byItem)
-            {
-                return byItem;
-            }
+            reference = reference["file://".Length..];
         }
 
-        return RetrievalRecordKey.ParentRecord(row.Scope?.EntityType, row.Scope?.EntityId)
-               ?? RetrievalRecordKey.ParentRecord("matter", row.Scope?.MatterId);
+        if (RetrievalRecordKey.Document(reference) is { } byId)
+        {
+            return byId;
+        }
+
+        return reference is not null && SpeDocumentRef.Match(reference) is { Success: true } spe
+            ? RetrievalRecordKey.DocumentByDriveItem(spe.Groups["itemId"].Value)
+            : null;
     }
+
+    /// <summary>The artifact's scope record: <c>scope.entityType</c> + <c>scope.entityId</c>, or the legacy <c>scope.matterId</c>.</summary>
+    private static RetrievalRecordKey? ScopeRecordOf(InsightRowProjection row) =>
+        RetrievalRecordKey.ParentRecord(row.Scope?.EntityType, row.Scope?.EntityId)
+        ?? RetrievalRecordKey.ParentRecord("matter", row.Scope?.MatterId);
 
     /// <summary>
     /// Maps a raw <see cref="SearchDocument"/> to the canonical <see cref="InsightRowProjection"/>.

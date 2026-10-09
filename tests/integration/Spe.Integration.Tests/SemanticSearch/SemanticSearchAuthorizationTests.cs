@@ -395,6 +395,53 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     /// A cross-record row. Both parent fields are explicit with no defaults, deliberately: parentage is
     /// the entire subject of these tests, so no test may leave it implied.
     /// </summary>
+    // ─── Task 176 fix round 2 (#1511): the PARENT decision does not cover a restricted document ───
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("all")]
+    public async Task Search_ARestrictedDocumentUnderAReadableMatter_IsNotReturned(string scope)
+    {
+        var callerId = Guid.NewGuid().ToString();
+        var matter = Guid.Parse(TestEntityId);
+        var restricted = Guid.NewGuid();
+        var readable = Guid.NewGuid();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", matter, AccessRights.Read);
+        _fixture.Search.Results =
+        [
+            CrossRecordRow(restricted.ToString(), "matter", matter.ToString()) with { Highlights = ["SECRET-1511-highlight"] },
+            CrossRecordRow(readable.ToString(), "matter", matter.ToString()),
+        ];
+        var userClient = new ReadableDocumentsUserClient(readable);
+        _fixture.Trim.Inner = new Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim(
+            _fixture.Services.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
+            userClient,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim>.Instance);
+        try
+        {
+            var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+            var request = scope == "entity"
+                ? EntityScopeRequest()
+                : new SemanticSearchRequest { Query = "test query", Scope = "all" };
+
+            var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            var body = await response.Content.ReadAsStringAsync();
+            body.Should().NotContain(restricted.ToString(), "a restricted document under a readable matter must not be served")
+                .And.NotContain("SECRET-1511-highlight");
+            body.Should().Contain(readable.ToString(), "the readable document under the same matter is still served");
+            var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+            content!.Metadata.ReturnedResults.Should().Be(1);
+            content.Metadata.TotalResults.Should().Be(1, "the counts describe what the caller may see");
+            userClient.Reads.Should().NotBeEmpty("the documents were checked as the caller");
+        }
+        finally
+        {
+            _fixture.Trim.Reset();
+        }
+    }
+
     private static SearchResult CrossRecordRow(string documentId, string? parentType, string? parentId) => new()
     {
         DocumentId = documentId,
@@ -912,6 +959,12 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
     /// <summary>The search stub, so tests can control the rows the authorization layer must filter.</summary>
     public MockAuthTestSearchService Search { get; } = new();
 
+    /// <summary>
+    /// The document-level access trim (task 176). Permit-all by default so the parent-record tests in this class keep
+    /// testing the parent decision; the document-trim tests switch in the real <c>RetrievalAccessTrim</c>.
+    /// </summary>
+    public SwitchableRetrievalAccessTrim Trim { get; } = new();
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         TestHostConfiguration.ConfigureTestHost(builder);
@@ -954,6 +1007,9 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
             // banned shape is transport-level mocking such as Mock<HttpMessageHandler>).
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Access);
+
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim>(Trim);
         });
 
         builder.UseEnvironment("Testing");
