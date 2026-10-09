@@ -61,3 +61,12 @@ RunAsUserWritesThatFileNothing).
   `sprk_budgetrevision` added to `SecureChildLineage` and `config/secure-record-owner-role.json` (mirrors `sprk_budget`; uac-r2 files, flagged for their
   review; the config entry's live negative control is pending). Needs `prvAssignsprk_BudgetRevision` on the writer (granted, D-108).
 - **Census (F2)**: the executors' dataverse field renamed `_dataverse`, so the census regex now sees them; `DecisionActionExecutors.cs` classified.
+
+## 5. Round 3
+
+- `DecisionActionOutcome` now separates `Written` (confirmed) from `PossiblyWritten` (5xx, status 0, timeout or fault after the request was sent). Revise-budget on a
+  5xx/0 amount write: `Written=[revision]`, `PossiblyWritten=[budget]`; a 4xx refusal lists the revision only. Other executors list the subject as possibly written.
+- `ReviseBudgetExecutor` uses the base class filter (`ex is not OperationCanceledException || !ct.IsCancellationRequested`) on the amount write, so an HttpClient
+  timeout after the create keeps the revision id; a real caller cancel still propagates.
+- Known limits, not fixed (D-106): preflight does not check AppendTo on the caller's own contact for `RescheduledBy`/`ReassignedBy`; a Secure-matter revision is
+  mirrored to sharees only by the reconcile job (up to ~2 min).

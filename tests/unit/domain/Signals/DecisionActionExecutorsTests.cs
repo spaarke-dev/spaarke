@@ -54,6 +54,7 @@ public class DecisionActionExecutorsTests
         public List<string> Gets { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
         public int PatchStatus { get; set; } = 204;
+        public Exception? PatchThrows { get; set; }
 
         public FakeUserClient OnGet(string prefix, object body)
         {
@@ -71,6 +72,7 @@ public class DecisionActionExecutorsTests
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
         {
             Patches.Add((relativePath, jsonBody));
+            if (PatchThrows is not null) throw PatchThrows;
             return Task.FromResult(PatchStatus is >= 200 and < 300
                 ? DataverseUserResponse.Ok(PatchStatus, null)
                 : DataverseUserResponse.Fail(PatchStatus, "denied", "no"));
@@ -257,6 +259,7 @@ public class DecisionActionExecutorsTests
         outcome.Status.Should().Be(DecisionActionStatus.Failed);
         outcome.ReasonCode.Should().Be(DecisionActionReasons.BudgetAmountNotWritten);
         outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
+        outcome.PossiblyWritten.Should().BeEmpty("a 403 is a clear refusal: the amount was not written");
         user.Patches.Should().ContainSingle("one attempt, as the user, no retry");
         writer.Org.Verify(o => o.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -1250,7 +1253,8 @@ public class DecisionActionExecutorsTests
         var fiveHundred = await new RescheduleExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["dueDate"] = "2026-11-02" }, TodoItem), CancellationToken.None);
         fiveHundred.Status.Should().Be(DecisionActionStatus.Failed);
-        fiveHundred.Written.Should().Equal(TodoItem);
+        fiveHundred.PossiblyWritten.Should().Equal(TodoItem);
+        fiveHundred.Written.Should().BeEmpty();
 
         // a core that never answers (the HTTP client's timeout surfaces as TaskCanceledException while the request lives)
         var timing = Cores();
@@ -1258,14 +1262,16 @@ public class DecisionActionExecutorsTests
         var timedOut = await new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), timing.Object, new FakeTimeProvider(Now)).ExecuteAsync(
             Request([], EventItem), CancellationToken.None);
         timedOut.Status.Should().Be(DecisionActionStatus.Failed);
-        timedOut.Written.Should().Equal(EventItem);
+        timedOut.PossiblyWritten.Should().Equal(EventItem);
+        timedOut.Written.Should().BeEmpty();
 
         // a work assignment patch that answers 500
         var user = new FakeUserClient { PatchStatus = 500 };
         var patched = await new ExtendResponseDateExecutor(Probe(CanWrite).Object, user).ExecuteAsync(
             Request(new() { ["responseDate"] = "2026-10-30" }, WorkAssignmentItem), CancellationToken.None);
         patched.Status.Should().Be(DecisionActionStatus.Failed);
-        patched.Written.Should().Equal(WorkAssignmentItem);
+        patched.PossiblyWritten.Should().Equal(WorkAssignmentItem);
+        patched.Written.Should().BeEmpty();
 
         // the narrow event write failing
         var eventCores = Cores();
@@ -1274,7 +1280,8 @@ public class DecisionActionExecutorsTests
         var eventFail = await new ReassignExecutor(Probe(CanWrite).Object, OpenEventUser(), eventCores.Object).ExecuteAsync(
             Request(ReassignParams(), EventItem), CancellationToken.None);
         eventFail.Status.Should().Be(DecisionActionStatus.Failed);
-        eventFail.Written.Should().Equal(EventItem);
+        eventFail.PossiblyWritten.Should().Equal(EventItem);
+        eventFail.Written.Should().BeEmpty();
 
         // the budget amount write answering 500: the revision AND the budget are possibly written
         var writer = new WriterHarness();
@@ -1283,7 +1290,85 @@ public class DecisionActionExecutorsTests
         var revise = await new ReviseBudgetExecutor(Probe(CanWrite).Object, budgetUser, writer.Build(), Owner().Object,
             new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
         revise.Status.Should().Be(DecisionActionStatus.Failed);
-        revise.Written.Should().Contain(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId))
-            .And.Contain(new DecisionRecordRef("sprk_budget", BudgetId));
+        revise.Written.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
+        revise.PossiblyWritten.Should().Equal(new DecisionRecordRef("sprk_budget", BudgetId));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Round 3: confirmed vs possible writes; a timeout after the revision exists
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static readonly DecisionRecordRef BudgetRef = new("sprk_budget", BudgetId);
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(503)]
+    [InlineData(0)]
+    public async Task ReviseBudget_AmountWriteWithNoClearAnswer_RevisionIsWritten_BudgetIsPossiblyWritten(int status)
+    {
+        var writer = new WriterHarness();
+        var user = BudgetUser(MatterId);
+        user.PatchStatus = status;
+
+        var outcome = await new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.BudgetAmountNotWritten);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
+        outcome.PossiblyWritten.Should().Equal(BudgetRef);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_AnHttpClientTimeoutAfterTheCreate_KeepsTheRevisionId()
+    {
+        var writer = new WriterHarness();
+        var user = BudgetUser(MatterId);
+        user.PatchThrows = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout");
+
+        // the request's own token is NOT cancelled: this is the client's timeout, not the caller walking away
+        var outcome = await new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
+        outcome.PossiblyWritten.Should().Equal(BudgetRef);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_TheCallerCancelling_StillPropagates()
+    {
+        var writer = new WriterHarness();
+        var user = BudgetUser(MatterId);
+        using var cts = new CancellationTokenSource();
+        user.PatchThrows = new OperationCanceledException(cts.Token);
+        cts.Cancel();
+
+        var act = () => new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task Failed_SeparatesConfirmedFromPossibleWrites_InEveryExecutorPath()
+    {
+        var done = DecisionActionOutcome.Done("x", EventItem);
+        done.Written.Should().Equal(EventItem);
+        done.PossiblyWritten.Should().BeEmpty();
+
+        var refused = DecisionActionOutcome.Refused("x", "r", "d");
+        refused.Written.Should().BeEmpty();
+        refused.PossiblyWritten.Should().BeEmpty();
+
+        // a create that never answered names nothing (no id exists yet)
+        var cores = Cores();
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timeout"));
+        var created = await new CreateEventExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore), CancellationToken.None);
+        created.Status.Should().Be(DecisionActionStatus.Failed);
+        created.Written.Should().BeEmpty();
+        created.PossiblyWritten.Should().BeEmpty();
+        await Task.CompletedTask;
     }
 }

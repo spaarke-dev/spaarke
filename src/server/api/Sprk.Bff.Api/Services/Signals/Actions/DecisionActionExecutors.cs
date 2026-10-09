@@ -44,9 +44,10 @@ public enum DecisionActionStatus
     /// <summary>NOTHING was written: bad input, a missing right, an unsupported subject, or the core refused first.</summary>
     Refused,
 
-    /// <summary>A write was attempted and did not complete cleanly; <see cref="DecisionActionOutcome.Written"/> lists any
-    /// record that DID land (the budget revision when the amount was refused). The commit route reports it; it never retries
-    /// with another identity.</summary>
+    /// <summary>A write was attempted and did not complete cleanly. <see cref="DecisionActionOutcome.Written"/> lists the
+    /// records CONFIRMED to have landed (the budget revision when the amount was refused);
+    /// <see cref="DecisionActionOutcome.PossiblyWritten"/> lists those whose write got no clear answer (a 5xx, a timeout or a
+    /// transport failure after the request was sent). The commit route reports both; it never retries with another identity.</summary>
     Failed,
 }
 
@@ -86,16 +87,25 @@ public sealed record DecisionActionOutcome(
     DecisionActionStatus Status,
     IReadOnlyList<DecisionRecordRef> Written,
     string? ReasonCode = null,
-    string? Detail = null)
+    string? Detail = null,
+    IReadOnlyList<DecisionRecordRef>? PossiblyWrittenRecords = null)
 {
+    /// <summary>Records whose write got no clear answer (5xx, timeout, transport failure): they MAY have changed. Empty unless
+    /// <see cref="DecisionActionStatus.Failed"/>.</summary>
+    public IReadOnlyList<DecisionRecordRef> PossiblyWritten => PossiblyWrittenRecords ?? [];
+
     public static DecisionActionOutcome Done(string code, params DecisionRecordRef[] written) =>
         new(code, DecisionActionStatus.Done, written);
 
     public static DecisionActionOutcome Refused(string code, string reasonCode, string detail) =>
         new(code, DecisionActionStatus.Refused, [], reasonCode, detail);
 
-    public static DecisionActionOutcome Failed(string code, string reasonCode, string detail, params DecisionRecordRef[] written) =>
-        new(code, DecisionActionStatus.Failed, written, reasonCode, detail);
+    /// <param name="written">Confirmed to have landed.</param>
+    /// <param name="possiblyWritten">Sent, but without a clear answer.</param>
+    public static DecisionActionOutcome Failed(
+        string code, string reasonCode, string detail,
+        IReadOnlyList<DecisionRecordRef>? written = null, IReadOnlyList<DecisionRecordRef>? possiblyWritten = null) =>
+        new(code, DecisionActionStatus.Failed, written ?? [], reasonCode, detail, possiblyWritten);
 }
 
 /// <summary>Stable reason codes an executor outcome carries.</summary>
@@ -261,7 +271,7 @@ internal static class DecisionExec
             401 or 403 => DecisionActionOutcome.Refused(code, DecisionActionReasons.NotAuthorized, detail),
             404 => DecisionActionOutcome.Refused(code, DecisionActionReasons.NotFound, detail),
             409 => DecisionActionOutcome.Refused(code, DecisionActionReasons.Conflict, detail),
-            _ => DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, detail + " It may have been applied.", possiblyWritten),
+            _ => DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, detail + " It may have been applied.", possiblyWritten: possiblyWritten),
         };
     }
 
@@ -272,7 +282,7 @@ internal static class DecisionExec
             EventDueAssigneeOutcome.NotFound => DecisionActionOutcome.Refused(code, DecisionActionReasons.NotFound, "The event was not found."),
             EventDueAssigneeOutcome.InvalidState => DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidState, result.Detail ?? "The event is not open work."),
             EventDueAssigneeOutcome.Denied => DecisionActionOutcome.Refused(code, DecisionActionReasons.NotAuthorized, "You do not have the rights this change needs on the event."),
-            _ => DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, "The event could not be updated; it may have been applied.", subject),
+            _ => DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, "The event could not be updated; it may have been applied.", possiblyWritten: [subject]),
         };
 
     /// <summary>The outcome of a caller PATCH on a work assignment: Done, a refusal, or Failed with the item possibly written.</summary>
@@ -283,7 +293,7 @@ internal static class DecisionExec
                 ? DecisionActionOutcome.Refused(code, DecisionActionReasons.NotAuthorized, "You do not have permission to change this work assignment.")
                 : patch.StatusCode == 404
                     ? DecisionActionOutcome.Refused(code, DecisionActionReasons.NotFound, "The work assignment was not found.")
-                    : DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, $"The {what} could not be confirmed; it may have been applied.", subject);
+                    : DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, $"The {what} could not be confirmed; it may have been applied.", possiblyWritten: [subject]);
 
     /// <summary>The refusal for an event that cannot be read or is not open work, or null. No write.</summary>
     internal static async Task<DecisionActionOutcome?> OpenEventRefusalAsync(
@@ -331,7 +341,7 @@ public abstract class DecisionExecutorBase : IDecisionActionExecutor
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed,
-                "The write did not finish cleanly; it may have been applied.", PossiblyWritten(request).ToArray());
+                "The write did not finish cleanly; it may have been applied.", possiblyWritten: PossiblyWritten(request));
         }
     }
 
@@ -443,11 +453,13 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
                 $"{DecisionExec.BudgetSet}({plan.BudgetId:D})",
                 JsonSerializer.Serialize(new Dictionary<string, object?> { ["sprk_totalbudget"] = plan.Amount }), ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // An HttpClient timeout is a TaskCanceledException whose token was NOT cancelled: the revision exists, so its id must survive.
             _logger.LogError(ex, "[decision-action] revise-budget: revision {RevisionId} exists but the amount write for budget {BudgetId} did not answer.", revisionId, plan.BudgetId);
             return DecisionActionOutcome.Failed(Code, DecisionActionReasons.BudgetAmountNotWritten,
-                $"The revision was recorded ({revisionId:D}) but the budget amount write did not answer; it may have been applied.", revisionRef, budgetRef);
+                $"The revision was recorded ({revisionId:D}) but the budget amount write did not answer; it may have been applied.",
+                written: [revisionRef], possiblyWritten: [budgetRef]);
         }
 
         if (!patch.IsSuccess)
@@ -455,9 +467,13 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
             _logger.LogError(
                 "[decision-action] revise-budget: revision {RevisionId} was created for budget {BudgetId} but the signed-in user could not write the amount (status {Status}). Stopping; no other identity is used.",
                 revisionId, plan.BudgetId, patch.StatusCode);
+            // 5xx, or 0 (no answer), after the request was sent: the amount may have landed. A 4xx refusal wrote nothing.
+            var unanswered = patch.StatusCode is 0 or >= 500;
             return DecisionActionOutcome.Failed(Code, DecisionActionReasons.BudgetAmountNotWritten,
-                $"The revision was recorded ({revisionId:D}) but you could not update the budget amount.",
-                patch.StatusCode >= 500 ? new[] { revisionRef, budgetRef } : new[] { revisionRef });
+                unanswered
+                    ? $"The revision was recorded ({revisionId:D}) but the budget amount write did not answer; it may have been applied."
+                    : $"The revision was recorded ({revisionId:D}) but you could not update the budget amount.",
+                written: [revisionRef], possiblyWritten: unanswered ? [budgetRef] : null);
         }
 
         return DecisionActionOutcome.Done(Code, revisionRef, budgetRef);
