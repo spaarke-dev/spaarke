@@ -1260,8 +1260,9 @@ public static class RagEndpoints
                 }
 
                 // Step 3: the parent the chunks are filed under, from the document row — the ONE derivation
-                // (DocumentIndexParentResolver, #1510 / task 177): its matter, else project, else invoice, exactly as
-                // this step always did; only a row with none of those reads its work assignment / related event.
+                // (DocumentIndexParentResolver, #1510 / task 177): the most specific record the document names (work
+                // assignment, project, matter, then invoice), else a related event's core record. Unchanged from the
+                // former matter / project / invoice block for a row that names only one of those.
                 var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
 
                 // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE

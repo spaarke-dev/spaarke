@@ -81,21 +81,39 @@ public class DocumentIndexParentResolverTests
     }
 
     /// <summary>
-    /// Send-to-Index's own path (an already-read <see cref="DocumentEntity"/>): its matter / project / invoice in that
-    /// order, with no further read — the derivation Send-to-Index had inline before this class. Beyond the named cases:
-    /// it pins that the shared helper did not change Send-to-Index's choice or add I/O for a row that already answers.
+    /// A document that names several records is filed under the MOST SPECIFIC one (owner decision 2026-10-09, task 177
+    /// Q1): the record that governs its access is the one search authorizes against, which fails closed for a secure child.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_matter", "sprk_matter", "sprk_project", "sprk_project", "project")]
+    [InlineData("sprk_matter", "sprk_matter", "sprk_workassignment", "sprk_workassignment", "workassignment")]
+    [InlineData("sprk_project", "sprk_project", "sprk_workassignment", "sprk_workassignment", "workassignment")]
+    public async Task ADocumentNamingTwoRecords_IsFiledUnderTheMoreSpecificOne(
+        string broadColumn, string broadTarget, string specificColumn, string specificTarget, string searchType)
+    {
+        DocumentRow((broadColumn, broadTarget, Guid.NewGuid(), "Broad"), (specificColumn, specificTarget, Linked, "Specific"));
+
+        var parent = await TestDocumentIndexParentResolver.Over(_dataverse.Object).ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext(searchType, Linked.ToString(), "Specific"));
+    }
+
+    /// <summary>
+    /// Send-to-Index's own path (an already-read <see cref="DocumentEntity"/>, which has no work-assignment column): the same
+    /// rule. The entity names a matter and a project; the read of the links it lacks finds a work assignment, which wins.
+    /// Beyond the named cases: it pins that Send-to-Index takes the same answer as the job path.
     /// </summary>
     [Fact]
-    public async Task SendToIndexsPath_KeepsItsOrder_AndReadsNothingMoreWhenTheEntityAnswers()
+    public async Task SendToIndexsPath_TakesTheMostSpecificRecord_IncludingTheWorkAssignmentTheEntityCannotCarry()
     {
         var document = new DocumentEntity
         {
-            Id = Document.ToString(), Name = "memo.docx", MatterId = Linked.ToString(), ProjectId = Guid.NewGuid().ToString(),
+            Id = Document.ToString(), Name = "memo.docx", MatterId = Guid.NewGuid().ToString(), ProjectId = Guid.NewGuid().ToString(),
         };
+        DocumentRow(("sprk_workassignment", "sprk_workassignment", Linked, "Diligence"));
 
         var parent = await TestDocumentIndexParentResolver.Over(_dataverse.Object).ResolveAsync(document, CancellationToken.None);
 
-        parent.Should().Be(new ParentEntityContext("matter", Linked.ToString(), "Unknown Matter"));
-        _dataverse.VerifyNoOtherCalls();
+        parent.Should().Be(new ParentEntityContext("workassignment", Linked.ToString(), "Diligence"));
     }
 }

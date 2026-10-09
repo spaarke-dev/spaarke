@@ -15,8 +15,12 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// (<c>RelocatedFileIndexing</c>), an Office new-item save, a Compose create-on-save, the post-analysis re-index — wrote
 /// chunks with no parent fields. <c>scope=entity</c> and <c>scope=all</c> search authorize and filter by those fields, so
 /// the document dropped out of record search and parent-scoped RAG although Dataverse still listed it under its record.</para>
-/// <para><b>Order.</b> (1) The row's matter, project, invoice — exactly Send-to-Index's previous inline derivation, in its
-/// order. (2) The row's work assignment. (3) The event the document is related to, named by the EVENT's core ancestor
+/// <para><b>Order: the most specific record wins</b> (owner decision 2026-10-09, task 177 Q1). A document that names several
+/// records is filed under the one that governs its access, so search authorizes against THAT record — which fails closed
+/// for a secure child: (1) the work assignment, (2) the project, (3) the matter, (4) the invoice (its place unchanged:
+/// after the matter and the project). Before this class, Send-to-Index took matter, then project, then invoice, and had no
+/// work assignment; the two orders differ only for a document that names more than one of these (0 such rows on dev,
+/// 2026-10-09). (5) Only when none is named: the event the document is related to, named by the EVENT's core ancestor
 /// (matter, project, work assignment — <see cref="CoreAncestorResolver"/>, one hop): search authorizes a parent through
 /// <c>SemanticSearchAuthorizationFilter.AuthorizableEntitySets</c>, which has no event, so a chunk filed under the event
 /// itself could never be found; the event inherits its access from that core record, which is why naming it is
@@ -43,7 +47,7 @@ public sealed class DocumentIndexParentResolver
     internal static readonly string[] RowColumns =
         [MatterColumn, ProjectColumn, InvoiceColumn, WorkAssignmentColumn, RelatedEventColumn];
 
-    /// <summary>The columns <see cref="DocumentEntity"/> does not carry, read only when its own links name no parent.</summary>
+    /// <summary>The links <see cref="Spaarke.Dataverse.DocumentEntity"/> does not carry: read for every Send-to-Index document.</summary>
     private static readonly string[] BeyondEntityColumns = [WorkAssignmentColumn, RelatedEventColumn];
 
     /// <summary>An event's core ancestors, in the order a parent is named from them.</summary>
@@ -69,21 +73,22 @@ public sealed class DocumentIndexParentResolver
     }
 
     /// <summary>
-    /// Step (1) alone, from an already-read <see cref="Spaarke.Dataverse.DocumentEntity"/>: its matter, else project, else
-    /// invoice. No I/O.
+    /// The links a <see cref="Spaarke.Dataverse.DocumentEntity"/> carries, most specific first: its project, else matter,
+    /// else invoice. No I/O. It cannot see a work assignment (the type has none), so it is never the whole answer on its
+    /// own — <see cref="ResolveAsync(Spaarke.Dataverse.DocumentEntity, CancellationToken)"/> reads that first.
     /// </summary>
-    public static ParentEntityContext? FromDocumentLinks(Spaarke.Dataverse.DocumentEntity document)
+    internal static ParentEntityContext? FromDocumentLinks(Spaarke.Dataverse.DocumentEntity document)
     {
         ArgumentNullException.ThrowIfNull(document);
-
-        if (!string.IsNullOrEmpty(document.MatterId))
-        {
-            return new ParentEntityContext("matter", document.MatterId, document.MatterName ?? "Unknown Matter");
-        }
 
         if (!string.IsNullOrEmpty(document.ProjectId))
         {
             return new ParentEntityContext("project", document.ProjectId, document.ProjectName ?? "Unknown Project");
+        }
+
+        if (!string.IsNullOrEmpty(document.MatterId))
+        {
+            return new ParentEntityContext("matter", document.MatterId, document.MatterName ?? "Unknown Matter");
         }
 
         if (!string.IsNullOrEmpty(document.InvoiceId))
@@ -95,18 +100,15 @@ public sealed class DocumentIndexParentResolver
     }
 
     /// <summary>
-    /// The parent for a document already read through <see cref="IDocumentDataverseService.GetDocumentAsync"/>: its
-    /// matter / project / invoice when it has one (no further read), otherwise one read of the links that type does not
-    /// carry (work assignment, related event).
+    /// The parent for a document already read through <see cref="IDocumentDataverseService.GetDocumentAsync"/> (Send-to-Index):
+    /// one read of the links that type does not carry (work assignment, related event), then the order in the remarks over
+    /// the entity's own project / matter / invoice. When that read fails the answer is NO parent, not the entity's links: a
+    /// work assignment the read would have found outranks them, and guessing past it could file a secure work assignment's
+    /// document under a record more people can read.
     /// </summary>
     public async Task<ParentEntityContext?> ResolveAsync(Spaarke.Dataverse.DocumentEntity document, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(document);
-
-        if (FromDocumentLinks(document) is { } parent)
-        {
-            return parent;
-        }
 
         if (!Guid.TryParse(document.Id, out var documentId) || documentId == Guid.Empty)
         {
@@ -114,7 +116,14 @@ public sealed class DocumentIndexParentResolver
         }
 
         var row = await ReadRowAsync(documentId, BeyondEntityColumns, ct).ConfigureAwait(false);
-        return row is null ? null : await FromBeyondEntityLinksAsync(documentId, row, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        return Named(row, WorkAssignmentColumn, "workassignment", "Unknown Work Assignment")
+            ?? FromDocumentLinks(document)
+            ?? await FromRelatedEventAsync(documentId, row, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -135,19 +144,15 @@ public sealed class DocumentIndexParentResolver
             return null;
         }
 
-        return Named(row, MatterColumn, "matter", "Unknown Matter")
+        return Named(row, WorkAssignmentColumn, "workassignment", "Unknown Work Assignment")
             ?? Named(row, ProjectColumn, "project", "Unknown Project")
+            ?? Named(row, MatterColumn, "matter", "Unknown Matter")
             ?? Named(row, InvoiceColumn, "invoice", "Unknown Invoice")
-            ?? await FromBeyondEntityLinksAsync(id, row, ct).ConfigureAwait(false);
+            ?? await FromRelatedEventAsync(id, row, ct).ConfigureAwait(false);
     }
 
-    private async Task<ParentEntityContext?> FromBeyondEntityLinksAsync(Guid documentId, Entity row, CancellationToken ct)
+    private async Task<ParentEntityContext?> FromRelatedEventAsync(Guid documentId, Entity row, CancellationToken ct)
     {
-        if (Named(row, WorkAssignmentColumn, "workassignment", "Unknown Work Assignment") is { } workAssignment)
-        {
-            return workAssignment;
-        }
-
         var relatedEvent = row.GetAttributeValue<EntityReference>(RelatedEventColumn);
         if (relatedEvent is null || relatedEvent.Id == Guid.Empty)
         {

@@ -18,23 +18,26 @@ are kept as regression tests and pass now.
 ## What changed, per goal
 
 1. **One helper.** `Services/Ai/DocumentIndexParentResolver.cs`. Send-to-Index's inline matter / project / invoice block
-   moved into it unchanged (`FromDocumentLinks`, same order, same "Unknown …" names). It is extended in two steps that run
-   only when that block finds nothing:
-   - the document's `sprk_workassignment` gives `workassignment`;
-   - the document's `sprk_relatedevent` gives the event's core ancestor. The event is read through the existing
-     `CoreAncestorResolver.ResolveStampsAsync("sprk_event", …)` (one hop) and named matter, then project, then work
-     assignment.
-
-   Types use the names `scope=entity` uses (`SemanticSearchAuthorizationFilter.AuthorizableEntitySets`): `matter`,
-   `project`, `invoice`, `workassignment`. That map has no `event`, so a chunk filed under the event itself could never be
-   searched; the event inherits its access from that core record, so naming the core record matches access.
+   moved into it. Owner decision 2026-10-09 (Q1, below): **the most specific record wins**. The order is work assignment,
+   then project, then matter, then invoice (the invoice keeps its place after matter and project). Only when none of
+   those is named does the document's `sprk_relatedevent` give a parent: the event's core ancestor, read through the
+   existing `CoreAncestorResolver.ResolveStampsAsync("sprk_event", …)` (one hop) and named matter, then project, then
+   work assignment. Types use the names `scope=entity` uses (`SemanticSearchAuthorizationFilter.AuthorizableEntitySets`):
+   `matter`, `project`, `invoice`, `workassignment`. That map has no `event`, so a chunk filed under the event itself
+   could never be searched. The event inherits its access from its core record, so naming that record matches access
+   (owner Q2: keep it).
 2. **Job handler.** `RagIndexingJobHandler` calls `ResolveAsync(payload.DocumentId)` when `payload.ParentEntity` is null
    and a document id is set. That is one read of five columns. The recovered parent feeds both the index request and the
    `ISearchIndexNameResolver` routing. An unreadable row, an unreadable event, or no link at all logs and returns no
    parent, and the job still indexes. Only cancellation propagates. A parent the payload already carries is used as is.
-3. **Send-to-Index.** It calls `ResolveAsync(DocumentEntity)`. A row with a matter, project or invoice takes exactly the
-   same parent as before, with no extra read. A row with none of them, which used to get no parent, now gets one read of
-   `sprk_workassignment` and `sprk_relatedevent`. Its existing tests pass unchanged.
+3. **Send-to-Index.** It calls `ResolveAsync(DocumentEntity)`, which makes one read of the two links that type lacks
+   (work assignment, related event) and applies the same order. **Behaviour change (owner Q1):** a document that names
+   more than one of work assignment / project / matter used to take the matter and now takes the most specific record.
+   Dev has 0 such rows (matter+project 0, work assignment + any of matter/project/invoice 0, 2026-10-09). A document that
+   names only one of these takes the same parent as before. A document that names none and used to get no parent may now
+   get one from its event. If that extra read fails, the answer is no parent rather than the entity's links: a work
+   assignment the read would have found outranks them, so the derivation fails closed. Send-to-Index's existing tests
+   pass unchanged.
 4. **Producers.** Every listed producer already passes `DocumentId`, so none needed a change (table below). Compose
    create-on-save indexes INLINE on the OBO path (`PostUploadIndexingEnqueuer.EnqueueIfApplicableAsync`), not through the
    job handler. The issue says "that one change fixes every producer", but Compose would not have been fixed by the
@@ -82,8 +85,9 @@ with nothing to place elsewhere under ADR-052. It sits in `Services/Ai/` because
   row gives no parent, and the job completes.
 - Extra 1: `ADocumentUnderAnEvent_IsFiledUnderTheEventsCoreRecord`. Goal 1 names the event, and it is the only branch
   that goes through `CoreAncestorResolver`.
-- Extra 2: `SendToIndexsPath_KeepsItsOrder_AndReadsNothingMoreWhenTheEntityAnswers`. It pins goal 3: same order, no
-  added I/O.
+- Extra 2: `SendToIndexsPath_TakesTheMostSpecificRecord_IncludingTheWorkAssignmentTheEntityCannotCarry`. It pins
+  that Send-to-Index takes the same answer as the job path.
+- Owner Q1: `ADocumentNamingTwoRecords_IsFiledUnderTheMoreSpecificOne` (three ties).
 - Extra 3: `PostUploadIndexingEnqueuerTests.EnqueueIfApplicableAsync_NoParentButADocument_IndexesUnderTheParentTheRowNames`.
   Compose indexes on this path, so without this test the Compose producer is untested.
 - Construction sites updated for the new constructor parameter: `RagIndexingJobHandlerTests`,
@@ -95,13 +99,11 @@ with nothing to place elsewhere under ADR-052. It sits in `Services/Ai/` because
 
 - K2: the related twins (`sprk_relatedmatter` / `sprk_relatedproject` / `sprk_relatedworkassignment`) are not read. 0 live
   rows set them (CoreAncestorResolver note, 2026-10-02), and no BFF writer writes them. Adding one is a single line.
-- K2: a document that names two different core records takes Send-to-Index's order (matter, project, invoice, work
-  assignment). Dev has 0 such rows. See open question 1.
 - K2: an event whose only core ancestor is a service request gives no parent, because search cannot authorize one.
 - K4: Send-to-Index's response `ParentEntityId` can now name an event's core record to a caller who holds Write on the
   document. It is the id of the record the document's family is filed under; no content is exposed.
 
-## Backfill (owner decision, not built)
+## Backfill (owner Q3: no new code; a post-deploy Send-to-Index repair, steps in PR #1517)
 
 The constraint rules out a backfill job. Chunks written before this fix keep no parent until the document is re-indexed
 (Send-to-Index, a save, or another relocation). The index could not be counted: `az` holds control-plane access to
@@ -112,16 +114,16 @@ risk are the relocated ones among the 145 with a link. If the owner wants them r
 one-off Send-to-Index over the documents that carry a link and were relocated (`sprk_searchindexname` stamped after a
 move). That needs no new code.
 
-## Open questions
+## Owner decisions (main session, 2026-10-09)
 
-1. When a document names two different core records (a matter and a project, or either one and a work assignment),
-   Send-to-Index's order picks the matter, then the project. Matter readers who cannot read a secure project or work
-   assignment would then see that document in record search. Dev has 0 such rows for both combinations (2026-10-09). The
-   relocator cannot move such a document into a secure container either, because `RecordContainerResolver` refuses it
-   as `container_ancestor_ambiguous`. Should the derivation give no parent, or the most specific record, when two
-   records are named? Either answer changes Send-to-Index for that case, which this task had to keep unchanged.
-2. Upload from an event form names the chunks `event` (the wizard strips `sprk_`). This task names the event's core
-   record instead, because search cannot authorize `event`. Is that the intended long-term naming?
+1. **Several core records named:** the MOST SPECIFIC wins (work assignment over project over matter; invoice keeps its
+   place). This is applied in the shared helper, so Send-to-Index changes for that case too. Tests: one per tie
+   (`ADocumentNamingTwoRecords_IsFiledUnderTheMoreSpecificOne`: matter+project gives project, matter+work assignment
+   and project+work assignment give work assignment) and the Send-to-Index path (a work assignment found by the extra
+   read beats the entity's matter and project).
+2. **Event:** naming the event's core record is correct. Kept.
+3. **Backfill:** no new code. A one-off Send-to-Index repair runs as a post-deploy main-session step (in the PR body):
+   documents that were relocated and carry a parent link.
 
 ## Out-of-scope defects found (filed as #1516)
 
@@ -147,5 +149,6 @@ move). That needs no new code.
 - Publish size (`dotnet publish -c Release`, fresh master `c8a87d818` vs this branch, the same machine): 127,552,292 →
   127,562,576 bytes uncompressed (+10,284 B); zipped 37,199,312 → 37,203,854 bytes (+4,542 B, about 35.48 MiB). No package
   reference changed, so no new CVE is possible.
+- After the owner's Q1 decision: the targeted run is 279 / 279 and the `-warnaserror` build is clean.
 - Self-review (task-execute Step 9.5): no F-class finding remains. The K-class items are listed above. The one full
   verifier pass is the main session's.
