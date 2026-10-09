@@ -75,11 +75,11 @@ public sealed class BootedApp : IDisposable
     private readonly BffFactory _factory;
     private readonly HandshakeOnlyRedis? _redis;
 
-    internal BootedApp(string environment)
+    internal BootedApp(string environment, IReadOnlyDictionary<string, string?>? settingOverrides = null, bool validateOnBuild = false)
     {
         Environment = environment;
         _redis = environment == Environments.Development ? null : new HandshakeOnlyRedis();
-        _factory = new BffFactory(environment, _redis?.Endpoint);
+        _factory = new BffFactory(environment, _redis?.Endpoint, settingOverrides, validateOnBuild);
         if (_redis is not null)
         {
             // Master T242: a Production BFF reaches Redis ONLY by its managed identity over TLS (no connection string outside
@@ -138,17 +138,21 @@ public sealed class BootedApp : IDisposable
     {
         private readonly string _environment;
         private readonly string? _redisConnectionString;
+        private readonly IReadOnlyDictionary<string, string?>? _overrides;
+        private readonly bool _validateOnBuild;
 
-        public BffFactory(string environment, string? redisConnectionString)
+        public BffFactory(string environment, string? redisConnectionString, IReadOnlyDictionary<string, string?>? overrides, bool validateOnBuild)
         {
             _environment = environment;
             _redisConnectionString = redisConnectionString;
+            _overrides = overrides;
+            _validateOnBuild = validateOnBuild;
         }
 
         protected override IHost CreateHost(IHostBuilder builder)
         {
             // Host configuration: visible while Program.cs registers its modules (the same mechanism every BFF test host uses).
-            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(Settings(_redisConnectionString)));
+            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(WithOverrides(Settings(_redisConnectionString))));
             return base.CreateHost(builder);
         }
 
@@ -160,14 +164,35 @@ public sealed class BootedApp : IDisposable
             builder.UseDefaultServiceProvider(options =>
             {
                 options.ValidateScopes = false;
-                options.ValidateOnBuild = false;
+                options.ValidateOnBuild = _validateOnBuild;
             });
 
             builder.ConfigureTestServices(services =>
             {
                 services.UseStubTokenCredential();
+                if (_validateOnBuild)
+                {
+                    // The validating boot proves every registration is constructible, hosted services included. Their
+                    // IHostedService registrations are removed below (they would connect out), which would also drop
+                    // them from validation — so re-register each hosted type as a plain singleton: validated, never started.
+                    foreach (var hosted in services.Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType is not null).Select(d => d.ImplementationType!).Distinct().ToList())
+                    {
+                        services.TryAddSingleton(hosted);
+                    }
+                }
+
                 services.RemoveAll<IHostedService>();
             });
+        }
+
+        private Dictionary<string, string?> WithOverrides(Dictionary<string, string?> settings)
+        {
+            if (_overrides is not null)
+            {
+                foreach (var (key, value) in _overrides) settings[key] = value;
+            }
+
+            return settings;
         }
 
         private static Dictionary<string, string?> Settings(string? redisConnectionString)
