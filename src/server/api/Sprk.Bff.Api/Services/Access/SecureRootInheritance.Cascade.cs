@@ -122,6 +122,12 @@ public sealed record FiledCascadePass(
         .ToList();
 }
 
+/// <summary>
+/// Task 175 fix round 3 (K1): what a parent's un-secure recorded below it first — <see cref="NotRecorded"/>: records with no
+/// access record left unrecorded (past the cap, or not written); null when the records below could not all be read.
+/// </summary>
+public sealed record RecordBelowResult(int Recorded, int? NotRecorded);
+
 /// <summary>One run of the job's follow-parents pass (task 175).</summary>
 public sealed record FollowParentsPass
 {
@@ -610,7 +616,7 @@ public sealed partial class SecureRootInheritance
         // Task 175 fix round 2 (F1, K2): a record is decided only on an access record that can be trusted — the column is
         // field-secured, and an EMPTY one is read as "not written yet" only once the BFF's read of the column is proven.
         // Otherwise nothing is written: an unreadable record must never be overwritten by the backfill rule's guess.
-        if (await AccessRecordDistrustAsync(own.Marker, ct).ConfigureAwait(false) is { } distrust)
+        if (await AccessRecordDistrustAsync(logical, own.Marker, ct).ConfigureAwait(false) is { } distrust)
         {
             _logger.LogWarning("[FOLLOW-PARENT] {Table} {RecordId}: {Detail} ({Code}); nothing was written.",
                 logical, recordId, distrust.Detail, distrust.Code);
@@ -794,15 +800,18 @@ public sealed partial class SecureRootInheritance
             };
         }
 
-        // F1: an EMPTY record is read as "not written yet" only once the BFF's read of the column is proven.
-        if (listed.Any(r => !string.IsNullOrEmpty(r.Marker)))
-            _accessRecordReadable = true; // a non-empty record read proves the BFF reads the column
-        var readable = !listed.Any(r => string.IsNullOrEmpty(r.Marker)) || await AccessRecordReadableAsync(ct).ConfigureAwait(false);
+        // F1: an EMPTY record is read as "not written yet" only once the BFF's read of the column is proven — PER TABLE (fix
+        // round 3, F-a): a non-empty record read proves its own table only.
+        foreach (var table in listed.Where(r => !string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
+            MarkReadable(table);
+        var readable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var table in listed.Where(r => string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
+            readable[table] = await AccessRecordReadableAsync(table, ct).ConfigureAwait(false);
         var unproven = 0;
 
         int parentless = 0, inStep = 0, unsecured = 0, permissions = 0, markers = 0, undetermined = 0, notCompleted = 0, deferred = 0, conflicts = 0;
         int unsecuresTried = 0, writesTried = 0;
-        var markerHidden = false;
+        var hiddenTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // a record read back empty there (F-a: per table)
         var problems = new List<string>();
         var changes = new List<object>();
         (string Table, Guid Id)? lastUnsecureTried = null;
@@ -817,7 +826,7 @@ public sealed partial class SecureRootInheritance
             foreach (var row in group)
             {
                 seen.Add((row.Table, row.Id));
-                if (!readable && string.IsNullOrEmpty(row.Marker))
+                if (string.IsNullOrEmpty(row.Marker) && !readable[row.Table])
                 {
                     unproven++; // never decided on an empty read the BFF cannot vouch for (F1): nothing written
                     continue;
@@ -878,9 +887,9 @@ public sealed partial class SecureRootInheritance
                 continue;
             }
 
-            // Field security hides the access record from the BFF (a write read back empty): no record read in this run can be
-            // trusted any more, so nothing further is followed (fix round 2: every write, not just record-only ones).
-            if (markerHidden)
+            // Field security hides the access record from the BFF on this table (a write read back empty): no record of it read
+            // in this run can be trusted any more, so nothing further on it is followed (fix rounds 2 and 3).
+            if (hiddenTables.Contains(row.Table))
             {
                 hidden++;
                 continue;
@@ -919,9 +928,9 @@ public sealed partial class SecureRootInheritance
             changedParents = new List<(string Table, Guid Id)>();
             foreach (var root in below.Where(r => r.Confirmed))
             {
-                if (markerHidden)
+                if (hiddenTables.Contains(root.Table))
                 {
-                    hidden++; // fix round 2: round 2 stops too once a record read back empty
+                    hidden++; // round 2 stops too, for the table a record read back empty on
                     continue;
                 }
 
@@ -950,7 +959,7 @@ public sealed partial class SecureRootInheritance
 
         return new FollowParentsPass
         {
-            Untrusted = markerHidden || unproven > 0 ? ReasonMarkerHidden : null,
+            Untrusted = hiddenTables.Count > 0 || unproven > 0 ? ReasonMarkerHidden : null,
             Listed = listed.Count,
             Parentless = parentless,
             InStep = inStep,
@@ -993,7 +1002,8 @@ public sealed partial class SecureRootInheritance
                     break;
                 case FollowParentsOutcome.Incomplete:
                     notCompleted++;
-                    markerHidden |= result.ReasonCode == ReasonMarkerHidden;
+                    if (result.ReasonCode == ReasonMarkerHidden)
+                        hiddenTables.Add(result.Table);
                     Problem($"{result.Table}:{result.Id:D}: {result.Detail} ({result.ReasonCode})");
                     break;
                 case FollowParentsOutcome.Parentless when !counted:
@@ -1191,7 +1201,7 @@ public sealed partial class SecureRootInheritance
             var back = await ReadOwnAccessAsync(logical, recordId, ct).ConfigureAwait(false);
             if (string.IsNullOrEmpty(back?.Marker))
             {
-                _accessRecordReadable = false;
+                MarkHidden(logical);
                 _logger.LogError("[FOLLOW-PARENT] {Table} {RecordId}: its {Column} was written but reads back empty - field-level " +
                     "security hides it from the BFF. Nothing is loosened until it can be read.", logical, recordId, AccessInheritance.Column);
                 return ColumnWrite.ReadsBackEmpty;
@@ -1211,60 +1221,107 @@ public sealed partial class SecureRootInheritance
     /// Task 175 fix round 2 (K1, owner round 87 item 1 for records secured before this deploy): BEFORE a matter or project's
     /// flag is cleared, every work assignment and project filed below it that has NO access record yet gets one by the backfill
     /// rule, decided while the parent is still secure — so a Secure it holds through that parent is recorded as INHERITED and
-    /// follows the parent out in the cascade after. At most <see cref="MaxInlineCascade"/> records; best effort (never throws):
-    /// a record not reached stays secure (the backfill rule never loosens) and is reported.
+    /// follows the parent out in the cascade after. At most <see cref="MaxInlineCascade"/> records are recorded; best effort
+    /// (never throws): a record not recorded stays secure (the backfill rule never loosens) and is COUNTED — past the cap too
+    /// (their records are read, not written) — in <see cref="RecordBelowResult.NotRecorded"/>, which the route returns
+    /// (<c>accessRecordsNotRecorded</c>). <c>null</c> there: the records below could not all be read.
     /// </summary>
-    public async Task<int> RecordBelowBeforeUnsecureAsync(string parentTable, Guid parentId, string traceId, CancellationToken ct)
+    public async Task<RecordBelowResult> RecordBelowBeforeUnsecureAsync(string parentTable, Guid parentId, string traceId, CancellationToken ct)
     {
         if (!IsParent(parentTable))
-            return 0;
+            return new RecordBelowResult(0, 0);
 
         var recorded = 0;
+        var notRecorded = 0;
         try
         {
             var walk = await ListFiledRootsBelowAsync(_dataverse, _logger, new[] { (parentTable.Trim().ToLowerInvariant(), parentId) }, ct, _recordTypes)
                 .ConfigureAwait(false);
-            var examined = 0;
+            var tried = 0;
             foreach (var root in walk.Roots.Where(r => r.Confirmed))
             {
-                if (examined++ >= MaxInlineCascade)
-                    break;
                 var own = await ReadOwnAccessAsync(root.Table, root.Id, ct).ConfigureAwait(false);
                 if (own is null || !string.IsNullOrEmpty(own.Marker))
                     continue;
+                if (tried++ >= MaxInlineCascade)
+                {
+                    notRecorded++; // past the cap: counted, not written (the job records it within a run)
+                    continue;
+                }
+
                 var follow = await FollowParentsAsync(root.Table, root.Id, traceId, ct).ConfigureAwait(false);
                 if (follow.MarkerWritten)
+                {
                     recorded++;
-                else if (!follow.IsComplete || follow.Outcome == FollowParentsOutcome.Undetermined)
-                    _logger.LogWarning("[FOLLOW-PARENT] {Table} {RecordId}: its access record was not written before {ParentTable} {ParentId} " +
-                        "was un-secured ({Code}); it stays secure (the backfill rule never loosens).", root.Table, root.Id, parentTable, parentId,
-                        follow.ReasonCode);
+                    continue;
+                }
+
+                notRecorded++;
+                _logger.LogWarning("[FOLLOW-PARENT] {Table} {RecordId}: its access record was not written before {ParentTable} {ParentId} " +
+                    "was un-secured ({Code}); it stays secure (the backfill rule never loosens).", root.Table, root.Id, parentTable, parentId,
+                    follow.ReasonCode);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[FOLLOW-PARENT] The records below {Table} {Id} could not all be recorded before its un-secure; any " +
                 "not recorded stays secure.", parentTable, parentId);
+            return new RecordBelowResult(recorded, null);
+        }
+
+        if (notRecorded > 0)
+        {
+            _logger.LogWarning("[FOLLOW-PARENT] Below {Table} {Id}: {NotRecorded} record(s) with no access record were NOT recorded before its " +
+                "un-secure (cap {Cap}, or not written); they stay secure and the job records them. TraceId={TraceId}",
+                parentTable, parentId, notRecorded, MaxInlineCascade, traceId);
         }
 
         _logger.LogInformation("[FOLLOW-PARENT] Below {Table} {Id}: {Recorded} access record(s) written before its un-secure. TraceId={TraceId}",
             parentTable, parentId, recorded, traceId);
-        return recorded;
+        return new RecordBelowResult(recorded, notRecorded);
     }
 
     // ── Task 175 fix round 2: whether access records can be trusted (cached for this scope: one job pass, one request) ──
 
     private bool? _accessRecordColumnSecured;
-    private bool? _accessRecordReadable;
 
-    /// <summary>Why no access record (or this EMPTY one) can be trusted, or null when it can.</summary>
-    private async Task<(string Code, string Detail)?> AccessRecordDistrustAsync(string? marker, CancellationToken ct)
+    // F-a (fix round 3): readability is proven PER TABLE. Proven: a non-empty record read on it, or the platform's answer.
+    // Hidden: a record written there read back empty — sticky for this scope, whatever was proven before.
+    private readonly HashSet<string> _readableTables = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _hiddenTables = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string>? _platformReadableTables;
+
+    private void MarkReadable(string table)
+    {
+        if (!_hiddenTables.Contains(table))
+            _readableTables.Add(table);
+    }
+
+    private void MarkHidden(string table)
+    {
+        _hiddenTables.Add(table);
+        _readableTables.Remove(table);
+    }
+
+    /// <summary>Why no access record (or this EMPTY one, on <paramref name="table"/>) can be trusted, or null when it can.</summary>
+    private async Task<(string Code, string Detail)?> AccessRecordDistrustAsync(string table, string? marker, CancellationToken ct)
     {
         if (!await AccessRecordColumnSecuredAsync(ct).ConfigureAwait(false))
             return (ReasonAccessRecordUnsecured, $"{AccessInheritance.Column} is not field-secured, so no access record is trusted");
-        if (string.IsNullOrEmpty(marker) && !await AccessRecordReadableAsync(ct).ConfigureAwait(false))
-            return (ReasonMarkerHidden, $"its {AccessInheritance.Column} reads empty and the BFF's read of that column could not be proven");
+        if (string.IsNullOrEmpty(marker) && !await AccessRecordReadableAsync(table, ct).ConfigureAwait(false))
+            return (ReasonMarkerHidden, $"its {AccessInheritance.Column} reads empty and the BFF's read of that column on {table} could not be proven");
         return null;
+    }
+
+    /// <summary>The BFF's read of the column on <paramref name="table"/> is proven (and not since disproven by a read-back).</summary>
+    private async Task<bool> AccessRecordReadableAsync(string table, CancellationToken ct)
+    {
+        if (_hiddenTables.Contains(table))
+            return false;
+        if (_readableTables.Contains(table))
+            return true;
+        _platformReadableTables ??= await PlatformReadableTablesAsync(ct).ConfigureAwait(false);
+        return _platformReadableTables.Contains(table);
     }
 
     /// <summary>
@@ -1301,14 +1358,13 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>
-    /// F1: the BFF's own read of the column is PROVEN — a non-empty record read back in this scope, or the BFF application user
-    /// holds the System Administrator role, or a field security profile it is a member of grants Read on the column on both
-    /// tables. Anything else, a fault included, is unproven (fail closed). Asked at most once per scope.
+    /// F1 / F-a: the tables on which the platform says the BFF reads the column — both when the BFF application user holds the
+    /// System Administrator role; otherwise exactly the tables a field security profile it is a member of grants Read on. A
+    /// fault, or no answer, is no table (fail closed). Asked at most once per scope.
     /// </summary>
-    private async Task<bool> AccessRecordReadableAsync(CancellationToken ct)
+    private async Task<HashSet<string>> PlatformReadableTablesAsync(CancellationToken ct)
     {
-        if (_accessRecordReadable is { } known)
-            return known;
+        var none = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var me = (await _webApi.QueryAsync<SystemUserIdRow>("systemusers", "Microsoft.Dynamics.CRM.EqualUserId(PropertyName='systemuserid')",
@@ -1319,7 +1375,7 @@ public sealed partial class SecureRootInheritance
             var admin = await _webApi.QueryAsync<RoleIdRow>($"systemusers({user})/systemuserroles_association",
                 "name eq 'System Administrator'", "roleid", cancellationToken: ct).ConfigureAwait(false);
             if (admin.Count > 0)
-                return (_accessRecordReadable = true).Value;
+                return new HashSet<string>(new[] { WorkAssignment, Project }, StringComparer.OrdinalIgnoreCase);
 
             var profiles = (await _webApi.QueryAsync<ProfileIdRow>($"systemusers({user})/systemuserprofiles_association", null,
                 "fieldsecurityprofileid", cancellationToken: ct).ConfigureAwait(false))
@@ -1331,22 +1387,28 @@ public sealed partial class SecureRootInheritance
                 $"attributelogicalname eq '{AccessInheritance.Column}' and canread eq 4 and (" +
                 string.Join(" or ", profiles.Select(p => $"_fieldsecurityprofileid_value eq {p}")) + ")",
                 "entityname", cancellationToken: ct).ConfigureAwait(false);
-            var tables = grants.Select(g => g.EntityName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return tables.Contains(WorkAssignment) && tables.Contains(Project)
-                ? (_accessRecordReadable = true).Value
-                : Unproven("no field security profile of the BFF's user grants Read on the column on both tables");
+            var tables = grants.Select(g => g.EntityName ?? string.Empty)
+                .Where(t => string.Equals(t, WorkAssignment, StringComparison.OrdinalIgnoreCase) || string.Equals(t, Project, StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (tables.Count < 2)
+            {
+                _logger.LogError("[FOLLOW-PARENT] The BFF's field security profiles grant Read on {Column} on {Tables} only; no EMPTY " +
+                    "access record on any other table is overwritten.", AccessInheritance.Column, tables.Count == 0 ? "no table" : string.Join(", ", tables));
+            }
+
+            return tables;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "[FOLLOW-PARENT] Whether the BFF can read {Column} could not be established.", AccessInheritance.Column);
-            return (_accessRecordReadable = false).Value;
+            return none;
         }
 
-        bool Unproven(string why)
+        HashSet<string> Unproven(string why)
         {
             _logger.LogError("[FOLLOW-PARENT] The BFF's read of {Column} is not proven: {Why}. No EMPTY access record is overwritten.",
                 AccessInheritance.Column, why);
-            return (_accessRecordReadable = false).Value;
+            return none;
         }
     }
 
@@ -1393,7 +1455,7 @@ public sealed partial class SecureRootInheritance
             return null;
         var marker = row.GetAttributeValue<string>(AccessInheritance.Column);
         if (!string.IsNullOrEmpty(marker))
-            _accessRecordReadable = true; // a non-empty record read back proves the BFF reads the column (fix round 2, F1)
+            MarkReadable(logical); // a non-empty record read proves the BFF reads the column on THIS table (F1, F-a)
         return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row), marker);
     }
 

@@ -185,6 +185,18 @@ existing in-process job (ADR-036/052). No package, endpoint, job or timer. One D
 | **K3** | `CheckRefileAsync` let `sprk_issecure` (true or false) through the app-only generic writers, skipping F3 and the provisioning / un-secure steps | The gate (`SecureRootFilingGate.CheckAsync` / `PlanCreateAsync`, and `CheckRefileAsync` / `PlanCreateAsync`) refuses any caller-supplied `sprk_issecure` write on a work assignment or project: `sdap.access.secure_flag_transition_only`. Only `/provision-project`, `/unsecure-project` and the cascade set it, and they write it directly, not through the gate. | `UpdateHandler_ASecureFlagWrite_IsRefused_AndNothingIsWritten` (true and false), `ActionCore_ASecureFlagWrite_IsRefused_AndNothingIsWritten`, `FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing`; gate update and create in the forged-record test |
 | **K4** | A parent re-secured between the child's Step 1.5 re-check and its flag clear | Left as a documented K (below). | - |
 
+## Fix round 3 (re-check of `3d113c8b5`; the live query shapes validated on dev)
+
+- **F-a, readability per TABLE.** Proof is now tracked per table:
+  - a non-empty record read proves its own table only;
+  - the System Administrator role proves both tables;
+  - the profile branch proves exactly the tables it grants Read on;
+  - a record that reads back empty un-proves only its table, for the rest of the scope, and the job stops writing to that table in rounds 1 and 2.
+
+  Step 1.6 and the `CascadeBelowAsync` loops follow per record through `FollowParentsAsync`, so they use the same per-table state. The fixture's `fieldpermissions` stub now honours its filter (column, Read, the BFF's own profile). Tests: `ReadabilityIsProvenPerTable_…` (Read granted on project only, so a work assignment's empty read is never written over) and `OnceARecordReadsBackEmpty_NeitherRoundWritesAnotherRecordOfThatTable`. Seeding check: a profile grant made to prove both tables turns the per-table test red.
+- **F-b.** `SecureFlagRefusalText` moved above `CheckRefileAsync`'s doc block.
+- **K1 cap.** Step 1.6 now counts the records below with no access record that it did not record, both past the cap of 50 (read, not written) and those it failed to write. It logs them and returns the count as `accessRecordsNotRecorded` on the un-secure response (additive; null for a work assignment or an unreadable listing). Test: `PastTheCap_TheUnsecureReportsTheRecordsBelowItLeftUnrecorded` (53 below, so 3 reported).
+
 ## Decisions and interpretations
 - **Access Permission vs F3 (O-5, answered: "same as today").** Round 87 item 4 says removing extra strictness needs F3. On a
   parentless record today only removing Secure is F3-gated; the Access Permission is edited on the form with Write

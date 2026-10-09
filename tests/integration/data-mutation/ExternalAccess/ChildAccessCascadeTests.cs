@@ -606,28 +606,31 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
-    /// F4, round 2: the platform says the BFF may read the column, but reads come back EMPTY. The first record written (a
-    /// project raised to its matter's Restricted) reads back empty, so the run stops trusting records: the work assignment
-    /// filed under that project — which round 1 and round 2 (the project changed) would both revisit — is never written, its
-    /// own Secure record is kept, and the run fails naming <c>access_record_hidden</c>.
+    /// F4, round 2 (per table since fix round 3): the platform says the BFF may read the column, but reads come back EMPTY.
+    /// The first work assignment written (raised to its matter's Restricted) reads back empty, so the run stops trusting
+    /// work-assignment records: the second work assignment — filed under a project the run changed, so round 1 AND round 2
+    /// both reach it — is never written, its own Secure record is kept, and the run fails naming <c>access_record_hidden</c>.
     /// </summary>
     [Fact]
-    public async Task OnceARecordReadsBackEmpty_NeitherRoundWritesAnotherRecord()
+    public async Task OnceARecordReadsBackEmpty_NeitherRoundWritesAnotherRecordOfThatTable()
     {
-        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var (first, second) = (Guid.Parse("00000000-0000-0000-0000-0000000001f1"), Guid.Parse("ffffffff-0000-0000-0000-0000000001f2"));
         OrdinaryMatter(matter, Restricted);
         _fixture.SeedProject(project, isSecure: false);
         FilePair(_fixture, "sprk_project", project, matter, RecordTypeRef(_fixture, "sprk_matter"));
         SetPermission("sprk_project", project, Standard);
-        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: SecureTeam, containerId: $"b!wa-{workAssignment:N}", isSecure: true);
-        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", project));
-        SetPermission("sprk_workassignment", workAssignment, Restricted);
-        SeedRecord("sprk_workassignment", workAssignment, floorSecure: false, Standard, ownSecure: true, ownPermission: Restricted,
+        FiledWorkAssignment(_fixture, first, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", first, Standard);
+        _fixture.SeedWorkAssignment(second, owningTeamId: SecureTeam, containerId: $"b!wa-{second:N}", isSecure: true);
+        World.Set("sprk_workassignment", second, "sprk_regardingproject", new EntityReference("sprk_project", project));
+        SetPermission("sprk_workassignment", second, Restricted);
+        SeedRecord("sprk_workassignment", second, floorSecure: false, Standard, ownSecure: true, ownPermission: Restricted,
             ("sprk_project", project));
-        var before = World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column);
+        var before = World.ValueOf<string>("sprk_workassignment", second, AccessInheritance.Column);
 
         World.HidesAccessRecords = true;
-        _fixture.AccessRecordReadableByProfile = true;
         _fixture.BffIsSystemAdministrator = true; // the platform vouches for the read; the reads still come back empty
         using var scope = _fixture.Services.CreateScope();
         var pass = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
@@ -635,9 +638,58 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
 
         pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
         pass.Problems.Should().Contain(p => p.Contains(SecureRootInheritance.ReasonMarkerHidden));
-        World.AccessRecordWrites.Should().NotContain(w => w.Id == workAssignment);
-        World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column).Should().Be(before);
+        World.AccessRecordWrites.Should().ContainSingle(w => w.Table == "sprk_workassignment", "one write per table proves it hidden");
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == second);
+        World.ValueOf<string>("sprk_workassignment", second, AccessInheritance.Column).Should().Be(before);
+        _fixture.IsSecureOf(second).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Fix round 3 (F-a): readability is proven PER TABLE. The BFF's profile grants Read on the project's column only, and no
+    /// record is non-empty anywhere: a project with no record is recorded, but a work assignment's EMPTY read is never written
+    /// over — it stays as it is and the run fails naming <c>access_record_hidden</c>. A non-empty project record does not
+    /// prove the work assignment table either.
+    /// </summary>
+    [Fact]
+    public async Task ReadabilityIsProvenPerTable_AWorkAssignmentRecordIsNeverWrittenOverAnEmptyRead_WhenOnlyProjectsAreReadable()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter);
+        _fixture.SeedProject(project, isSecure: false);
+        SeedRecord("sprk_project", project, floorSecure: false, Standard, ownSecure: false, ownPermission: null, ("sprk_matter", matter));
+        FilePair(_fixture, "sprk_project", project, matter, RecordTypeRef(_fixture, "sprk_matter"));
+        SecureFiledWorkAssignment(_fixture, workAssignment, matter);
+        _fixture.AccessRecordReadTables.Remove("sprk_workassignment");
+
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Contain(SecureRootInheritance.ReasonMarkerHidden);
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment table is not proven readable");
+        World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column).Should().BeNull();
         _fixture.IsSecureOf(workAssignment).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Fix round 3 (K1): with more records below a matter than the inline cap (50), the matter's un-secure records the first
+    /// 50 and returns how many records with no access record it left unrecorded (<c>accessRecordsNotRecorded</c>); those stay
+    /// secure (never loosened) and the job records them.
+    /// </summary>
+    [Fact]
+    public async Task PastTheCap_TheUnsecureReportsTheRecordsBelowItLeftUnrecorded()
+    {
+        var matter = Guid.NewGuid();
+        SecureMatter(_fixture, matter);
+        var below = Enumerable.Range(0, SecureRootInheritance.MaxInlineCascade + 3).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var id in below)
+            SecureFiledWorkAssignment(_fixture, id, matter);
+
+        var response = await PostAsync(UnsecureRoute, new { recordType = "matter", recordId = matter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await JsonOf(response)).GetProperty("accessRecordsNotRecorded").GetInt32().Should().Be(3);
+        World.AccessRecordWrites.Select(w => w.Id).Distinct().Count(below.Contains).Should().BeGreaterOrEqualTo(SecureRootInheritance.MaxInlineCascade);
+        below.Count(id => _fixture.IsSecureOf(id) == true).Should().BeGreaterOrEqualTo(3, "the unrecorded ones stay secure");
     }
 
     /// <summary>

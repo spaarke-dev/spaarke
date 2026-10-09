@@ -495,6 +495,11 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool AccessRecordReadableByProfile { get; set; } = true;
 
+    /// <summary>Task 175 fix round 3 (F-a): the tables the BFF's profile grants Read on (when <see cref="AccessRecordReadableByProfile"/>).</summary>
+    public HashSet<string> AccessRecordReadTables { get; } = new(StringComparer.OrdinalIgnoreCase) { "sprk_workassignment", "sprk_project" };
+
+    private static readonly Guid BffWriterProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d");
+
     /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role.</summary>
     public bool BffIsSystemAdministrator { get; set; }
 
@@ -701,6 +706,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         OwnershipPatchIsApplied = true;
         AccessRecordColumnSecured = true;
         AccessRecordReadableByProfile = true;
+        AccessRecordReadTables.Clear();
+        AccessRecordReadTables.Add("sprk_workassignment");
+        AccessRecordReadTables.Add("sprk_project");
         BffIsSystemAdministrator = false;
         OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
@@ -1268,15 +1276,16 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                 : Array.Empty<Dictionary<string, object?>>());
         }
         if (entitySet == $"systemusers({BffApplicationUserId})/systemuserprofiles_association")
-            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d") } });
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = BffWriterProfileId } });
         if (entitySet == "fieldpermissions")
         {
-            return JsonSerializer.Serialize(AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
-                ? new[]
-                {
-                    new Dictionary<string, object?> { ["entityname"] = "sprk_workassignment" },
-                    new Dictionary<string, object?> { ["entityname"] = "sprk_project" },
-                }
+            // Honours the filter (fix round 3): the column, Read, and the BFF's own profile must all be asked for.
+            var asked = filter is not null
+                        && filter.Contains("attributelogicalname eq 'sprk_accessinheritance'", StringComparison.Ordinal)
+                        && filter.Contains("canread eq 4", StringComparison.Ordinal)
+                        && filter.Contains($"_fieldsecurityprofileid_value eq {BffWriterProfileId}", StringComparison.OrdinalIgnoreCase);
+            return JsonSerializer.Serialize(asked && AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
+                ? AccessRecordReadTables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray()
                 : Array.Empty<Dictionary<string, object?>>());
         }
 

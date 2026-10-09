@@ -475,6 +475,11 @@ public sealed partial class SecureRootInheritance
 
     // ── (1) + (2): create and re-file ────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Task 175 fix round 2 (K3): the refusal text for a generic write of <c>sprk_issecure</c>.</summary>
+    internal const string SecureFlagRefusalText =
+        "sprk_issecure is set only by Make Secure and Remove Secure (and, for a record filed under a secure record, by Spaarke " +
+        "following its parent), so it was not written";
+
     /// <summary>
     /// BEFORE a BFF create or re-file of a work assignment or project: when the write sets or clears what the row is filed
     /// under, the records it will be filed under AFTER the write are resolved and their flags read. If one cannot be read
@@ -488,11 +493,6 @@ public sealed partial class SecureRootInheritance
     /// <param name="writes">The columns the write sets, by any spelling a BFF writer uses: the logical name, or the
     /// navigation property with <c>@odata.bind</c>; values as <see cref="EntityReference"/>, <see cref="Guid"/>, a bind path
     /// (<c>/sprk_matters(…)</c>), a GUID string, or <c>null</c> for a clear.</param>
-    /// <summary>Task 175 fix round 2 (K3): the refusal text for a generic write of <c>sprk_issecure</c>.</summary>
-    internal const string SecureFlagRefusalText =
-        "sprk_issecure is set only by Make Secure and Remove Secure (and, for a record filed under a secure record, by Spaarke " +
-        "following its parent), so it was not written";
-
     public async Task<RecordOwnerResolution?> CheckRefileAsync(
         string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct)
     {

@@ -573,8 +573,9 @@ public static class UnsecureProjectEndpoint
         // A work assignment or project below it with no access record yet (secured before task 175's deploy) gets one now,
         // while this record is still secure: a Secure it holds through this record is recorded as INHERITED, so it follows
         // this record out in the cascade after Step 5. Best effort; a record not reached stays secure (never loosened).
+        RecordBelowResult? recordedBelow = null;
         if (SecureRootInheritance.IsParent(root.LogicalName))
-            await relatedRoots.RecordBelowBeforeUnsecureAsync(root.LogicalName, recordId, traceId, ct);
+            recordedBelow = await relatedRoots.RecordBelowBeforeUnsecureAsync(root.LogicalName, recordId, traceId, ct);
 
         // ── Step 2: Resolve the new owner ────────────────────────────────────
         //
@@ -881,7 +882,12 @@ public static class UnsecureProjectEndpoint
             SweepComplete: sweep.Complete,
             RecordType: root.WireToken,
             RecordId: recordId,
-            Children: SecureChildPassSummary.From(childPass)));
+            Children: SecureChildPassSummary.From(childPass))
+        {
+            // Task 175 fix round 3 (K1): records below with no access record that Step 1.6 did not record (they stay secure;
+            // the job records them). Null for a work assignment, or when the records below could not all be read.
+            AccessRecordsNotRecorded = recordedBelow?.NotRecorded,
+        });
     }
 
     /// <summary>
