@@ -1,10 +1,25 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 7 · **Last Updated**: 2026-10-07
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 9)
+> **Version**: 8 · **Last Updated**: 2026-10-08
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 10)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
 >
+>
+> **v10 (2026-10-08, `customer-provisioning-orchestration-r1` T206 + T207 re-measured)**: every check recipe now decides by
+> exit code and asserts the condition its `expect` field describes (before: 33 of 36 active recipes had no `exit 1`, so a
+> failing check printed a result and passed). Recipes that were wrong rather than merely unguarded: `PRQ-E-01` /
+> `PRQ-E-02` / `PRQ-E-09` named resources that do not exist (`sprk{env}artifacts`, `sprk{env}acr`, `sprk-{env}-kv`; the
+> real names are `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`, `sprk-controlplane-{env}-kv`); `PRQ-E-07` queried
+> the Graph service principal's own `appRoleAssignments` instead of the L2 identity's; `PRQ-E-08` / `PRQ-E-13` used `pac`
+> commands and a column (`sprk_environmentid`) that do not exist; `PRQ-C-01` / `PRQ-C-02` still checked `gpt-5` /
+> `GlobalStandard` instead of the three `DataZoneStandard` pins in `openai.bicep` / `PinnedModelCatalog.cs`;
+> `PRQ-C-07` ran PowerShell `Select-String` under `bash -c`. **Rescoped** `once_per_tenant` -> `once_per_env`:
+> `PRQ-T-01` … `PRQ-T-05` (they use `{containerTypeId}` / `{env}`, which are unknown while skill Step 0.5 runs the tenant
+> scope, so they could never resolve there). `validate.ps1` now lints every recipe for the defect classes above
+> (token available at the step that runs its scope, no undefined bash variable, explicit `exit 1`, no PowerShell cmdlet
+> under bash, no parenthesis in an `az` argument, no `grep -i -F`), and `tests/scripts/Prereqs-Recipes.Tests.ps1` runs
+> the recipes against fake `az` / `curl` / `pac` and proves each exits 1 on the defect it exists to catch.>
 > **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
 > users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
 > `sprk-{customerId}-users` — intake `environmentSecurityGroupId`), `PRQ-C-11` **added** (the environment linked to a
@@ -87,12 +102,12 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 37 prereqs across 3 scopes (33 active)
+## Summary — 40 prereqs across 3 scopes (36 active)
 
 | Scope | Count | IDs |
 |---|---|---|
-| `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
-| `once_per_env` | 12 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_tenant` | 1 active (+1 retired) | `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** (`PRQ-T-01` … `PRQ-T-05` are `once_per_env` since 2026-10-08) |
+| `once_per_env` | 17 active (+1 retired) | `PRQ-T-01` … `PRQ-T-05` (rescoped 2026-10-08), `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
 | `once_per_customer` | 18 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-12` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
 | **Total** | **40** (36 active) | Authoritative count: `validate.ps1` over the YAML |
 
@@ -118,7 +133,7 @@ Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-
 
 Grouped by scope. Programmatic check recipes in the YAML.
 
-### Once-per-tenant (6 active, 1 retired)
+### Once-per-tenant (1 active, 1 retired) — plus PRQ-T-01 … PRQ-T-05, which are `once_per_env` since 2026-10-08 and listed here for continuity
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -179,7 +194,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
-| PRQ-C-01 | OpenAI regional TPM headroom (frontier models) | Spaarke admin | `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs |
+| PRQ-C-01 | OpenAI regional TPM headroom for the pinned deployments (gpt-4o 150, gpt4.1-mini 200, text-embedding-3-large 350 — DataZoneStandard) | Spaarke admin | `InsufficientQuota - <model> - DataZoneStandard` on a subscription without the grant |
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | ~~PRQ-C-04~~ | **Retired 2026-10-06 (T228).** Dataverse environment-creation rate — L2 no longer creates environments (PRQ-C-09). | — | — |
