@@ -200,7 +200,7 @@ import {
   DialogActions,
   Button,
 } from '@fluentui/react-components';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, type OkResponse } from '@spaarke/auth';
 // Aliased on import — the PCF control class below MUST be named
 // `TrackingFieldTrio` to match `constructor="TrackingFieldTrio"` in
 // ControlManifest.Input.xml, so the shared component is imported under a
@@ -911,8 +911,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
   /** Wraps `authenticatedFetch` so a click that races MSAL bootstrap still
    * succeeds (awaits `authInitPromise` first) instead of hitting
-   * `@spaarke/auth`'s "not initialized" guard. */
-  private authenticatedFetchGated = async (url: string, init?: RequestInit): Promise<Response> => {
+   * `@spaarke/auth`'s "not initialized" guard. Throws on failure exactly as
+   * `authenticatedFetch` does (`OkResponse` — it resolves only with a success). */
+  private authenticatedFetchGated = async (url: string, init?: RequestInit): Promise<OkResponse> => {
     await this.authInitPromise;
     return authenticatedFetch(url, init);
   };

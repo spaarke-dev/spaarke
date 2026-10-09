@@ -14,6 +14,7 @@ import {
   initAuth,
   resolveRuntimeConfig,
   authenticatedFetch as sharedAuthFetch,
+  type OkResponse,
 } from "@spaarke/auth";
 
 let _initPromise: Promise<void> | null = null;
@@ -55,7 +56,7 @@ export function ensureAuthInitialized(): Promise<void> {
 export async function authenticatedFetch(
   url: string,
   init?: RequestInit,
-): Promise<Response> {
+): Promise<OkResponse> {
   await ensureAuthInitialized();
   return sharedAuthFetch(url, init);
 }

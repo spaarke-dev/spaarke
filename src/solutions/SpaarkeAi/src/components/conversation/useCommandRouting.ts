@@ -25,7 +25,7 @@
 import * as React from "react";
 import { usePaneEventBus } from "@spaarke/ai-widgets/events";
 import type { IChatMessage } from "@spaarke/ui-components";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import { parse as parseCommandIntent } from "./CommandRouter";
 import {
   executeHardSlash,
@@ -42,7 +42,8 @@ import ReferenceResolver, {
 
 export interface CommandRoutingDeps {
   bffBaseUrl: string;
-  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>;
+  /** `@spaarke/auth`'s fetch — resolves only with a success, throws every failure. */
+  authenticatedFetch: AuthenticatedFetchFn;
   chatSessionId: string | null;
   setChatSessionId: (id: string) => void;
   /** Active entity context (matter scoping + resolver context). */
