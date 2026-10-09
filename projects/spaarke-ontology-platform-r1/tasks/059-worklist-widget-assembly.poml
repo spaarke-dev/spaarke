@@ -41,6 +41,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): both lanes render one card per CORE record (matter or project); the reader's own items with no core record appear in their Do lane under a "Not filed" group (last in the lane, included in the Do counts). Filters and the "+1 other open item" line work per core record.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-36): one card per core record of ANY core type (matter, project, work assignment, service request), grouped by (sprk_corerecordtype, sprk_corerecordid); no per-type code.</constraint>
     <constraint source="project">ADDED 2026-10-09 from task 051 (#1513): the host passes MatterCard `visibleList` (the lane's browse set, not one card's items) and `onOpenItem`; each item carries `pastDueWording` from 038's response ("late" for work assignments). See notes/051-worklist-row-component-notes.md.</constraint>
+    <constraint source="project">ADDED 2026-10-09 from task 054: place 054's AggregateCard (reconciliation count, from the Needs Review grid configuration source) as exactly one item at the top of the Do lane, excluded from both lanes' counts, hidden when a Do filter is on; it is not a sprk_signal row. Verify 054's former acceptance here.</constraint>
   </constraints>
 
   <knowledge>
