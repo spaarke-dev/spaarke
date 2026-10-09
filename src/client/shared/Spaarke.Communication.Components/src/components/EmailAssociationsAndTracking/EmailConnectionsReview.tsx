@@ -33,16 +33,11 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarActions,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
   Button,
   mergeClasses,
 } from '@fluentui/react-components';
 import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
-import { getXrmForPicker, SprkModal, cleanGuid } from '@spaarke/ui-components';
+import { getXrmForPicker, SprkModal, cleanGuid, RowActionMenu } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
@@ -116,6 +111,13 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   );
 
   const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;
+  // The record-type picker's items, one per catalog entry; the item key is the entity logical name (C-9: rendered by
+  // the shared RowActionMenu).
+  const linkMenuActions = catalog.map(entry => ({
+    key: entry.logicalName,
+    label: entry.displayName,
+    testId: `link-another-record-item-${entry.logicalName}`,
+  }));
 
   // Highlight the confirmed (🟢) or auto-matched (🟡) primary card green; a user
   // pick highlights blue. The confirmed primary already owns the denorm fields, so
@@ -350,29 +352,19 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
             renders this as a labelled field BELOW the grid instead (see below). */}
         {!reconcile && !readOnly && (
           <div className={s.cardCell}>
-            <Menu positioning="below-start">
-              <MenuTrigger disableButtonEnhancement>
+            <RowActionMenu
+              positioning="below-start"
+              trigger={
                 <button type="button" className={s.linkCard} disabled={busy} data-testid="link-another-record">
                   <span className={s.linkCardLabel}>Link another record</span>
                   <span className={s.linkCardIconRow}>
                     <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
                   </span>
                 </button>
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {catalog.map(entry => (
-                    <MenuItem
-                      key={entry.recordTypeRefId}
-                      onClick={() => void handleLinkPick(entry.logicalName)}
-                      data-testid={`link-another-record-item-${entry.logicalName}`}
-                    >
-                      {entry.displayName}
-                    </MenuItem>
-                  ))}
-                </MenuList>
-              </MenuPopover>
-            </Menu>
+              }
+              groups={[linkMenuActions]}
+              onAction={logicalName => void handleLinkPick(logicalName)}
+            />
           </div>
         )}
 
@@ -420,8 +412,9 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
         <div className={s.lookupField}>
           {/* Item 4 (owner UAT 2026-08-19): no separate label — the prompt lives inside
               the field as placeholder text ("Look up another record"). */}
-          <Menu positioning="below-start">
-            <MenuTrigger disableButtonEnhancement>
+          <RowActionMenu
+            positioning="below-start"
+            trigger={
               <button
                 type="button"
                 className={s.lookupControl}
@@ -432,21 +425,10 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                 <span className={s.lookupPlaceholder}>Look up another record</span>
                 <Search20Regular className={s.lookupControlIcon} aria-hidden="true" />
               </button>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {catalog.map(entry => (
-                  <MenuItem
-                    key={entry.recordTypeRefId}
-                    onClick={() => void handleLinkPick(entry.logicalName)}
-                    data-testid={`link-another-record-item-${entry.logicalName}`}
-                  >
-                    {entry.displayName}
-                  </MenuItem>
-                ))}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+            }
+            groups={[linkMenuActions]}
+            onAction={logicalName => void handleLinkPick(logicalName)}
+          />
         </div>
       )}
 

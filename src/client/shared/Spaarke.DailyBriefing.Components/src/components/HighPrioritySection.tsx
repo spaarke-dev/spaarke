@@ -33,14 +33,10 @@ import {
   Badge,
   Button,
   Tooltip,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
 } from '@fluentui/react-components';
 import { AlertUrgentRegular, MailRegular, MoreVerticalRegular, OpenRegular } from '@fluentui/react-icons';
 
+import { RowActionMenu } from '@spaarke/ui-components';
 import type { HighPriorityItemResult } from '../services/briefingService';
 
 // ---------------------------------------------------------------------------
@@ -296,8 +292,8 @@ export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items,
                     {badge.label}
                   </Badge>
                   {(onOpenRecord || onEmailItem) && (
-                    <Menu>
-                      <MenuTrigger disableButtonEnhancement>
+                    <RowActionMenu<'openRecord' | 'email'>
+                      trigger={
                         <Tooltip content="More actions" relationship="label">
                           <Button
                             appearance="subtle"
@@ -306,22 +302,18 @@ export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items,
                             aria-label={`More actions for ${item.name || 'item'}`}
                           />
                         </Tooltip>
-                      </MenuTrigger>
-                      <MenuPopover>
-                        <MenuList>
-                          {onOpenRecord && (
-                            <MenuItem icon={<OpenRegular />} onClick={() => handleOpen(item.entityType, item.entityId)}>
-                              Open record
-                            </MenuItem>
-                          )}
-                          {onEmailItem && (
-                            <MenuItem icon={<MailRegular />} onClick={() => onEmailItem(item)}>
-                              Email
-                            </MenuItem>
-                          )}
-                        </MenuList>
-                      </MenuPopover>
-                    </Menu>
+                      }
+                      groups={[
+                        [
+                          { key: 'openRecord', label: 'Open record', icon: <OpenRegular />, hidden: !onOpenRecord },
+                          { key: 'email', label: 'Email', icon: <MailRegular />, hidden: !onEmailItem },
+                        ],
+                      ]}
+                      onAction={key => {
+                        if (key === 'openRecord') handleOpen(item.entityType, item.entityId);
+                        else onEmailItem?.(item);
+                      }}
+                    />
                   )}
                 </div>
               </div>

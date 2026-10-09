@@ -70,8 +70,8 @@
  *   - WCAG: trigger has aria-label="More actions"; MenuItem touch targets meet
  *     ≥44×44px via Fluent v9 defaults; keyboard nav (Tab, Enter, arrows, Esc)
  *     handled by the Menu primitive out-of-box
- *   - Visual pattern: matches `DocumentRowMenu` (the canonical Spaarke
- *     three-dot pattern) and the semantic-search PCF ResultCard convention
+ *   - Visual pattern: built on the shared `RowActionMenu` (extracted from
+ *     `DocumentRowMenu`, C-9; the canonical Spaarke three-dot pattern) and the semantic-search PCF ResultCard convention
  *
  * Component hoisted into `@spaarke/daily-briefing-components/components` by R2
  * task 011 (Wave 3 / Group A). Task 045 (R4) refactors the inline action row
@@ -84,12 +84,6 @@ import {
   tokens,
   Text,
   Badge,
-  Menu,
-  MenuTrigger,
-  MenuButton,
-  MenuPopover,
-  MenuList,
-  MenuItem,
 } from '@fluentui/react-components';
 import {
   MoreVerticalRegular,
@@ -99,11 +93,22 @@ import {
   OpenRegular,
   DocumentRegular,
 } from '@fluentui/react-icons';
-import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm, RowActionMenu } from '@spaarke/ui-components';
+import type { RowActionDescriptor } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
 import { NarrativeCitedText, hasInlineRegardingMention } from './NarrativeCitedText';
+
+/** Keys of the overflow-menu actions (see `menuActions` in the component). */
+type NarrativeMenuAction =
+  | 'previewDocument'
+  | 'markAsRead'
+  | 'remove'
+  | 'keep'
+  | 'addToTodo'
+  | 'dismiss'
+  | 'openRecord';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -503,6 +508,37 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     if (onPreviewDocument && documentId) onPreviewDocument(documentId, narrative);
   };
 
+  // Overflow-menu action table (C-9): the order below is the canonical FR-18 order; `RowActionMenu` renders it.
+  const menuActions: RowActionDescriptor<NarrativeMenuAction>[] = [
+    { key: 'previewDocument', label: 'Open document', icon: <DocumentRegular />, hidden: !canPreviewDocument },
+    { key: 'markAsRead', label: 'Mark as read', icon: <CheckmarkRegular />, hidden: !onCheck },
+    { key: 'remove', label: 'Remove from briefing', icon: <DismissRegular />, hidden: !onRemove },
+    { key: 'keep', label: 'Keep on briefing for 7 more days', icon: <CalendarAddRegular />, hidden: !onKeep },
+    // Canonical position 4 (per FR-18 order): "Add to To Do" moved from a standalone button into the menu (R5 task 021).
+    { key: 'addToTodo', label: addToDoLabel, icon: <CheckmarkRegular />, disabled: isTodoCreated || isTodoPending },
+    { key: 'dismiss', label: 'Dismiss', icon: <DismissRegular /> },
+    { key: 'openRecord', label: 'Open record', icon: <OpenRegular />, hidden: !canOpenRecord },
+  ];
+
+  const handleMenuAction = (key: NarrativeMenuAction): void => {
+    switch (key) {
+      case 'previewDocument':
+        return handlePreviewDocument();
+      case 'markAsRead':
+        return handleMenuMarkAsRead();
+      case 'remove':
+        return handleMenuRemoveFromBriefing();
+      case 'keep':
+        return handleMenuKeepSevenMoreDays();
+      case 'addToTodo':
+        return handleMenuAddToTodo();
+      case 'dismiss':
+        return handleMenuDismiss();
+      case 'openRecord':
+        return handleMenuOpenRecord();
+    }
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.content}>
@@ -598,52 +634,12 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           Items 1/2/3 hide when their callback is undefined (defensive default,
           back-compat). Item 5 hides when primaryEntityType/Id are missing.
         */}
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <MenuButton appearance="subtle" size="small" icon={<MoreVerticalRegular />} aria-label="More actions" />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {canPreviewDocument && (
-                <MenuItem icon={<DocumentRegular />} onClick={handlePreviewDocument}>
-                  Open document
-                </MenuItem>
-              )}
-              {onCheck && (
-                <MenuItem icon={<CheckmarkRegular />} onClick={handleMenuMarkAsRead}>
-                  Mark as read
-                </MenuItem>
-              )}
-              {onRemove && (
-                <MenuItem icon={<DismissRegular />} onClick={handleMenuRemoveFromBriefing}>
-                  Remove from briefing
-                </MenuItem>
-              )}
-              {onKeep && (
-                <MenuItem icon={<CalendarAddRegular />} onClick={handleMenuKeepSevenMoreDays}>
-                  Keep on briefing for 7 more days
-                </MenuItem>
-              )}
-              {/* Canonical position 4 (per FR-18 order): "Add to To Do" moved from a
-                  standalone button into the menu (R5 task 021). */}
-              <MenuItem
-                icon={<CheckmarkRegular />}
-                onClick={handleMenuAddToTodo}
-                disabled={isTodoCreated || isTodoPending}
-              >
-                {addToDoLabel}
-              </MenuItem>
-              <MenuItem icon={<DismissRegular />} onClick={handleMenuDismiss}>
-                Dismiss
-              </MenuItem>
-              {canOpenRecord && (
-                <MenuItem icon={<OpenRegular />} onClick={handleMenuOpenRecord}>
-                  Open record
-                </MenuItem>
-              )}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+        <RowActionMenu<NarrativeMenuAction>
+          ariaLabel="More actions"
+          triggerIcon={<MoreVerticalRegular />}
+          groups={[menuActions]}
+          onAction={handleMenuAction}
+        />
       </div>
     </div>
   );

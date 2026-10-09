@@ -148,6 +148,10 @@ export * from './PaneHeaderToolsMenu';
 // TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
 export * from './TagFilter';
 
+// RowActionMenu - the ONE shared descriptor-driven row-action menu (C-9; DocumentRowMenu and the four former
+// bespoke row menus are built on it)
+export * from './RowActionMenu';
+
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
 
