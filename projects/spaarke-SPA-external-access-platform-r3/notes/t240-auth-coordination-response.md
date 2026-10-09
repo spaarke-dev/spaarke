@@ -109,4 +109,4 @@ Provisioning relayed the owner's decisions (t240 second message). R3 **agrees wi
 - **Routing → invitation / deep-link scoped**, not the workforce directory (CIAM contacts aren't in the `sprk-*-users` groups it resolves). This **converges with R3's C3 deep-link** — the "you've been granted access to {record}" notification already targets one record on one stamp, so it carries `{customerId, apiBaseUrl}`. Cold-landing needs a contact→customers map in the shared registry (written at invite time) or a pick-organization prompt.
 - **Provisioner → keyless federated credential** from the stamp MI — agreed; flag cross-tenant workload-identity federation (stamp MI → `spaarkeextid` app) as the item to validate for support.
 
-All captured authoritatively in [`../design.md` §4.6](../design.md). R3's external-contact capabilities (C1 messages/detail, C2 external submission, C3 in-portal) are **gated on 240d**.
+All captured authoritatively in [`../design.md` §4.6](../design.md). R3's external-contact capabilities (C1 messages/detail, C3 in-portal, C6 message send) are **gated on 240d**. C2 (Front Door intake) is workforce-only and not gated.
