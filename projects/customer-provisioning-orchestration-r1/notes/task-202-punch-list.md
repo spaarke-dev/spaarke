@@ -442,6 +442,13 @@ Sub-phase by dependency + E2E-blocking status:
 | **204e-F7** | `Graph:Scopes` (`[Required]` + `MinLength`, empty default) — only `Configure-ProductionAppSettings.ps1` writes `Graph__Scopes__0`; no stamp channel. | same |
 | **204e-F8** | `ServiceBus:QueueName` (`[Required]`, empty default) — `customer.bicep` creates the queues but never tells the BFF which; only the L2 control-plane apps set `ServiceBus__QueueName`. | same |
 
+**F5-F8 status — closed by task 258 (2026-10-09).** F6/F7/F8 are supplied by manifest `per_env_settings` (H4b, both slots):
+`PublicConfig__BffUrl` (new source `from-h2a-output:bff_url` — `StampBffUrl`, the URL H9 records), `PublicConfig__MsalClientId`
+(`from-h3-output:bff_app_client_id`), `PublicConfig__TenantId` (`from-intake-parameter:tenant_id`), literals `Graph__Scopes__0`
+and `ServiceBus__QueueName=sdap-jobs`. F5: the H0.5 consent callback is Model 2 only and cannot run on a customer stamp, so the
+BFF now registers and maps it only with `Onboarding:Enabled=true` (default false, set by no stamp channel); the census row is
+`Exempt` with that gate, and `IOptionsDriftTests` now fails if a stamp channel ever writes an Exempt row's gate.
+
 **F5-F8 caveat**: channels are the manifest and `customer.bicep`. `appsettings.template.json` is not one (the BFF csproj sets `CopyToPublishDirectory="Never"`). Confirm on a fresh stamp before treating F5-F8 as live failures; if some other path writes them, add it to the channel parser rather than the ledger.
 
 **Pre-existing, not touched**: `dotnet build Spaarke.sln` reports 4 `CA2024` warnings in `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs` (0 errors).

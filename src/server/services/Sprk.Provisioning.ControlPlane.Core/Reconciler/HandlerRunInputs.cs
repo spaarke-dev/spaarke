@@ -143,7 +143,7 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
-                RunInput.Output(nameof(InterStepState.AppServiceName)),
+                RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
                 // PerEnvSourceCatalog sources:
                 RunInput.Output(nameof(InterStepState.KeyVaultUri)),
                 RunInput.Output(nameof(InterStepState.CosmosEndpoint)),

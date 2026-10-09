@@ -157,6 +157,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["service_bus_fqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net",
             ["redis_endpoint"] = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",   // T242: H2a's RedisEndpoint
             ["content_safety_endpoint"] = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",   // T246: H2a's ContentSafetyEndpoint
+            ["bff_url"] = "https://sprk-prod-api.azurewebsites.net",   // T258: from H2a's AppServiceName (sprk-prod-api)
             ["bff_app_client_id"] = "00000000-aaaa-bbbb-cccc-999999999999",
             ["tenant_id"] = TenantId,
             ["container_type_id"] = "00000000-dead-beef-0000-000000000001",
@@ -848,6 +849,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["ServiceBusFqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net",
         ["RedisEndpoint"] = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
         ["ContentSafetyEndpoint"] = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
+        ["BffUrl"] = "https://sprk-prod-api.azurewebsites.net",
         ["BffAppClientId"] = "00000000-aaaa-bbbb-cccc-999999999999",
         ["TenantId"] = TenantId,
         ["ContainerTypeId"] = "00000000-dead-beef-0000-000000000001",
@@ -888,6 +890,60 @@ public sealed class H4bBulkAppSettingsHandlerTests
         scriptSettings["AzureOpenAI__Endpoint"].Should().Be("@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=AzureOpenAI-Endpoint)");
         scriptSettings.ContainsKey("AiSpendLimit__MonthlyLimitUsd").Should().Be(runCarriesSpendLimit,
             "T254: the optional spend limit is written only when the run carries it");
+    }
+
+    // ---------- T258 (204e F5–F8): the startup keys a stamp BFF demands, with stamp-correct values ----------
+
+    [Fact]
+    public async Task T258_RealManifest_WritesTheStartupKeysTheBffDemands_WithStampValues()
+    {
+        // The BFF refuses to start outside Development/Testing without these (PublicConfigOptionsValidator,
+        // GraphOptions [Required] Scopes, ServiceBusOptions [Required] QueueName). Expected values are written out,
+        // not read back from the manifest: a wrong source or literal must fail here.
+        var run = BuildRun();
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-t258"),
+            new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var settings = writer.LastRequest!.Settings;
+        settings["PublicConfig__BffUrl"].Should().Be("https://sprk-prod-api.azurewebsites.net",
+            "the stamp's own production URL, from H2a's App Service name");
+        settings["PublicConfig__BffUrl"].Should().Be(StampBffUrl.Production(AppServiceName),
+            "the URL H9 records as BffApiUrl and H7 writes as sprk_BffApiBaseUrl");
+        settings["PublicConfig__MsalClientId"].Should().Be("00000000-aaaa-bbbb-cccc-999999999999", "H3's BFF app registration");
+        settings["PublicConfig__MsalClientId"].Should().Be(settings["AzureAd__ClientId"]);
+        settings["PublicConfig__TenantId"].Should().Be(TenantId, "the intake tenantId");
+        settings["PublicConfig__TenantId"].Should().Be(settings["AzureAd__TenantId"]);
+        settings["Graph__Scopes__0"].Should().Be("https://graph.microsoft.com/.default");
+        settings["ServiceBus__QueueName"].Should().Be("sdap-jobs");
+
+        settings.Keys.Where(k => k.StartsWith("PublicConfig__", StringComparison.Ordinal))
+            .Should().OnlyContain(k => !settings[k].StartsWith("@Microsoft.KeyVault", StringComparison.Ordinal),
+                "GET /api/config is anonymous: PublicConfig carries public values only, never a Key Vault reference");
+        settings.Keys.Should().NotContain(k => k.StartsWith("Onboarding__", StringComparison.Ordinal),
+            "no stamp enables the Model 2 consent callback (Onboarding:Enabled) or carries its HMAC key");
+    }
+
+    [Fact]
+    public async Task T258_ServiceBusQueueName_IsAQueueTheStampTemplateCreates()
+    {
+        // ServiceBus__QueueName is a literal; the queue exists only because customer.bicep's serviceBusQueues default
+        // creates it (H2a passes no serviceBusQueues parameter — ArmDeploymentRunner.BuildParametersPayload). Read the
+        // COMPILED template H2a deploys.
+        var success = (PerEnvSettingsManifestReadResult.Success)await new FilePerEnvSettingsManifest(
+            NullLogger<FilePerEnvSettingsManifest>.Instance).ReadAsync(CancellationToken.None);
+        var queueName = success.Entries.Single(e => e.Key == "ServiceBus__QueueName").LiteralValue;
+
+        using var template = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(LocateRepoFile(Path.Combine("infrastructure", "bicep", "customer.json"))));
+        var queues = template.RootElement.GetProperty("parameters").GetProperty("serviceBusQueues")
+            .GetProperty("defaultValue").EnumerateArray().Select(q => q.GetString()).ToList();
+
+        queues.Should().Contain(queueName, "the BFF receives jobs from ServiceBus:QueueName; a queue the stamp never created fails every job");
     }
 
     /// <summary>
