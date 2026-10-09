@@ -25,7 +25,7 @@
 //
 // auth-v4 §10.4 DUAL APP-USER TRAP (task 205d / punch row A41): the UAMI row's
 // azureactivedirectoryobjectid MUST be the UAMI's principalId — NEVER its
-// clientId. See DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+// clientId. See DataverseAppUserCreationRequest.SystemUserAzureActiveDirectoryObjectId's
 // remarks for the full silent-fail shape. This creator writes that field
 // explicitly (in the same POST as applicationid) whenever the caller supplies
 // it; it does NOT rely on Dataverse's applicationid-only auto-resolution for
@@ -194,11 +194,11 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         // DataverseAppUserCreationRequest's remarks for the silent-fail trap
         // this guards against), validate its GUID shape before it reaches the
         // POST payload, same rationale as the ApplicationId check above.
-        if (request.AzureActiveDirectoryObjectId is not null
-            && !Guid.TryParse(request.AzureActiveDirectoryObjectId, out _))
+        if (request.SystemUserAzureActiveDirectoryObjectId is not null
+            && !Guid.TryParse(request.SystemUserAzureActiveDirectoryObjectId, out _))
         {
             return new DataverseAppUserCreationOutcome.Failure(
-                $"AzureActiveDirectoryObjectId '{request.AzureActiveDirectoryObjectId}' is not a valid GUID — " +
+                $"AzureActiveDirectoryObjectId '{request.SystemUserAzureActiveDirectoryObjectId}' is not a valid GUID — " +
                 "refusing to write it to the systemuser row.");
         }
 
@@ -246,9 +246,9 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                     ["applicationid"] = applicationId.ToString("D"),
                     ["businessunitid@odata.bind"] = $"/businessunits({request.BusinessUnitId:D})",
                 };
-                if (!string.IsNullOrWhiteSpace(request.AzureActiveDirectoryObjectId))
+                if (!string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId))
                 {
-                    payload["azureactivedirectoryobjectid"] = request.AzureActiveDirectoryObjectId;
+                    payload["azureactivedirectoryobjectid"] = request.SystemUserAzureActiveDirectoryObjectId;
                 }
                 systemUserId = await CreateAsync(envUri, token, "systemusers", payload, cancellationToken).ConfigureAwait(false);
             }

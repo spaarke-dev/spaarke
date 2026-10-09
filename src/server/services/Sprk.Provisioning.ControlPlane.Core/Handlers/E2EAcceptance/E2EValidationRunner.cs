@@ -16,6 +16,11 @@
 //                               and reports one result per service; each service is one check, passed only when
 //                               "proved". The openai-chat result is the ADR-028 E-2 measurement on the stamp's
 //                               kind: OpenAI account (logged as such).
+//   5. secure-isolation-census  POST {bffApiUrl}/api/platform/secure-record-isolation-census (task 260, ISS-014) — a
+//                               separate method (RunSecureIsolationCensusAsync) with its own typed outcome, so H13 can
+//                               quarantine on it under its own codes. Same identity, token audience, https rule, retry
+//                               and refusal handling as the keyless proof (PostAsL2IdentityAsync). The BFF runs the
+//                               census its 15-minute job runs and answers isolated | findings | inert | error.
 //
 // FAIL-CLOSED (task 230b): an auth refusal is a FAILURE, never a skip — the role missing on the BFF (401/403, or a
 //   token without the role), no token, a service that refused the stamp identity, a key configured instead of the
@@ -66,6 +71,9 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     /// <summary>Check name for the keyless-proof CALL itself (token, route, response) — task 230b.</summary>
     public const string CheckKeylessProof = "keyless-proof";
+
+    /// <summary>Label of the secure-record isolation census call (task 260) in diagnostics.</summary>
+    public const string CheckSecureIsolationCensus = "secure-isolation-census";
 
     /// <summary>Prefix of the per-service keyless-proof check names (<c>keyless-proof-{service}</c>).</summary>
     public const string KeylessProofCheckPrefix = "keyless-proof-";
@@ -255,130 +263,21 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         List<string> passed, List<string> failed, List<string> inconclusive, List<string> diagnostics,
         CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(request.BffAppRegId, out var appId) || appId == Guid.Empty)
+        var call = await PostAsL2IdentityAsync(
+            httpClient, bffBaseUri, request.BffAppRegId, KeylessProofContract.Route, CheckKeylessProof, routeTask: "230b",
+            cancellationToken).ConfigureAwait(false);
+        switch (call)
         {
-            failed.Add(CheckKeylessProof);
-            diagnostics.Add(
-                $"{CheckKeylessProof}: BffAppRegId '{request.BffAppRegId}' is not an app (client) id -- H3 writes it, and " +
-                "the keyless-proof token is requested for api://{BffAppRegId}.");
-            return;
-        }
-
-        // A privileged token never travels over plain http.
-        if (!string.Equals(bffBaseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            failed.Add(CheckKeylessProof);
-            diagnostics.Add($"{CheckKeylessProof}: BffApiUrl '{bffBaseUri}' is not https -- the L2 token is not sent over plain http.");
-            return;
-        }
-
-        // The audience the BFF validates (AzureAd:ClientId / api://{clientId}); a token for the host name is not it.
-        var scope = $"api://{appId:D}/.default";
-        string bearerToken;
-        try
-        {
-            var token = await _credential
-                .GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
-                .ConfigureAwait(false);
-            bearerToken = token.Token;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // An auth failure, never a skip (task 230b).
-            failed.Add(CheckKeylessProof);
-            diagnostics.Add(
-                $"{CheckKeylessProof}: the L2 identity could not get a token for '{scope}' ({ex.GetType().Name}: " +
-                $"{ex.Message}). Check H3 created the app registration with identifier URI api://{appId:D}.");
-            return;
-        }
-
-        // A managed-identity token is cached for up to 24 h: one issued before H3's role assignment propagated carries no
-        // role, and every retry within that window would 403. Say so instead of a generic refusal.
-        if (TokenRoles(bearerToken) is { } roles && !roles.Contains(KeylessProofContract.AppRoleValue, StringComparer.Ordinal))
-        {
-            failed.Add(CheckKeylessProof);
-            diagnostics.Add(
-                $"{CheckKeylessProof}: the L2 token for '{scope}' (oid {TokenClaim(bearerToken, "oid") ?? "?"}) carries no " +
-                $"'{KeylessProofContract.AppRoleValue}' role (roles: [{string.Join(", ", roles)}]). H3 assigns it to " +
-                "ControlPlaneIdentity:PrincipalObjectId — check that is this oid; a managed-identity token issued before the " +
-                "assignment propagated stays role-less for up to 24 hours (token cache).");
-            return;
-        }
-
-        var uri = new Uri(bffBaseUri.GetLeftPart(UriPartial.Authority) + KeylessProofContract.Route);
-        string? body = null;
-        for (var attempt = 1; ; attempt++)
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_options.KeylessProofTimeout);
-            try
-            {
-                using var call = new HttpRequestMessage(HttpMethod.Post, uri);
-                call.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-                call.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                using var response = await httpClient.SendAsync(call, timeout.Token).ConfigureAwait(false);
-
-                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                {
-                    failed.Add(CheckKeylessProof);
-                    diagnostics.Add(
-                        $"{CheckKeylessProof}: the customer BFF refused the L2 identity (HTTP {(int)response.StatusCode}). " +
-                        $"H3 assigns the L2 Worker identity the '{KeylessProofContract.AppRoleValue}' app role on the BFF " +
-                        "app registration; check that assignment and that the token audience is the BFF's.");
-                    return;
-                }
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    // No verdict on the stamp: the BFF build predates the route. Redeploy (H9), then resume.
-                    inconclusive.Add(CheckKeylessProof);
-                    diagnostics.Add(
-                        $"{CheckKeylessProof}: '{uri}' returned HTTP 404 -- the deployed BFF build has no keyless-proof route. " +
-                        "Deploy a build that contains task 230b (H9), then resume.");
-                    return;
-                }
-                if (IsTransientStatus(response.StatusCode) && attempt == 1)
-                {
-                    await Task.Delay(TransientRetryDelay, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-                if (IsTransientStatus(response.StatusCode))
-                {
-                    inconclusive.Add(CheckKeylessProof);
-                    diagnostics.Add($"{CheckKeylessProof}: '{uri}' returned HTTP {(int)response.StatusCode} after one retry.");
-                    return;
-                }
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    failed.Add(CheckKeylessProof);
-                    diagnostics.Add($"{CheckKeylessProof}: '{uri}' returned HTTP {(int)response.StatusCode}; expected 200.");
-                    return;
-                }
-
-                body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                break;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                inconclusive.Add(CheckKeylessProof);
-                diagnostics.Add($"{CheckKeylessProof}: no answer within {_options.KeylessProofTimeout} (KeylessProofTimeout).");
+            case BffCall.Failed refusal:
+                failed.Add(CheckKeylessProof);
+                diagnostics.Add(refusal.Diagnostic);
                 return;
-            }
-            catch (HttpRequestException ex) when (attempt == 1)
-            {
-                _logger.LogWarning("H13 keyless proof transport fault ({Error}); retrying once.", ex.Message);
-                await Task.Delay(TransientRetryDelay, cancellationToken).ConfigureAwait(false);
-            }
-            catch (HttpRequestException ex)
-            {
+            case BffCall.Inconclusive noVerdict:
                 inconclusive.Add(CheckKeylessProof);
-                diagnostics.Add($"{CheckKeylessProof}: transport fault after one retry: {ex.Message}");
+                diagnostics.Add(noVerdict.Diagnostic);
                 return;
-            }
         }
+        var body = ((BffCall.Ok)call).Body;
 
         IReadOnlyDictionary<string, ProofEntry> entries;
         try
@@ -432,6 +331,259 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
                 "openai-chat={Outcome} code={Code} status={Status}",
                 request.CustomerId, request.RunId, chat.Outcome, chat.Code, chat.StatusCode);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // The L2 identity's call to the customer BFF — shared by the keyless proof and the isolation census (task 260)
+    // ------------------------------------------------------------------
+
+    /// <summary>The result of one authenticated POST to the customer BFF.</summary>
+    private abstract record BffCall
+    {
+        private BffCall() { }
+
+        /// <summary>HTTP 200 with its body.</summary>
+        public sealed record Ok(string Body) : BffCall;
+
+        /// <summary>A verdict against the stamp (auth refusal, unusable app id or URL, 500, other status) — fail-closed.</summary>
+        public sealed record Failed(string Diagnostic) : BffCall;
+
+        /// <summary>No verdict (transport, timeout, throttling, gateway, a build without the route).</summary>
+        public sealed record Inconclusive(string Diagnostic) : BffCall;
+    }
+
+    /// <summary>
+    /// POSTs <paramref name="route"/> on the customer BFF as the L2 Worker identity with a token for
+    /// <c>api://{bffAppRegId}</c> — the audience the BFF validates — and classifies the answer. A privileged token never
+    /// travels over plain http; a token without the keyless-proof role is reported with its <c>oid</c>; one transient
+    /// retry; 401/403 and 500 fail; 404 (a build that predates the route) and gateway faults are inconclusive.
+    /// <paramref name="label"/> prefixes every diagnostic; <paramref name="routeTask"/> names the task whose build carries
+    /// the route.
+    /// </summary>
+    private async Task<BffCall> PostAsL2IdentityAsync(
+        HttpClient httpClient, Uri bffBaseUri, string bffAppRegId, string route, string label, string routeTask,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(bffAppRegId, out var appId) || appId == Guid.Empty)
+        {
+            return new BffCall.Failed(
+                $"{label}: BffAppRegId '{bffAppRegId}' is not an app (client) id -- H3 writes it, and " +
+                $"the {label} token is requested for api://{{BffAppRegId}}.");
+        }
+
+        // A privileged token never travels over plain http.
+        if (!string.Equals(bffBaseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return new BffCall.Failed($"{label}: BffApiUrl '{bffBaseUri}' is not https -- the L2 token is not sent over plain http.");
+        }
+
+        // The audience the BFF validates (AzureAd:ClientId / api://{clientId}); a token for the host name is not it.
+        var scope = $"api://{appId:D}/.default";
+        string bearerToken;
+        try
+        {
+            var token = await _credential
+                .GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
+                .ConfigureAwait(false);
+            bearerToken = token.Token;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // An auth failure, never a skip (task 230b).
+            return new BffCall.Failed(
+                $"{label}: the L2 identity could not get a token for '{scope}' ({ex.GetType().Name}: " +
+                $"{ex.Message}). Check H3 created the app registration with identifier URI api://{appId:D}.");
+        }
+
+        // A managed-identity token is cached for up to 24 h: one issued before H3's role assignment propagated carries no
+        // role, and every retry within that window would 403. Say so instead of a generic refusal.
+        if (TokenRoles(bearerToken) is { } roles && !roles.Contains(KeylessProofContract.AppRoleValue, StringComparer.Ordinal))
+        {
+            return new BffCall.Failed(
+                $"{label}: the L2 token for '{scope}' (oid {TokenClaim(bearerToken, "oid") ?? "?"}) carries no " +
+                $"'{KeylessProofContract.AppRoleValue}' role (roles: [{string.Join(", ", roles)}]). H3 assigns it to " +
+                "ControlPlaneIdentity:PrincipalObjectId — check that is this oid; a managed-identity token issued before the " +
+                "assignment propagated stays role-less for up to 24 hours (token cache).");
+        }
+
+        var uri = new Uri(bffBaseUri.GetLeftPart(UriPartial.Authority) + route);
+        for (var attempt = 1; ; attempt++)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_options.KeylessProofTimeout);
+            try
+            {
+                using var call = new HttpRequestMessage(HttpMethod.Post, uri);
+                call.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                call.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                using var response = await httpClient.SendAsync(call, timeout.Token).ConfigureAwait(false);
+
+                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    return new BffCall.Failed(
+                        $"{label}: the customer BFF refused the L2 identity (HTTP {(int)response.StatusCode}). " +
+                        $"H3 assigns the L2 Worker identity the '{KeylessProofContract.AppRoleValue}' app role on the BFF " +
+                        "app registration; check that assignment and that the token audience is the BFF's.");
+                }
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    // No verdict on the stamp: the BFF build predates the route. Redeploy (H9), then resume.
+                    return new BffCall.Inconclusive(
+                        $"{label}: '{uri}' returned HTTP 404 -- the deployed BFF build has no {label} route. " +
+                        $"Deploy a build that contains task {routeTask} (H9), then resume.");
+                }
+                if (IsTransientStatus(response.StatusCode) && attempt == 1)
+                {
+                    await Task.Delay(TransientRetryDelay, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+                if (IsTransientStatus(response.StatusCode))
+                {
+                    return new BffCall.Inconclusive($"{label}: '{uri}' returned HTTP {(int)response.StatusCode} after one retry.");
+                }
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    return new BffCall.Failed($"{label}: '{uri}' returned HTTP {(int)response.StatusCode}; expected 200.");
+                }
+
+                return new BffCall.Ok(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return new BffCall.Inconclusive($"{label}: no answer within {_options.KeylessProofTimeout} (KeylessProofTimeout).");
+            }
+            catch (HttpRequestException ex) when (attempt == 1)
+            {
+                _logger.LogWarning("H13 {Label} transport fault ({Error}); retrying once.", label, ex.Message);
+                await Task.Delay(TransientRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                return new BffCall.Inconclusive($"{label}: transport fault after one retry: {ex.Message}");
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Secure-record isolation census (task 260, ISS-014)
+    // ------------------------------------------------------------------
+
+    /// <summary>Findings carried into run state at most; the rest are counted (the BFF logs every one).</summary>
+    internal const int MaxReportedFindings = 20;
+
+    /// <summary>Characters kept per finding message — enough for the principal and the remedy.</summary>
+    internal const int MaxReportedFindingLength = 400;
+
+    /// <inheritdoc/>
+    public async Task<SecureIsolationCensusOutcome> RunSecureIsolationCensusAsync(
+        E2EValidationRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var bffApiUrl = request.BffApiUrl?.TrimEnd('/') ?? string.Empty;
+        if (!Uri.TryCreate(bffApiUrl, UriKind.Absolute, out var bffBaseUri) || !AllowedSchemes.Contains(bffBaseUri.Scheme))
+        {
+            return new SecureIsolationCensusOutcome.Failed(
+                $"{CheckSecureIsolationCensus}: BffApiUrl '{request.BffApiUrl}' is not a valid http(s) absolute URL -- " +
+                "cannot call the census.");
+        }
+
+        var call = await PostAsL2IdentityAsync(
+            _httpClientFactory.CreateClient(HttpClientName), bffBaseUri, request.BffAppRegId,
+            KeylessProofContract.SecureRecordIsolationCensus.Route, CheckSecureIsolationCensus, routeTask: "260",
+            cancellationToken).ConfigureAwait(false);
+
+        var outcome = call switch
+        {
+            BffCall.Failed refusal => new SecureIsolationCensusOutcome.Failed(refusal.Diagnostic),
+            BffCall.Inconclusive noVerdict => new SecureIsolationCensusOutcome.Inconclusive(noVerdict.Diagnostic),
+            BffCall.Ok ok => ParseCensus(ok.Body),
+            _ => throw new InvalidOperationException($"Unhandled BFF call result {call.GetType().Name}."),
+        };
+
+        _logger.Log(
+            outcome is SecureIsolationCensusOutcome.Isolated ? LogLevel.Information : LogLevel.Warning,
+            "H13 secure-record isolation census: customerId={CustomerId} runId={RunId} outcome={Outcome}",
+            request.CustomerId, request.RunId, outcome.GetType().Name);
+        return outcome;
+    }
+
+    /// <summary>
+    /// Parses <c>{"status","verdict","findings":[{"verdict","message"}]}</c>. Anything this build cannot read — a missing
+    /// status, an unknown status, <c>isolated</c> with findings — fails closed.
+    /// </summary>
+    internal static SecureIsolationCensusOutcome ParseCensus(string? body)
+    {
+        string status;
+        string verdict;
+        List<string> findings;
+        int findingCount;
+        try
+        {
+            using var doc = JsonDocument.Parse(body ?? string.Empty);
+            var root = doc.RootElement;
+            status = Sanitize(root.GetProperty("status").GetString());
+            verdict = root.TryGetProperty("verdict", out var v) && v.ValueKind == JsonValueKind.String ? Sanitize(v.GetString()) : string.Empty;
+            findings = new List<string>();
+            findingCount = 0;
+            if (root.TryGetProperty("findings", out var list) && list.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in list.EnumerateArray())
+                {
+                    findingCount++;
+                    if (findings.Count >= MaxReportedFindings)
+                    {
+                        continue;
+                    }
+                    var findingVerdict = item.TryGetProperty("verdict", out var fv) && fv.ValueKind == JsonValueKind.String
+                        ? Sanitize(fv.GetString()) : "?";
+                    var message = item.TryGetProperty("message", out var fm) && fm.ValueKind == JsonValueKind.String
+                        ? SanitizeText(fm.GetString(), MaxReportedFindingLength) : string.Empty;
+                    findings.Add($"{findingVerdict}: {message}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return new SecureIsolationCensusOutcome.Failed(
+                $"{CheckSecureIsolationCensus}: the BFF's answer is not the census shape ({ex.GetType().Name}).");
+        }
+
+        if (findingCount > findings.Count)
+        {
+            findings.Add($"(+{findingCount - findings.Count} more -- every finding is a [SECURE-CENSUS] line in the BFF's log)");
+        }
+
+        switch (status)
+        {
+            case KeylessProofContract.SecureRecordIsolationCensus.Isolated when findingCount == 0:
+                return new SecureIsolationCensusOutcome.Isolated();
+            case KeylessProofContract.SecureRecordIsolationCensus.Isolated:
+                return new SecureIsolationCensusOutcome.Failed(
+                    $"{CheckSecureIsolationCensus}: the BFF reported 'isolated' with {findingCount} finding(s) -- an " +
+                    "inconsistent answer is never a pass.");
+            case KeylessProofContract.SecureRecordIsolationCensus.Findings:
+            case KeylessProofContract.SecureRecordIsolationCensus.Inert:
+                return new SecureIsolationCensusOutcome.NotIsolated(status, verdict, findings);
+            case KeylessProofContract.SecureRecordIsolationCensus.Error:
+                return new SecureIsolationCensusOutcome.Inconclusive(
+                    $"{CheckSecureIsolationCensus}: the BFF could not read the census (status 'error') -- isolation is " +
+                    "unknown. The BFF's log has the cause ([SECURE-CENSUS] acceptance call); resume once it is cleared.");
+            default:
+                return new SecureIsolationCensusOutcome.Failed(
+                    $"{CheckSecureIsolationCensus}: unknown census status '{status}' -- fail-closed.");
+        }
+    }
+
+    /// <summary>Free text from the BFF into run state: control characters become spaces, then capped.</summary>
+    private static string SanitizeText(string? value, int maxLength)
+    {
+        var text = new string((value ?? string.Empty).Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray()).Trim();
+        return text.Length <= maxLength ? text : text[..maxLength] + "...";
     }
 
     private sealed record ProofEntry(string Outcome, string Code, int? StatusCode);

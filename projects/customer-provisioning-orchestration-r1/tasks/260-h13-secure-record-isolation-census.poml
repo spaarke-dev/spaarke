@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="260" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H13 requires the BFF's secure-record isolation census: a read-only POST /api/platform/secure-record-isolation-census behind the keyless-proof filter (ISS-014 / #1527)</title>
+    <phase>Model 1 dedicated-stamp remediation — T186 blocker (ISS-014)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF route (auth surface) + the final acceptance gate; a wrong verdict lets a run reach Ready with secure records readable by every guest (F1, tenant isolation).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>auth + tenant-isolation; Dataverse BU/role-depth semantics.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, auth, tenant-isolation, provisioning-handler, testing</tags>
+    <deps>259, 230b</deps>
+  </metadata>
+
+  <prompt>Build ISS-014 (notes/defer-issues.md, GitHub #1527). Owner approved the recommended fix on 2026-10-09.</prompt>
+
+  <goal>A provisioning run cannot reach Ready unless the stamp BFF's secure-record isolation census — the same evaluator the
+  15-minute scheduled job runs — says `isolated`. H13 reaches the census as the L2 Worker identity through the existing
+  keyless-proof authorization (no new app role, no H3 change).</goal>
+
+  <context>
+    <background>
+      T259 built the customer business-unit topology (T1/T3/T5) but could not build its step 5: the census exists only as the
+      BFF scheduled job `secure-record-isolation-census`, reachable through the admin job routes behind the "SystemAdmin"
+      policy, and a stamp's BFF registration defines only the L2-only app role `Provisioning.KeylessProof`. ISS-014's
+      recommendation (approved): a synchronous read-only route beside the keyless proof, behind the same filter, returning
+      the job's result shape from the SAME code; H13 calls it with the keyless proof's token acquisition and fails unless
+      `isolated`.
+    </background>
+    <relevant-files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/defer-issues.md (ISS-014)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ExternalAccess/SecureRecordIsolationCensusJob.cs (census read + evaluation to extract)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs (the evaluator — unchanged)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/KeylessProofAuthorizationFilter.cs (reused as is)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Platform/KeylessProofEndpoints.cs (reference route — copy its shape)</file>
+      <file>src/server/shared/Contracts/KeylessProofContract.cs (source-linked BFF/L2 contract — add the census route + statuses)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs (reference: token acquisition + call shape for the keyless proof — reuse exactly)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs + H13RejectionCodes.cs</file>
+      <file>tests/integration/contract/Api/Platform/KeylessProofEndpointContractTests.cs (reference endpoint auth tests)</file>
+      <file>tests/integration/auth/UnifiedAccessControl/SecureRecordIsolationCensusJobTests.cs</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md ("run the census by hand" interim text)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Reuse KeylessProofAuthorizationFilter exactly: no new app role, no H3 change.</constraint>
+    <constraint source="ISS-014">One evaluator: the job and the route run the same census read + SecureBuRoleDepthAssertion.Evaluate; no duplicated logic.</constraint>
+    <constraint source="ISS-014">The route writes nothing and returns only what the job's ResultJson already carries (status, verdict, findings{verdict,message}) — no record data.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement decision stated; publish-size delta vs a fresh master build; no new package / HIGH CVE.</constraint>
+    <constraint source="CLAUDE.md §9">Every endpoint requires auth: 401 without a token, 403 for a token without the role, 200 for the keyless-proof caller.</constraint>
+    <constraint source="live">No live action (no Azure/Dataverse/Graph writes, no deploys).</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/**: proposed .claude edits are returned verbatim.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">BFF: extract the job's census read + evaluation into one shared runner (SecureRecordIsolationCensus) that returns {status, verdict, findings}; the job keeps its schedule, logging, heartbeat and retry semantics by calling it.</step>
+    <step order="2">BFF: map POST /api/platform/secure-record-isolation-census beside the keyless proof — RequireAuthorization + AddKeylessProofAuthorizationFilter + a rate limit; synchronous; bounded by a timeout; 200 with {status, verdict, findings}; a census read failure → 200 status=error (no exception text).</step>
+    <step order="3">Contract: add the route and the four statuses to KeylessProofContract (source-linked into both deployables).</step>
+    <step order="4">H13: after the existing live checks, call the census with the keyless proof's token (same credential, same audience, https only, one transient retry). Fail unless `isolated`: findings → QuarantineRequired `h13-secure-isolation-not-isolated` (findings in the diagnostic); inert → QuarantineRequired `h13-secure-isolation-inert`; error / transport / 404 → Resumable `h13-secure-isolation-inconclusive`; 401/403 / bad shape → QuarantineRequired via the not-isolated code family (`h13-secure-isolation-refused`).</step>
+    <step order="5">Tests: BFF unit tests (shared runner statuses; job unchanged), endpoint contract tests (401 / 403 / 200 / filter on the route); L2 unit tests (runner parse + every status; H13 decision incl. negatives). Docs: deployment guide (remove "run the census by hand"); ISS-014 → Resolved.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/platform/secure-record-isolation-census without a token → 401; with a delegated or role-less token → 403; with an app-only token of this tenant + audience holding Provisioning.KeylessProof → 200.</criterion>
+    <criterion testable="true">The route and the scheduled job produce the same status for the same census (one shared method; job tests still pass).</criterion>
+    <criterion testable="true">The response carries only status, verdict and findings (verdict + message) — no record ids beyond those the job's ResultJson already carries.</criterion>
+    <criterion testable="true">H13 transitions to Ready only when the census returns `isolated`; `findings` and `inert` quarantine; `error` / transport / timeout are Resumable; 401/403 quarantine.</criterion>
+    <criterion testable="true">Negative: H13 never calls the census over plain http and never sends the token when BffAppRegId is not a GUID.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln 0 errors / 0 warnings; BFF unit tests + ControlPlane tests + Spaarke.ArchTests pass; BFF publish-size delta measured.</criterion>
+  </acceptance-criteria>
+  <notes>
+  </notes>
+</task>

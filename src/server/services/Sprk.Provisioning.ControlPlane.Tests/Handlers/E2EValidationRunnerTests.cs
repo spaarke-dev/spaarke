@@ -382,6 +382,205 @@ public sealed class E2EValidationRunnerTests
         credential.RequestedScopes.Should().BeEmpty();
     }
 
+    // -----------------------------------------------------------------------
+    // Task 260 (ISS-014): the secure-record isolation census — same identity and call path as the keyless proof; only
+    // `isolated` passes.
+    // -----------------------------------------------------------------------
+
+    private static bool IsCensus(HttpRequestMessage req) => PathIs(req, KeylessProofContract.SecureRecordIsolationCensus.Route);
+
+    private static FakeBffHttpMessageHandler CensusAnswers(string body)
+        => new(req => IsCensus(req) ? Json(body) : throw new InvalidOperationException($"unexpected call {req.RequestUri}"));
+
+    [Fact]
+    public async Task Census_Isolated_IsIsolated_AndIsAnAuthenticatedPostForTheBffAudience()
+    {
+        var credential = new FakeTokenCredential();
+        var handler = CensusAnswers("{\"status\":\"isolated\",\"verdict\":\"Isolated\",\"findings\":[]}");
+
+        var outcome = await BuildRunner(handler, credential).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Isolated>();
+        credential.RequestedScopes.Should().Equal($"api://{BffAppRegId}/.default");
+        var call = handler.Requests.Single();
+        call.Url.Should().Be(BffApiUrl + KeylessProofContract.SecureRecordIsolationCensus.Route);
+        call.Method.Should().Be(HttpMethod.Post);
+        call.AuthorizationScheme.Should().Be("Bearer");
+        call.AuthorizationParameter.Should().Be(FakeTokenCredential.TokenValue);
+    }
+
+    [Fact]
+    public async Task Census_Findings_IsNotIsolated_CarryingEachFinding()
+    {
+        var handler = CensusAnswers(
+            "{\"status\":\"findings\",\"verdict\":\"SecureBusinessUnitHasUsers\",\"findings\":["
+            + "{\"verdict\":\"SecureBusinessUnitHasUsers\",\"message\":\"'Moved Attorney' sits in the Secure Record unit.\"},"
+            + "{\"verdict\":\"HumanPrincipalReachesSecureBusinessUnit\",\"message\":\"'Root Paralegal' holds Deep.\"}]}");
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        var notIsolated = outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>().Subject;
+        notIsolated.Status.Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Findings);
+        notIsolated.Verdict.Should().Be("SecureBusinessUnitHasUsers");
+        notIsolated.Findings.Should().Equal(
+            "SecureBusinessUnitHasUsers: 'Moved Attorney' sits in the Secure Record unit.",
+            "HumanPrincipalReachesSecureBusinessUnit: 'Root Paralegal' holds Deep.");
+    }
+
+    [Fact]
+    public async Task Census_Inert_IsNotIsolated_NeverAPass()
+    {
+        var handler = CensusAnswers(
+            "{\"status\":\"inert\",\"verdict\":\"SecureBusinessUnitNotFound\",\"findings\":[{\"verdict\":\"SecureBusinessUnitNotFound\",\"message\":\"Secure Record BU not found\"}]}");
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>()
+            .Which.Status.Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Inert);
+    }
+
+    [Fact]
+    public async Task Census_Error_IsInconclusive()
+    {
+        var handler = CensusAnswers("{\"status\":\"error\",\"verdict\":\"unknown\",\"findings\":[]}");
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("isolation is unknown");
+    }
+
+    [Theory]
+    [InlineData("{\"status\":\"clean\",\"findings\":[]}")]                                        // unknown status
+    [InlineData("{\"verdict\":\"Isolated\",\"findings\":[]}")]                                    // no status
+    [InlineData("<html>gateway</html>")]                                                          // not JSON
+    [InlineData("{\"status\":\"isolated\",\"findings\":[{\"verdict\":\"X\",\"message\":\"y\"}]}")] // isolated WITH findings
+    [InlineData("{\"status\":\"ISOLATED\",\"findings\":[]}")]                                     // statuses are exact
+    public async Task Census_AnAnswerThisBuildCannotRead_FailsClosed(string body)
+    {
+        var outcome = await BuildRunner(CensusAnswers(body)).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Census_BffRefusesTheL2Identity_Fails_NeverASkip(HttpStatusCode status)
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(status));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain(KeylessProofContract.AppRoleValue).And.Contain(E2EValidationRunner.CheckSecureIsolationCensus);
+    }
+
+    [Fact]
+    public async Task Census_ABffBuildWithoutTheRoute_404_IsInconclusive_NamingTask260()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("404").And.Contain("260");
+    }
+
+    [Fact]
+    public async Task Census_ABffError500_Fails()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+    }
+
+    [Fact]
+    public async Task Census_Transient503ThenIsolated_RetriesOnce()
+    {
+        var calls = 0;
+        var handler = new FakeBffHttpMessageHandler(_ => ++calls == 1
+            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            : Json("{\"status\":\"isolated\",\"verdict\":\"Isolated\",\"findings\":[]}"));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Isolated>();
+        calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Census_TransientTwice_IsInconclusive()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.GatewayTimeout));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>();
+    }
+
+    [Fact]
+    public async Task Census_PlainHttpBff_NeverSendsTheToken_AndFails()
+    {
+        var credential = new FakeTokenCredential();
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, credential)
+            .RunSecureIsolationCensusAsync(BuildRequest(bffApiUrl: "http://bff-acme.azurewebsites.net"), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>().Which.Diagnostic.Should().Contain("not https");
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task Census_BffAppRegIdNotAnAppId_Fails_AndNoTokenIsRequested(string bffAppRegId)
+    {
+        var credential = new FakeTokenCredential();
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, credential)
+            .RunSecureIsolationCensusAsync(BuildRequest(bffAppRegId: bffAppRegId), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Census_ATokenWithoutTheRole_Fails_WithoutCallingTheBff()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"roles\":[\"Other.Role\"]}") + ".";
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, new FakeTokenCredential(jwt))
+            .RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>().Which.Diagnostic.Should().Contain("carries no");
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseCensus_ControlCharactersAreNeutralised_LongMessagesCapped_AndExtraFindingsCounted()
+    {
+        var findings = Enumerable.Range(1, E2EValidationRunner.MaxReportedFindings + 3)
+            .Select(i => $"{{\"verdict\":\"SecureBusinessUnitHasUsers\",\"message\":\"user {i}\\r\\nInjected: line{new string('x', 600)}\"}}");
+        var body = "{\"status\":\"findings\",\"verdict\":\"SecureBusinessUnitHasUsers\",\"findings\":[" + string.Join(",", findings) + "]}";
+
+        var outcome = E2EValidationRunner.ParseCensus(body);
+
+        var notIsolated = outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>().Subject;
+        notIsolated.Findings.Should().HaveCount(E2EValidationRunner.MaxReportedFindings + 1);
+        notIsolated.Findings.Take(E2EValidationRunner.MaxReportedFindings).Should().OnlyContain(f =>
+            !f.Any(char.IsControl) && f.Length <= "SecureBusinessUnitHasUsers: ".Length + E2EValidationRunner.MaxReportedFindingLength + 3);
+        notIsolated.Findings.Last().Should().Contain("+3 more");
+    }
+
     [Theory]
     [InlineData("refused", "http-403")]
     [InlineData("key-credential", "key-configured:AzureOpenAI:ApiKey")]

@@ -1,6 +1,5 @@
 using System.Text.Json;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Contracts.Provisioning;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -20,7 +19,8 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///
 /// <para><b>What it checks</b> — exactly the NFR-05 standing assertion, through the SAME evaluator and census
 /// composition the manual gate uses (<see cref="SecureBuRoleDepthAssertion"/>,
-/// <see cref="SecureBuRoleDepthCensusBuilder"/>): role-depth reach into the secure BU (clause 1); the named owner team
+/// <see cref="SecureBuRoleDepthCensusBuilder"/>), read through <see cref="SecureRecordIsolationCensus"/> — the one census
+/// the provisioning acceptance route also runs (task 260): role-depth reach into the secure BU (clause 1); the named owner team
 /// resolves and has no members of any kind (2); the owner role is held by that team alone (3); the BU holds no
 /// systemusers of any kind (4); the owner role holds Read at User depth on every table of the codified set,
 /// <c>config/secure-record-owner-role.json</c> (5, task 145). Every exposure finding is logged at
@@ -49,19 +49,10 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
     /// <summary>Every 15 minutes. Short, because each run bounds how long a Change-BU into the secure BU goes unseen.</summary>
     internal const string DefaultCronSchedule = "*/15 * * * *";
 
-    /// <summary>Rows per page of each census read.</summary>
-    internal const int PageSize = 5000;
-
-    /// <summary>
-    /// Page ceiling per read — 100,000 rows. Past it the census is INCOMPLETE and the run throws: a census that stopped
-    /// early could omit the one principal that reaches the secure BU and report isolation.
-    /// </summary>
-    internal const int MaxPages = 20;
-
-    internal const string StatusIsolated = "isolated";
-    internal const string StatusFindings = "findings";
-    internal const string StatusInert = "inert";
-    internal const string StatusError = "error";
+    // Paging (PageSize / MaxPages), the census read and the status mapping live in SecureRecordIsolationCensus (task
+    // 260): the provisioning acceptance route runs the same census synchronously.
+    internal const string StatusIsolated = KeylessProofContract.SecureRecordIsolationCensus.Isolated;
+    internal const string StatusError = KeylessProofContract.SecureRecordIsolationCensus.Error;
 
     // The Dataverse seam is resolved per run from a scope, as the sibling jobs do (GrantExpiryReminderJob,
     // ExternalAccessReconciliationJob): constructing the job — which the scheduler's registry does at startup — then
@@ -110,9 +101,9 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
         {
             using var scope = _scopeFactory.CreateScope();
             var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
-            var census = await ReadCensusAsync(dataverse, cancellationToken).ConfigureAwait(false);
-            outcome = SecureBuRoleDepthAssertion.Evaluate(census);
-            status = outcome.Passed ? StatusIsolated : outcome.IsInert ? StatusInert : StatusFindings;
+            outcome = await SecureRecordIsolationCensus.EvaluateAsync(dataverse, _configuration, cancellationToken)
+                .ConfigureAwait(false);
+            status = SecureRecordIsolationCensus.StatusOf(outcome);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -182,144 +173,4 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                 attempt = context.Attempt
             }));
     }
-
-    // =====================================================================================================
-    // Census reader — SDK, paged, read-only. Every failure throws; nothing degrades to "empty".
-    // =====================================================================================================
-
-    /// <summary>Reads the directory and composes the census through the shared builder.</summary>
-    private async Task<SecureBuRoleDepthCensus> ReadCensusAsync(IGenericEntityService dataverse, CancellationToken ct)
-    {
-        var secureBuName = SecureRecordOwnerTeam.BusinessUnitName(_configuration);
-        var ownerTeamName = SecureRecordOwnerTeam.OwnerTeamName(_configuration);
-
-        var businessUnits = (await RetrieveAllAsync(dataverse,
-                Query("businessunit", "businessunitid", "name", "parentbusinessunitid"), ct))
-            .Select(row => new BusinessUnitNode(
-                row.Id,
-                row.GetAttributeValue<string>("name") ?? string.Empty,
-                OptionalGuid(row, "parentbusinessunitid")))
-            .ToArray();
-
-        // The guarded root-table Reads (clause 1) plus every privilege of the codified owner-role set (clause 5, task
-        // 145) — read from the ONE list compiled into this assembly.
-        var ownerRoleSet = SecureRecordOwnerRoleSet.Embedded;
-        var privilegeNames = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(ownerRoleSet);
-
-        var privilegeQuery = Query("privilege", "privilegeid", "name");
-        privilegeQuery.Criteria.AddCondition("name", ConditionOperator.In, privilegeNames.Cast<object>().ToArray());
-        var privileges = (await RetrieveAllAsync(dataverse,privilegeQuery, ct))
-            .ToDictionary(row => row.Id, row => row.GetAttributeValue<string>("name") ?? string.Empty);
-
-        SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(privileges.Values.ToArray());
-
-        var depthQuery = Query("roleprivileges", "roleid", "privilegeid", "privilegedepthmask");
-        depthQuery.Criteria.AddCondition("privilegeid", ConditionOperator.In, privileges.Keys.Cast<object>().ToArray());
-        var depthByRootRole = new Dictionary<(Guid RootRoleId, string Privilege), PrivilegeDepth>();
-        foreach (var row in await RetrieveAllAsync(dataverse,depthQuery, ct))
-        {
-            depthByRootRole[(RequiredGuid(row, "roleid"), privileges[RequiredGuid(row, "privilegeid")])] =
-                (PrivilegeDepth)row.GetAttributeValue<int>("privilegedepthmask");
-        }
-
-        var roles = (await RetrieveAllAsync(dataverse,Query("role", "roleid", "name", "businessunitid", "parentrootroleid"), ct))
-            .Select(row => new CensusRole(
-                row.Id,
-                row.GetAttributeValue<string>("name") ?? string.Empty,
-                RequiredGuid(row, "businessunitid"),
-                OptionalGuid(row, "parentrootroleid") ?? row.Id))
-            .ToArray();
-
-        var userRoles = Group(await RetrieveAllAsync(dataverse,Query("systemuserroles", "systemuserid", "roleid"), ct),
-            "systemuserid", "roleid");
-
-        var users = (await RetrieveAllAsync(dataverse,
-                Query("systemuser", "systemuserid", "fullname", "domainname", "accessmode", "applicationid",
-                    "isdisabled", "businessunitid"), ct))
-            .Select(row =>
-            {
-                var name = row.GetAttributeValue<string>("fullname") ?? string.Empty;
-                var isHuman = SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
-                    hasApplicationId: OptionalGuid(row, "applicationid") is { } appId && appId != Guid.Empty,
-                    isDisabled: row.GetAttributeValue<bool>("isdisabled"),
-                    fullName: name,
-                    accessMode: row.GetAttributeValue<OptionSetValue>("accessmode")?.Value ?? 0);
-
-                return new CensusUser(
-                    row.Id, name, row.GetAttributeValue<string>("domainname"), isHuman,
-                    OptionalGuid(row, "businessunitid"),
-                    userRoles.TryGetValue(row.Id, out var ids) ? ids : Array.Empty<Guid>());
-            })
-            .ToArray();
-
-        var teamRoles = Group(await RetrieveAllAsync(dataverse,Query("teamroles", "teamid", "roleid"), ct), "teamid", "roleid");
-        var teamMembers = Group(await RetrieveAllAsync(dataverse,Query("teammembership", "teamid", "systemuserid"), ct),
-            "teamid", "systemuserid");
-
-        var teams = (await RetrieveAllAsync(dataverse,
-                Query("team", "teamid", "name", "isdefault", "teamtype", "businessunitid"), ct))
-            .Select(row => new CensusTeam(
-                row.Id,
-                row.GetAttributeValue<string>("name") ?? string.Empty,
-                RequiredGuid(row, "businessunitid"),
-                row.GetAttributeValue<bool>("isdefault"),
-                row.GetAttributeValue<OptionSetValue>("teamtype")?.Value ?? -1,
-                teamRoles.TryGetValue(row.Id, out var roleIds) ? roleIds : Array.Empty<Guid>(),
-                teamMembers.TryGetValue(row.Id, out var memberIds) ? memberIds : Array.Empty<Guid>()))
-            .ToArray();
-
-        return SecureBuRoleDepthCensusBuilder.Build(
-            secureBuName, ownerTeamName, businessUnits, depthByRootRole, roles, users, teams, ownerRoleSet,
-            privileges.Values.ToArray());
-    }
-
-    private static QueryExpression Query(string entity, params string[] columns) =>
-        new(entity) { ColumnSet = new ColumnSet(columns), NoLock = true };
-
-    /// <summary>Every page of a query, or a throw — a truncated census is never graded.</summary>
-    private static async Task<List<Entity>> RetrieveAllAsync(
-        IGenericEntityService dataverse, QueryExpression query, CancellationToken ct)
-    {
-        var rows = new List<Entity>();
-        query.PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 };
-
-        for (var page = 1; page <= MaxPages; page++)
-        {
-            var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            rows.AddRange(result.Entities);
-
-            if (!result.MoreRecords)
-            {
-                return rows;
-            }
-
-            query.PageInfo.PageNumber++;
-            query.PageInfo.PagingCookie = result.PagingCookie;
-        }
-
-        throw new InvalidOperationException(
-            $"The census read of '{query.EntityName}' still had rows after {MaxPages} pages of {PageSize}; it is " +
-            "INCOMPLETE and will not be graded.");
-    }
-
-    private static Dictionary<Guid, IReadOnlyList<Guid>> Group(IEnumerable<Entity> rows, string keyColumn, string valueColumn) =>
-        rows.GroupBy(row => RequiredGuid(row, keyColumn))
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<Guid>)g.Select(row => RequiredGuid(row, valueColumn)).ToArray());
-
-    /// <summary>A GUID column that may arrive as a Guid (intersect tables) or an EntityReference (lookups).</summary>
-    private static Guid? OptionalGuid(Entity row, string column) =>
-        row.Attributes.TryGetValue(column, out var value)
-            ? value switch
-            {
-                Guid id => id,
-                EntityReference reference => reference.Id,
-                _ => null
-            }
-            : null;
-
-    private static Guid RequiredGuid(Entity row, string column) =>
-        OptionalGuid(row, column) is { } id && id != Guid.Empty
-            ? id
-            : throw new InvalidOperationException(
-                $"The census expected a GUID in '{row.LogicalName}.{column}' but the row did not carry one.");
 }

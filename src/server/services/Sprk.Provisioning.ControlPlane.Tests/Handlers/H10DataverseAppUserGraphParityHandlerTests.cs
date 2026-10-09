@@ -127,17 +127,17 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         // auth-v4 §10.4 (punch row A41) — the UAMI row's azureactivedirectoryobjectid
         // MUST be the UAMI's principalId (UamiObjectId), NEVER its clientId.
         var uamiRequest = creator.Requests.Should().ContainSingle(r => r.ApplicationId == UamiClientId).Subject;
-        uamiRequest.AzureActiveDirectoryObjectId.Should().Be(UamiObjectId,
+        uamiRequest.SystemUserAzureActiveDirectoryObjectId.Should().Be(UamiObjectId,
             "the UAMI row's azureactivedirectoryobjectid MUST be the principalId — the auth-v4 §10.4 " +
             "silent-fail trap fires when this is set to the clientId instead");
-        uamiRequest.AzureActiveDirectoryObjectId.Should().NotBe(UamiClientId,
+        uamiRequest.SystemUserAzureActiveDirectoryObjectId.Should().NotBe(UamiClientId,
             "NEVER the clientId — this is the exact trap auth-v4 calls its 'single most-missed item'");
 
         // The BFF app-reg row deliberately does NOT set an explicit
         // azureactivedirectoryobjectid — Dataverse's applicationid-only
         // auto-resolution is reliable for a standard app registration.
         var bffRequest = creator.Requests.Should().ContainSingle(r => r.ApplicationId == BffAppRegId).Subject;
-        bffRequest.AzureActiveDirectoryObjectId.Should().BeNull();
+        bffRequest.SystemUserAzureActiveDirectoryObjectId.Should().BeNull();
 
         verifier.CallCount.Should().Be(1);
         verifier.LastApplicationId.Should().Be(UamiClientId, "T2 verifies the UAMI specifically");

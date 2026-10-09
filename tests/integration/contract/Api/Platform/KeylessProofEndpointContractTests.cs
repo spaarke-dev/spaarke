@@ -135,6 +135,12 @@ public sealed class KeylessProofHost : WebApplicationFactory<Program>
         new KeylessProbeResult(KeylessProofContract.Services.ContentSafetyGroundedness, KeylessProofContract.Outcomes.Proved, 200, 8, "ok"),
     };
 
+    /// <summary>
+    /// The Dataverse seam (<c>IGenericEntityService</c> resolves to it). Task 260's census tests answer its reads; every
+    /// other call it records proves the census route wrote nothing.
+    /// </summary>
+    public Mock<IDataverseService> Dataverse { get; } = new();
+
     public HttpClient Caller(string? roles = null, string? scope = null, string? idtyp = null, string? audience = null)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
@@ -249,10 +255,9 @@ public sealed class KeylessProofHost : WebApplicationFactory<Program>
 
             services.RemoveAll<IHostedService>();
 
-            var dataverse = new Mock<IDataverseService>();
-            dataverse.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            Dataverse.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
-            services.AddSingleton(dataverse.Object);
+            services.AddSingleton(Dataverse.Object);
 
             // The module boundary: the AI-owned probes call Azure.
             var aiProbe = new Mock<IAiKeylessProbe>();
