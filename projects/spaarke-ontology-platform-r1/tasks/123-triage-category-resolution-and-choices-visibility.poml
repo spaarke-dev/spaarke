@@ -4,7 +4,7 @@
     <title>ISS-010 + ISS-002: triage category resolution honours enabled/active (#1387); every $choices degrade path is counted and logged as an error (#1049) — on this branch</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code (.cs) on the classification path the whole ontology rests on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -60,6 +60,8 @@
 
   <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Closes #1387 and #1049 when this branch merges (put "Closes #1387, #1049" in PR #1111's body).
 2026-10-09 D-106: scope narrowed to ISS-010 (#1387, classifier input). ISS-002 (#1049) deferred to the issues list.</notes>
+
+  <completion>COMPLETED 2026-10-09 (ISS-010 / #1387 part only, scope narrowed by D-106): PR #1526 merged into docs/ontology-platform-design (10b19b90e) after independent review (approved, no F-class). Triage category resolution (both queries in ResolveTriageCategoryIdAsync) uses LookupChoicesResolver.AddOfferedRowPredicate (statecode = 0 + sprk_enabled) from the same table as the $choices offer; 7 seam tests (4 fail on the old code). ISS-002 / #1049 deferred (F-29). D-106 items: F-41. Task 073 must use the same predicate.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
