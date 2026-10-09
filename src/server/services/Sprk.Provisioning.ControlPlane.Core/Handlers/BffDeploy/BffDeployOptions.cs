@@ -44,25 +44,9 @@ public sealed class BffDeployOptions
     // were DELETED — they served the retired Deploy-BffApi.ps1 / az shell-outs (task 132); nothing read them, and the
     // Worker host has no pwsh or az.
 
-    /// <summary>
-    /// Absolute path to <c>scripts/Deploy-Release.ps1</c>. Read by the H9
-    /// handler's <c>spaarkedev1</c>-regression pre-flight scan (Gap 2 /
-    /// FR-28 / §4D I1 assertion — per POML criterion 5, deploy MUST fail if
-    /// Phase 4's post-Phase-B hardening has been regressed to include a
-    /// hardcoded <c>spaarkedev1</c> literal).
-    /// </summary>
-    public string DeployReleaseScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "Deploy-Release.ps1");
-
-    /// <summary>
-    /// Absolute path to the BFF publish zip used to measure the deploy-artifact
-    /// compressed size (the metric spec.md NFR-01 tracks — 44.96 MB baseline
-    /// 2026-08-13, ≤60 MB hard ceiling, ≥+5 MB single-task delta forces
-    /// escalation). Defaults to <c>deploy/api-publish.zip</c> relative to
-    /// <see cref="AppContext.BaseDirectory"/> (Deploy-BffApi.ps1 default).
-    /// </summary>
-    public string BffPublishZipPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "deploy", "api-publish.zip");
+    // DeployReleaseScriptPath and BffPublishZipPath were DELETED (task 253 follow-up, 2026-10-09): the first fed a scan
+    // of a script H9 never runs and the Worker never carries; the second was never read (H9 measures the zip it
+    // downloads from the artifact store).
 
     /// <summary>
     /// Baseline compressed publish size in bytes for NFR-01 delta computation.

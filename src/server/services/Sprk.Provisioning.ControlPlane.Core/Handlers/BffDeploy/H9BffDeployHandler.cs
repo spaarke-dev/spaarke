@@ -386,21 +386,10 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
             }
         }
 
-        // (4) Gap 2 assertion — spaarkedev1-hardcode pre-flight scan on the
-        //     shipped Deploy-Release.ps1 script. Task 013 hardened Phase 4
-        //     to be customerId-driven; a regression MUST NOT silently
-        //     proceed to production. POML acceptance criterion 5. Unrelated
-        //     to task 132's re-scope (Deploy-Release.ps1 is a different,
-        //     broader release-orchestration script than the retired
-        //     Deploy-BffApi.ps1-shelling collaborators) — left unchanged.
-        var hardcodeScanResult = ScanForSpaarkedev1Hardcode();
-        if (hardcodeScanResult is not null)
-        {
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                BffDeployRejectionCodes.Spaarkedev1HardcodeDetected,
-                hardcodeScanResult,
-                cancellationToken).ConfigureAwait(false);
-        }
+        // (4) The Gap 2 spaarkedev1-hardcode scan of Deploy-Release.ps1 was REMOVED by task 253's follow-up
+        //     (2026-10-09): H9 never runs that script, and the Worker publish does not carry it, so on every live
+        //     run the scan logged "not present — skipped" and checked nothing. Deploy-Release.ps1's own hardening
+        //     (task 013) and its review are the guard.
 
         // (5) Artifact manifest resolve + verify (task 132, DS-4 §5 items 1+2
         //     — replaces the old r3-era shell-out gate verification). Hard
@@ -817,55 +806,6 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         => run.CompletedPhases.Any(cp =>
             string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
             && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal));
-
-    /// <summary>
-    /// Scans <see cref="BffDeployOptions.DeployReleaseScriptPath"/> for the
-    /// literal <c>spaarkedev1</c>. Returns a non-null diagnostic string when
-    /// the regression is detected; null when the script is clean OR when the
-    /// script simply is not present at the configured path (tolerant of
-    /// wave-C4 publish layouts that ship without scripts/Deploy-Release.ps1).
-    ///
-    /// Path A rationale (per CLAUDE.md §6.5): the shipped Deploy-Release.ps1
-    /// was hardened in task 013 (Phase 4 customerId-driven, -CustomerId
-    /// Mandatory, no spaarkedev1 fallback). This scan is a
-    /// defense-in-depth guard against a regression — task 013's hardening
-    /// is the primary defense; this handler-side scan is the secondary
-    /// belt-and-braces one. Internal so unit tests can override the scan
-    /// target via BffDeployOptions.DeployReleaseScriptPath fixtures.
-    /// UNCHANGED by task 132 — orthogonal to the artifact-based re-scope.
-    /// </summary>
-    internal string? ScanForSpaarkedev1Hardcode()
-    {
-        var scriptPath = _options.DeployReleaseScriptPath;
-        if (!File.Exists(scriptPath))
-        {
-            _logger.LogInformation(
-                "H9 Gap 2 assertion — Deploy-Release.ps1 not present at '{Path}' — scan skipped " +
-                "(task 013's script-level hardening is the primary defense).", scriptPath);
-            return null;
-        }
-
-        try
-        {
-            var content = File.ReadAllText(scriptPath);
-            if (content.Contains("spaarkedev1", StringComparison.Ordinal))
-            {
-                return
-                    $"Deploy-Release.ps1 at '{scriptPath}' contains a hardcoded 'spaarkedev1' literal — " +
-                    "task 013's Phase 4 hardening has been REGRESSED (spec.md §4D I1 / FR-28 no-hardcoded-tenant + " +
-                    "POML criterion 5). Deploy BLOCKED before any external side effect. Restore the customerId-driven " +
-                    "Phase 4 code path OR run the deploy against a script whose scan passes.";
-            }
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "H9 Gap 2 assertion — could not read Deploy-Release.ps1 at '{Path}' — scan skipped " +
-                "(script-level hardening is the primary defense).", scriptPath);
-            return null;
-        }
-    }
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters,
