@@ -140,6 +140,23 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         stored!.Disposition.Should().Be("notification");
     }
 
+    [Fact]
+    public async Task DispatchAsync_NotificationDisposition_LlmPriorityOutsideTheLiveSet_ThrowsLoud_AfterLedgerStore()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync();
+        h.GivenBinding(BindingDisposition.Notification, SelectionInputSchema);
+        h.GivenFlatTextAction("ROLE: Draft the notification.", NotificationOutputSchema);
+        // 300000000 is not an appnotification priority option; Dataverse would reject the create.
+        h.OpenAi.RawJsonToReturn =
+            "{\"notification\":{\"title\":\"t\",\"body\":\"b\",\"recipientId\":\"" + RecipientId + "\",\"priority\":300000000}}";
+
+        Func<Task> act = () => h.DispatchToCompletionAsync(new { selectionText = "x" });
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*300000000*");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull("the ledger write precedes the routing leg (ADR-040)");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // (3) Loud failure when the routed payload carries NO `notification` envelope — the router's own
     //     STRUCTURE validation (mirrors DeliverEmailAsync's missing-`email`-envelope check).
@@ -200,6 +217,9 @@ public sealed class DispositionRoutabilityNotificationSeamTests
                         return new CreateNotificationResult(false, null, false, "title is required");
                     if (string.IsNullOrWhiteSpace(req.Body))
                         return new CreateNotificationResult(false, null, false, "body is required");
+                    var invalid = Sprk.Bff.Api.Services.AppNotificationOptions.Validate(req.Priority, req.ToastType);
+                    if (invalid is not null)
+                        return new CreateNotificationResult(false, null, false, invalid);
                     return new CreateNotificationResult(true, CreatedNotificationId, false, null);
                 });
 

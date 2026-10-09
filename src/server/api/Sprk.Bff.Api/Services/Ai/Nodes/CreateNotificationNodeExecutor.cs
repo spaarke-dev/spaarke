@@ -44,13 +44,13 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// <summary>
     /// Default priority for notifications when not specified in config (Normal = 200000000).
     /// </summary>
-    private const int DefaultPriority = 200_000_000;
+    private const int DefaultPriority = Sprk.Bff.Api.Services.AppNotificationOptions.Priority.Normal;
 
     /// <summary>
     /// Dataverse <c>toasttype</c> option-set default value ("Timed") — visible toast that auto-dismisses.
     /// Used when no explicit ToastType is supplied in config.
     /// </summary>
-    private const int DefaultToastType = 200_000_000;
+    private const int DefaultToastType = Sprk.Bff.Api.Services.AppNotificationOptions.ToastType.Timed;
 
     private readonly ITemplateEngine _templateEngine;
     private readonly IGenericEntityService _entityService;

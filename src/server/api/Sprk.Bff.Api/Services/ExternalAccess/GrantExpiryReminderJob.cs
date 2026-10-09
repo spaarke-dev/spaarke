@@ -527,9 +527,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     /// <summary>
     /// Whether another attempt in this run could plausibly succeed. A Dataverse fault that is not throttling is a
     /// rejection (privilege, validation) and is permanent; timeouts, network failures, throttling and anything
-    /// unrecognised are treated as transient — a retry costs seconds, a lost last-day reminder costs the warning.
+    /// unrecognised are treated as transient (an <see cref="ArgumentException"/> is not: it is a defect in the request) — a retry costs seconds, a lost last-day reminder costs the warning.
     /// </summary>
-    private static bool IsTransient(Exception ex)
+    internal static bool IsTransient(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
@@ -539,6 +539,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                     return true;
                 case FaultException<OrganizationServiceFault> fault:
                     return ThrottlingErrorCodes.Contains(fault.Detail?.ErrorCode ?? 0);
+                // A value the writer built wrongly (an option outside the table's set) fails the same way every time.
+                case ArgumentException:
+                    return false;
             }
         }
 

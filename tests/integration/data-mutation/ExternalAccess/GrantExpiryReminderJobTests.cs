@@ -128,6 +128,16 @@ public class GrantExpiryReminderJobTests
             "the reminders inside the final week are High, the earlier ones Normal");
     }
 
+    [Fact]
+    public void IsTransient_AnArgumentException_IsNotRetried_ButAnUnknownFaultStillIs()
+    {
+        // A request the writer built wrongly (an option outside the table's set) fails identically on every attempt.
+        GrantExpiryReminderJob.IsTransient(new ArgumentOutOfRangeException("priority")).Should().BeFalse();
+        GrantExpiryReminderJob.IsTransient(new InvalidOperationException("wrapped", new ArgumentException("bad"))).Should().BeFalse();
+        GrantExpiryReminderJob.IsTransient(new InvalidOperationException("unrecognised")).Should().BeTrue();
+        GrantExpiryReminderJob.IsTransient(new TimeoutException()).Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(31)]
     [InlineData(45)]
