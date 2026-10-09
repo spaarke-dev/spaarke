@@ -3,7 +3,7 @@
   <metadata>
     <title>Customer management group + common policy (G36, ADR-027): `spaarke-customers` under `spaarke-environments`, Audit-only built-in policy, PRQ-S-06 membership check</title>
     <phase>Model 1 dedicated-stamp remediation — G36 (ADR-027 "MUST use Azure Management Groups for common policy across customer subscriptions")</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant-level governance IaC (management groups, policy assignments, subscription moves); a wrong effect or scope can block deployments in every customer subscription.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,5 +115,6 @@
     LIVE STEP (main session, owner-approved): see the task report — elevate/assign Contributor at "/", run -Apply,
     verify, remove the temporary Contributor; then the skill token edit must be applied BEFORE the next
     /provision-environment run (Step 1e-ter HARD STOPs on the unresolved {customerManagementGroupId} otherwise).
+    <note date="2026-10-09">Applied live with owner OK: temporary Contributor at "/" for the operator (role assignment e59bad73, created via ARM REST because `az role assignment create --scope /` fails with MissingSubscription), `Deploy-ManagementGroups.ps1 -Apply` (spaarke-environments → spaarke-customers; 9 assignments at spaarke-customers; demo → spaarke-customers, dev + shared prod → spaarke-environments; all read back), then the grant was deleted and re-verified (only User Access Administrator remains at "/").</note>
   </notes>
 </task>
