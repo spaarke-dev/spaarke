@@ -70,3 +70,9 @@ RunAsUserWritesThatFileNothing).
   timeout after the create keeps the revision id; a real caller cancel still propagates.
 - Known limits, not fixed (D-106): preflight does not check AppendTo on the caller's own contact for `RescheduledBy`/`ReassignedBy`; a Secure-matter revision is
   mirrored to sharees only by the reconcile job (up to ~2 min).
+
+## 6. Round 4
+
+The writer's create gets an id chosen by the executor (`revision.Id = Guid.NewGuid()` before the call), uses the base class cancellation filter, and on a timeout,
+transport failure or 5xx returns `Failed` with `PossiblyWritten=[revision]`. A service fault or 4xx Dataverse answered (`FaultException<OrganizationServiceFault>`, or a
+`DataverseOperationException` wrapping a 4xx) is a clear refusal and names nothing. Limit: an unclassified exception type counts as "no answer".

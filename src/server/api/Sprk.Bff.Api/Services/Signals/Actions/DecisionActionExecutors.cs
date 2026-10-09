@@ -431,19 +431,25 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
 
         plan.Owner.ApplyTo(revision); // the resolver's own writer of ownerid: the owned team, never the writer's business unit
 
-        Guid revisionId;
-        try
-        {
-            revisionId = await _writer.CreateAsync(revision, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "[decision-action] revise-budget: the writer could not create the revision for budget {BudgetId}.", plan.BudgetId);
-            return DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The budget revision could not be recorded; the budget was not changed.");
-        }
-
+        // The id is chosen HERE, before the create is sent, so a create that times out after Dataverse committed it can still be
+        // named (the SDK honours a supplied primary id).
+        var revisionId = Guid.NewGuid();
+        revision.Id = revisionId;
         var revisionRef = new DecisionRecordRef(RevisionEntity, revisionId);
         var budgetRef = new DecisionRecordRef(BudgetEntity, plan.BudgetId);
+        try
+        {
+            await _writer.CreateAsync(revision, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[decision-action] revise-budget: the writer's create of revision {RevisionId} for budget {BudgetId} did not complete cleanly.", revisionId, plan.BudgetId);
+            return IsClearRefusal(ex)
+                ? DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, "The budget revision could not be recorded; the budget was not changed.")
+                : DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed,
+                    $"The budget revision ({revisionId:D}) did not confirm; it may have been recorded. The budget was not changed.",
+                    possiblyWritten: [revisionRef]);
+        }
 
         // The new AMOUNT is the signed-in user's write (D-55). If it is refused, STOP and report the revision id.
         DataverseUserResponse patch;
@@ -478,6 +484,12 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
 
         return DecisionActionOutcome.Done(Code, revisionRef, budgetRef);
     }
+
+    /// <summary>True when Dataverse ANSWERED with a refusal (a service fault, or a 4xx): nothing was written. A timeout, a transport
+    /// failure or a 5xx is not an answer, so the row may exist.</summary>
+    private static bool IsClearRefusal(Exception ex) =>
+        ex is System.ServiceModel.FaultException<OrganizationServiceFault>
+        || (ex is Microsoft.PowerPlatform.Dataverse.Client.Utils.DataverseOperationException { InnerException: Microsoft.Rest.HttpOperationException { Response.StatusCode: >= System.Net.HttpStatusCode.BadRequest and < System.Net.HttpStatusCode.InternalServerError } });
 
     /// <summary>Every refusal, no write: parameters, matter, Write on the budget, the budget as the caller on this matter, the
     /// caller's systemuserid, and the owner the revision will have.</summary>

@@ -130,17 +130,26 @@ public class DecisionActionExecutorsTests
     {
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
         public List<Entity> Created { get; } = new();
-        public Guid RevisionId { get; } = Guid.Parse("88888888-0000-0000-0000-000000000001");
+
+        /// <summary>Every create the executor SENT, including ones the fake then failed.</summary>
+        public List<Entity> Attempted { get; } = new();
+
+        /// <summary>The id the executor chose for the revision (it is supplied on the create, so it is known even when the create fails).</summary>
+        public Guid RevisionId => Attempted.Single().Id;
+
         public bool Throw { get; set; }
+        public Exception? ThrowWith { get; set; }
 
         public OntologyWriterDataverseClient Build()
         {
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Returns<Entity, CancellationToken>((e, _) =>
                 {
+                    Attempted.Add(e);
+                    if (ThrowWith is not null) throw ThrowWith;
                     if (Throw) throw new InvalidOperationException("writer refused");
                     Created.Add(e);
-                    return Task.FromResult(RevisionId);
+                    return Task.FromResult(e.Id);
                 });
             return new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
         }
@@ -277,6 +286,7 @@ public class DecisionActionExecutorsTests
         outcome.Status.Should().Be(DecisionActionStatus.Failed);
         outcome.Written.Should().BeEmpty();
         user.Patches.Should().BeEmpty("the amount follows the revision, never precedes it");
+        outcome.PossiblyWritten.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
     }
 
     [Theory]
@@ -1370,5 +1380,74 @@ public class DecisionActionExecutorsTests
         created.Written.Should().BeEmpty();
         created.PossiblyWritten.Should().BeEmpty();
         await Task.CompletedTask;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Round 4: the writer's create may have committed even when it throws
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReviseBudget_TheCreateIsSentWithAnIdTheExecutorChose()
+    {
+        var writer = new WriterHarness();
+        var outcome = await new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        writer.Attempted.Single().Id.Should().NotBe(Guid.Empty);
+        outcome.Written.Should().Contain(new DecisionRecordRef("sprk_budgetrevision", writer.Attempted.Single().Id));
+    }
+
+    public static IEnumerable<object[]> UnansweredCreateFaults() =>
+    [
+        [new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout")],
+        [new TimeoutException("timed out")],
+        [new HttpRequestException("503 Service Unavailable", null, System.Net.HttpStatusCode.ServiceUnavailable)],
+    ];
+
+    [Theory]
+    [MemberData(nameof(UnansweredCreateFaults))]
+    public async Task ReviseBudget_ACreateThatGetsNoAnswer_NamesTheRevisionAsPossiblyWritten_AndPatchesNothing(Exception fault)
+    {
+        var writer = new WriterHarness { ThrowWith = fault };
+        var user = BudgetUser(MatterId);
+
+        var outcome = await new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.Written.Should().BeEmpty();
+        outcome.PossiblyWritten.Should().Equal(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId));
+        user.Patches.Should().BeEmpty("the amount is never written when the revision is unconfirmed");
+    }
+
+    [Fact]
+    public async Task ReviseBudget_ACreateTheServiceRefuses_WritesNothing_AndNamesNothing()
+    {
+        var writer = new WriterHarness
+        {
+            ThrowWith = new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { Message = "AppendTo denied" }),
+        };
+        var user = BudgetUser(MatterId);
+
+        var outcome = await new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.Written.Should().BeEmpty();
+        outcome.PossiblyWritten.Should().BeEmpty("a refusal Dataverse answered wrote nothing");
+        user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviseBudget_TheCallerCancellingTheCreate_StillPropagates()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var writer = new WriterHarness { ThrowWith = new OperationCanceledException(cts.Token) };
+
+        var act = () => new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }
