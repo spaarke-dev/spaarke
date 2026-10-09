@@ -125,6 +125,7 @@ public static class CommunicationModule
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.PolicyActionRateService>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryReplyTodoCreator>();
         // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
         // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
         services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());

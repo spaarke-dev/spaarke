@@ -265,6 +265,12 @@ public partial class RouteAuthorizationGuardTests
             + "the closed action catalog. The record-level decision is SignalCoreRecordAccess.AuthorizeAsync, asked AS THE CALLER "
             + "through IDataverseUserClient (the Signal row, then its core record of any type; a no-core Signal is owner-only in "
             + "the Do lane, D-35): no read is the uniform 404, an unresolved caller the single 403 (D-29)."),
+        new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
+            + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
+            + "serviceRequestId): no Read is the uniform 404, Read without Write a 403; every write then runs AS THE CALLER "
+            + "(IDataverseUserClient, version-conditional), so Dataverse enforces Write a second time. The reply is read as the "
+            + "caller and must be Incoming and filed against the inquiry named."),
         new GovernedFile("Api/FieldMappings/FieldMappingEndpoints.cs", Scope.RouteLevelGate,
             "field-mapping configuration reads, type validation, and the push route: Read on the source as the caller, children "
             + "read and written impersonated (task 166; sweep S-67)."),
@@ -697,7 +703,12 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/v1/signals/{signalId:guid}/decision-plan. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions
     // below. Ontology task 036 owns only these three ledger edits (this count, one GovernedFiles entry, one
     // HandlerDecision); other ontology routes (038, 043, 044, 046 ...) add their own and the main session reconciles.
-    private const int ExpectedEndpointFileCount = 119;
+    //
+    // 119 -> 120 (2026-10-09, spaarke-ontology-platform-r1 task 071). Net +1: Api/InquiryEndpoints.cs ADDED -- POST
+    // /api/v1/inquiries/{serviceRequestId:guid}/disposition. Classified by GovernedFiles (RouteLevelGate); its record-level
+    // decision is the already-credited fixed-entity-set form of RecordRouteAccessAuthorizationFilter. The main session
+    // reconciles the count with the other ontology routes at integration.
+    private const int ExpectedEndpointFileCount = 120;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

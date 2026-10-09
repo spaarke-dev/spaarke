@@ -187,6 +187,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TaskActionCore.cs", "sprk_event", 1, Disposition.Routed,
             "AI create-task: ForChild over the stamped parents; the caller-supplied owner no longer owns a filed task "
             + "(B2: the assignee belongs in Assigned To, task 152)."),
+        new CensusEntry("InquiryReplyTodoCreator.cs", "sprk_todo", 1, Disposition.Routed,
+            "Ontology task 071 (D-111): the \"Record the outcome of the budget inquiry\" To Do raised when a reply arrives: ForChild "
+            + "over the matter it is filed against (secure-if-any); the person it is for is Assigned To (task 152's rule); a "
+            + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
         new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
@@ -419,6 +423,8 @@ public class RecordOwnerAssignmentCensusTests
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
+        new OwnerWriteEntry("InquiryReplyTodoCreator.cs", "CreateIfNeededAsync", 1, OwnerWriteKind.Routed,
+            "The budget-inquiry outcome To Do (ontology 071) - ForChild over its matter, the resolver's team; nothing is created on a refusal."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
@@ -1384,6 +1390,9 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+        ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
+                                           + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
+                                           + "is written, so nothing is created or re-filed.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
     };

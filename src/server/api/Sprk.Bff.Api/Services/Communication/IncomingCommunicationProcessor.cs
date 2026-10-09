@@ -433,6 +433,24 @@ public sealed class IncomingCommunicationProcessor
             await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, ct);
         }
 
+        // ── Step 4.9: a reply to a budget inquiry raises its "Record the outcome" To Do (ontology task 071 / D-111) ──
+        // After association (4.5): the reply carries sprk_regardingservicerequest only once the ladder has linked it. The
+        // creator is scoped, so it is resolved per message; it never throws (a failure must not fail email capture) and is
+        // idempotent per service request.
+        try
+        {
+            using var inquiryScope = _scopeFactory.CreateScope();
+            var inquiryTodo = inquiryScope.ServiceProvider
+                .GetService<Sprk.Bff.Api.Services.Signals.Actions.InquiryReplyTodoCreator>();
+            if (inquiryTodo is not null)
+                await inquiryTodo.OnReplyArrivedAsync(communicationId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Inquiry outcome To Do failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
+        }
+
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).

@@ -242,6 +242,8 @@ public static class EndpointMappingExtensions
         // re-filed in the browser (G5). UNCONDITIONAL (bff-extensions.md §F.1): IDataverseUserClient, IRecordOwnershipResolver,
         // IFieldMappingDataverseService and CoreAncestorRestamper are all registered unconditionally.
         app.MapChildRecordEndpoints();
+        // Ontology task 071 (D-111): a person records how a budget inquiry turned out (write as the caller, record-level filter).
+        app.MapInquiryEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

@@ -1,7 +1,5 @@
-using System.Data;
 using System.Globalization;
 using System.Text.Json;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Signals.Actions;
@@ -19,24 +17,35 @@ public enum InquiryDisposition
     NoAction = 100000003,
 }
 
-/// <summary>How a reply's attempt to resolve its Inquiry ended.</summary>
+/// <summary>How recording an Inquiry's disposition ended.</summary>
 public enum InquiryResolutionOutcome
 {
     /// <summary>The Inquiry now carries the disposition and is closed.</summary>
     Resolved,
-    /// <summary>Nothing written: the communication is missing, is not inbound, or is not filed against a service request.</summary>
+    /// <summary>Nothing written: the reply or the service request is missing, or the caller cannot read it (one answer for both).</summary>
+    NotFound,
+    /// <summary>Nothing written: the communication is not an inbound (Incoming) reply.</summary>
     NotAReply,
-    /// <summary>Nothing written: the service request is missing or is not an Outbound inquiry.</summary>
+    /// <summary>Nothing written: the reply is filed against a different service request than the one named.</summary>
+    ReplyNotForInquiry,
+    /// <summary>Nothing written: the service request is not an outbound inquiry.</summary>
     NotAnInquiry,
-    /// <summary>Nothing written: the Inquiry already has a disposition (the first reply wins; a later reply never overwrites it).</summary>
+    /// <summary>Nothing written: the Inquiry already has a disposition or is closed (the first one wins).</summary>
     AlreadyResolved,
     /// <summary>Nothing written: the request is malformed (empty id, or a disposition that is not one of the four).</summary>
     Invalid,
-    /// <summary>Dataverse failed; the Inquiry is unchanged.</summary>
+    /// <summary>Dataverse refused the caller's write (they lack Write on the service request).</summary>
+    Denied,
+    /// <summary>Dataverse failed, or the row's version could not be read; the Inquiry is unchanged.</summary>
     Failed,
 }
 
-public sealed record InquiryResolutionResult(InquiryResolutionOutcome Outcome, Guid? ServiceRequestId = null, string? Error = null)
+/// <param name="Outcome">How it ended.</param>
+/// <param name="ServiceRequestId">The Inquiry, when one was identified.</param>
+/// <param name="Error">A caller-safe reason for any outcome but Resolved.</param>
+/// <param name="TodoCompleted">The "Record the outcome" To Do was found and completed (false when there was none, or it could not be completed; the log says which).</param>
+public sealed record InquiryResolutionResult(
+    InquiryResolutionOutcome Outcome, Guid? ServiceRequestId = null, string? Error = null, bool TodoCompleted = false)
 {
     public bool Succeeded => Outcome == InquiryResolutionOutcome.Resolved;
 }
@@ -67,89 +76,162 @@ public sealed record DispositionTally(int WriteOff, int BudgetRevised, int Scope
 public sealed record FirmDispositionTally(Guid? FirmId, DispositionTally Dispositions);
 
 /// <summary>
-/// Task 071 (spec FR-37, criterion 10): a reply resolves its Inquiry with a typed disposition, and the dispositions are
-/// queryable per matter and per outside firm. Both are derived from existing relationships on
+/// Task 071 (spec FR-37, criterion 10; decision D-111): a human records how the Inquiry turned out, and the dispositions
+/// are queryable per matter and per outside firm. Both are derived from existing relationships on
 /// <c>sprk_servicerequest</c> (<c>sprk_regardingmatter</c>, <c>sprk_regardingorganization</c>, written by the Inquiry
 /// executor, task 070): no denormalised column was added.
 /// </summary>
 /// <remarks>
-/// <para><b>Resolution is an application write</b> (an inbound email has no calling user): it is update-only and, when the
-/// row's <c>versionnumber</c> is known, conditional on it, so two replies racing for the same Inquiry cannot both win.
-/// The reply is tied to the Inquiry through the association ladder: the Inquiry email's primary association is the
-/// service request (task 070), so a reply carries <c>sprk_communication.sprk_regardingservicerequest</c>.</para>
-/// <para><b>The disposition value is an input.</b> Nothing in R1 reads a reply's text to choose it (ADR-013: no AI in the
-/// executor path); the caller (the reviewing human, or a later classifier) supplies it.</para>
-/// <para><b>Queries run as the caller</b> (<see cref="IDataverseUserClient"/>): a user sees the tallies of the Inquiries
-/// they may read, nothing more. They are server-side aggregates, so there is no paging to truncate.</para>
+/// <para><b>Recording is written AS THE CALLER</b> (<see cref="IDataverseUserClient"/>): Dataverse enforces Write on the
+/// service request itself, so there is no application-identity write path. The PATCH is conditional on the row's
+/// <c>versionnumber</c> (If-Match), so two people recording at once cannot both win; on a 412 the row is re-read once and
+/// the write retried only if the disposition is still empty. The reply is tied to the Inquiry through the association
+/// ladder: the Inquiry email's primary association is the service request (task 070), so a reply carries
+/// <c>sprk_communication.sprk_regardingservicerequest</c>, which must equal the Inquiry named.</para>
+/// <para>The human's choice counts as confirming a Suggested association of the reply. The "Record the outcome" To Do
+/// (<see cref="InquiryReplyTodoCreator"/>) is completed in the same call.</para>
+/// <para><b>Tallies run as the caller</b>: a user sees the tallies of the Inquiries they may read, nothing more. They are
+/// server-side aggregates, so there is no paging to truncate.</para>
 /// </remarks>
 public sealed class InquiryDispositionService(
-    IFieldMappingDataverseService appOnly,
     IDataverseUserClient user,
+    TimeProvider clock,
     ILogger<InquiryDispositionService> logger)
 {
     internal const string ServiceRequest = "sprk_servicerequest";
-    internal const string Communication = "sprk_communication";
     /// <summary>sprk_communication.sprk_direction: Incoming.</summary>
     internal const int CommunicationIncoming = 100000000;
+    /// <summary>sprk_communication.sprk_associationstatus: Suggested / Resolved.</summary>
+    internal const int AssociationSuggested = 100000003;
+    internal const int AssociationResolved = 100000000;
     internal const int StateInactive = 1;
     internal const int StatusInactive = 2;
+    /// <summary>sprk_todo.statuscode Completed (State Inactive).</summary>
+    internal const int TodoStatusCompleted = 2;
 
     /// <summary>
-    /// The inbound reply <paramref name="replyCommunicationId"/> resolves the Inquiry it is filed against with
-    /// <paramref name="disposition"/>: sets <c>sprk_disposition</c> and closes the service request.
+    /// Records <paramref name="disposition"/> on the Inquiry <paramref name="serviceRequestId"/> because of the inbound
+    /// <paramref name="replyCommunicationId"/>: sets <c>sprk_disposition</c> and closes the service request, completes the
+    /// "Record the outcome" To Do and confirms a Suggested association of the reply.
     /// </summary>
-    public async Task<InquiryResolutionResult> ResolveFromReplyAsync(
-        Guid replyCommunicationId, InquiryDisposition disposition, CancellationToken ct)
+    public async Task<InquiryResolutionResult> RecordDispositionAsync(
+        Guid serviceRequestId, Guid replyCommunicationId, int disposition, CancellationToken ct)
     {
-        if (replyCommunicationId == Guid.Empty || !Enum.IsDefined(disposition))
-            return new(InquiryResolutionOutcome.Invalid, Error: "A reply and one of the four dispositions are required.");
+        if (serviceRequestId == Guid.Empty || replyCommunicationId == Guid.Empty || !Enum.IsDefined(typeof(InquiryDisposition), disposition))
+            return new(InquiryResolutionOutcome.Invalid, Error: "An inquiry, its reply and one of the four dispositions are required.");
 
-        try
+        var reply = await user.GetAsync(
+            $"sprk_communications({replyCommunicationId:D})?$select=sprk_direction,_sprk_regardingservicerequest_value,sprk_associationstatus", ct)
+            .ConfigureAwait(false);
+        if (!reply.IsSuccess)
+            return FailureOfRead(reply, "The reply could not be read.");
+
+        if (ReadLong(reply.Body, "sprk_direction") != CommunicationIncoming)
+            return new(InquiryResolutionOutcome.NotAReply, Error: "The communication is not an inbound reply.");
+        if (ReadGuid(reply.Body, "_sprk_regardingservicerequest_value") != serviceRequestId)
+            return new(InquiryResolutionOutcome.ReplyNotForInquiry, Error: "The reply is not filed against this inquiry.");
+
+        // One re-read after a 412: the write is retried only if the disposition is STILL empty.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            var reply = await appOnly.RetrieveRecordFieldsAsync(
-                Communication, replyCommunicationId, ["sprk_direction", "_sprk_regardingservicerequest_value"], ct).ConfigureAwait(false);
+            var row = await user.GetAsync(
+                $"sprk_servicerequests({serviceRequestId:D})?$select=sprk_direction,sprk_disposition,statecode,versionnumber", ct)
+                .ConfigureAwait(false);
+            if (!row.IsSuccess)
+                return FailureOfRead(row, "The inquiry could not be read.");
 
-            if (reply.Count == 0 || AsLong(reply, "sprk_direction") != CommunicationIncoming
-                || AsGuid(reply, "_sprk_regardingservicerequest_value") is not { } serviceRequestId)
-                return new(InquiryResolutionOutcome.NotAReply, Error: "The communication is not an inbound reply to a service request.");
-
-            var inquiry = await appOnly.RetrieveRecordFieldsAsync(
-                ServiceRequest, serviceRequestId, ["sprk_direction", "sprk_disposition", "versionnumber"], ct).ConfigureAwait(false);
-
-            if (inquiry.Count == 0 || AsLong(inquiry, "sprk_direction") != BudgetInquiryExecutor.DirectionOutbound)
+            if (ReadLong(row.Body, "sprk_direction") != BudgetInquiryExecutor.DirectionOutbound)
                 return new(InquiryResolutionOutcome.NotAnInquiry, serviceRequestId, "The service request is not an outbound inquiry.");
-
-            if (AsLong(inquiry, "sprk_disposition") is not null)
+            if (ReadLong(row.Body, "sprk_disposition") is not null || ReadLong(row.Body, "statecode") == StateInactive)
                 return new(InquiryResolutionOutcome.AlreadyResolved, serviceRequestId, "The inquiry already has a disposition.");
-
-            var fields = new Dictionary<string, object?>
+            if (ReadLong(row.Body, "versionnumber") is not { } version)
             {
-                ["sprk_disposition"] = (int)disposition,
+                logger.LogWarning("Inquiry not resolved: the row's versionnumber was not returned | ServiceRequestId: {Id}", serviceRequestId);
+                return new(InquiryResolutionOutcome.Failed, serviceRequestId, "The inquiry's version could not be read; nothing was written.");
+            }
+
+            var body = JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["sprk_disposition"] = disposition,
                 ["statecode"] = StateInactive,
                 ["statuscode"] = StatusInactive,
-            };
+            });
+            var patch = await user.PatchAsync($"sprk_servicerequests({serviceRequestId:D})", body, version, ct).ConfigureAwait(false);
 
-            if (AsLong(inquiry, "versionnumber") is { } version)
-                await appOnly.UpdateRecordFieldsIfUnchangedAsync(ServiceRequest, serviceRequestId, fields, version, ct).ConfigureAwait(false);
-            else
-                await appOnly.UpdateExistingRecordFieldsAsync(ServiceRequest, serviceRequestId, fields, ct).ConfigureAwait(false);
+            if (patch.IsSuccess)
+            {
+                var todoCompleted = await CompleteTodoAsync(serviceRequestId, ct).ConfigureAwait(false);
+                await ConfirmSuggestedAssociationAsync(replyCommunicationId, ReadLong(reply.Body, "sprk_associationstatus"), ct).ConfigureAwait(false);
+                return new(InquiryResolutionOutcome.Resolved, serviceRequestId, TodoCompleted: todoCompleted);
+            }
 
-            return new(InquiryResolutionOutcome.Resolved, serviceRequestId);
+            if (patch.StatusCode == 412 && attempt == 0)
+                continue;
+            if (patch.StatusCode == 412)
+                return new(InquiryResolutionOutcome.AlreadyResolved, serviceRequestId, "The inquiry changed while it was being recorded.");
+
+            return patch.StatusCode == 403
+                ? new(InquiryResolutionOutcome.Denied, serviceRequestId, "You do not have permission to record this disposition.")
+                : new(InquiryResolutionOutcome.Failed, serviceRequestId, "The disposition could not be recorded.");
         }
-        catch (DBConcurrencyException)
-        {
-            return new(InquiryResolutionOutcome.AlreadyResolved, Error: "Another reply resolved the inquiry first.");
-        }
-        catch (KeyNotFoundException)
-        {
-            return new(InquiryResolutionOutcome.NotAnInquiry, Error: "The service request no longer exists.");
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Inquiry not resolved | ReplyCommunicationId: {ReplyId}", replyCommunicationId);
-            return new(InquiryResolutionOutcome.Failed, Error: "The inquiry could not be resolved.");
-        }
+
+        return new(InquiryResolutionOutcome.Failed, serviceRequestId, "The disposition could not be recorded.");
     }
+
+    /// <summary>
+    /// The deterministic id of an Inquiry's "Record the outcome" To Do: the same Inquiry always yields the same id, which
+    /// makes creating it idempotent (a second create is a duplicate key) and finding it to complete it a lookup by id.
+    /// </summary>
+    internal static Guid TodoIdFor(Guid serviceRequestId)
+    {
+        var hash = System.Security.Cryptography.MD5.HashData(
+            System.Text.Encoding.UTF8.GetBytes("inquiry-outcome-todo:" + serviceRequestId.ToString("D")));
+        return new Guid(hash);
+    }
+
+    private async Task<bool> CompleteTodoAsync(Guid serviceRequestId, CancellationToken ct)
+    {
+        var body = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["statecode"] = StateInactive,
+            ["statuscode"] = TodoStatusCompleted,
+            ["sprk_completedon"] = clock.GetUtcNow().UtcDateTime,
+        });
+        var response = await user.PatchAsync($"sprk_todos({TodoIdFor(serviceRequestId):D})", body, ct).ConfigureAwait(false);
+        if (response.IsSuccess)
+            return true;
+
+        // 404 is "there is no such To Do" (no reply raised one, or it was removed): nothing to complete. Anything else is
+        // reported in the log; the disposition is already recorded and stands.
+        if (response.StatusCode != 404)
+            logger.LogWarning("Inquiry outcome To Do not completed ({Status}) | ServiceRequestId: {Id}", response.StatusCode, serviceRequestId);
+        return false;
+    }
+
+    private async Task ConfirmSuggestedAssociationAsync(Guid replyCommunicationId, long? status, CancellationToken ct)
+    {
+        if (status != AssociationSuggested)
+            return;
+
+        var body = JsonSerializer.Serialize(new Dictionary<string, object> { ["sprk_associationstatus"] = AssociationResolved });
+        var response = await user.PatchAsync($"sprk_communications({replyCommunicationId:D})", body, ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+            logger.LogWarning("Reply association not confirmed ({Status}) | CommunicationId: {Id}", response.StatusCode, replyCommunicationId);
+    }
+
+    /// <summary>A read the caller could not do: a missing row and one they may not read get the SAME answer.</summary>
+    private static InquiryResolutionResult FailureOfRead(DataverseUserResponse response, string message) =>
+        response.StatusCode is 403 or 404
+            ? new(InquiryResolutionOutcome.NotFound, Error: "Not found.")
+            : new(InquiryResolutionOutcome.Failed, Error: message);
+
+    private static long? ReadLong(JsonElement? body, string name) =>
+        body is { } b && b.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var l) ? l : null;
+
+    private static Guid? ReadGuid(JsonElement? body, string name) =>
+        body is { } b && b.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g) ? g : null;
+
+    // ---- accrual: queryable per matter and per outside firm ------------------------------------------------------
 
     /// <summary>Every resolved Inquiry on <paramref name="matterId"/>, by disposition.</summary>
     public async Task<DispositionTally> GetByMatterAsync(Guid matterId, CancellationToken ct)
@@ -221,10 +303,4 @@ public sealed class InquiryDispositionService(
 
     internal static Guid? AsGuid(JsonElement row, string name) =>
         row.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g) ? g : null;
-
-    private static long? AsLong(Dictionary<string, object?> fields, string name) =>
-        fields.TryGetValue(name, out var v) && v is not null ? Convert.ToInt64(v, CultureInfo.InvariantCulture) : null;
-
-    private static Guid? AsGuid(Dictionary<string, object?> fields, string name) =>
-        fields.TryGetValue(name, out var v) && v is string s && Guid.TryParse(s, out var g) ? g : null;
 }
