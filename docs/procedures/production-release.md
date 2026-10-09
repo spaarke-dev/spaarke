@@ -489,6 +489,10 @@ Reference data scripts are idempotent (safe to re-run every release):
 
 ```powershell
 # Playbook definitions (7 notification playbooks with nodes and relationships)
+# Creates an absent playbook; SYNCS an existing one's nodes in place by node name (never delete-and-recreate),
+# then reads every node back and fails on any difference. -DryRun previews; -RecordPath <dir> saves before/after JSON.
+# Run only AFTER the BFF containing the ISS-018 fix (#1452) is deployed (Phase 2): the playbooks' FetchXML now needs the
+# fetchInGuids helper (corrected 2026-10-08, ISS-018 #1452).
 .\scripts\Deploy-NotificationPlaybooks.ps1 `
     -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
 

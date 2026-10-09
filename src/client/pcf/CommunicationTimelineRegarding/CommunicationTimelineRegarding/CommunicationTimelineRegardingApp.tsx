@@ -27,7 +27,7 @@ import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid, getX
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveRegardingContext } from './hostContext';
-import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against newer React
 // types, whose FC return type is incompatible with React 16's JSX element
@@ -126,7 +126,7 @@ export const CommunicationTimelineRegardingApp: React.FC<ICommunicationTimelineR
           }
           return;
         }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
         if (cancelled) return;
         setBffBaseUrl(baseUrl);
         setAuthReady(true);

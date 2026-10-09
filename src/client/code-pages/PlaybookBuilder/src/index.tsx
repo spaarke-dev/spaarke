@@ -30,6 +30,7 @@ import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
+import { setAuthRuntimeConfig } from './services/authInit';
 import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components';
 import { App } from './App';
 
@@ -75,9 +76,12 @@ async function bootstrap(): Promise<void> {
   const runtimeConfig = await resolveRuntimeConfig();
 
   // Set window globals so @spaarke/auth resolveConfig() can pick them up
-  // when initAuth() is called later during authentication
+  // when initAuth() is called later during authentication. The BFF URL global is
+  // __SPAARKE_BFF_URL__ (what the library reads); __SPAARKE_BFF_BASE_URL__ was never read.
   window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
-  window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
+  window.__SPAARKE_BFF_URL__ = runtimeConfig.bffBaseUrl;
+  // The scope and tenant have no reliable global: hand them to the auth bridge explicitly.
+  setAuthRuntimeConfig(runtimeConfig);
 
   createRoot(container).render(<ThemeRoot />);
 }

@@ -111,6 +111,7 @@ import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssoci
 // both panes (like ComposeActionBridgeProvider) so the workspace tab-focus feed publishes and the
 // assistant pane consumes the single active-item handle (id/type/label; NEVER bytes — ADR-015 / ADR-030).
 import { ActiveItemConduitProvider } from "../workspace/activeItemConduit";
+import { IN_APP_WIZARD_RENDERERS } from "./inAppWizardRenderers";
 // UAT round-1 follow-on (task 071): "Notify me when completed" — the review-complete toast
 // bridge. Mounted alongside the shell's Toaster below (SPAARKEAI_SHELL_TOASTER_ID) so it shares
 // the SAME portal/stacking order as restore-failure toasts (§11 reuse — no second Toaster).
@@ -961,6 +962,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                 bffBaseUrl={bffBaseUrl}
                 tenantId={tenantId || undefined}
                 uiScale={uiScale}
+                renderers={IN_APP_WIZARD_RENDERERS}
               />
             </PaneCollapseContext.Provider>
            </AnalysisLaunchContext.Provider>

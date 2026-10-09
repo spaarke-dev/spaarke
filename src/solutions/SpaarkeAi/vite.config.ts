@@ -64,6 +64,12 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // files that still physically live under src/solutions/LegalWorkspace/src.
     path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src"),
     path.resolve(__dirname, "../LegalWorkspace/src"),
+    // spaarke-ontology-platform-r1 task 113 (D-26): the Console hosts these code-page wizards
+    // in-app (components/shell/inAppWizardRenderers.tsx), so their sources are bundled here and
+    // their bare imports must resolve to THIS project's node_modules.
+    path.resolve(__dirname, "../DocumentUploadWizard/src"),
+    path.resolve(__dirname, "../FindSimilarCodePage/src"),
+    path.resolve(__dirname, "../WorkspaceLayoutWizard/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -155,6 +161,13 @@ export default defineConfig({
         // file: dep (which re-exports LegalWorkspace/src via barrel — see R2 task 021 notes).
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.ts"),
+        // Task 113 (D-26): in-app hosted code-page wizards (see resolveSharedLibDeps above).
+        path.resolve(__dirname, "../DocumentUploadWizard/src/**/*.tsx"),
+        path.resolve(__dirname, "../DocumentUploadWizard/src/**/*.ts"),
+        path.resolve(__dirname, "../FindSimilarCodePage/src/**/*.tsx"),
+        path.resolve(__dirname, "../FindSimilarCodePage/src/**/*.ts"),
+        path.resolve(__dirname, "../WorkspaceLayoutWizard/src/**/*.tsx"),
+        path.resolve(__dirname, "../WorkspaceLayoutWizard/src/**/*.ts"),
       ],
     }),
     // Inline all JS/CSS into a single HTML file for Dataverse web resource deployment (ADR-026)
