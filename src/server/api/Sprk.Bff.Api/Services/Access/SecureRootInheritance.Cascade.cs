@@ -79,9 +79,6 @@ public sealed record FollowParentsResult(string Table, Guid Id, FollowParentsOut
     /// <summary>The un-secure step failed (a 5xx): it stays secure (or flagged secure), and the job retries it.</summary>
     public const string Failed = "failed";
 
-    /// <summary>The secure step's result, when it ran (provisioning's own steps, <see cref="SecureRootInheritance.SecureIfFiledUnderSecureAsync"/>).</summary>
-    public SecureRootInheritResult? Secured { get; init; }
-
     /// <summary><see cref="Unsecured"/>, <see cref="Refused"/> or <see cref="Failed"/> when the un-secure step ran; otherwise null.</summary>
     public string? UnsecureOutcome { get; init; }
 
@@ -105,7 +102,7 @@ public sealed record FollowParentsResult(string Table, Guid Id, FollowParentsOut
         or FollowParentsOutcome.InStep or FollowParentsOutcome.Changed;
 
     /// <summary>The call changed something.</summary>
-    public bool WroteAnything => PermissionTo is not null || UnsecureOutcome == Unsecured || Secured?.WroteAnything == true;
+    public bool WroteAnything => PermissionTo is not null || UnsecureOutcome == Unsecured;
 }
 
 /// <summary>
@@ -253,13 +250,17 @@ public sealed partial class SecureRootInheritance
     /// what differs; never throws a read fault.
     /// </summary>
     /// <remarks>
-    /// <para><b>Order — fail closed (goal 5).</b> (a) A STRICTER Access Permission is written first. (b) Secure: provisioning's own
-    /// steps (<see cref="SecureIfFiledUnderSecureAsync"/>). (c) Un-secure: the unsecure endpoint's own steps
-    /// (<see cref="UnsecureProjectEndpoint.UnsecureInheritedAsync"/> — ownership to its parents' business unit's team and read
-    /// back, related records out of isolation, shares revoked, the flag cleared LAST). (d) Only then a LOOSER Access Permission.
-    /// A step that does not complete stops the call: the record stays secure and its Access Permission is not loosened.</para>
-    /// <para><b>Undecidable.</b> A filing, parent or flag that cannot be read loosens nothing (a readably secure ancestor still
-    /// secures it — the closed direction); an EMPTY own flag is never "secure, so un-secure it".</para>
+    /// <para><b>Order — fail closed (goal 5).</b> (a) A STRICTER Access Permission is written first. (b) Un-secure: the unsecure
+    /// endpoint's own steps (<see cref="UnsecureProjectEndpoint.UnsecureInheritedAsync"/> — ownership to its parents' business
+    /// unit's team and read back, related records out of isolation, shares revoked, the flag cleared LAST). (c) Only then a
+    /// LOOSER Access Permission. A step that does not complete stops the call: the record stays secure and its Access
+    /// Permission is not loosened.</para>
+    /// <para><b>The securing direction is not here.</b> Making a record secure stays task 158's
+    /// (<see cref="SecureIfFiledUnderSecureAsync"/>: provisioning's own steps, bounded by its callers — the create / re-file
+    /// writers, the parent's provisioning, the job's securing loop and its per-run bound). A record whose parents are secure
+    /// and which is not secure yet is left for it (<see cref="FollowParentsResult.IsSecureAfter"/> false).</para>
+    /// <para><b>Undecidable.</b> A filing, parent or flag that cannot be read loosens nothing; an EMPTY own flag is never
+    /// "secure, so un-secure it".</para>
     /// </remarks>
     public async Task<FollowParentsResult> FollowParentsAsync(string table, Guid recordId, string traceId, CancellationToken ct)
     {
@@ -301,19 +302,12 @@ public sealed partial class SecureRootInheritance
 
         if (!ancestry.IsKnown)
         {
-            // The closed direction only: a readably secure ancestor still secures it (secure-if-any, as task 158's rule).
-            SecureRootInheritResult? secured = null;
-            if (ancestry.HasSecureParent && own.Secure != true)
-                secured = await SecureIfFiledUnderSecureAsync(logical, recordId, traceId, ct).ConfigureAwait(false);
-
             _logger.LogWarning(
                 "[FOLLOW-PARENT] {Table} {RecordId}: what it is filed under could not be read ({Why}); nothing was loosened.",
                 logical, recordId, ancestry.Unverifiable);
             return result with
             {
                 Outcome = FollowParentsOutcome.Undetermined,
-                Secured = secured,
-                IsSecureAfter = own.Secure != false || secured?.IsSecure == true,
                 ReasonCode = ReasonParentUnverifiable,
                 Detail = ancestry.Unverifiable,
             };
@@ -334,26 +328,8 @@ public sealed partial class SecureRootInheritance
             wrote = true;
         }
 
-        // (b) Secure.
-        if (targetSecure && own.Secure != true)
-        {
-            var secured = await SecureIfFiledUnderSecureAsync(logical, recordId, traceId, ct).ConfigureAwait(false);
-            result = result with { Secured = secured, IsSecureAfter = secured.IsSecure || own.Secure != false };
-            if (!secured.IsComplete)
-            {
-                return result with
-                {
-                    Outcome = FollowParentsOutcome.Incomplete,
-                    ReasonCode = secured.ReasonCode ?? ReasonSharesIncomplete,
-                    Detail = secured.Detail ?? "it is not secure yet",
-                };
-            }
-
-            wrote |= secured.WroteAnything;
-        }
-
-        // (c) Un-secure: its only secure sources are no longer secure (round 84, replacing round 6 item 4).
-        else if (!targetSecure && own.Secure == true)
+        // (b) Un-secure: its only secure sources are no longer secure (round 84, replacing round 6 item 4).
+        if (!targetSecure && own.Secure == true)
         {
             var unsecure = await UnsecureFollowingParentsAsync(logical, recordId, ancestry.DirectParents, traceId, ct).ConfigureAwait(false);
             result = result with
@@ -378,7 +354,7 @@ public sealed partial class SecureRootInheritance
             };
         }
 
-        // (d) Only now a looser (or otherwise different) Access Permission.
+        // (c) Only now a looser (or otherwise different) Access Permission.
         if (stored != target)
         {
             if (!await WritePermissionAsync(logical, recordId, own.Permission, target, parents, ct).ConfigureAwait(false))
