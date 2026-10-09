@@ -10,7 +10,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
   >
     <nav
       aria-label="Wizard steps"
-      class="___1xvjbls_0000000 f22iagw f1vx9l62 fbc6vix f45u8dm fi64zpg f8ivn9s f1isyly7 fhx4nu fw5db7e f1dmdbja f1hqa2wf fcdblym f7pw515 f1ewtqcl"
+      class="___12nn9d6_0000000 f22iagw f1vx9l62 fbc6vix f45u8dm fi64zpg f8ivn9s f1isyly7 fhx4nu fw5db7e f1dmdbja f5tn483 fcdblym f7pw515 f1ewtqcl"
     >
       <span
         aria-hidden="true"
@@ -32,7 +32,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
           >
             <span
               aria-hidden="true"
-              class="___uhqy350_0000000 f6zmzpu f50nw0v f5q2cvs ftac7j7 f1w0yd9v fdwcyh7 f1h0xgbp fzkkow9 fcdblym fg706s2 fjik90z f1c6jg8l f6z23yc f17aye20 f1u8pn5z f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
+              class="___heek1e0_0000000 f6zmzpu f50nw0v f5q2cvs f18zi460 f1wpluaz fmklw6v fsfsuhs fzkkow9 fcdblym fg706s2 fjik90z f1c6jg8l f6z23yc f17aye20 f1u8pn5z f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
             >
               <span
                 class="___1hu08kk_0000000 f1o3cbw4 f1x82gua f5q2cvs flo9id0"
@@ -47,7 +47,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
           </div>
           <span
             aria-hidden="true"
-            class="___ay7tjv0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 frkrog8 fn4h89p"
+            class="___vrz87p0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 f1u4ofkn fn4h89p"
           />
         </li>
         <li
@@ -59,7 +59,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
           >
             <span
               aria-hidden="true"
-              class="___ch4zps0_0000000 f6zmzpu f50nw0v f5q2cvs ftac7j7 f1w0yd9v fdwcyh7 f1h0xgbp fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
+              class="___1qsmo2y_0000000 f6zmzpu f50nw0v f5q2cvs f18zi460 f1wpluaz fmklw6v fsfsuhs fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
             />
             <span
               aria-label="Step b, pending"
@@ -70,7 +70,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
           </div>
           <span
             aria-hidden="true"
-            class="___ay7tjv0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 frkrog8 fn4h89p"
+            class="___vrz87p0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 f1u4ofkn fn4h89p"
           />
         </li>
         <li
@@ -82,7 +82,7 @@ exports[`WizardShell characterization — embedded markup embedded markup under 
           >
             <span
               aria-hidden="true"
-              class="___ch4zps0_0000000 f6zmzpu f50nw0v f5q2cvs ftac7j7 f1w0yd9v fdwcyh7 f1h0xgbp fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
+              class="___1qsmo2y_0000000 f6zmzpu f50nw0v f5q2cvs f18zi460 f1wpluaz fmklw6v fsfsuhs fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
             />
             <span
               aria-label="Step c, pending"
@@ -178,7 +178,7 @@ exports[`WizardShell characterization — embedded markup embedded markup with t
   >
     <nav
       aria-label="Wizard steps"
-      class="___1xvjbls_0000000 f22iagw f1vx9l62 fbc6vix f45u8dm fi64zpg f8ivn9s f1isyly7 fhx4nu fw5db7e f1dmdbja f1hqa2wf fcdblym f7pw515 f1ewtqcl"
+      class="___12nn9d6_0000000 f22iagw f1vx9l62 fbc6vix f45u8dm fi64zpg f8ivn9s f1isyly7 fhx4nu fw5db7e f1dmdbja f5tn483 fcdblym f7pw515 f1ewtqcl"
     >
       <span
         aria-hidden="true"
@@ -226,7 +226,7 @@ exports[`WizardShell characterization — embedded markup embedded markup with t
           </div>
           <span
             aria-hidden="true"
-            class="___ay7tjv0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 frkrog8 fn4h89p"
+            class="___vrz87p0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 f1u4ofkn fn4h89p"
           />
         </li>
         <li
@@ -239,7 +239,7 @@ exports[`WizardShell characterization — embedded markup embedded markup with t
           >
             <span
               aria-hidden="true"
-              class="___uhqy350_0000000 f6zmzpu f50nw0v f5q2cvs ftac7j7 f1w0yd9v fdwcyh7 f1h0xgbp fzkkow9 fcdblym fg706s2 fjik90z f1c6jg8l f6z23yc f17aye20 f1u8pn5z f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
+              class="___heek1e0_0000000 f6zmzpu f50nw0v f5q2cvs f18zi460 f1wpluaz fmklw6v fsfsuhs fzkkow9 fcdblym fg706s2 fjik90z f1c6jg8l f6z23yc f17aye20 f1u8pn5z f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
             >
               <span
                 class="___1hu08kk_0000000 f1o3cbw4 f1x82gua f5q2cvs flo9id0"
@@ -254,7 +254,7 @@ exports[`WizardShell characterization — embedded markup embedded markup with t
           </div>
           <span
             aria-hidden="true"
-            class="___ay7tjv0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 frkrog8 fn4h89p"
+            class="___vrz87p0_0000000 f1euv43f f1vpap1a f1gak3hv f5gq2j6 f1u4ofkn fn4h89p"
           />
         </li>
         <li
@@ -266,7 +266,7 @@ exports[`WizardShell characterization — embedded markup embedded markup with t
           >
             <span
               aria-hidden="true"
-              class="___ch4zps0_0000000 f6zmzpu f50nw0v f5q2cvs ftac7j7 f1w0yd9v fdwcyh7 f1h0xgbp fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
+              class="___1qsmo2y_0000000 f6zmzpu f50nw0v f5q2cvs f18zi460 f1wpluaz fmklw6v fsfsuhs fzkkow9 fcdblym fg706s2 fjik90z fj3muxo f1akhkt f1aperda f1lxtadh f3rmtva fi64zpg f22iagw f122n59 f4d9j23"
             />
             <span
               aria-label="Step c, pending"
