@@ -78,6 +78,14 @@ public static class HandlerIds
     /// <summary>H7 -- Dataverse environment-variable values.</summary>
     public const string H7 = "H7";
 
+    /// <summary>
+    /// H7b (T256 — unified-access-control-r2 INCOMING-145) -- the per-environment Secure Record setup: the Secure Record
+    /// business unit, its named memberless owner team, the "Secure Record Owner" role created IN that unit with exactly the
+    /// Read-at-Basic set of config/secure-record-owner-role.json, the BFF-managed field-security memberships, and the
+    /// sprk_noaccessentry prerequisite. Runs after H6; H9 (BFF deploy) and H13 wait for it.
+    /// </summary>
+    public const string H7b = "H7b";
+
     /// <summary>H8 -- SPE container CREATION (H8-B semantics per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md). Wire format literal "H8" is unchanged.</summary>
     public const string H8 = "H8";
 
@@ -135,6 +143,6 @@ public static class HandlerIds
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H7b, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

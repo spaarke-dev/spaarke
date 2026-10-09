@@ -358,6 +358,29 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
     }
 
+    /// <summary>
+    /// T256: secureRecordSetupDryRun is OPTIONAL (apply is the default), a boolean in the intake file — sent as the
+    /// exact lower-case 'true' / 'false' strings SecureRecordSetupIntake accepts, under the same key.
+    /// </summary>
+    [Fact]
+    public void T256_SecureRecordSetupDryRun_IsAnOptionalBoolean_UnderTheIntakeKey()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.SecureRecordSetupDryRun);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("secureRecordSetupDryRun", "apply is the default");
+        property.GetProperty("type").GetString().Should().Be("boolean");
+        property.GetProperty("default").GetBoolean().Should().BeFalse();
+
+        foreach (var literal in new[] { "true", "false" })
+        {
+            Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordSetupIntake.TryReadDryRun(
+                new Dictionary<string, string> { ["secureRecordSetupDryRun"] = literal }, out var dryRun).Should().BeTrue();
+            dryRun.Should().Be(literal == "true");
+        }
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [

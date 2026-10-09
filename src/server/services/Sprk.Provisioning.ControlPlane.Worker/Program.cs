@@ -57,6 +57,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -697,6 +698,8 @@ builder.Services.AddOptions<EnvVarValuesOptions>()
 builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName);
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
+// T256: H7b Secure Record setup — signs in exactly as H7 (EnvVarValuesOptions + the FR-39 factory above).
+builder.Services.AddH7bSecureRecordSetupHandler();
 
 // Task 214 (H8-B rewrite, 2026-08-30): H8 SPE-container-CREATION handler
 // (H8-B semantics — container-TYPE creation retired to operator prereq per

@@ -36,6 +36,15 @@ it, when it must exist, what to seed, or how H13 verifies it.
 UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
 answer into T256 handler work and T218 package content.
 
+**Update 2026-10-08 (T256).** What provisioning needs is now answered by the repository, and built:
+1. *Packaging*: the table ships in SpaarkeMaster 1.2.0.0 with every column the BFF reads (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_noaccessentry`).
+2. *Ordering*: H7b probes `sprk_noaccessentries` with the BFF reader's own `$select` (`NoAccessListReader.RowSelect`,
+   pinned by `SecureRecordOwnerRoleSetParityTests`) and refuses Resumable `secure_setup.noaccessentry_missing`; H9 waits
+   for H7b, so no BFF is deployed to an environment without it. Nothing is seeded: an empty deny list denies nothing.
+3. *Verification*: that probe, on every run.
+4. *Upgrades*: SpaarkeMaster upgrades carry it.
+Left open only for UAC-r2's confirmation on #1364 (and to hear if the schema changes — we re-export, never hand-edit).
+
 ### ISS-003 — A second environment for the same customer overwrites the first one's BFF app registration
 
 | Field | Value |
@@ -125,6 +134,49 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
+
+### ISS-008 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — needs an owner decision (placement + one new input) |
+| **Urgency** | before T186 (server-side creates of secure children; #1081) |
+| **Filed** | 2026-10-08 (T256) |
+| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
+| **GitHub Issue** | to be filed by the main session (the T256 worktree agent makes no GitHub writes) |
+
+**Description**
+
+§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
+business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
+parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
+parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
+built, because each needs a decision or an input that does not exist:
+- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
+  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
+- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
+  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
+  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
+  (a business-unit change removes a user's roles) is not a safe repair.
+- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
+  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
+  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
+  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
+  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
+  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
+  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
+  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
+  is run and acted on.
+
+**Suggested fix (one recommendation)**
+
+Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
+root before it creates the two application users IN it with System Administrator (T3), and records the unit id
+(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
+checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
+`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
+void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
+after H11 and treat any human reaching the Secure Record unit as a stop.
 
 ---
 
