@@ -4,7 +4,7 @@
     <title>D-96/D-101: fix the Matter Health insights playbook (matter-health-single) so the card returns real answers; deactivate the broken demo and junk playbooks</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live AI playbook used by a production card; engine skip semantics; dev playbook data changes.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>Create Analysis started from the Console hub fails at Finish: "A record this analysis is filed under was not found. The analysis was not saved." (404)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>User-facing create path that loses work; BFF write path (filing parent resolution) and a shared wizard.</rigor-reason>
     <model-tier>opus</model-tier>

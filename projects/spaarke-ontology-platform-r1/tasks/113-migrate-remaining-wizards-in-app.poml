@@ -4,7 +4,7 @@
     <title>Migrate the remaining wizards off navigateTo: Summarize Files, Upload Documents, Find Similar, Workspace layout</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>112 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes how four more shipped wizards open from Spaarke React surfaces.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,6 +99,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-60; D-26; modal note section 5.2 P5 (part 2 of 2). Deployed by task 114. Amended 2026-10-08 by the no-parking sweep: #1420 and #1421 (found by task 112) folded in; 113 did not cover them before.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1480 merged 00fb99eda (Summarize Files, Upload Documents, Find Similar and the Workspace layout wizard open in the in-app modal; closes #1420, #1421, #1479). Console auto-deployed to dev (deploy-spaarke-ai run 05:43Z, success). Live check = task 114.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

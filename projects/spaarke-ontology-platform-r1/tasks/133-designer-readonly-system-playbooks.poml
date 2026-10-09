@@ -4,7 +4,7 @@
     <title>D-97 / PB-08: repo-deployed system playbooks are read-only in the Playbook Designer — the BFF refuses every canvas-to-node sync for them (Designer save, JIT sync, re-analysis)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF write path that deletes live node rows (data loss); owner decision D-97.</rigor-reason>
     <model-tier>opus</model-tier>

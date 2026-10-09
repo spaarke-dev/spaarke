@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **114 tasks** across 14 phases (55 ✅ · 1 🔄 · 57 🔲 · 1 cancelled; updated 2026-10-09)
+> (spec §9) · **115 tasks** across 14 phases (56 ✅ · 5 🔄 · 53 🔲 · 1 cancelled; updated 2026-10-09)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -234,7 +234,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 056 | [WizardShell: characterization tests, re-base on SprkModal, v4 props, delete WizardModal](056-wizardshell-rebase-on-sprkmodal.poml) | FULL | **opus**/high | 110 | — | Modal note P1-P3. Embedded markup must not move |
 | 🔲 [open] 111 | [**Deploy** + regression of non-embedded WizardShell consumers](111-wizard-consumer-regression-and-deploy.poml) | FULL | sonnet/high | 056 | — | Modal note P4; SemanticSearchControl PCF last (`build:prod`) |
 | ✅ [done] 112 | [Migrate Create wizards off `navigateTo` (in-app host)](112-migrate-create-wizards-in-app.poml) | FULL | **opus**/high | 056 | — | [PR #1422](https://github.com/spaarke-dev/spaarke/pull/1422) **open, awaiting owner merge** (head `0b2ec81bc`). `InAppWizardHost` mounted in the Console; bundle +3,584 B. Filed #1420, #1421 |
-| 🔄 [wip] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout. **+ #1421** (create-project widget) **+ #1420** (Work Assignment completion) (no-parking sweep). [PR #1480](https://github.com/spaarke-dev/spaarke/pull/1480) open, not merged |
+| ✅ [done] 113 | [Migrate remaining wizards off `navigateTo`](113-migrate-remaining-wizards-in-app.poml) | FULL | sonnet/high | 112 | — | P5 part 2: Summarize Files, Upload Documents, Find Similar, Workspace layout. **+ #1421** (create-project widget) **+ #1420** (Work Assignment completion) (no-parking sweep). [PR #1480](https://github.com/spaarke-dev/spaarke/pull/1480) open, not merged |
 | 🔲 [open] 114 | [**Deploy** the in-app wizard migration](114-deploy-in-app-wizard-migration.poml) | FULL | sonnet/high | 111, 113, 121 | — | Verify all nine in-app on dev, full page and in an Xrm dialog |
 
 ### Phase 6 — Do lane and Briefing fold-in
@@ -295,12 +295,13 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 128 | [Client test-harness repairs, own PR: #1416, #1417, #1388, #1392](128-client-test-harness-repairs-own-pr.poml) | FULL | sonnet/high | — | J | Test files/config only; rebase SemanticSearchControl after #1415 |
 | 🔲 [open] 129 | [D-63 completion: chart/view/grid definitions off `sprk_finalduedate` + deploy VisualHost 1.4.39 (068) without tenant-wide publish](129-visualhost-finalduedate-definitions-and-pcf-deploy.poml) | FULL | sonnet/high | 068 | — | Inventory read-only; **row edits and the import: owner approval required** |
 | 🔲 [open] 130 | [D-83: remove tenant-wide publish repo-wide (one scoped-publish procedure for scripts + skills)](130-scoped-publish-repo-wide.poml) | FULL | sonnet/high | — | J | Owner D-83. Skill text applied by the main session; live proof needs owner approval |
-| 🔲 [open] 131 | [D-100: retire the seven notification playbooks (deploy path, alert, unused-code inventory)](131-notification-scheduler-schedules-dedup-designer.poml) | FULL | sonnet/high | — | S1 | Repurposed 2026-10-09 (D-100). Azure alert deletion and code deletion need owner approval |
-| 🔲 [open] 132 | [Invalid appnotification option values in the non-playbook writers (held-email alert, grant reminder, toast type)](132-notification-delivery-correctness.poml) | FULL | sonnet/high | — | S1 | D-98 item 9; rewritten on D-100 |
-| 🔲 [open] 133 | [System playbooks read-only in the Playbook Designer](133-designer-readonly-system-playbooks.poml) | FULL | sonnet/high | — | S1 | D-97 / sweep PB-08 (protects matter-health-single etc.) |
+| 🔄 [wip] 131 | [D-100: retire the seven notification playbooks (deploy path, alert, unused-code inventory)](131-notification-scheduler-schedules-dedup-designer.poml) | FULL | sonnet/high | — | S1 | Repurposed 2026-10-09 (D-100). Azure alert deletion and code deletion need owner approval |
+| 🔄 [wip] 132 | [Invalid appnotification option values in the non-playbook writers (held-email alert, grant reminder, toast type)](132-notification-delivery-correctness.poml) | FULL | sonnet/high | — | S1 | D-98 item 9; rewritten on D-100 |
+| 🔄 [wip] 133 | [System playbooks read-only in the Playbook Designer](133-designer-readonly-system-playbooks.poml) | FULL | sonnet/high | — | S1 | PR #1497 open (not merged). D-97 / sweep PB-08 (protects matter-health-single etc.) |
 | 🔲 [open] 134 | [uac-r2 follow-through: membership role credit bug (PB-07) + AiAnalysis write tools (AI-EX7)](134-uac-membership-role-credit-and-aianalysis-writes.poml) | FULL | **opus**/high | — | S1 | Blocked on uac-r2 (#1355 comment 6074035905) |
-| 🔲 [open] 135 | [Fix the Matter Health insights playbook; deactivate broken demo + junk playbooks](135-matter-health-playbook-fix.poml) | FULL | **opus**/high | — | S1 | D-96 / D-101 |
-| 🔲 [open] 136 | [Create Analysis from the Console hub fails at Finish (404 "filed under ... not found")](136-create-analysis-hub-finish-404.poml) | FULL | **opus**/high | — | S1 | Owner checklist r1 (2026-10-08) |
+| 🔄 [wip] 135 | [Fix the Matter Health insights playbook; deactivate broken demo + junk playbooks](135-matter-health-playbook-fix.poml) | FULL | **opus**/high | — | S1 | D-96 / D-101 |
+| 🔄 [wip] 136 | [Create Analysis from the Console hub fails at Finish (404 "filed under ... not found")](136-create-analysis-hub-finish-404.poml) | FULL | **opus**/high | — | S1 | Owner checklist r1 (2026-10-08) |
+| 🔲 [open] 137 | [Guard the per-node endpoints for system playbooks (#1498)](137-guard-per-node-endpoints-system-playbooks.poml) | FULL | sonnet/high | 133 | S1 | Task 133 finding |
 | ✅ [done] 069 | [D-60: remove foreign tables from `OntologyPlatformSolution`](069-d60-solution-hygiene.poml) | STANDARD | sonnet/high | — | E | **D-60** done 2026-10-07 by stream C2: 17 → 10 components; 11 foreign tables removed (reference only); `sprk_servicerequest` direction/disposition/responseduedate kept as column components; issue #1385 closed |
 | ✅ [done] 099 | [CI: Tier 2 ADR Compliance timeout 3 → 5 min, own PR](099-ci-adr-compliance-timeout-own-pr.poml) | STANDARD | sonnet/medium | — | I2 | **D-29**. ci-workflows hot path (declared N): note it in the PR. Can start now  **Merged 2026-10-07 as PR #1346 (`dbc58d139`).** |
 

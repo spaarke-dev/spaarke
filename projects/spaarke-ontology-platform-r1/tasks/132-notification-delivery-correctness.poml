@@ -4,7 +4,7 @@
     <title>Invalid appnotification option values in the non-playbook writers (held-email admin alert, grant-expiry reminder, NotificationActionCore toast type): one set of constants, validated, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code in two background jobs; a write that Dataverse rejects at runtime.</rigor-reason>
     <model-tier>sonnet</model-tier>

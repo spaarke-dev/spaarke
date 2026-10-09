@@ -155,3 +155,9 @@ Owner D-100: retire the notification playbooks (the Daily Briefing does not read
 - BFF process restarted between 04:15Z and 04:45Z (in-memory run history empty); same build still running (`1.0.0+e9f08b764`, no new deploy - last OneDeploy 02:24:46Z).
 - Next tick 05:00:00Z: run 1e29021b, trigger Scheduled, Succeeded in 0.37 s, processedItems=0, children=[] -> no notification playbook queried or run.
 - Left as is (task 131 / owner): alert rule notification-playbook-total-failure-dev (no new Error traces can occur), node rows, repo JSONs, code, C:\wt120d.
+
+## 2026-10-09 - D-104(a): delete the notification alert rule (spaarkedev1 subscription, main session)
+
+- Before (11:37Z, `az monitor scheduled-query show`): `notification-playbook-total-failure-dev` in `spe-infrastructure-westus2`, enabled, severity 1.
+- Action: `az monitor scheduled-query delete -g spe-infrastructure-westus2 -n notification-playbook-total-failure-dev --yes` at 2026-10-09T11:37:11Z.
+- After: `show` returns `ResourceNotFound`. The bicep that created it is deleted by PR #1493 (task 131), so no deploy recreates it.

@@ -4,7 +4,7 @@
     <title>D-100: retire the seven notification playbooks (bell notifications are not wanted); remove their deploy path and alert; propose deletion of now-unused code</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes a live scheduled feature (dev data), a deploy script, an Azure alert rule and possibly BFF code.</rigor-reason>
     <model-tier>sonnet</model-tier>

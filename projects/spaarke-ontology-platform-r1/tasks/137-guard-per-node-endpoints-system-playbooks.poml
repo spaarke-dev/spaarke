@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="137" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Per-node create/update/delete endpoints can still change or delete nodes of a system playbook (#1498): apply the task 133 guard without breaking the deploy tooling</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>after #1497 (task 133) review</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF endpoints; protects live system playbooks; may touch the deploy path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master after #1497 merges (reuses its guard); own PR.</parallel-reason>
+    <deps>133</deps>
+    <tags>bff-api,ai,bug,separate-pr</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the remaining path by which a system playbook's nodes can be changed outside the repo: the per-node endpoints in NodeEndpoints.cs.</prompt>
+  <role>SPAARKE backend engineer.</role>
+  <goal>No API path can create, update or delete a node of a protected playbook (the task 133 predicate), unless it is the sanctioned deploy path, and the deploy tooling still works.</goal>
+
+  <context>
+    <background>Found by task 133 (PR #1497) and filed as #1498. Task 133 guards the Designer canvas save and the JIT sync through NodeService.EnsureCanvasSyncAllowedAsync. The per-node create/update/delete endpoints in NodeEndpoints.cs are not guarded. First establish (evidence, grep plus the deploy recipe) whether any deploy script (Deploy-Playbook*.ps1, the JPS deploy recipe, scripts/) uses these endpoints or writes Dataverse directly. That decides the design: guard them outright, or allow a deploy-only caller.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Reuse the task 133 predicate; no second definition of "protected". Fail closed. A test per endpoint fails on the old code. If deploy tooling uses these endpoints, do not break it: bring the design choice to the main session before coding. Own worktree off origin/master after #1497 merges, own PR, do not merge. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. No parking. Closes #1498.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Create, update and delete of a node on a protected playbook are refused (409 playbook_read_only), with zero Dataverse writes; tests fail on the old code.</criterion>
+    <criterion testable="true">User-authored playbooks are unaffected (regression tests).</criterion>
+    <criterion testable="true">The deploy path is proven still working (evidence recorded), or the PR states that it never used these endpoints.</criterion>
+    <criterion testable="true">#1498 closed by the PR; CI green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 by the main session from #1498 (task 133 finding; no-parking rule).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
