@@ -82,7 +82,12 @@ internal static class EventDueAssigneeWrite
         return null;
     }
 
-    /// <summary>The payload the caller's PATCH carries; separate so tests pin the exact column set.</summary>
+    /// <summary>
+    /// The payload the caller's PATCH carries; separate so tests pin the exact column set. The <c>@odata.bind</c> names are the
+    /// lookups' NAVIGATION PROPERTIES, which the Web API matches case-sensitively (live, spaarkedev1, 2026-10-09:
+    /// <c>$expand=sprk_AssignedTo</c> 200, <c>$expand=sprk_assignedto</c> 400): <c>sprk_AssignedTo</c>,
+    /// <c>sprk_ReassignedBy</c>, <c>sprk_RescheduledBy</c>. Plain column names stay lower case.
+    /// </summary>
     internal static string BuildPatchJson(UpdateEventDueAssigneeRequest request, Guid? callerContactId, DateTimeOffset now)
     {
         var body = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -93,22 +98,51 @@ internal static class EventDueAssigneeWrite
             body["sprk_rescheduleddate"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
             if (callerContactId is { } rescheduler && rescheduler != Guid.Empty)
             {
-                body["sprk_rescheduledby@odata.bind"] = $"/contacts({rescheduler:D})";
+                body["sprk_RescheduledBy@odata.bind"] = $"/contacts({rescheduler:D})";
             }
         }
 
         if (request.AssigneeContactId is { } assignee)
         {
-            body["sprk_assignedto@odata.bind"] = $"/contacts({assignee:D})";
+            body["sprk_AssignedTo@odata.bind"] = $"/contacts({assignee:D})";
             body["statuscode"] = EventStatusCode.Reassigned;
             body["sprk_reassigneddate"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
             if (callerContactId is { } reassigner && reassigner != Guid.Empty)
             {
-                body["sprk_reassignedby@odata.bind"] = $"/contacts({reassigner:D})";
+                body["sprk_ReassignedBy@odata.bind"] = $"/contacts({reassigner:D})";
             }
         }
 
         return JsonSerializer.Serialize(body);
+    }
+
+    /// <summary>
+    /// The event's <c>statuscode</c>, read AS THE CALLER, with the open-work gate applied: the refusal to return when the event
+    /// cannot be read (not found) or is not open work (invalid state), else null with the status. No write.
+    /// </summary>
+    internal static async Task<(EventDueAssigneeResult? Refusal, int Status)> ReadStatusAsync(
+        IDataverseUserClient user, Guid eventId, CancellationToken ct)
+    {
+        // The caller's own read: a row they cannot read is a not-found, and the gate below never runs for it.
+        var current = await user.GetAsync($"{EventSet}({eventId:D})?$select=statuscode", ct).ConfigureAwait(false);
+        if (!current.IsSuccess)
+        {
+            return (current.StatusCode is 403 or 404
+                ? new EventDueAssigneeResult(EventDueAssigneeOutcome.NotFound, current.StatusCode)
+                : new EventDueAssigneeResult(EventDueAssigneeOutcome.Failed, current.StatusCode, current.ErrorMessage), 0);
+        }
+
+        var statusCode = current.Body is { ValueKind: JsonValueKind.Object } row
+            && row.TryGetProperty("statuscode", out var sc) && sc.ValueKind == JsonValueKind.Number && sc.TryGetInt32(out var parsed)
+                ? parsed
+                : (int?)null;
+        if (statusCode is not { } status || !EventStatusCode.IsOpenWork(status))
+        {
+            return (new EventDueAssigneeResult(EventDueAssigneeOutcome.InvalidState, null,
+                "Only an event that is open work (Draft, Open, On Hold or Reassigned) can be rescheduled or reassigned."), 0);
+        }
+
+        return (null, status);
     }
 
     internal static async Task<EventDueAssigneeResult> ApplyAsync(
@@ -119,23 +153,10 @@ internal static class EventDueAssigneeWrite
         DateTimeOffset now,
         CancellationToken ct)
     {
-        // The caller's own read: a row they cannot read is a not-found, and the gate below never runs for it.
-        var current = await user.GetAsync($"{EventSet}({eventId:D})?$select=statuscode", ct).ConfigureAwait(false);
-        if (!current.IsSuccess)
+        var (read, _) = await ReadStatusAsync(user, eventId, ct).ConfigureAwait(false);
+        if (read is not null)
         {
-            return current.StatusCode is 403 or 404
-                ? new EventDueAssigneeResult(EventDueAssigneeOutcome.NotFound, current.StatusCode)
-                : new EventDueAssigneeResult(EventDueAssigneeOutcome.Failed, current.StatusCode, current.ErrorMessage);
-        }
-
-        var statusCode = current.Body is { ValueKind: JsonValueKind.Object } row
-            && row.TryGetProperty("statuscode", out var sc) && sc.ValueKind == JsonValueKind.Number && sc.TryGetInt32(out var parsed)
-                ? parsed
-                : (int?)null;
-        if (statusCode is not { } status || !EventStatusCode.IsOpenWork(status))
-        {
-            return new EventDueAssigneeResult(EventDueAssigneeOutcome.InvalidState, null,
-                "Only an event that is open work (Draft, Open, On Hold or Reassigned) can be rescheduled or reassigned.");
+            return read;
         }
 
         var patch = await user.PatchAsync($"{EventSet}({eventId:D})", BuildPatchJson(request, callerContactId, now), ct)

@@ -1386,6 +1386,10 @@ public class RecordOwnerAssignmentCensusTests
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
+        ["DecisionActionExecutors.cs"] = "Ontology platform R1 task 044: the caller PATCHes ONE budget amount column (sprk_totalbudget, D-55) and, on a work "
+                                         + "assignment, sprk_responseduedate / sprk_respondedon / sprk_responseoutcome after their Write — plain columns, never a "
+                                         + "lookup or an owner, so nothing is re-filed. The budget revision is created by the writer, owned through "
+                                         + "IRecordOwnershipResolver (ApplyTo); the To Do and event writes go through the child-records cores.",
         ["EventDueAssigneeWrite.cs"] = "Ontology platform R1 task 044 (#29): PATCHes an event's sprk_duedate and/or its assignee CONTACT "
                                        + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
                                        + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "

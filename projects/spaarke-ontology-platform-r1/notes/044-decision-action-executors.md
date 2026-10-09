@@ -48,3 +48,16 @@ RunAsUserWritesThatFileNothing).
 - Event reschedule/reassign writes no `sprk_eventlog` row (the removed PUT did not either on this path); complete keeps its own log.
 - create-event writes the date to `sprk_duedate` and attendees into `sprk_description` (no attendee column).
 - `sprk_budgetrevision` is not in `SecureChildLineage`: a revision on a Secure matter is not a secure child (see issues list).
+
+## 4. Round 2 (review of #1515, 2026-10-09)
+
+- **Navigation names (F1)**: the events write uses `sprk_AssignedTo`, `sprk_ReassignedBy`, `sprk_RescheduledBy` (case-sensitive). Live read-only
+  GETs on spaarkedev1: `sprk_events?$top=1&$expand=<name>($select=contactid)` -> `sprk_AssignedTo` 200, `sprk_ReassignedBy` 200, `sprk_RescheduledBy` 200;
+  lower-case `sprk_assignedto` / `sprk_reassignedby` / `sprk_rescheduledby` -> 400. Metadata: `ManyToOneRelationships` `ReferencingEntityNavigationPropertyName`.
+  The To Do bind goes through the child-records mapper (case-insensitive), unchanged.
+- **Preflight (F4)**: `IDecisionActionExecutor.PreflightAsync` (null = would proceed; else the Refused outcome Execute gives, no write); `ExecuteAsync` runs it first.
+  A 5xx, no answer or a thrown fault lists the subject as possibly written (`Failed`).
+- **Owner (F3, D-33/D-38)**: the revision is owned via `IRecordOwnershipResolver` (`ApplyTo`) over the matter and budget; resolved in the preflight.
+  `sprk_budgetrevision` added to `SecureChildLineage` and `config/secure-record-owner-role.json` (mirrors `sprk_budget`; uac-r2 files, flagged for their
+  review; the config entry's live negative control is pending). Needs `prvAssignsprk_BudgetRevision` on the writer (granted, D-108).
+- **Census (F2)**: the executors' dataverse field renamed `_dataverse`, so the census regex now sees them; `DecisionActionExecutors.cs` classified.

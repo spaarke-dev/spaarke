@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
@@ -86,20 +87,42 @@ public class DecisionActionExecutorsTests
     }
 
     /// <summary>The probe: reports <paramref name="rights"/> on every record.</summary>
-    private static Mock<CallerRecordAccessProbe> Probe(AccessRights rights, Guid? userId = null)
+    private static Mock<CallerRecordAccessProbe> Probe(
+        AccessRights rights, Guid? userId = null, bool createPrivilege = true, Func<string, AccessRights>? bySet = null)
     {
         var probe = new Mock<CallerRecordAccessProbe>(
             new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(rights);
+            .Returns<string?, string, Guid, CancellationToken>((_, set, _, _) => Task.FromResult(bySet is null ? rights : bySet(set)));
         probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(userId ?? CallerUserId);
+        probe.Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(createPrivilege);
         return probe;
     }
 
-    private const AccessRights CanWrite = AccessRights.Read | AccessRights.Write;
+    private const AccessRights CanWrite = AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+    private const AccessRights CanCreate = AccessRights.Read | AccessRights.AppendTo;
     private const AccessRights ReadOnly = AccessRights.Read;
+
+    /// <summary>The ownership resolver: answers <paramref name="team"/> for every child of a budget and matter.</summary>
+    private static Mock<IRecordOwnershipResolver> Owner(Guid? team = null, bool secure = false, bool refuse = false)
+    {
+        var owner = new Mock<IRecordOwnershipResolver>();
+        owner.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(refuse
+                ? new RecordOwnerResolution(RecordOwnerOutcome.Refused, null, "no_owner", "No owner team.")
+                : new RecordOwnerResolution(RecordOwnerOutcome.Owned, team ?? MatterTeam, null, null) { IsSecureOwner = secure });
+        return owner;
+    }
+
+    private static readonly Guid MatterTeam = Guid.Parse("eeeeeeee-0000-0000-0000-000000000001");
+    private static readonly Guid SecureTeam = Guid.Parse("eeeeeeee-0000-0000-0000-000000000002");
+
+    /// <summary>A caller-identity client whose event reads answer "Open" (the open-work gate passes).</summary>
+    private static FakeUserClient OpenEventUser() =>
+        new FakeUserClient().OnGet("sprk_events(", new Dictionary<string, object?> { ["statuscode"] = 659490001 });
 
     private sealed class WriterHarness
     {
@@ -156,7 +179,7 @@ public class DecisionActionExecutorsTests
     {
         var user = BudgetUser(MatterId);
         var writer = new WriterHarness();
-        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
@@ -191,7 +214,7 @@ public class DecisionActionExecutorsTests
     {
         var user = BudgetUser(MatterId);
         var writer = new WriterHarness();
-        var executor = new ReviseBudgetExecutor(Probe(ReadOnly).Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(Probe(ReadOnly).Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
@@ -209,7 +232,7 @@ public class DecisionActionExecutorsTests
     {
         var user = BudgetUser(OtherMatterId);
         var writer = new WriterHarness();
-        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
@@ -226,7 +249,7 @@ public class DecisionActionExecutorsTests
         var user = BudgetUser(MatterId);
         user.PatchStatus = 403;
         var writer = new WriterHarness();
-        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
@@ -243,7 +266,7 @@ public class DecisionActionExecutorsTests
     {
         var user = BudgetUser(MatterId);
         var writer = new WriterHarness { Throw = true };
-        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
@@ -266,7 +289,7 @@ public class DecisionActionExecutorsTests
         var probe = Probe(CanWrite);
         var user = BudgetUser(MatterId);
         var writer = new WriterHarness();
-        var executor = new ReviseBudgetExecutor(probe.Object, user, writer.Build(), new FakeTimeProvider(Now),
+        var executor = new ReviseBudgetExecutor(probe.Object, user, writer.Build(), Owner().Object, new FakeTimeProvider(Now),
             NullLogger<ReviseBudgetExecutor>.Instance);
 
         var outcome = await executor.ExecuteAsync(Request(parameters), CancellationToken.None);
@@ -308,7 +331,7 @@ public class DecisionActionExecutorsTests
     {
         var cores = Cores();
         cores.Setup(c => c.CompleteEventAsync(It.IsAny<HttpContext>(), ItemId, It.IsAny<CancellationToken>())).ReturnsAsync(Reply(200));
-        var executor = new MarkCompleteExecutor(Probe(CanWrite).Object, cores.Object, new FakeTimeProvider(Now));
+        var executor = new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object, new FakeTimeProvider(Now));
 
         var outcome = await executor.ExecuteAsync(Request([], EventItem), CancellationToken.None);
 
@@ -325,7 +348,7 @@ public class DecisionActionExecutorsTests
         cores.Setup(c => c.UpdateChildAsync(It.IsAny<HttpContext>(), "sprk_todo", ItemId, It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .Callback<HttpContext, string, Guid, JsonElement, CancellationToken>((_, _, _, body, _) => sent = body)
             .ReturnsAsync(Reply(204));
-        var executor = new MarkCompleteExecutor(Probe(CanWrite).Object, cores.Object, new FakeTimeProvider(Now));
+        var executor = new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object, new FakeTimeProvider(Now));
 
         var outcome = await executor.ExecuteAsync(Request([], TodoItem), CancellationToken.None);
 
@@ -343,7 +366,7 @@ public class DecisionActionExecutorsTests
     public async Task MarkComplete_CallerWithoutWrite_WritesNothing(string entity)
     {
         var cores = Cores();
-        var executor = new MarkCompleteExecutor(Probe(ReadOnly).Object, cores.Object, new FakeTimeProvider(Now));
+        var executor = new MarkCompleteExecutor(Probe(ReadOnly).Object, OpenEventUser(), cores.Object, new FakeTimeProvider(Now));
 
         var outcome = await executor.ExecuteAsync(Request([], new DecisionRecordRef(entity, ItemId)), CancellationToken.None);
 
@@ -356,7 +379,7 @@ public class DecisionActionExecutorsTests
     public async Task MarkComplete_WorkAssignment_IsNotSupported_AndWritesNothing()
     {
         var cores = Cores();
-        var outcome = await new MarkCompleteExecutor(Probe(CanWrite).Object, cores.Object, new FakeTimeProvider(Now))
+        var outcome = await new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object, new FakeTimeProvider(Now))
             .ExecuteAsync(Request([], WorkAssignmentItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -370,7 +393,7 @@ public class DecisionActionExecutorsTests
         var cores = Cores();
         cores.Setup(c => c.CompleteEventAsync(It.IsAny<HttpContext>(), ItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Reply(400, null, "Cannot complete event with status 'Closed'."));
-        var outcome = await new MarkCompleteExecutor(Probe(CanWrite).Object, cores.Object, new FakeTimeProvider(Now))
+        var outcome = await new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object, new FakeTimeProvider(Now))
             .ExecuteAsync(Request([], EventItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -385,7 +408,7 @@ public class DecisionActionExecutorsTests
         cores.Setup(c => c.WriteEventDueAssigneeAsync(It.IsAny<HttpContext>(), ItemId, It.IsAny<UpdateEventDueAssigneeRequest>(), It.IsAny<CancellationToken>()))
             .Callback<HttpContext, Guid, UpdateEventDueAssigneeRequest, CancellationToken>((_, _, r, _) => sent = r)
             .ReturnsAsync(new EventDueAssigneeResult(EventDueAssigneeOutcome.Written));
-        var executor = new RescheduleExecutor(Probe(CanWrite).Object, cores.Object);
+        var executor = new RescheduleExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object);
 
         var outcome = await executor.ExecuteAsync(
             Request(new() { ["dueDate"] = "2026-11-02", ["reason"] = "Client asked" }, EventItem), CancellationToken.None);
@@ -404,7 +427,7 @@ public class DecisionActionExecutorsTests
             .Callback<HttpContext, string, Guid, JsonElement, CancellationToken>((_, _, _, body, _) => sent = body)
             .ReturnsAsync(Reply(204));
 
-        var outcome = await new RescheduleExecutor(Probe(CanWrite).Object, cores.Object).ExecuteAsync(
+        var outcome = await new RescheduleExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["dueDate"] = "2026-11-02", ["reason"] = "x" }, TodoItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Done);
@@ -420,7 +443,7 @@ public class DecisionActionExecutorsTests
     public async Task Reschedule_MalformedDate_RefusesBeforeAnyWrite(string? date)
     {
         var cores = Cores();
-        var outcome = await new RescheduleExecutor(Probe(CanWrite).Object, cores.Object)
+        var outcome = await new RescheduleExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object)
             .ExecuteAsync(Request(new() { ["dueDate"] = date }, EventItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -433,7 +456,7 @@ public class DecisionActionExecutorsTests
     public async Task Reschedule_CallerWithoutWrite_WritesNothing(string entity)
     {
         var cores = Cores();
-        var outcome = await new RescheduleExecutor(Probe(ReadOnly).Object, cores.Object)
+        var outcome = await new RescheduleExecutor(Probe(ReadOnly).Object, OpenEventUser(), cores.Object)
             .ExecuteAsync(Request(new() { ["dueDate"] = "2026-11-02" }, new DecisionRecordRef(entity, ItemId)), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -450,7 +473,7 @@ public class DecisionActionExecutorsTests
             .Callback<HttpContext, Guid, UpdateEventDueAssigneeRequest, CancellationToken>((_, _, r, _) => sent = r)
             .ReturnsAsync(new EventDueAssigneeResult(EventDueAssigneeOutcome.Written));
 
-        var outcome = await new ReassignExecutor(Probe(CanWrite).Object, cores.Object).ExecuteAsync(
+        var outcome = await new ReassignExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["assignee"] = ContactId.ToString("D") }, EventItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Done);
@@ -466,7 +489,7 @@ public class DecisionActionExecutorsTests
             .Callback<HttpContext, string, Guid, JsonElement, CancellationToken>((_, _, _, body, _) => sent = body)
             .ReturnsAsync(Reply(204));
 
-        var outcome = await new ReassignExecutor(Probe(CanWrite).Object, cores.Object).ExecuteAsync(
+        var outcome = await new ReassignExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["assignee"] = ContactId.ToString("D") }, TodoItem), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Done);
@@ -478,9 +501,9 @@ public class DecisionActionExecutorsTests
     public async Task Reassign_NoAssignee_Refuses_AndCallerWithoutWriteRefuses()
     {
         var cores = Cores();
-        (await new ReassignExecutor(Probe(CanWrite).Object, cores.Object).ExecuteAsync(
+        (await new ReassignExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["assignee"] = "nobody" }, EventItem), CancellationToken.None)).Status.Should().Be(DecisionActionStatus.Refused);
-        (await new ReassignExecutor(Probe(ReadOnly).Object, cores.Object).ExecuteAsync(
+        (await new ReassignExecutor(Probe(ReadOnly).Object, OpenEventUser(), cores.Object).ExecuteAsync(
             Request(new() { ["assignee"] = ContactId.ToString("D") }, EventItem), CancellationToken.None)).ReasonCode
             .Should().Be(DecisionActionReasons.NotAuthorized);
         cores.VerifyNoOtherCalls();
@@ -717,7 +740,7 @@ public class DecisionActionExecutorsTests
             .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
             .ReturnsAsync(Reply(201, body: new { id = created }));
 
-        var outcome = await new AddTodoExecutor(cores.Object, Entities()).ExecuteAsync(
+        var outcome = await new AddTodoExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
             Request(new() { ["title"] = "Chase the revised budget", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore),
             CancellationToken.None);
 
@@ -744,7 +767,7 @@ public class DecisionActionExecutorsTests
             .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
             .ReturnsAsync(Reply(201, body: new { id = created }));
 
-        var outcome = await new CreateEventExecutor(cores.Object, Entities()).ExecuteAsync(
+        var outcome = await new CreateEventExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
             Request(new() { ["title"] = "Budget call", ["date"] = "2026-10-22", ["attendees"] = "A. Smith, B. Jones" }, null, MatterCore),
             CancellationToken.None);
 
@@ -767,7 +790,7 @@ public class DecisionActionExecutorsTests
         cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Reply(status, "child_record.denied", "no"));
 
-        var outcome = await new AddTodoExecutor(cores.Object, Entities()).ExecuteAsync(
+        var outcome = await new AddTodoExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
             Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore),
             CancellationToken.None);
 
@@ -780,10 +803,10 @@ public class DecisionActionExecutorsTests
     public async Task NextStep_BadInput_RefusesBeforeTheCore()
     {
         var cores = Cores();
-        (await new AddTodoExecutor(cores.Object, Entities()).ExecuteAsync(
+        (await new AddTodoExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
             Request(new() { ["title"] = "t", ["assignee"] = "x", ["dueDate"] = "2026-10-20" }), CancellationToken.None)).Status
             .Should().Be(DecisionActionStatus.Refused);
-        (await new CreateEventExecutor(cores.Object, Entities()).ExecuteAsync(
+        (await new CreateEventExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
             Request(new() { ["title"] = "t", ["date"] = "soon" }), CancellationToken.None)).Status
             .Should().Be(DecisionActionStatus.Refused);
         cores.VerifyNoOtherCalls();
@@ -801,16 +824,16 @@ public class DecisionActionExecutorsTests
         var entities = Entities();
         return
         [
-            new ReviseBudgetExecutor(probe, user, new WriterHarness().Build(), new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance),
+            new ReviseBudgetExecutor(probe, user, new WriterHarness().Build(), Owner().Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance),
             new ApproveVarianceExecutor(),
-            new MarkCompleteExecutor(probe, cores, new FakeTimeProvider(Now)),
-            new RescheduleExecutor(probe, cores),
-            new ReassignExecutor(probe, cores),
+            new MarkCompleteExecutor(probe, user, cores, new FakeTimeProvider(Now)),
+            new RescheduleExecutor(probe, OpenEventUser(), cores),
+            new ReassignExecutor(probe, OpenEventUser(), cores),
             new SendReminderExecutor(probe, user, cores),
             new ExtendResponseDateExecutor(probe, user),
             new RecordTheResponseExecutor(probe, user, cores),
-            new AddTodoExecutor(cores, entities),
-            new CreateEventExecutor(cores, entities),
+            new AddTodoExecutor(probe, cores, entities),
+            new CreateEventExecutor(probe, cores, entities),
             new SendEmailExecutor(probe, user, cores),
         ];
     }
@@ -863,15 +886,15 @@ public class DecisionActionExecutorsTests
         var due = new Dictionary<string, string?> { ["dueDate"] = "2026-11-02", ["responseDate"] = "2026-11-02", ["date"] = "2026-11-02", ["assignee"] = ContactId.ToString("D"), ["title"] = "t", ["response"] = "no-longer-needed" };
         foreach (var subject in new[] { EventItem, TodoItem, WorkAssignmentItem })
         {
-            await new RescheduleExecutor(probe, cores.Object).ExecuteAsync(Request(due, subject), CancellationToken.None);
-            await new ReassignExecutor(probe, cores.Object).ExecuteAsync(Request(due, subject), CancellationToken.None);
-            await new MarkCompleteExecutor(probe, cores.Object, new FakeTimeProvider(Now)).ExecuteAsync(Request(due, subject), CancellationToken.None);
+            await new RescheduleExecutor(probe, OpenEventUser(), cores.Object).ExecuteAsync(Request(due, subject), CancellationToken.None);
+            await new ReassignExecutor(probe, OpenEventUser(), cores.Object).ExecuteAsync(Request(due, subject), CancellationToken.None);
+            await new MarkCompleteExecutor(probe, OpenEventUser(), cores.Object, new FakeTimeProvider(Now)).ExecuteAsync(Request(due, subject), CancellationToken.None);
             await new ExtendResponseDateExecutor(probe, user).ExecuteAsync(Request(due, subject), CancellationToken.None);
             await new RecordTheResponseExecutor(probe, user, cores.Object).ExecuteAsync(Request(due, subject), CancellationToken.None);
         }
 
-        await new AddTodoExecutor(cores.Object, Entities()).ExecuteAsync(Request(due, null, MatterCore), CancellationToken.None);
-        await new CreateEventExecutor(cores.Object, Entities()).ExecuteAsync(Request(due, null, MatterCore), CancellationToken.None);
+        await new AddTodoExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(Request(due, null, MatterCore), CancellationToken.None);
+        await new CreateEventExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(Request(due, null, MatterCore), CancellationToken.None);
 
         (bodies.Count + user.Patches.Count).Should().BeGreaterThan(8, "the sweep must actually have written something to search");
         bodies.Concat(user.Patches.Select(p => p.Body)).Should().NotContain(b => b.Contains("finalduedate", StringComparison.OrdinalIgnoreCase));
@@ -887,7 +910,7 @@ public class DecisionActionExecutorsTests
         var json = EventDueAssigneeWrite.BuildPatchJson(new UpdateEventDueAssigneeRequest(new DateOnly(2026, 11, 2), null), ContactId, Now);
 
         var names = JsonDocument.Parse(json).RootElement.EnumerateObject().Select(p => p.Name).ToList();
-        names.Should().BeEquivalentTo("sprk_duedate", "sprk_rescheduleddate", "sprk_rescheduledby@odata.bind");
+        names.Should().BeEquivalentTo("sprk_duedate", "sprk_rescheduleddate", "sprk_RescheduledBy@odata.bind");
         JsonDocument.Parse(json).RootElement.GetProperty("sprk_duedate").GetString().Should().Be("2026-11-02");
     }
 
@@ -898,10 +921,10 @@ public class DecisionActionExecutorsTests
 
         var root = JsonDocument.Parse(json).RootElement;
         root.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "sprk_assignedto@odata.bind", "statuscode", "sprk_reassigneddate", "sprk_reassignedby@odata.bind");
-        root.GetProperty("sprk_assignedto@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
+            "sprk_AssignedTo@odata.bind", "statuscode", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind");
+        root.GetProperty("sprk_AssignedTo@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
         root.GetProperty("statuscode").GetInt32().Should().Be(659490007);
-        root.GetProperty("sprk_reassignedby@odata.bind").GetString().Should().Be($"/contacts({FirmId:D})");
+        root.GetProperty("sprk_ReassignedBy@odata.bind").GetString().Should().Be($"/contacts({FirmId:D})");
     }
 
     [Theory]
@@ -971,5 +994,296 @@ public class DecisionActionExecutorsTests
         problem.Detail.Should().Be("no");
 
         (await DecisionRouteCores.ReadAsync(Results.NoContent(), http)).Status.Should().Be(204);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Round 2: the revision's owner (D-33/D-38)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReviseBudget_TheRevisionIsOwnedByTheTeamTheOwnershipRuleNames(bool secureMatter)
+    {
+        var team = secureMatter ? SecureTeam : MatterTeam;
+        var owner = Owner(team, secure: secureMatter);
+        RecordOwnershipContext? asked = null;
+        owner.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .Callback<RecordOwnershipContext, CancellationToken>((c, _) => asked = c)
+            .ReturnsAsync(new RecordOwnerResolution(RecordOwnerOutcome.Owned, team, null, null) { IsSecureOwner = secureMatter });
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), owner.Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var revision = writer.Created.Should().ContainSingle().Subject;
+        revision.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", team),
+            "the revision must not fall to the writer's own business unit");
+        asked!.TargetEntityLogicalName.Should().Be("sprk_matter");
+        asked.TargetRecordId.Should().Be(MatterId);
+        asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_budget", BudgetId));
+    }
+
+    [Fact]
+    public async Task ReviseBudget_NoOwnerCanBeResolved_RefusesBeforeAnyWrite()
+    {
+        var user = BudgetUser(MatterId);
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, user, writer.Build(), Owner(refuse: true).Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.OwnerUnresolved);
+        writer.Created.Should().BeEmpty();
+        user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void OwnerRoleConfig_NamesTheBudgetRevisionAsAChild()
+    {
+        var root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "config", "secure-record-owner-role.json")))
+            root = Path.GetDirectoryName(root);
+        root.Should().NotBeNull();
+
+        using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(root!, "config", "secure-record-owner-role.json")));
+        var entry = config.RootElement.EnumerateObject()
+            .SelectMany(p => p.Value.ValueKind == JsonValueKind.Array ? p.Value.EnumerateArray() : Enumerable.Empty<JsonElement>())
+            .Single(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("logicalName", out var n) && n.GetString() == "sprk_budgetrevision");
+        entry.GetProperty("kind").GetString().Should().Be("child");
+        entry.GetProperty("privilegeName").GetString().Should().Be("prvReadsprk_BudgetRevision");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Round 2: preflight (no write) and "possibly written"
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>Every write an executor could make, counted: the user client, the writer, and the route cores.</summary>
+    private sealed class Spy
+    {
+        public FakeUserClient User { get; init; } = new();
+        public WriterHarness Writer { get; } = new();
+        public Mock<DecisionRouteCores> Cores { get; } = DecisionActionExecutorsTests.Cores();
+
+        public int Writes => User.Patches.Count + Writer.Created.Count + Cores.Invocations.Count(i =>
+            i.Method.Name is "CompleteEventAsync" or "CreateChildAsync" or "UpdateChildAsync" or "WriteEventDueAssigneeAsync" or "SendCommunicationAsync");
+    }
+
+    private static async Task AssertPreflightRefusesWithoutWriting(
+        IDecisionActionExecutor executor, DecisionActionRequest request, Spy spy, string reason)
+    {
+        var preflight = await executor.PreflightAsync(request, CancellationToken.None);
+        preflight.Should().NotBeNull($"{executor.Code} preflight must refuse");
+        preflight!.Status.Should().Be(DecisionActionStatus.Refused);
+        preflight.ReasonCode.Should().Be(reason);
+        preflight.Written.Should().BeEmpty();
+        spy.Writes.Should().Be(0, "a preflight never writes");
+
+        var executed = await executor.ExecuteAsync(request, CancellationToken.None);
+        executed.Status.Should().Be(DecisionActionStatus.Refused, "ExecuteAsync runs the preflight first");
+        executed.ReasonCode.Should().Be(reason);
+        spy.Writes.Should().Be(0, "a refused execute writes nothing either");
+    }
+
+    private static Dictionary<string, string?> ReassignParams() => new() { ["assignee"] = ContactId.ToString("D") };
+
+    [Fact]
+    public async Task Preflight_ReviseBudget_RefusesAtTheLateChecks_WithZeroWrites()
+    {
+        var spy = new Spy { User = BudgetUser(MatterId) };
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, spy.User, spy.Writer.Build(), Owner(refuse: true).Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(ReviseParams()), spy, DecisionActionReasons.OwnerUnresolved);
+    }
+
+    [Fact]
+    public async Task Preflight_ApproveVariance_HasNothingToRefuse()
+    {
+        (await new ApproveVarianceExecutor().PreflightAsync(Request([]), CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Preflight_MarkComplete_RefusesAClosedEvent_WithZeroWrites()
+    {
+        var spy = new Spy { User = new FakeUserClient().OnGet("sprk_events(", new Dictionary<string, object?> { ["statuscode"] = 659490002 }) };
+        var executor = new MarkCompleteExecutor(Probe(CanWrite).Object, spy.User, spy.Cores.Object, new FakeTimeProvider(Now));
+        await AssertPreflightRefusesWithoutWriting(executor, Request([], EventItem), spy, DecisionActionReasons.InvalidState);
+    }
+
+    [Fact]
+    public async Task Preflight_Reschedule_RefusesAClosedEvent_WithZeroWrites()
+    {
+        var spy = new Spy { User = new FakeUserClient().OnGet("sprk_events(", new Dictionary<string, object?> { ["statuscode"] = 659490004 }) };
+        var executor = new RescheduleExecutor(Probe(CanWrite).Object, spy.User, spy.Cores.Object);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(new() { ["dueDate"] = "2026-11-02" }, EventItem), spy, DecisionActionReasons.InvalidState);
+    }
+
+    [Fact]
+    public async Task Preflight_Reassign_RefusesWithoutAppendToOnTheAssigneeContact_WithZeroWrites()
+    {
+        var spy = new Spy { User = OpenEventUser() };
+        var probe = Probe(CanWrite, bySet: set => set == "contacts" ? ReadOnly : CanWrite);
+        var executor = new ReassignExecutor(probe.Object, spy.User, spy.Cores.Object);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(ReassignParams(), EventItem), spy, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Fact]
+    public async Task Preflight_ExtendResponseDate_RefusesWithoutWrite_WithZeroWrites()
+    {
+        var spy = new Spy();
+        var executor = new ExtendResponseDateExecutor(Probe(ReadOnly).Object, spy.User);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(new() { ["responseDate"] = "2026-10-30" }, WorkAssignmentItem), spy, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Fact]
+    public async Task Preflight_RecordTheResponse_RefusesWithoutWrite_WithZeroWrites()
+    {
+        var spy = new Spy();
+        var executor = new RecordTheResponseExecutor(Probe(ReadOnly).Object, spy.User, spy.Cores.Object);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(new() { ["response"] = "no-longer-needed" }, WorkAssignmentItem), spy, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Preflight_Messages_RefuseAnUnresolvableRecipient_WithZeroWrites(bool reminder)
+    {
+        var spy = new Spy();
+        var probe = Probe(CanWrite).Object;
+        IDecisionActionExecutor executor = reminder
+            ? new SendReminderExecutor(probe, spy.User, spy.Cores.Object)
+            : new SendEmailExecutor(probe, spy.User, spy.Cores.Object);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(Message(FirmId.ToString("D")), WorkAssignmentItem), spy, DecisionActionReasons.RecipientUnresolved);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Preflight_Messages_RefuseWithoutAppendToOnTheCoreRecord_WithZeroWrites(bool reminder)
+    {
+        var spy = new Spy();
+        var probe = Probe(ReadOnly).Object;
+        IDecisionActionExecutor executor = reminder
+            ? new SendReminderExecutor(probe, spy.User, spy.Cores.Object)
+            : new SendEmailExecutor(probe, spy.User, spy.Cores.Object);
+        await AssertPreflightRefusesWithoutWriting(executor, Request(Message("a@b.example"), WorkAssignmentItem, MatterCore), spy, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Fact]
+    public async Task Preflight_AddTodo_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheCoreOrTheAssignee()
+    {
+        var parameters = new Dictionary<string, string?> { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" };
+
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AddTodoExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noCore = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AddTodoExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noCore.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noCore, DecisionActionReasons.NotAuthorized);
+
+        var noAssignee = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AddTodoExecutor(Probe(CanCreate, bySet: set => set == "contacts" ? ReadOnly : CanCreate).Object, noAssignee.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noAssignee, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Fact]
+    public async Task Preflight_CreateEvent_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheCore()
+    {
+        var parameters = new Dictionary<string, string?> { ["title"] = "t", ["date"] = "2026-10-22" };
+
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateEventExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noCore = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateEventExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noCore.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noCore, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Fact]
+    public async Task Preflight_ForEveryExecutor_OnAValidRequest_ProceedsAndWritesNothing()
+    {
+        var spy = new Spy { User = OpenEventUser() };
+        spy.User.OnGet("sprk_budgets(", new Dictionary<string, object?> { ["sprk_totalbudget"] = 1m, ["_sprk_matter_value"] = MatterId.ToString("D") });
+        var probe = Probe(CanWrite).Object;
+        var cores = spy.Cores.Object;
+
+        var cases = new (IDecisionActionExecutor Executor, DecisionActionRequest Request)[]
+        {
+            (new ReviseBudgetExecutor(probe, spy.User, spy.Writer.Build(), Owner().Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance), Request(ReviseParams())),
+            (new MarkCompleteExecutor(probe, spy.User, cores, new FakeTimeProvider(Now)), Request([], EventItem)),
+            (new RescheduleExecutor(probe, spy.User, cores), Request(new() { ["dueDate"] = "2026-11-02" }, TodoItem)),
+            (new ReassignExecutor(probe, spy.User, cores), Request(ReassignParams(), EventItem)),
+            (new ExtendResponseDateExecutor(probe, spy.User), Request(new() { ["responseDate"] = "2026-10-30" }, WorkAssignmentItem)),
+            (new RecordTheResponseExecutor(probe, spy.User, cores), Request(new() { ["response"] = "no-longer-needed" }, WorkAssignmentItem)),
+            (new SendReminderExecutor(probe, spy.User, cores), Request(Message("a@b.example"), WorkAssignmentItem, MatterCore)),
+            (new SendEmailExecutor(probe, spy.User, cores), Request(Message("a@b.example"), null, MatterCore)),
+            (new AddTodoExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore)),
+            (new CreateEventExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore)),
+        };
+
+        foreach (var (executor, request) in cases)
+        {
+            (await executor.PreflightAsync(request, CancellationToken.None)).Should().BeNull($"{executor.Code} would proceed");
+        }
+
+        spy.Writes.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PossiblyWritten_AServerErrorOrATimeout_NamesTheSubject()
+    {
+        // an update that answers 5xx
+        var cores = Cores();
+        cores.Setup(c => c.UpdateChildAsync(It.IsAny<HttpContext>(), "sprk_todo", ItemId, It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Reply(503, null, "unavailable"));
+        var fiveHundred = await new RescheduleExecutor(Probe(CanWrite).Object, OpenEventUser(), cores.Object).ExecuteAsync(
+            Request(new() { ["dueDate"] = "2026-11-02" }, TodoItem), CancellationToken.None);
+        fiveHundred.Status.Should().Be(DecisionActionStatus.Failed);
+        fiveHundred.Written.Should().Equal(TodoItem);
+
+        // a core that never answers (the HTTP client's timeout surfaces as TaskCanceledException while the request lives)
+        var timing = Cores();
+        timing.Setup(c => c.CompleteEventAsync(It.IsAny<HttpContext>(), ItemId, It.IsAny<CancellationToken>())).ThrowsAsync(new TaskCanceledException("timeout"));
+        var timedOut = await new MarkCompleteExecutor(Probe(CanWrite).Object, OpenEventUser(), timing.Object, new FakeTimeProvider(Now)).ExecuteAsync(
+            Request([], EventItem), CancellationToken.None);
+        timedOut.Status.Should().Be(DecisionActionStatus.Failed);
+        timedOut.Written.Should().Equal(EventItem);
+
+        // a work assignment patch that answers 500
+        var user = new FakeUserClient { PatchStatus = 500 };
+        var patched = await new ExtendResponseDateExecutor(Probe(CanWrite).Object, user).ExecuteAsync(
+            Request(new() { ["responseDate"] = "2026-10-30" }, WorkAssignmentItem), CancellationToken.None);
+        patched.Status.Should().Be(DecisionActionStatus.Failed);
+        patched.Written.Should().Equal(WorkAssignmentItem);
+
+        // the narrow event write failing
+        var eventCores = Cores();
+        eventCores.Setup(c => c.WriteEventDueAssigneeAsync(It.IsAny<HttpContext>(), ItemId, It.IsAny<UpdateEventDueAssigneeRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EventDueAssigneeResult(EventDueAssigneeOutcome.Failed, 500));
+        var eventFail = await new ReassignExecutor(Probe(CanWrite).Object, OpenEventUser(), eventCores.Object).ExecuteAsync(
+            Request(ReassignParams(), EventItem), CancellationToken.None);
+        eventFail.Status.Should().Be(DecisionActionStatus.Failed);
+        eventFail.Written.Should().Equal(EventItem);
+
+        // the budget amount write answering 500: the revision AND the budget are possibly written
+        var writer = new WriterHarness();
+        var budgetUser = BudgetUser(MatterId);
+        budgetUser.PatchStatus = 500;
+        var revise = await new ReviseBudgetExecutor(Probe(CanWrite).Object, budgetUser, writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance).ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+        revise.Status.Should().Be(DecisionActionStatus.Failed);
+        revise.Written.Should().Contain(new DecisionRecordRef("sprk_budgetrevision", writer.RevisionId))
+            .And.Contain(new DecisionRecordRef("sprk_budget", BudgetId));
     }
 }

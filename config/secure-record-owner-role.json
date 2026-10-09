@@ -206,6 +206,14 @@
       "addedBy": "unified-access-control-r2 task 146"
     },
     {
+      "logicalName": "sprk_budgetrevision",
+      "privilegeName": "prvReadsprk_BudgetRevision",
+      "kind": "child",
+      "reason": "Ontology platform R1 task 044 (D-33/D-38): a budget revision recorded by a decision on a Secure matter is created by the Ontology Service writer owned by the named Secure team, so the team needs Read on the table (mirrors sprk_budget).",
+      "evidence": "Pending: the manual negative control (a probe revision owned by the Secure Record Owners team before this privilege was added) has not been run; uac-r2 to confirm on review. Mirrors the sprk_budget entry (task 146, G146-1).",
+      "addedBy": "ontology-platform-r1 task 044"
+    },
+    {
       "logicalName": "sprk_kpiassessment",
       "privilegeName": "prvReadsprk_KPIAssessment",
       "kind": "child",
