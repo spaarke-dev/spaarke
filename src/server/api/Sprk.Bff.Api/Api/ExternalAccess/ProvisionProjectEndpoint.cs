@@ -565,7 +565,7 @@ public static class ProvisionProjectEndpoint
     // Handler
     // =========================================================================
 
-    private static Task<IResult> ProvisionProjectAsync(
+    private static async Task<IResult> ProvisionProjectAsync(
         ProvisionProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeFileStore speFileStore,
@@ -580,12 +580,36 @@ public static class ProvisionProjectEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
-        => ProvisionCoreAsync(
+    {
+        var result = await ProvisionCoreAsync(
             request,
             ProvisioningCreator.Caller(callerAccessProbe, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
             httpContext.TraceIdentifier,
             dataverseClient, speFileStore, recordShare, secureChildren, relatedRoots, configuration, noAccessGuard,
             accessCacheInvalidator, fileRelocator, callerAccessProbe, httpContext, logger, ct);
+
+        // ── Task 175 (owner round 87): a work assignment or project made secure BY HAND keeps it as its own ──
+        //
+        // Making a record stricter is never refused (a child may be stricter than its parent). Its access record now says the
+        // secure designation was set on it, so a parent that is later secured and then un-secured does not take it away (round
+        // 87 item 2). Best effort: a failure here is logged, and the job reads the same fact from the record within 5 minutes.
+        var target = ResolveRoot(request);
+        if (result is Microsoft.AspNetCore.Http.HttpResults.Ok<ProvisionProjectResponse> && target.Ok
+            && SecureRootInheritance.Inherits(ExternalGrantRoot.LogicalNameFor(target.Type)))
+        {
+            try
+            {
+                await relatedRoots.FollowParentsAsync(ExternalGrantRoot.LogicalNameFor(target.Type), target.Id,
+                    httpContext.TraceIdentifier, CancellationToken.None, ownSecureSetNow: true);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[PROVISION] Recording that {RecordId} was made secure by hand failed; the job records it.", target.Id);
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// unified-access-control-r2 task 158 (owner round 6): provisions a work assignment or project that is FILED UNDER a
@@ -713,8 +737,14 @@ public static class ProvisionProjectEndpoint
         // record the person this run would share it to — the creator / Make Secure caller — is not shared to when flagged
         // sprk_isexternal = true, exactly as a named colleague is not. A secure record left with nobody internal is then
         // provisioned anyway (an administrator still sees it) and the response says so.
+        // #1478 (task 175): Restricted THROUGH a parent counts as Restricted (owner round 84; task 174's effective rule) — a
+        // work assignment or project filed under a Restricted matter is Restricted before its own column catches up. A
+        // chain that cannot be read counts as Restricted (fail closed: it only bars a person flagged external).
+        var restrictedThroughFiling = row.sprk_accesspermission != ExternalParticipationService.AccessPermissionRestricted
+                                      && (await relatedRoots.IsRestrictedThroughFilingAsync(root.LogicalName, recordId, ct) ?? true);
         var creatorRule = new RestrictedCreatorRule(
-            dataverseClient, row.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted);
+            dataverseClient,
+            row.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted || restrictedThroughFiling);
 
         var recordName = row.NameFrom(root.NameColumn) ?? request.ProjectRef ?? recordId.ToString();
 
@@ -1104,7 +1134,7 @@ public static class ProvisionProjectEndpoint
         IReadOnlyList<ProvisionSkippedPrincipal> skippedPrincipals;
         try
         {
-            (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
+            (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(restrictedThroughFiling,
                 dataverseClient, recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger,
                 traceId, ct);
         }
@@ -3685,7 +3715,7 @@ public static class ProvisionProjectEndpoint
     /// (<c>ClassifyEligibility</c> = <c>ExternalOnRestricted</c>); each one left out is added to <paramref name="skipped"/>.
     /// </summary>
     private static async Task<List<Guid>> WithoutExternalOnRestrictedAsync(
-        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, List<Guid> colleagues,
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, bool restrictedThroughFiling, List<Guid> colleagues,
         List<ProvisionSkippedPrincipal> skipped, ILogger logger, string traceId, CancellationToken ct)
     {
         const string couldNotCheck =
@@ -3704,7 +3734,11 @@ public static class ProvisionProjectEndpoint
                 cancellationToken: ct);
 
             restricted = false;
-            if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true))
+            if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true) && restrictedThroughFiling)
+            {
+                restricted = true; // #1478: Restricted through a parent (task 175)
+            }
+            else if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true))
             {
                 var rows = await dataverseClient.QueryAsync<RootRow>(
                     root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: "sprk_accesspermission", top: 1,
@@ -3748,6 +3782,7 @@ public static class ProvisionProjectEndpoint
     }
 
     private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
+        bool restrictedThroughFiling,
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         SecureShareNoAccessGuard noAccessGuard,
@@ -3815,7 +3850,8 @@ public static class ProvisionProjectEndpoint
         // ── Task 114 (owner round 67): the ONE share-eligibility rule — a Restricted record is never shared with a person
         // flagged external. The flags are read for the colleagues; the record's Restricted state only when one of them is
         // flagged. A read that fails skips the colleague (ADR-003), as an unverifiable No Access check does.
-        colleagues = await WithoutExternalOnRestrictedAsync(dataverseClient, root, recordId, colleagues, skipped, logger, traceId, ct);
+        colleagues = await WithoutExternalOnRestrictedAsync(
+            dataverseClient, root, recordId, restrictedThroughFiling, colleagues, skipped, logger, traceId, ct);
         if (colleagues.Count == 0)
             return (0, skipped);
 

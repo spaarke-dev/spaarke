@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
     Locks sprk_accesspermission on the To Do, Event, Communication and Document forms while the record has a parent, with
-    an "Access permission is inherited from ..." notification (owner rounds 81 and 84). DRY RUN by default; -Verify checks
-    the result at any time.
+    an "Access permission is inherited from ..." notification (owner rounds 81 and 84) - and, task 175 (owner round 87), a
+    FLOOR lock on the Work Assignment and Project main forms while the record is filed under a matter or project.
+    DRY RUN by default; -Verify checks the result at any time.
 
 .DESCRIPTION
     Owner round 81 (2026-10-08, binding): a To Do, Event, Communication or Document WITH a parent shows the parent's Access
@@ -13,23 +14,32 @@
     (src/client/webresources/js/sprk_accesspermission_inherited.js), which decides "has a parent" from the server's own
     filing lookups (pinned by ParentLineageTests.FormLibraryParentLookups_MatchTheServerMap).
 
+    Task 175 (owner round 87: "the parent sets a FLOOR"): a work assignment or project filed under a matter or project
+    (its typed regarding lookups or the polymorphic regarding pair - the server's SecureRootInheritance filing, pinned in
+    the library's ROOT_PARENT_LOOKUPS / PAIR_PARENT_TABLES) inherits Secure and Access Permission and may never be looser,
+    but may be made stricter. There the same library (1.2.0) keeps sprk_accesspermission editable, puts back a value looser
+    than the parents' floor, disables sprk_issecure while the record is filed, and says whether the value is inherited or
+    set on the record; an unreadable parent locks both (fail safe).
+
     The lock is applied at run time (the field is editable on a parentless record), so per form this script only:
       - registers the library sprk_accesspermission_inherited and its OnLoad handler
-        Spaarke.AccessPermissionInherited.onLoad (pass execution context), on EVERY Main (type 2) and Quick Create
-        (type 7) form of the four tables that SHOWS sprk_accesspermission - a control bound to it, or a custom control
-        parameter bound to it (the TrackingFieldTrio pill on the To Do and Event main forms);
+        Spaarke.AccessPermissionInherited.onLoad (pass execution context), on EVERY form of the target tables (see
+        $TableFormTypes: Main (type 2) and Quick Create (type 7) for To Do, Event, Communication and Document; Main only
+        for Work Assignment and Project) that SHOWS sprk_accesspermission - a control bound to it, or a custom control
+        parameter bound to it (the TrackingFieldTrio pill on the To Do, Event, Work Assignment and Project main forms);
       - on the forms named by -AddControlForms that do not show the column yet (default: the Communication "Message main
         form" b58ec3d8 and the "Document main form" 9088d6a4 - owner round 81: "a permission control on these child
         records, but NOT TrackingFieldTrio on Communication"), adds a plain choice control for it in a new section
-        "sprk_access_permission", first in the first visible tab.
+        "sprk_access_permission", first in the first visible tab. (No plain control is added to a Work Assignment or
+        Project form: their main forms show the column through the TrackingFieldTrio pill.)
     The change is ADDITIVE ONLY, made as string insertions into the form XML (never a re-serialization), and proven by a
     parsed comparison in which every original node is still present, in order, with identical attributes and text. New ids
     are derived from the form id (a stable hash), so a re-run writes identical bytes and a complete form is left
     byte-identical ("nothing to do").
 
     Fail closed (ADR-003). Each of these REFUSES (exit 2), names the form, and writes nothing:
-      FORM_NOT_FOUND     an -AddControlForms id is not in the environment, or is not a Main/Quick Create form of one of
-                         the four tables;
+      FORM_NOT_FOUND     an -AddControlForms id is not in the environment, or is not a target form type of one of the
+                         target tables;
       MANAGED_FORM       a form that needs a change is managed (change it in its owning solution);
       HANDLER_DISABLED   the OnLoad handler is registered but disabled (a maker's choice this script does not override);
       NO_VISIBLE_TAB     a control must be added and the form has no visible tab with a <sections> element;
@@ -42,7 +52,8 @@
 
     ORDER (live steps run by the main session, each dry run -> -Apply -> -Verify):
       1. Set-DocumentAccessPermissionSchema.ps1 (sprk_document.sprk_accesspermission in source and in SpaarkeCore);
-      2. deploy the web resource: scripts/Deploy-WebResourceInline.ps1 -WebResourceName sprk_accesspermission_inherited
+      2. deploy the web resource: scripts/Deploy-WebResourceInline.ps1 -DataverseUrl <environment>
+         -WebResourceName sprk_accesspermission_inherited
          -FilePath src/client/webresources/js/sprk_accesspermission_inherited.js -WebResourceType 3;
       3. THIS script.
     No other formxml writer may run against the environment at the same time (task 168 rule: whole-document rewrites).
@@ -54,7 +65,7 @@
     Snapshot, PATCH, publish, read back. Without a mode switch the script is a READ-ONLY dry run.
 
 .PARAMETER Verify
-    Read-only. Exit 0 only when: every Main/Quick Create form of the four tables that shows sprk_accesspermission
+    Read-only. Exit 0 only when: every target form (see $TableFormTypes) that shows sprk_accesspermission
     registers the library and an ENABLED OnLoad handler; every -AddControlForms form shows the column; the web resource
     exists and its content equals the checked-in library byte for byte; and no refusal case is present. Otherwise exit 1
     naming each gap - a form that shows the field without the lock (a "re-opened" control) is a gap. Any read fault is a
@@ -90,7 +101,7 @@
 
 .NOTES
     Project : unified-access-control-r2
-    Task    : 173 (#1423) - owner rounds 81 and 84
+    Task    : 173 (#1423) - owner rounds 81 and 84; 175 - work assignment and project (owner round 84)
     Created : 2026-10-08
     Docs    : projects/unified-access-control-r2/notes/task-173-child-access-permission.md
 
@@ -142,12 +153,22 @@ if ([string]::IsNullOrEmpty($FixturePath)) { $FixturePath = Join-Path $RepoRoot 
 if ([string]::IsNullOrEmpty($LibraryPath)) { $LibraryPath = Join-Path $RepoRoot 'src/client/webresources/js/sprk_accesspermission_inherited.js' }
 
 $Column = 'sprk_accesspermission'
-$Tables = @('sprk_todo', 'sprk_event', 'sprk_communication', 'sprk_document')
+# The target tables and, per table, the form types the library is registered on (2 = Main, 7 = Quick Create). Task 175
+# adds the Work Assignment and Project MAIN forms (the TrackingFieldTrio pill shows the column there).
+$TableFormTypes = [ordered]@{
+    'sprk_todo'           = @(2, 7)
+    'sprk_event'          = @(2, 7)
+    'sprk_communication'  = @(2, 7)
+    'sprk_document'       = @(2, 7)
+    'sprk_workassignment' = @(2)
+    'sprk_project'        = @(2)
+}
+$Tables = @($TableFormTypes.Keys)
+$RootTables = @('sprk_workassignment', 'sprk_project')   # the library's ROOT_PARENT_LOOKUPS tables (task 175)
 $Library = 'sprk_accesspermission_inherited'
 $OnLoadFunction = 'Spaarke.AccessPermissionInherited.onLoad'
 $SectionName = 'sprk_access_permission'
 $ClassIdOptionSet = '{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}'
-$FormTypes = @(2, 7)  # Main, Quick Create
 
 # ============================================================================
 # Pure functions (no I/O) - exercised offline by -SelfTest
@@ -478,6 +499,20 @@ if ($SelfTest) {
     $lib = Get-Content -LiteralPath $LibraryPath -Raw -Encoding UTF8
     Report 'library declares Spaarke.AccessPermissionInherited.onLoad' ($lib -match 'Spaarke\.AccessPermissionInherited\s*=' -and $lib -match 'ns\.onLoad\s*=')
 
+    # Task 175: every table this script registers the library on is one the library locks - PARENT_LOOKUPS (the four
+    # child tables) or ROOT_PARENT_LOOKUPS (work assignment, project) - and the root tables are exactly the latter.
+    function Get-LibraryMapKeys([string]$Source, [string]$Marker) {
+        $m = [regex]::Match($Source, "/\*\s*${Marker}:BEGIN[^\n]*\n\s*ns\.$Marker\s*=\s*(?<json>\{.*?\});\s*/\*\s*${Marker}:END", 'Singleline')
+        if (-not $m.Success) { return $null }
+        return @(($m.Groups['json'].Value | ConvertFrom-Json -AsHashtable).Keys)
+    }
+    $childKeys = Get-LibraryMapKeys $lib 'PARENT_LOOKUPS'
+    $rootKeys = Get-LibraryMapKeys $lib 'ROOT_PARENT_LOOKUPS'
+    $libraryTables = @($childKeys) + @($rootKeys)
+    Report 'library maps every target table (PARENT_LOOKUPS + ROOT_PARENT_LOOKUPS)' ($null -ne $childKeys -and $null -ne $rootKeys -and @($Tables | Where-Object { $libraryTables -notcontains $_ }).Count -eq 0)
+    Report 'the root tables are the library ROOT_PARENT_LOOKUPS tables' ((@($rootKeys | Sort-Object) -join ',') -eq (@($RootTables | Sort-Object) -join ','))
+    Report 'the root tables are registered on Main forms only' (@($RootTables | Where-Object { ($TableFormTypes[$_] -join ',') -ne '2' }).Count -eq 0)
+
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures of $count check(s)." -ForegroundColor Red; exit 1 }
     Write-Host "`nSELF-TEST PASS: $count check(s)." -ForegroundColor Green
     exit 0
@@ -622,8 +657,8 @@ try {
     }
 
     Write-Step "Forms"
-    $typeFilter = ($FormTypes | ForEach-Object { "type eq $_" }) -join ' or '
     foreach ($t in $Tables) {
+        $typeFilter = ($TableFormTypes[$t] | ForEach-Object { "type eq $_" }) -join ' or '
         $forms = Invoke-Dv -Endpoint "systemforms?`$select=formid,name,type,ismanaged,formxml,formactivationstate&`$filter=objecttypecode eq '$t' and ($typeFilter)"
         foreach ($f in @($forms.value)) {
             $id = ([string]$f.formid).ToLowerInvariant()
@@ -646,8 +681,11 @@ try {
     $seen = @($edits | ForEach-Object { $_.FormId })
     foreach ($a in $addIds) {
         $f = Invoke-Dv -Endpoint "systemforms($a)?`$select=formid,objecttypecode,type" -AllowNotFound
-        if ($null -eq $f -or $Tables -notcontains [string]$f.objecttypecode -or $FormTypes -notcontains [int]$f.type) {
-            $refusals.Add(@{ Code = 'FORM_NOT_FOUND'; Where = $a; Detail = 'not a Main or Quick Create form of the four tables in this environment' })
+        if ($null -eq $f -or $Tables -notcontains [string]$f.objecttypecode -or $TableFormTypes[[string]$f.objecttypecode] -notcontains [int]$f.type) {
+            $refusals.Add(@{ Code = 'FORM_NOT_FOUND'; Where = $a; Detail = 'not a target form type of the target tables in this environment' })
+        }
+        elseif ($RootTables -contains [string]$f.objecttypecode) {
+            $refusals.Add(@{ Code = 'FORM_NOT_FOUND'; Where = $a; Detail = "a $($f.objecttypecode) form gets no plain control (the TrackingFieldTrio pill shows the column there)" })
         }
     }
 }
@@ -690,7 +728,7 @@ if ([string]::IsNullOrEmpty($SnapshotPath)) {
 }
 $snapshot = [ordered]@{
     script         = 'Set-InheritedAccessPermissionFormLock.ps1'
-    task           = 'unified-access-control-r2 task 173 (owner rounds 81/84)'
+    task           = 'unified-access-control-r2 tasks 173/175 (owner rounds 81/84)'
     environmentUrl = $BaseUrl
     createdUtc     = (Get-Date).ToUniversalTime().ToString('o')
     forms          = @($edits | ForEach-Object {

@@ -224,6 +224,49 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 }
             }
 
+            // ── #1478 (task 175): the work assignments and projects filed BELOW a Restricted matter or project are Restricted
+            //    through it (task 174's effective rule) before their own column catches up — candidates too. A listing that
+            //    cannot complete is a problem of this run (the next run lists them again); nothing is decided on part of it. ──
+            var restrictedParents = restricted
+                .Where(r => r.Item1 is ExternalGrantRootType.Matter or ExternalGrantRootType.Project)
+                .Select(r => (ExternalGrantRoot.LogicalNameFor(r.Item1), r.Item2))
+                .ToList();
+            if (restrictedParents.Count > 0)
+            {
+                var generic = scope.ServiceProvider.GetService<Spaarke.Dataverse.IGenericEntityService>();
+                if (generic is null)
+                {
+                    problems.Add("RESTRICTED-BELOW: no Dataverse reader is configured, so records filed under Restricted records were not listed.");
+                }
+                else
+                {
+                    try
+                    {
+                        var below = await Sprk.Bff.Api.Services.Access.SecureRootInheritance.ListFiledRootsBelowAsync(
+                            generic, _logger, restrictedParents, cancellationToken).ConfigureAwait(false);
+                        foreach (var filed in below.Roots.Where(r => r.Confirmed))
+                        {
+                            var type = string.Equals(filed.Table, ExternalGrantRoot.LogicalNameFor(ExternalGrantRootType.Project),
+                                StringComparison.OrdinalIgnoreCase)
+                                ? ExternalGrantRootType.Project
+                                : ExternalGrantRootType.WorkAssignment;
+                            all.TryAdd((type, filed.Id), null);
+                            restricted.Add((type, filed.Id));
+                        }
+
+                        if (below.DepthBoundReached)
+                            problems.Add("RESTRICTED-BELOW: a filing chain below a Restricted record is deeper than the walk follows; the rest were not listed.");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(ex,
+                            "[ASSIGNED-ACCESS-RECON] The records filed under {Count} Restricted record(s) could not be listed; they " +
+                            "are listed again next run.", restrictedParents.Count);
+                        problems.Add("RESTRICTED-BELOW: the records filed under Restricted records could not be listed this run.");
+                    }
+                }
+            }
+
             restrictedCandidates = restricted.Count;
 
             if (truncated)

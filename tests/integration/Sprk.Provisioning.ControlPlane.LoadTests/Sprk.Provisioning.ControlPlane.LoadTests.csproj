@@ -167,5 +167,7 @@
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
     <Compile Remove="..\Shared\Dataverse\**\*.cs" />
+    <!-- Shared\Ai holds BFF-only AI test helpers (the task 176 retrieval-access-trim doubles); same reason. -->
+    <Compile Remove="..\Shared\Ai\**\*.cs" />
   </ItemGroup>
 </Project>

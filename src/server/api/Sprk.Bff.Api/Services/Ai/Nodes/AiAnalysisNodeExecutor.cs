@@ -220,7 +220,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             // L2 Document Context Retrieval: query customer document index for similar documents.
             // Controlled by retrievalConfig.IncludeDocumentContext (off by default).
             var documentContextKnowledge = await RetrieveDocumentContextAsync(
-                context, retrievalConfig, cancellationToken);
+                context, retrievalConfig, scope.ServiceProvider, cancellationToken);
 
             // L3 Entity Context Retrieval: query records index for parent entity metadata.
             // Controlled by retrievalConfig.IncludeEntityContext (off by default).
@@ -451,6 +451,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             AnalysisId = context.RunId,
             TenantId = context.TenantId,
             Document = context.Document!,
+            CallerObjectId = context.CallerObjectId,
             PreviousResults = previousResults,
             UserContext = context.UserContext,
             ActionSystemPrompt = actionSystemPrompt,
@@ -939,10 +940,16 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// <para>
     /// ADR-014: Retrieved content is NOT logged. Only metadata (count, duration) is logged.
     /// </para>
+    /// <para>
+    /// Task 176 (#1511): rows are trimmed through <see cref="PublicContracts.IRetrievalAccessTrim"/> to documents the run
+    /// principal (<see cref="NodeExecutionContext.CallerObjectId"/>) can read, so a parent named in ConfigJson that the
+    /// caller cannot read yields nothing. App-only and scheduled runs have no run principal and get no L2 context.
+    /// </para>
     /// </remarks>
     private async Task<string?> RetrieveDocumentContextAsync(
         NodeExecutionContext context,
         KnowledgeRetrievalConfig retrievalConfig,
+        IServiceProvider scopedProvider,
         CancellationToken cancellationToken)
     {
         // Never mode skips all retrieval including L2
@@ -990,9 +997,19 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 ParentEntityId = parentEntityId
             };
 
-            var searchResponse = await _ragService.SearchAsync(query, searchOptions, cancellationToken);
+            var accessTrim = scopedProvider.GetRequiredService<PublicContracts.IRetrievalAccessTrim>();
+            var (searchResponse, trim) = await accessTrim.SearchReadableAsync(
+                _ragService, query, searchOptions, context.CallerObjectId, cancellationToken);
 
             stopwatch.Stop();
+
+            if (trim.Withheld)
+            {
+                _logger.LogWarning(
+                    "L2 document context withheld for node {NodeId}: {Outcome} (task 176, fail closed)",
+                    context.Node.Id, trim.Outcome);
+                return null;
+            }
 
             // Exclude chunks belonging to the current document
             var currentDocumentId = context.Document.DocumentId.ToString();
@@ -1093,6 +1110,23 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
 
         try
         {
+            // Task 176 (#1511): the parent comes from playbook ConfigJson and the records index is read app-only, so
+            // the RUN PRINCIPAL must be able to read that record before its metadata reaches the prompt. One
+            // caller-scoped read through the shared trim; no principal, an unreadable record or a failed check → no
+            // L3 context.
+            var accessTrim = scopedProvider.GetRequiredService<PublicContracts.IRetrievalAccessTrim>();
+            var parentKey = PublicContracts.RetrievalRecordKey.ParentRecord(parentEntityType, parentEntityId);
+            var parentCheck = await accessTrim.TrimByRecordAsync(
+                new[] { parentKey }, k => k, context.CallerObjectId, cancellationToken);
+            if (parentKey is null || parentCheck.Rows.Count == 0)
+            {
+                _logger.LogInformation(
+                    "L3 entity context skipped for node {NodeId}: the run principal's Read on the parent could not be "
+                    + "established ({Outcome}) (task 176, fail closed)",
+                    context.Node.Id, parentKey is null ? "unsupported parent" : parentCheck.Outcome.ToString());
+                return null;
+            }
+
             // Query the records index by parent entity name (using the entity ID as a search filter).
             // Use keyword search to find the exact record by dataverseRecordId.
             var searchRequest = new RecordSearchRequest
@@ -1143,6 +1177,18 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             }
 
             var entityRecord = searchResponse.Results[0];
+
+            // Task 176: the records index is searched by keyword, so the top hit is not necessarily the checked
+            // parent. Only that record's metadata may be used.
+            if (!Guid.TryParse(entityRecord.RecordId, out var hitId)
+                || !Guid.TryParse(parentEntityId, out var parentId)
+                || hitId != parentId)
+            {
+                _logger.LogDebug(
+                    "L3 entity context for node {NodeId}: top records-index hit is not the configured parent — skipping",
+                    context.Node.Id);
+                return null;
+            }
 
             _logger.LogInformation(
                 "L3 entity context for node {NodeId}: found '{RecordName}' ({RecordType}) in {ElapsedMs}ms",

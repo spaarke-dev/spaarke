@@ -27,6 +27,9 @@ module.exports = {
     // source module and THROWS for any un-mapped export (never undefined).
     // See `test-mocks/spaarke-ui-components.js`.
     '^@spaarke/ui-components$': '<rootDir>/test-mocks/spaarke-ui-components.js',
+    // `@spaarke/auth` to its TS source (its dist is ESM, which the `.tsx?` transform does not cover),
+    // so the archive-failure suite throws the REAL ApiError / AuthError (as Reporting's jest config does).
+    '^@spaarke/auth$': '<rootDir>/../../shared/Spaarke.Auth/src/index.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {

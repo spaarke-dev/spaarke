@@ -91,6 +91,10 @@ export interface ITrackingFieldTrioProps {
   secureAccessPermission?: {
     label: string;
   };
+  /** Where the pill's effective value comes from (unified-access-control-r2 task 175, owner round 87), e.g. "Access
+   * Permission: Restricted (inherited from Matter X)". When supplied, shown as the pill's tooltip and added to its
+   * accessible description. Omit (the default) for no note. */
+  accessPermissionNote?: string;
 
   // ---------------------------------------------------------------------
   // Governance toolbar (person + email icons — task 040, teams-app-r1).

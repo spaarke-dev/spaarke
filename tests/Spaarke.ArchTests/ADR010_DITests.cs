@@ -301,7 +301,15 @@ public class ADR010_DITests
         // The two "⚠️ WEAKEST" seams grandfathered above are gone. ITenantBudgetPolicy is replaced by the concrete
         // AiSpendLimit; ITenantTokenLedger by IAiSpendLedger, which has TWO implementations (RedisAiSpendLedger — the
         // "Redis successor" that note anticipated — and InMemoryAiSpendLedger), so it is not a 1:1 mapping.
-        const int knownOneToOneCeiling = 157;
+        //
+        // ───────── Ceiling raised 157 → 158, 2026-10-09 (unified-access-control-r2 task 176, #1511) ─────────
+        // IRetrievalAccessTrim -> RetrievalAccessTrim. SEAM JUSTIFICATION: it is the Services/Ai/PublicContracts facade
+        // (ADR-013 / CLAUDE.md §10) the task POML requires for the one access trim every AI retrieval path applies, so a
+        // CRUD caller can trim without reaching IRagService. It is also a real test seam: PermitAllRetrievalAccessTrim
+        // (tests/integration/Shared) is its double in the suites that test what retrieval callers do with rows they MAY
+        // see, while the trim itself is tested for real in Issue1511_AiRetrievalAccessTrimTests. Same category as
+        // IRelocatedFileIndexing / IAiKeylessProbe. Verified as the only addition (master measured 157).
+        const int knownOneToOneCeiling = 158;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
