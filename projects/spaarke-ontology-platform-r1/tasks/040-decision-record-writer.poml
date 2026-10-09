@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Decision Record writer with record class and mandatory fact snapshot</title>
+    <phase>4 The Decision Record</phase>
+    <gate>001, 030, 007, 036, 008, 039 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes the append-only artifact the whole defensibility story rests on; it cannot be edited after the fact.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified writer; the judgement was settled by D-2 and the BR-1 reversal.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 041 and 042 both build on the writer.</parallel-reason>
+    <deps>001, 030, 007, 036, 008, 039</deps>
+    <tags>bff-api,dataverse,decision-record</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write a Decision Record on EVERY human resolution, typed by record class, with a mandatory fact snapshot.</prompt>
+  <role>SPAARKE backend developer. Append-only means you get one chance per row.</role>
+  <goal>Every human resolution of a Work Item writes a Decision Record and populates the Signal decision reference; the class distinguishes judgement from routine work.</goal>
+
+  <context>
+    <background>BR-1 was REVERSED. The earlier rule (Do-lane completions write no record) was drawn at the wrong granularity: resolving a Do item is rarely a bare mark-complete, it also sends email, creates follow-ons and closes records, and one of those is outward-facing. The lane is not a safe proxy for whether a judgement occurred. The fix is write everything, type it, filter on read.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: EVERY human resolution writes a record: complete, reschedule, reassign, send email, create follow-on, close record, dismiss. Decide lane and Do lane alike. Do NOT reintroduce a lane-based carve-out.</constraint>
+    <constraint source="project">Scope: sprk_factsnapshot is MANDATORY. Do not make it optional. The gap it closes is invisible until the first time someone audits an old decision.</constraint>
+    <constraint source="project">Scope: sprk_recordclass is derived from WHICH ACTION was taken, not chosen by the user. Bare completion or reschedule of one own assigned work maps to Routine; send-email, create-follow-on and close-record map to Judgement; dismiss maps to Dismissal.</constraint>
+    <constraint source="project">Scope: sprk_action is NULLABLE and stays null on deny paths. An action taken outside a Signal equally has no decision.</constraint>
+    <constraint source="ADR-015">Scope: copy sprk_privilegeflagged forward and NEVER branch on it. Privilege is flagged, never decided.</constraint>
+    <constraint source="project">Scope: sprk_decisionoutcome (Authorized, Denied, Dismissed) answers what the human decided at the gate. It is DISTINCT from sprk_servicerequest.sprk_disposition, which answers how the Inquiry turned out. One word per concept; do not merge them.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17; reconciliation R-6, S-10; #6, #16): the writer writes ONE record per REVIEW, not per action. Its input is the review outcome from the commit route (task 043): every action the plan offered, each taken or skipped with the values used and its actual outcome, the Next steps created with their ids, the strictest gate tier among taken actions, and the resolved Signal ids. It writes sprk_steps (JSON), sprk_followons (JSON) and sprk_gatetier (task 007); sprk_actioncode = the first action taken (the catalog code; sprk_action stays the nullable lookup and is left null for catalog actions, #6); sprk_proposedaction = the offered action labels joined. It is called LAST by the commit route, after every other write succeeded; it never runs on a failed review.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17, FR-50): sprk_recordclass comes from task 036's catalog (Dismissal when nothing was taken; Judgement when any taken action or any Next step is Judgement; Routine otherwise), never from the client and never from scattered conditionals. The decider's role and the "because" text go into sprk_factsnapshot (#16, S-10).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-33): the Decision Record is a SECURE CHILD and still APPEND-ONLY. Before the create, call RecordOwnershipResolver.ResolveOwnerAsync with the record's matter as parent (task 039 registered sprk_decisionrecord with sprk_matter as its only lineage lookup); on a Secure answer set ownerid to the Secure Record Owners team IN the create (Spaarke Ontology Service holds Assign on sprk_decisionrecord from task 008: owner only, never content); otherwise keep the writer's current ownership; on a refusal, write nothing and fail the review (the commit route reports it, no record). No human role and not the writer holds Write or Delete on sprk_decisionrecord, so the mirrored share rights are inert and append-only by privilege still holds. Do not use the 2-minute-reconcile alternative (the owner approved Assign).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-36): the Decision Record's SUBJECT is the item's CORE record, the same one its Signal groups under, for all four core types: copy the Signal's sprk_corerecordtype and sprk_corerecordid, and set the matching typed lineage lookup (sprk_matter, sprk_project or sprk_workassignment) when the core type has one on this table (task 007); a service request has none. Pass the core record as the resolver parent for ownership. Read which typed column to set from a single data table keyed by core entity (the lineage columns of task 007), not from per-type branches.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-39): for an item with NO core record, the record is OWNED BY THE ITEM'S OWNER (ownerid = that user, set in the create; Ontology Service holds Assign on sprk_decisionrecord from task 008) and visible like its Signal (owner only through the BFF; task 038's reasoning applies). Both core columns are null.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (FR-22, R-7): setting sprk_signal.sprk_decisionrecord covers every Signal the review resolves (the primary and any ticked Also-resolve Decide Signals on the same matter).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Append-only decision ledger</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the writer taking ONE review outcome (offered actions taken or skipped with values and outcomes, Next steps with ids, gate tier, resolved Signal ids), the confirming user and the fact values at decision time (amended 2026-10-07, D-17).</step>
+    <step order="2">Derive sprk_recordclass from task 036's catalog for the actions taken and Next steps created (one table, the catalog), never from the client.</step>
+    <step order="3">Populate sprk_matter, sprk_policyversion, sprk_factsnapshot, sprk_proposedaction, sprk_decisionoutcome, sprk_confirmedby, sprk_decidedon.</step>
+    <step order="4">Populate sprk_actioncode with the first action taken, sprk_steps, sprk_followons and sprk_gatetier; leave sprk_action null on deny and for catalog actions.</step>
+    <step order="5">Copy sprk_privilegeflagged forward from the Signal.</step>
+    <step order="6">Return the record id to the commit route, which sets sprk_signal.sprk_decisionrecord on every resolved Signal and their resolution type to Acted or Dismissed (or do it here if the commit route delegates it, but in one place only).</step>
+    <step order="7">Add tests for each record class, the deny path with a null action, and the mandatory snapshot refusal.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an action arises that maps cleanly to none of Judgement, Routine or Dismissal, STOP and escalate rather than defaulting it. Defaulting silently mis-types the Report Card, and the option set is closed.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+    <trigger>If writing a no-core record owned by the item's owner needs a privilege beyond task 008's list, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CommunicationRuleDecision already carries the full decision on both the authorize and deny paths, but it is written to ILogger and LOST. SessionGate (ADR-040) carries Kind, Status, SideEffectClass, BindingId and Turn but no authority, policy version, evidence or confirmer. sprk_emailreviewlog is append-only but domain-specific.</existing>
+    <extension>No. The value already exists in memory; what is missing is persistence to a durable, per-matter-queryable row. ADR-040 was amended in task 003 to name the two as siblings rather than forcing one to serve both.</extension>
+    <cost-of-doing-nothing>Suppression is impossible, so a Signal dismissed three times keeps firing and users mute the system. Thresholds stay guesses forever (criterion 5). And there is no answer to why did nothing happen, which Dataverse audit structurally cannot give because nothing changed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Decide-lane authorization, when resolved, then a record exists with class Judgement and the Signal decision reference is set.</criterion>
+    <criterion testable="true">Given a bare Do-lane completion, when resolved, then a record exists with class Routine (NOT absent).</criterion>
+    <criterion testable="true">Given a Do-lane resolution that also sends an email, when resolved, then the class is Judgement, not Routine.</criterion>
+    <criterion testable="true">Given a dismissal, when resolved, then the class is Dismissal and a reason is recorded.</criterion>
+    <criterion testable="true">Negative: given a deny, when resolved, then the record saves with sprk_action null.</criterion>
+    <criterion testable="true">Negative: attempting to write a record without sprk_factsnapshot is refused.</criterion>
+    <criterion testable="true">Negative: nothing in the writer branches on sprk_privilegeflagged.</criterion>
+    <criterion testable="true">Given a review offering three actions of which two were taken and one Next step created, when written, then exactly one record exists whose sprk_steps lists all three (one skipped) with values and outcomes, sprk_followons lists the Next step id, sprk_actioncode is the first taken action and the class is Judgement.</criterion>
+    <criterion testable="true">Given a review resolving a primary Signal and one Also-resolve Signal, when completed, then both Signals reference the one record.</criterion>
+    <criterion testable="true">Given a review on a Secure matter, when the record is written, then its owningteam is the Secure Record Owners team, set in the create; given a Standard, Limited or Restricted matter, then ownership is unchanged from the non-secure path (D-33).</criterion>
+    <criterion testable="true">Negative: after the D-33 change, an update to a Secure-team-owned sprk_decisionrecord row by a user holding a mirrored share is refused (append-only by privilege still holds).</criterion>
+    <criterion testable="true">Negative: the writer is never invoked for a review that failed before the record step (task 043 contract), and it refuses a review whose record class cannot be derived from the catalog.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a review of a project-grouped Signal, when written, then the record's sprk_project is the project, sprk_matter is null, and a Secure project makes it Secure-team-owned (D-33, D-34).</criterion>
+    <criterion testable="true">Given a review of a work-assignment-grouped Signal, when written, then the record carries that core record in the generic columns and in sprk_workassignment; given a service-request-grouped Signal, then in the generic columns only (D-36).</criterion>
+    <criterion testable="true">Given a review of a no-core Signal, when written, then the record is owned by the item's owner and both core columns are null (D-39).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-18 (amended, D-17), FR-19, FR-20, FR-22, FR-50, FR-51. design.md BR-1 as reversed, and notes/schema-draft.md section 6 for the full rationale. Amended 2026-10-07: one record per review (reconciliation B.2 row 040); the record class of reassign and extend-response-date is open (C-3, O-3) and handled by task 036.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

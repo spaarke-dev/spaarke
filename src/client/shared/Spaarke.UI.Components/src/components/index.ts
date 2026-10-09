@@ -299,6 +299,11 @@ export type {
   ChooserFileArgs,
 } from './GetStartedCards/CreateRecordChooserModal';
 
+// StatusBadge - generic status/severity badge (label + tone), no domain
+// vocabulary. The ONE legitimately-new UI primitive added by
+// spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41).
+export * from './StatusBadge';
+
 // AccessGrantModal - the person-icon access-grant modal opened from
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);

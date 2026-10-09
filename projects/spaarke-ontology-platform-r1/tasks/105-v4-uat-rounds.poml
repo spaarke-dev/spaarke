@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>v4 UAT rounds with the owner on dev</title>
+    <phase>11 UAT</phase>
+    <gate>055, 064, 102 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Owner walkthrough and recording; fixes found here become their own tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Main-session coordination and recording.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs in the main session with the owner, against the shared dev environment.</parallel-reason>
+    <deps>055, 064, 102</deps>
+    <tags>uat,testing,e2e-test</tags>
+    <estimated-effort>recurring</estimated-effort>
+  </metadata>
+
+  <prompt>Walk the owner through the deployed Console on dev against HANDOFF v4 section 1.4 as the UAT script, record each result, and turn each refinement into a task or an issue.</prompt>
+  <role>SPAARKE project lead, main session.</role>
+  <goal>A dated UAT log per round with pass/refine per HANDOFF section 1.4 rule; every refinement has a task id or an issue URL.</goal>
+
+  <context>
+    <background>Owner decision 1 (2026-10-05, reconciliation header): v4 is the baseline, refined in UAT here. Reconciliation section B.3 proposed task 105 against walk-v4.cjs's 17 steps; section B.6 says deploy and cutover tasks use the full section 1.4 list as the UAT script against real Dataverse.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: real dev Dataverse only; never the prototype harness.</constraint>
+    <constraint source="project">Scope: a refinement that changes a binding behaviour or a decision is raised to the owner as a decision, not implemented in this task; small fixes become tasks via task-create conventions; everything else becomes an issue (notes/defer-issues.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>UAT</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Run the round with the owner; record each section 1.4 rule as pass or refine.</step>
+    <step order="2">Create a task or issue per refinement.</step>
+    <step order="3">When the owner declares UAT complete, update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="HANDOFF section 1.4 walkthrough">
+      <steps>
+        <step>Walk every section 1.4 rule on dev with the owner</step>
+      </steps>
+      <expected>Each rule is pass or has a recorded refinement.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Repeat the walkthrough's wizard steps in dark mode</step>
+      </steps>
+      <expected>No white surfaces; tokens throughout.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">Owner walkthrough on dev</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each UAT round, when recorded, then every HANDOFF section 1.4 rule has pass or refine with a date.</criterion>
+    <criterion testable="true">Given each refinement, when recorded, then it has a task id or an issue URL.</criterion>
+    <criterion testable="true">The owner's completion statement is recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner decision 1 (2026-10-05); reconciliation B.3, B.6.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

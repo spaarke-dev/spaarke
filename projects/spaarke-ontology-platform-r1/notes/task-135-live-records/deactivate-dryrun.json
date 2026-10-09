@@ -1,0 +1,639 @@
+{
+  "targets": [
+    {
+      "id": "e62f30c6-4aea-f011-8406-7ced8d1dc988",
+      "name": "Quick Document Review",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "7d9a9209-31da-f011-8406-7ced8d1dc988",
+      "name": "Analyze Agreement Financial Terms",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "ba709d6e-e0f2-f011-8406-7ced8d1dc988",
+      "name": "Real Estate Lease Agreement Review",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "0e234d5a-e214-f111-8343-7c1e520aa4df",
+      "name": "Patent Claims Analysis",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "44285d15-1360-f111-ab0b-70a8a59455f4",
+      "name": "summarize-document-for-chat@v1",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "9b44cb6a-c370-f111-ab0e-7ced8ddc4a05",
+      "name": "summarize-document-for-workspace@v1",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "4369cab2-5f2d-f111-88b5-7c1e520aa4df",
+      "name": null,
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "4babdf0a-4f60-f111-ab0b-7c1e521b425f",
+      "name": "New Playbook",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "63746efa-414d-f111-bec7-7ced8d1dc988",
+      "name": "New Playbook",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "4ba53adc-396e-f111-ab0e-7ced8ddc4cc6",
+      "name": "New Playbook",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "db1cc47b-3a6e-f111-ab0e-7ced8ddc4cc6",
+      "name": "New Playbook",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    },
+    {
+      "id": "64455dfc-da6f-f111-ab0e-7ced8ddc4cc6",
+      "name": "New Playbook",
+      "before": [0, 1],
+      "after": [0, 1],
+      "patch": null
+    }
+  ],
+  "rowsWhoseStateChanged": [],
+  "onlyTargetsChanged": true,
+  "totalRows": 34,
+  "before": {
+    "7b5a6ed3-0271-f111-ab0e-000d3a13a4cd": {
+      "@odata.etag": "W/\"14440195\"",
+      "modifiedon": "2026-07-08T03:36:36Z",
+      "sprk_name": "Daily Briefing Narrate",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "7b5a6ed3-0271-f111-ab0e-000d3a13a4cd",
+      "statuscode": 2
+    },
+    "a0d49d0d-4a65-f111-ab0c-70a8a590c51c": {
+      "@odata.etag": "W/\"10270937\"",
+      "modifiedon": "2026-06-11T04:00:30Z",
+      "sprk_name": "matter-health-single",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "a0d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "statuscode": 1
+    },
+    "44285d15-1360-f111-ab0b-70a8a59455f4": {
+      "@odata.etag": "W/\"12111962\"",
+      "modifiedon": "2026-06-23T14:13:47Z",
+      "sprk_name": "summarize-document-for-chat@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "44285d15-1360-f111-ab0b-70a8a59455f4",
+      "statuscode": 1
+    },
+    "0e234d5a-e214-f111-8343-7c1e520aa4df": {
+      "@odata.etag": "W/\"8145006\"",
+      "modifiedon": "2026-03-15T21:14:54Z",
+      "sprk_name": "Patent Claims Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "0e234d5a-e214-f111-8343-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "47686eb1-9916-f111-8343-7c1e520aa4df": {
+      "@odata.etag": "W/\"9435010\"",
+      "modifiedon": "2026-05-05T02:37:10Z",
+      "sprk_name": "Document Summary",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "47686eb1-9916-f111-8343-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "fe3e5acc-4aea-f011-8406-7c1e520aa4df": {
+      "@odata.etag": "W/\"8145032\"",
+      "modifiedon": "2026-03-15T21:16:02Z",
+      "sprk_name": "Risk Scan",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fe3e5acc-4aea-f011-8406-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "18cf3cc8-02ec-f011-8406-7c1e520aa4df": {
+      "@odata.etag": "W/\"12286915\"",
+      "modifiedon": "2026-06-24T14:57:38Z",
+      "sprk_name": "Document Profile",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "18cf3cc8-02ec-f011-8406-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "1e657651-9308-f111-8407-7c1e520aa4df": {
+      "@odata.etag": "W/\"8144995\"",
+      "modifiedon": "2026-03-15T21:02:37Z",
+      "sprk_name": "Finance Invoice Processing",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "1e657651-9308-f111-8407-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "2f46208e-5f2d-f111-88b5-7c1e520aa4df": {
+      "@odata.etag": "W/\"27277677\"",
+      "modifiedon": "2026-10-09T02:42:38Z",
+      "sprk_name": "New Emails on Matters",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "2f46208e-5f2d-f111-88b5-7c1e520aa4df",
+      "statuscode": 2
+    },
+    "4369cab2-5f2d-f111-88b5-7c1e520aa4df": {
+      "@odata.etag": "W/\"12156519\"",
+      "modifiedon": "2026-06-23T18:10:56Z",
+      "sprk_name": null,
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4369cab2-5f2d-f111-88b5-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "fc343e9c-3460-f111-ab0b-7c1e521b425f": {
+      "@odata.etag": "W/\"12111983\"",
+      "modifiedon": "2026-06-23T14:14:01Z",
+      "sprk_name": "Create New Project Pre-Fill",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fc343e9c-3460-f111-ab0b-7c1e521b425f",
+      "statuscode": 1
+    },
+    "4babdf0a-4f60-f111-ab0b-7c1e521b425f": {
+      "@odata.etag": "W/\"9991949\"",
+      "modifiedon": "2026-06-04T19:53:28Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4babdf0a-4f60-f111-ab0b-7c1e521b425f",
+      "statuscode": 1
+    },
+    "fd584739-965e-f111-ab0c-7c1e521b425f": {
+      "@odata.etag": "W/\"9954211\"",
+      "modifiedon": "2026-06-02T15:18:02Z",
+      "sprk_name": "predict-matter-cost@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fd584739-965e-f111-ab0c-7c1e521b425f",
+      "statuscode": 1
+    },
+    "5ece14f7-8a17-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145036\"",
+      "modifiedon": "2026-03-15T21:16:15Z",
+      "sprk_name": "SprkChat Document Assistant",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "2d660cad-d418-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"12756246\"",
+      "modifiedon": "2026-06-27T02:42:33Z",
+      "sprk_name": "Create New Matter Pre-Fill",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "2d660cad-d418-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "4a72f99c-a119-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"9991929\"",
+      "modifiedon": "2026-06-04T19:52:27Z",
+      "sprk_name": "Summarize File",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4a72f99c-a119-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "86c243fe-2eda-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145040\"",
+      "modifiedon": "2026-03-15T21:16:23Z",
+      "sprk_name": "Summarize a Non-Disclosure Agreement",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "86c243fe-2eda-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "7d9a9209-31da-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8144965\"",
+      "modifiedon": "2026-03-15T21:01:01Z",
+      "sprk_name": "Analyze Agreement Financial Terms",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "7d9a9209-31da-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "e62f30c6-4aea-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145010\"",
+      "modifiedon": "2026-03-15T21:15:03Z",
+      "sprk_name": "Quick Document Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "e62f30c6-4aea-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "ea4d2ecc-4aea-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145001\"",
+      "modifiedon": "2026-03-15T21:14:31Z",
+      "sprk_name": "Full Contract Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "bc71facf-6af1-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8144985\"",
+      "modifiedon": "2026-03-15T21:01:47Z",
+      "sprk_name": "Email Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "bc71facf-6af1-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "ba709d6e-e0f2-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145024\"",
+      "modifiedon": "2026-03-15T21:15:37Z",
+      "sprk_name": "Real Estate Lease Agreement Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "ba709d6e-e0f2-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "c546a6cc-c2f5-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8724029\"",
+      "modifiedon": "2026-04-03T20:40:40Z",
+      "sprk_name": "U.S. Patent Office Action Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "c546a6cc-c2f5-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "24051c80-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277667\"",
+      "modifiedon": "2026-10-09T02:42:37Z",
+      "sprk_name": "Matter/Project Activity Summary",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "24051c80-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "29051c80-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277672\"",
+      "modifiedon": "2026-10-09T02:42:37Z",
+      "sprk_name": "New Documents on Your Matters",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "29051c80-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "a4bc529c-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277679\"",
+      "modifiedon": "2026-10-09T02:42:38Z",
+      "sprk_name": "New Events on Matters/Projects",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "a4bc529c-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "77f77aa5-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27280613\"",
+      "modifiedon": "2026-10-09T04:14:58Z",
+      "sprk_name": "Tasks Due Soon",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "77f77aa5-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "4369cab2-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277661\"",
+      "modifiedon": "2026-10-09T02:42:36Z",
+      "sprk_name": "Tasks Overdue",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "4369cab2-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "be7874be-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27280616\"",
+      "modifiedon": "2026-10-09T04:14:59Z",
+      "sprk_name": "New Work Assignments",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "be7874be-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "63746efa-414d-f111-bec7-7ced8d1dc988": {
+      "@odata.etag": "W/\"9508871\"",
+      "modifiedon": "2026-05-11T14:02:10Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "63746efa-414d-f111-bec7-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "9b44cb6a-c370-f111-ab0e-7ced8ddc4a05": {
+      "@odata.etag": "W/\"12516744\"",
+      "modifiedon": "2026-06-25T18:26:48Z",
+      "sprk_name": "summarize-document-for-workspace@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "9b44cb6a-c370-f111-ab0e-7ced8ddc4a05",
+      "statuscode": 1
+    },
+    "4ba53adc-396e-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12010130\"",
+      "modifiedon": "2026-06-22T12:57:04Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4ba53adc-396e-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    },
+    "db1cc47b-3a6e-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12010232\"",
+      "modifiedon": "2026-06-22T13:22:02Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "db1cc47b-3a6e-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    },
+    "64455dfc-da6f-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12286489\"",
+      "modifiedon": "2026-06-24T14:42:58Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "64455dfc-da6f-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    }
+  },
+  "after": {
+    "7b5a6ed3-0271-f111-ab0e-000d3a13a4cd": {
+      "@odata.etag": "W/\"14440195\"",
+      "modifiedon": "2026-07-08T03:36:36Z",
+      "sprk_name": "Daily Briefing Narrate",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "7b5a6ed3-0271-f111-ab0e-000d3a13a4cd",
+      "statuscode": 2
+    },
+    "a0d49d0d-4a65-f111-ab0c-70a8a590c51c": {
+      "@odata.etag": "W/\"10270937\"",
+      "modifiedon": "2026-06-11T04:00:30Z",
+      "sprk_name": "matter-health-single",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "a0d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "statuscode": 1
+    },
+    "44285d15-1360-f111-ab0b-70a8a59455f4": {
+      "@odata.etag": "W/\"12111962\"",
+      "modifiedon": "2026-06-23T14:13:47Z",
+      "sprk_name": "summarize-document-for-chat@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "44285d15-1360-f111-ab0b-70a8a59455f4",
+      "statuscode": 1
+    },
+    "0e234d5a-e214-f111-8343-7c1e520aa4df": {
+      "@odata.etag": "W/\"8145006\"",
+      "modifiedon": "2026-03-15T21:14:54Z",
+      "sprk_name": "Patent Claims Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "0e234d5a-e214-f111-8343-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "47686eb1-9916-f111-8343-7c1e520aa4df": {
+      "@odata.etag": "W/\"9435010\"",
+      "modifiedon": "2026-05-05T02:37:10Z",
+      "sprk_name": "Document Summary",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "47686eb1-9916-f111-8343-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "fe3e5acc-4aea-f011-8406-7c1e520aa4df": {
+      "@odata.etag": "W/\"8145032\"",
+      "modifiedon": "2026-03-15T21:16:02Z",
+      "sprk_name": "Risk Scan",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fe3e5acc-4aea-f011-8406-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "18cf3cc8-02ec-f011-8406-7c1e520aa4df": {
+      "@odata.etag": "W/\"12286915\"",
+      "modifiedon": "2026-06-24T14:57:38Z",
+      "sprk_name": "Document Profile",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "18cf3cc8-02ec-f011-8406-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "1e657651-9308-f111-8407-7c1e520aa4df": {
+      "@odata.etag": "W/\"8144995\"",
+      "modifiedon": "2026-03-15T21:02:37Z",
+      "sprk_name": "Finance Invoice Processing",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "1e657651-9308-f111-8407-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "2f46208e-5f2d-f111-88b5-7c1e520aa4df": {
+      "@odata.etag": "W/\"27277677\"",
+      "modifiedon": "2026-10-09T02:42:38Z",
+      "sprk_name": "New Emails on Matters",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "2f46208e-5f2d-f111-88b5-7c1e520aa4df",
+      "statuscode": 2
+    },
+    "4369cab2-5f2d-f111-88b5-7c1e520aa4df": {
+      "@odata.etag": "W/\"12156519\"",
+      "modifiedon": "2026-06-23T18:10:56Z",
+      "sprk_name": null,
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4369cab2-5f2d-f111-88b5-7c1e520aa4df",
+      "statuscode": 1
+    },
+    "fc343e9c-3460-f111-ab0b-7c1e521b425f": {
+      "@odata.etag": "W/\"12111983\"",
+      "modifiedon": "2026-06-23T14:14:01Z",
+      "sprk_name": "Create New Project Pre-Fill",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fc343e9c-3460-f111-ab0b-7c1e521b425f",
+      "statuscode": 1
+    },
+    "4babdf0a-4f60-f111-ab0b-7c1e521b425f": {
+      "@odata.etag": "W/\"9991949\"",
+      "modifiedon": "2026-06-04T19:53:28Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4babdf0a-4f60-f111-ab0b-7c1e521b425f",
+      "statuscode": 1
+    },
+    "fd584739-965e-f111-ab0c-7c1e521b425f": {
+      "@odata.etag": "W/\"9954211\"",
+      "modifiedon": "2026-06-02T15:18:02Z",
+      "sprk_name": "predict-matter-cost@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "fd584739-965e-f111-ab0c-7c1e521b425f",
+      "statuscode": 1
+    },
+    "5ece14f7-8a17-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145036\"",
+      "modifiedon": "2026-03-15T21:16:15Z",
+      "sprk_name": "SprkChat Document Assistant",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "2d660cad-d418-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"12756246\"",
+      "modifiedon": "2026-06-27T02:42:33Z",
+      "sprk_name": "Create New Matter Pre-Fill",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "2d660cad-d418-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "4a72f99c-a119-f111-8343-7ced8d1dc988": {
+      "@odata.etag": "W/\"9991929\"",
+      "modifiedon": "2026-06-04T19:52:27Z",
+      "sprk_name": "Summarize File",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4a72f99c-a119-f111-8343-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "86c243fe-2eda-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145040\"",
+      "modifiedon": "2026-03-15T21:16:23Z",
+      "sprk_name": "Summarize a Non-Disclosure Agreement",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "86c243fe-2eda-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "7d9a9209-31da-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8144965\"",
+      "modifiedon": "2026-03-15T21:01:01Z",
+      "sprk_name": "Analyze Agreement Financial Terms",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "7d9a9209-31da-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "e62f30c6-4aea-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145010\"",
+      "modifiedon": "2026-03-15T21:15:03Z",
+      "sprk_name": "Quick Document Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "e62f30c6-4aea-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "ea4d2ecc-4aea-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145001\"",
+      "modifiedon": "2026-03-15T21:14:31Z",
+      "sprk_name": "Full Contract Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "bc71facf-6af1-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8144985\"",
+      "modifiedon": "2026-03-15T21:01:47Z",
+      "sprk_name": "Email Analysis",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "bc71facf-6af1-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "ba709d6e-e0f2-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8145024\"",
+      "modifiedon": "2026-03-15T21:15:37Z",
+      "sprk_name": "Real Estate Lease Agreement Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "ba709d6e-e0f2-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "c546a6cc-c2f5-f011-8406-7ced8d1dc988": {
+      "@odata.etag": "W/\"8724029\"",
+      "modifiedon": "2026-04-03T20:40:40Z",
+      "sprk_name": "U.S. Patent Office Action Review",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "c546a6cc-c2f5-f011-8406-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "24051c80-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277667\"",
+      "modifiedon": "2026-10-09T02:42:37Z",
+      "sprk_name": "Matter/Project Activity Summary",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "24051c80-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "29051c80-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277672\"",
+      "modifiedon": "2026-10-09T02:42:37Z",
+      "sprk_name": "New Documents on Your Matters",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "29051c80-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "a4bc529c-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277679\"",
+      "modifiedon": "2026-10-09T02:42:38Z",
+      "sprk_name": "New Events on Matters/Projects",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "a4bc529c-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "77f77aa5-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27280613\"",
+      "modifiedon": "2026-10-09T04:14:58Z",
+      "sprk_name": "Tasks Due Soon",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "77f77aa5-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "4369cab2-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27277661\"",
+      "modifiedon": "2026-10-09T02:42:36Z",
+      "sprk_name": "Tasks Overdue",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "4369cab2-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "be7874be-5f2d-f111-88b5-7ced8d1dc988": {
+      "@odata.etag": "W/\"27280616\"",
+      "modifiedon": "2026-10-09T04:14:59Z",
+      "sprk_name": "New Work Assignments",
+      "statecode": 1,
+      "sprk_analysisplaybookid": "be7874be-5f2d-f111-88b5-7ced8d1dc988",
+      "statuscode": 2
+    },
+    "63746efa-414d-f111-bec7-7ced8d1dc988": {
+      "@odata.etag": "W/\"9508871\"",
+      "modifiedon": "2026-05-11T14:02:10Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "63746efa-414d-f111-bec7-7ced8d1dc988",
+      "statuscode": 1
+    },
+    "9b44cb6a-c370-f111-ab0e-7ced8ddc4a05": {
+      "@odata.etag": "W/\"12516744\"",
+      "modifiedon": "2026-06-25T18:26:48Z",
+      "sprk_name": "summarize-document-for-workspace@v1",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "9b44cb6a-c370-f111-ab0e-7ced8ddc4a05",
+      "statuscode": 1
+    },
+    "4ba53adc-396e-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12010130\"",
+      "modifiedon": "2026-06-22T12:57:04Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "4ba53adc-396e-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    },
+    "db1cc47b-3a6e-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12010232\"",
+      "modifiedon": "2026-06-22T13:22:02Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "db1cc47b-3a6e-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    },
+    "64455dfc-da6f-f111-ab0e-7ced8ddc4cc6": {
+      "@odata.etag": "W/\"12286489\"",
+      "modifiedon": "2026-06-24T14:42:58Z",
+      "sprk_name": "New Playbook",
+      "statecode": 0,
+      "sprk_analysisplaybookid": "64455dfc-da6f-f111-ab0e-7ced8ddc4cc6",
+      "statuscode": 1
+    }
+  }
+}

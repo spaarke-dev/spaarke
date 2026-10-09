@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-83: remove tenant-wide publish repo-wide; one scoped "import, then publish only the imported components" procedure for scripts and deploy skills</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes every Dataverse deploy path in the repo (scripts + shared skills used by all projects); a wrong scoped publish leaves components unpublished.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR. Skill text (.claude) is applied by the main session.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,scripts,deploy,separate-pr</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace every tenant-wide publish in the repo's Dataverse deploy paths with one documented, tested scoped procedure: import the solution (or update the component) WITHOUT publishing everything, then publish exactly the imported components.</prompt>
+  <role>SPAARKE platform engineer. Deploys must never publish other people's unpublished customizations.</role>
+  <goal>No script or deploy skill in the repo runs PublishAllXml, `pac solution import --publish-changes`, or an equivalent publish-all. Each runs the shared scoped procedure, and that procedure is proven in spaarkedev1 for each component type the scripts deploy.</goal>
+
+  <context>
+    <background>Owner decision D-83 (2026-10-08): the scoped publish applies repo-wide, not only to this project. The draft procedure is projects/spaarke-ontology-platform-r1/notes/scoped-solution-import.md from task 121. It has two open questions: does PublishXml accept app modules, and is an imported PCF control served without any publish? Task 121 found tenant-wide publish in:
+- Deploy-DataverseSolutions.ps1:392
+- Deploy-NoAccessEntryRibbon.ps1:144
+- Deploy-SecureChildNewCommands.ps1:247-249 (also PublishAllXml)
+- Publish-ThemeIcons.ps1:89 (PublishAllXml)
+- Remove-SprkEventTodoFields.ps1:9 (PublishAllXml)
+- Package-LegalWorkspace.ps1:326/362/370 (task 121 may delete this script)
+The skills are .claude/skills/dataverse-deploy/SKILL.md (lines ~99, 169, 437, 467, 470, 499, 597, and the publish-all alternative at ~512-513), pcf-deploy/SKILL.md (~298, 391) and ribbon-edit/SKILL.md (~216). Task 111 ran a PublishAll in dev through pcf-deploy's command; that is the defect this task prevents.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-83: the procedure goes in ONE shared place, a PowerShell module or script under scripts/ (for example scripts/lib/Publish-SolutionComponents.ps1), that every deploy script calls. Do not hand-roll it per script. Re-run git grep afterwards: zero hits for PublishAllXml, --publish-changes and publish-all in scripts/, .github/ and docs/. A documented, intentional exception needs the owner's approval.</constraint>
+    <constraint source="project">You cannot write .claude/. Draft the exact replacement text for the three skills (each line or section) in projects/spaarke-ontology-platform-r1/notes/task-130-skill-amendments.md. The main session applies it.</constraint>
+    <constraint source="project">Proving it in spaarkedev1 needs a real import or a component update. Each live proof step is "owner approval required": STOP and report the exact commands before the first live import. Use a harmless component, or the deploy a pending task already needs (for example task 129's VisualHost import), so nothing ships that isn't already approved. Never run a tenant-wide publish, even "to compare".</constraint>
+    <constraint source="project">Code goes in a new worktree off origin/master (git worktree add C:\wts-130 -b fix/scoped-publish-130 origin/master) and its own PR. Do not merge it. Never use --no-verify or bare git stash. No parking: any further publish-all or deploy defect you find is fixed here or reported for a task.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor. Read scoped-solution-import.md and the three skills.</step>
+    <step order="1">Inventory every publish-all in scripts/, .github/, docs/ and .claude/ with file:line. Answer the two open questions from Microsoft documentation (researcher approach) before relying on either.</step>
+    <step order="2">Build the shared scoped-publish module: resolve the solution's components, then call PublishXml with an exact ParameterXml (entities, web resources, ribbons, app modules, sitemaps, option sets) and read back the publish state. Add unit tests for the ParameterXml builder.</step>
+    <step order="3">Change every script to use it. Add a lint test that fails if publish-all reappears.</step>
+    <step order="4">Draft the skill amendments. Open the PR with green CI. STOP for the owner's approval of one live proof.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">git grep for PublishAllXml, --publish-changes and publish-all returns zero hits outside the lint test and the amendment note; the lint test fails when one is reintroduced.</criterion>
+    <criterion testable="true">The ParameterXml builder emits each component type correctly (unit tests); after one approved live proof in spaarkedev1, the imported component is live and no unrelated customization was published (evidence recorded).</criterion>
+    <criterion testable="true">The exact skill replacement text is ready for the main session; once applied, no skill prescribes a tenant-wide publish.</criterion>
+    <criterion testable="true">Negative: no live import or publish ran without owner approval; no tenant-wide publish ran at all.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-08 by the main session on owner decision D-83 (from task 121's findings).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

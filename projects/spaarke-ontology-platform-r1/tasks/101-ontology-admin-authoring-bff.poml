@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin slice (b), BFF: dry run, authorable catalog, save version, publish with supersede</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>104, 031, 033, 022, 036, 024 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Admin write path for rules (save, publish) and a dry run that must not leak rows; the publish closes and re-raises live Signals.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive identity split (dry run as the evaluator, writes as the caller, results filtered by caller access) and immutability enforced in code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>102 is built on these routes.</parallel-reason>
+    <deps>104, 031, 033, 022, 036, 024</deps>
+    <tags>bff-api,auth,security,admin,endpoints</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the BFF routes the rule wizard needs: the authorable condition catalog generated from the compiler, a dry run that runs the evaluator's side-effect-free core, save a new rule or version through ValidateForSave (new rules save Off), and publish a version (supersede, re-raise, stamp the old version's sprk_inforceto, body immutable after publish).</prompt>
+  <role>SPAARKE backend developer. The dry run reads as the evaluator; everything the admin sees is filtered by what the admin may read; every write is the admin's own.</role>
+  <goal>An administrator can author, test and publish a rule entirely through the BFF, with the same validation and compilation production uses and no path to a row they cannot read.</goal>
+
+  <context>
+    <background>D-22 slice (b): the rule-authoring wizard's save calls PolicyVersionValidator.ValidateForSave and its catalog is generated from the compiler's verified joins (#46: an editor offering conditions the evaluator cannot run is worse than none). #39: Test is one query per run and must run as the evaluator principal (org-wide read), because as the admin a notExists clause is true for every matter; the displayed rows are filtered by the caller's access. D-14: publishing stamps the old version's sprk_inforceto (Spaarke Ontology Administrator has Write on sprk_policyversion, task 008) while the body stays immutable, enforced here in code. D-13 / FR-16: publishing supersedes open items and re-raises those that still hold as a new episode. 031 exposes Evaluate(version, scope) side-effect free for exactly this.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-22, #46): the catalog route derives the authorable subjects, fields, operators and joins from PredicateCompiler's EvaluatorGlobalReadableEntities, VerifiedJoins and relative-date grammar (and the triage categories by name), so the editor can only offer what compiles. No hand-maintained word list.</constraint>
+    <constraint source="owner">Scope (D-22): save calls PolicyVersionValidator.ValidateForSave (and the decision-plan check against task 036's catalog); a refusal returns field-level errors and writes nothing. A new policy saves with sprk_enabled = No (FR-10). Writes run AS THE CALLER.</constraint>
+    <constraint source="owner">Scope (#39): the dry run calls task 031's Evaluate(version, scope) with the evaluator principal, writes nothing, and returns per matter open / suppressed / new; before returning, rows whose matter the caller cannot read are removed (same check as task 038). The response also returns the counts publish would supersede and re-raise.</constraint>
+    <constraint source="owner">Scope (D-14, D-13): publish creates the new sprk_policyversion as the caller, sets sprk_currentversion, stamps the previous version's sprk_inforceto, then runs task 033's supersede path (close open Signals of the old version as Superseded; the evaluator re-raises those that still hold as new episodes). Publish refuses unless a dry run was made on the exact body being published (v4: Save needs a test run; any edit invalidates it), tracked by a body hash.</constraint>
+    <constraint source="owner">Scope (D-14): after publish, no BFF route updates a published version's sprk_rulebody, sprk_ruletype, sprk_messagetemplate or sprk_decisionplan; the only field this service ever updates on an existing version is sprk_inforceto.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entries; single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: integration tests as the owner's admin user and a Console User, against spaarkedev1.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule authoring</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/022-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Catalog route from the compiler's lists.</step>
+    <step order="2">Dry-run route over 031's Evaluate, with the caller filter and the publish counts.</step>
+    <step order="3">Save route (new policy Off; new draft version) through ValidateForSave, as the caller.</step>
+    <step order="4">Publish route: dry-run hash check, version create, currentversion, inforceto stamp, supersede.</step>
+    <step order="5">Integration tests, including a publish that supersedes and re-raises one Signal as episode 2.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the dry run cannot run as the evaluator principal without exposing it to the admin's request beyond Evaluate(version, scope), STOP and escalate rather than running it as the admin (which would make notExists true for every matter, #39).</trigger>
+    <trigger>Whether admins may still author sprk_policyversion directly in the model-driven app is closed by D-22 (tables are read-only there). If a direct MDA write is found to be possible after task 008, report it; task 022's evaluation-time gate stays as the defence.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PolicyVersionValidator.ValidateForSave (task 022) and the compiler exist; no BFF write path for sprk_policyversion exists (022-progress); task 031's Evaluate core exists for reuse.</existing>
+    <extension>Validation, compilation, evaluation and closure are all reused; only the admin routes and their orchestration are new.</extension>
+    <cost-of-doing-nothing>D-22 slice (b) cannot be built: no rule can be authored, tested or published from the Console, and supersede-and-re-raise has no trigger.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminEndpoints.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Ontology</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the catalog route, when called, then every subject, field, operator and join it offers compiles, and nothing outside the compiler's lists is offered.</criterion>
+    <criterion testable="true">Given a dry run, when called, then nothing is written, results are per matter open / suppressed / new, and a matter the admin cannot read is absent.</criterion>
+    <criterion testable="true">Given an invalid body, when saved, then field-level errors return and nothing is written; given a valid new policy, then it saves with sprk_enabled No.</criterion>
+    <criterion testable="true">Given a publish after a dry run on the same body, when published, then the new version is current, the old version's sprk_inforceto is stamped, its open Signals close as Superseded, and those that still hold re-raise as a new episode.</criterion>
+    <criterion testable="true">Negative: publish without a dry run on the exact body is refused; no route updates a published version's body, type, template or plan.</criterion>
+    <criterion testable="true">Negative: a Console User is refused by every write route; an unresolved caller gets 403; every route is in the census.</criterion>
+    <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-16, FR-21 (amended), FR-58; D-13, D-14, D-22; #39, #40, #46.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

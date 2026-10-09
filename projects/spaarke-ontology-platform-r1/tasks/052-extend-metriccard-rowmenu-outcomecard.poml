@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Extend MetricCard into the lane count filters; C-9 RowActionMenu cleanup (DocumentRowMenu/OutcomeCard reuse dropped, D-46)</title>
+    <phase>5 The worklist surface</phase>
+    <gate>051 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Component-reuse rule is binding; building past a named existing component is a section 11 violation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extension of three identified components with known file and line references.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>051</deps>
+    <tags>frontend,fluent-ui,reuse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend WorkspaceShell/MetricCard and MetricCardRow into the per-lane count filters D-24 names (selected state, note line, progress, non-square layout). The DocumentRowMenu and OutcomeCard extensions are on hold until the owner answers C-10. Do not build parallel components.</prompt>
+  <role>SPAARKE front-end developer. Default to reuse; new surface needs a justification it cannot give here.</role>
+  <goal>Count filters, the row menu and the outcome surface all come from extended shipped components.</goal>
+
+  <context>
+    <background>The reuse audit found three components that would otherwise be rebuilt, each with a named file and line range. Building past them is a CLAUDE.md section 11 violation with no cost-of-doing-nothing to cite.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/OutcomeCard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: count-filter cards extend WorkspaceShell/MetricCard.tsx:24-222 plus MetricCardRow. They are ALREADY clickable (role=button), square and badge-capable. Do NOT use StatTiles, which has NO onClick at all (StatTiles.tsx:95-111) and carries the overlapping-lenses semantics being retired.</constraint>
+    <constraint source="project">Scope: the row menu extends DocumentRowMenu.tsx:150-208, an action-descriptor table with disabledActions filtering. Do NOT hand-roll a fourth menu: three bespoke ones already exist (DocumentRowMenu, NarrativeBullet.tsx:600-645, HighPrioritySection.tsx:298-325), which is section 11 own named anti-pattern.</constraint>
+    <constraint source="project">Scope: the post-action surface extends SprkChat/OutcomeCard.tsx:93-367, already status badge plus summary plus link plus next-step chips. Add the Signal statuses; do not build a parallel worklist outcome card.</constraint>
+    <constraint source="project">Scope: ALWAYS cite the full path for MetricCard. A second unrelated one exists at Spaarke.Visuals/src/components/MetricCard.tsx (task 011 disambiguated this).</constraint>
+    <constraint source="project">Scope: count filters are LENSES ON MEMBERSHIP, not separate queues. Clicking one filters the existing list; it does not open another list.</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 tokens only across all three extensions.</constraint>
+    <constraint source="project">Scope: C-9 (assigned here 2026-10-03). Extract a shared RowActionMenu from DocumentRowMenu, build the worklist row against it, and migrate the four other hand-rolled row menus onto it.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-24; #21; reconciliation W-7..W-9): extend MetricCard with selected (aria-pressed), note (one line, e.g. "oldest 4 days", "3 past due") and progress ("n of m done today") props and a non-square layout option; disabled when its count is 0. Cards split each lane by work type so counts add up (W-8): Decide = Ask outside counsel, Approve or rebudget, Chase a reply; Do = Finish or reschedule, Coming due, Chase a response; the work type comes from sprk_policy.sprk_worktype (task 007). Existing MetricCard consumers keep their behaviour with the new props absent.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-46, FR-27 amended): the DocumentRowMenu and OutcomeCard reuse requirements are DROPPED. The worklist row has no menu (task 051) and post-decision state is the status bar on Fluent MessageBar (task 057). Do NOT add Work Item descriptors to DocumentRowMenu and do NOT extend OutcomeCard. C-9 (extract a shared RowActionMenu from DocumentRowMenu and migrate the four existing hand-rolled row menus onto it) continues ON ITS OWN, as cleanup independent of the worklist.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Component reuse and extension</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read each of the three components and record what it already does, so the extension is additive.</step>
+    <step order="2">Extend MetricCard or MetricCardRow for the lane count filters, preserving the existing clickable behavior.</step>
+    <step order="3">C-9: extract RowActionMenu from DocumentRowMenu and migrate the four existing row menus onto it (D-46).</step>
+    <step order="4">Do not touch OutcomeCard (D-46).</step>
+    <step order="5">Add tests for each extension and confirm no existing consumer regressed.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the three genuinely cannot be extended, STOP and escalate with the specific blocking reason. The reuse rule is binding, and a new parallel component needs owner sign-off rather than an implementer decision.</trigger>
+    <trigger>If the C-9 RowActionMenu migration would change the behaviour of any of the four existing menus, STOP and escalate.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Count filters act as lenses">
+      <steps>
+        <step>Render the worklist with lane count filters</step>
+        <step>Click a count filter</step>
+      </steps>
+      <expected>The existing list filters in place; no second list or queue opens.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Exercise all three extensions</step>
+      </steps>
+      <expected>All three adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DocumentRowMenu.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/OutcomeCard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the worklist count filters, when inspected, then they are MetricCard or MetricCardRow instances, not new components and not StatTiles.</criterion>
+    <criterion testable="true">Negative: clicking a count filter filters the existing list and does not open a second queue.</criterion>
+    <criterion testable="true">Negative: no existing consumer of any of the three components regressed; their existing tests pass unmodified.</criterion>
+    <criterion testable="true">The package builds.</criterion>
+    <criterion testable="true">One shared RowActionMenu exists, extracted from DocumentRowMenu, and the four former row menus use it with unchanged behaviour (C-9, D-46).</criterion>
+    <criterion testable="true">Given the extended MetricCard with selected, note and progress, when rendered, then it exposes aria-pressed, shows the note and progress lines, is disabled at count 0, and existing consumers render unchanged without the new props.</criterion>
+    <criterion testable="true">Given each lane, when its cards are summed, then the counts add up to the lane total (one work type per item).</criterion>
+    <criterion testable="true">Negative: DocumentRowMenu has no Work Item descriptors and OutcomeCard has no Signal statuses (D-46).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-27, FR-28 (amended, D-24), FR-34. design.md section 1.3 is BINDING, not advisory, which is why the DocumentRowMenu/OutcomeCard drop needs the owner (C-10, O-7). Amended 2026-10-07 per reconciliation B.2 row 052. The criteria about DocumentRowMenu and OutcomeCard above apply only if the owner keeps them.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

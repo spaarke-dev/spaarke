@@ -25,10 +25,11 @@
  *     `loadNotificationContext`
  *   - **IGNORES all of them** in the new architecture — `DailyBriefingApp`
  *     self-resolves Xrm via frame-walking and fetches data via
- *     `useBriefingNotifications(webApi)`. The Option D notification-loader
- *     seam from R2 task 002 / PR #397 was solving a problem the new
- *     architecture eliminates (the component reads `appnotification`
- *     directly; no external loader injection needed).
+ *     `useBriefingRender`, which calls `fetchBriefingLive` (behind
+ *     `USE_LIVE_RENDER` in `briefingService.ts`). The Option D
+ *     notification-loader seam from R2 task 002 / PR #397 was solving a
+ *     problem the new architecture eliminates (the component queries
+ *     Dataverse directly server-side; no external loader injection needed).
  *
  * The options remain on the type so consumers don't break. They'll be
  * deprecated in a follow-up PR once SpaarkeAi `main.tsx` is updated to stop
@@ -72,8 +73,8 @@ export const TELEMETRY_EVENT_DAILY_BRIEFING_429 = 'spaarke-ai-error.daily-briefi
  * the parameter type of `loadNotificationContext` for backward compat with
  * call sites that still type that option. (SpaarkeAi's loader — the last
  * such call site — was deleted by Track-B batch 2, task 071.) The new
- * `DailyBriefingApp` does NOT consume this — it builds its own narrate
- * request internally via `useBriefingNarration`.
+ * `DailyBriefingApp` does NOT consume this — it fetches the briefing via
+ * `useBriefingRender` → `fetchBriefingLive`, with no request body.
  *
  * Field shapes mirror the legacy `useDailyBriefing` types that lived in
  * `@spaarke/ui-components` before R2.1's Fix A retired them. The legacy
@@ -131,8 +132,9 @@ export interface NarrateRequest {
 export interface CreateDailyBriefingRegistrationOptions {
   /**
    * @deprecated R2.1 — Ignored. `DailyBriefingApp` does not need an external
-   * fetch wrapper; it uses `useBriefingNotifications(webApi)` which reads
-   * `appnotification` directly via `Xrm.WebApi`.
+   * fetch wrapper; it fetches via `useBriefingRender`, which calls
+   * `fetchBriefingLive` (`briefingService.ts`) using the package's own
+   * `@spaarke/auth` `authenticatedFetch`.
    */
   authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /**
@@ -142,7 +144,7 @@ export interface CreateDailyBriefingRegistrationOptions {
   tenantId?: string;
   /**
    * @deprecated R2.1 — Ignored. Rate-limit telemetry is now logged via
-   * `console.warn` inside `useBriefingNarration` (the new package). Custom
+   * `console.warn` inside `briefingService.ts`'s live-render path. Custom
    * App Insights routing will return in a follow-up if a real consumer needs
    * it; until then `console.warn` keeps the failure mode observable.
    */
@@ -150,8 +152,9 @@ export interface CreateDailyBriefingRegistrationOptions {
   /**
    * @deprecated R2.1 — Ignored. The Option D notification-loader seam from
    * R2 task 002 / PR #397 was solving a problem the new architecture
-   * eliminates. `DailyBriefingApp` reads `appnotification` directly via
-   * `useBriefingNotifications(webApi)`; no external loader injection needed.
+   * eliminates. `DailyBriefingApp` fetches via `useBriefingRender`, which
+   * queries Dataverse server-side through `/api/ai/daily-briefing/render`;
+   * no external loader injection needed.
    */
   loadNotificationContext?: () => Promise<NarrateRequest | null>;
 }

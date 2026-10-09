@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>sprk_event date columns: UserLocal to Date Only, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>One-way Dataverse schema change plus a data conversion, then BFF and client date handling.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Irreversible schema change on live dev data; every step must be evidenced.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree; code part branches from PR #1302 (same event code) and opens its PR after #1302 merges.</parallel-reason>
+    <deps>097</deps>
+    <tags>dataverse,schema,bff-api,frontend,separate-pr</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Convert sprk_event's six date columns from Date Only format with User Local behaviour to Date Only behaviour, so every surface shows the day the user picked; then make the BFF, the external SPA and the Copilot agent read them as plain dates.</prompt>
+  <role>SPAARKE engineer. A date that shows a day early is a defect users see; an irreversible change is evidenced before and after.</role>
+  <goal>sprk_duedate, sprk_finalduedate, sprk_basedate, sprk_completeddate, sprk_approveddate and sprk_meetingdate on sprk_event have Date Only behaviour in spaarkedev1; every existing value reads back as the day the user picked; the change is recorded so it ships to other environments; the BFF exposes these as yyyy-MM-dd and clients parse them as calendar dates.</goal>
+
+  <context>
+    <background>Found by the second independent review of task 097 (PR #1302). Live: all six columns are Format DateOnly, Behavior UserLocal, CanChangeDateTimeBehavior = False, owned by the unmanaged solution SPRKDOCINTELLIGENCE (source not in the repo). The model-driven app shows them a day early to users west of UTC (event 171b8d24 stored 2026-10-02T00:00:00Z, formatted "10/1/2026"). Task 097's read-only analysis of 120 stored values: 36 date strings at 00:00 UTC, 77 MDA entries at 04:00/05:00 UTC (Eastern local midnight), 7 BFF-computed timestamps; a UTC conversion keeps 113 on the right day and shifts 5 (due and final due on two "ONTOLOGY DEV SEED 005" events, and one completed date at 03:49 UTC on June 4 that was June 3 for the user). Owner decisions 2026-10-05: convert to Date Only; switching CanChangeDateTimeBehavior on is approved; do it as this separate task.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Approved 2026-10-05: set CanChangeDateTimeBehavior = True on the six columns, change their DateTimeBehavior to DateOnly (one-way), convert existing rows with ConvertDateAndTimeBehavior using the UTC rule, and correct the 5 shifted values by hand to the day the user picked. Nothing beyond these six sprk_event columns.</constraint>
+    <constraint source="project">Scope: before any change, re-run the 120-value analysis (values may have changed since task 097) and record each value's before state; after conversion, re-read every value and show it is the intended day. If the re-analysis shows a population a UTC conversion would break beyond the known 5, STOP and report.</constraint>
+    <constraint source="project">Scope: the change must ship to other environments. Record exactly what has to be exported or replicated (owning solution SPRKDOCINTELLIGENCE, unmanaged; source not in the repo) and write the per-environment procedure (including re-running the value analysis there). Do not export or import solutions yourself; report what the owner must run.</constraint>
+    <constraint source="project">Scope: code changes (EventDto as DateOnly yyyy-MM-dd, parse without local conversion, completeddate as the user's date, external SPA and Copilot consumers parse calendar dates) branch from fix/event-complete-and-todo-reassign (PR #1302) and open their PR against master only after #1302 merges (rebase onto master then). Root CLAUDE.md section 10 applies to the BFF part. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Re-run the value analysis; record before-state of every value.</step>
+    <step order="2">Set CanChangeDateTimeBehavior = True on the six columns; verify.</step>
+    <step order="3">Change DateTimeBehavior to DateOnly on the six columns; publish; verify metadata.</step>
+    <step order="4">Run ConvertDateAndTimeBehavior (UTC rule) for the six columns; wait for the async job; verify job success.</step>
+    <step order="5">Re-read every value; correct the known shifted values to the user's picked day; re-read again.</step>
+    <step order="6">Write the per-environment procedure and what must ship in SPRKDOCINTELLIGENCE.</step>
+    <step order="7">Code: BFF DateOnly in EventDto, client parsing; tests that fail on old code; live proof via the task 097 live harness; PR after #1302 merges.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The six columns report DateTimeBehavior DateOnly in spaarkedev1.</criterion>
+    <criterion testable="true">Every pre-existing value reads back as the day the user picked; before/after evidence is recorded.</criterion>
+    <criterion testable="true">The per-environment procedure and the owning-solution export requirement are written down.</criterion>
+    <criterion testable="true">The BFF returns these dates as yyyy-MM-dd and clients show the same day; a test fails on the old code.</criterion>
+    <criterion testable="true">A PR against master is open with the evidence in its body.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-05 by the main session on the owner's decision.</notes>
+
+  <completion>COMPLETED 2026-10-08: PR #1359 merged to master by owner approval (merge commit 11dc9b0da; head fcdd78409). Final round independently re-checked (merge-ready, no F-class); task 065 (Briefing reads sprk_duedate, D-27) and D-43 (overdue from 1 day) landed with it. Publish delta +18,125 B. Follow-ups: task 068 (D-63 remaining sprk_finalduedate readers), task 106 (sprk_todo Date Only), #1402 (ISS-011 test-only live-leg cleanup, fixed in 106).</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

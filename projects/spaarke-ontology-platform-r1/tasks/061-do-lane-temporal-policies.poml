@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Do lane: four policies as subject-only rules (incl. overdue To Do), evaluated by the one evaluator</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>060, 034, 024, 036, 037, 047 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves Do-lane membership from hardcoded collector queries into declared rules evaluated by the shared evaluator; changes what users are told is overdue.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Policy authoring over a grammar and evaluator built by tasks 024, 031 and 037; the collector's predicates are the reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 062 and 063 build on the Do lane existing.</parallel-reason>
+    <deps>060, 034, 024, 036, 037, 047</deps>
+    <tags>dataverse,policy,do-lane,signals</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the four Do-lane policies (overdue task, task due within 3 days, work assignment past its response due date, and overdue To Do for all To Dos per D-31) as subject-only rules in the extended grammar, each with a work type and a decision plan, and prove the nightly evaluator produces their Signals over real dev data.</prompt>
+  <role>SPAARKE platform developer. The collector's predicates are the reference; the evaluator is the only evaluator.</role>
+  <goal>Four enabled-after-review Do-lane policies whose bodies reproduce DailyBriefingCollector's predicates, fire through task 031's job, write Signals with due dates and owners per D-16, D-31 and D-33, and change membership with no deployment when a knob changes.</goal>
+
+  <context>
+    <background>AMENDED 2026-10-07. D-16 (spec section 9; #12): the Do lane runs on Path B's evaluator through a grammar extension (subject-only rules, now+Nd, matter derivation for event / To Do / work assignment via sprk_regardingmatter), not on the Daily Briefing collector, so the collector is NOT modified to read policy rows (that would be a second evaluator, FR-11). The collector's hardcoded predicates are the reference for the bodies: the task-type GUID (:101), statuscode Open (:104), the TaskOverdueDaysPast = 5 constant (:116) and highpriority OR monitor (:500-502). D-27: the event due date is sprk_duedate. D-25: "today" per item (task 031). D-15: the Do lane shows each reader only their own work (task 038). Reconciliation W-17: the rule type is named (Existence, subject-only); W-8: each Do rule declares its work type. #3: a work assignment has no response column; the rule is "active assignment past sprk_responseduedate".</background>
+    <relevant-files>
+      <file role="new">Dataverse: four sprk_policy plus sprk_policyversion rows (lane Do)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Signals/SignalPredicateTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-16): each rule is an Existence body with a when filter only (zero clauses), over sprk_event (task type, open per EventStatusCode.IsOpenWork, task 097 decision A) sprk_workassignment (active) or sprk_todo (open; D-31), using now-Nd / now+Nd. Use the three fixtures task 024 proved against the collector. Do NOT modify DailyBriefingCollector.</constraint>
+    <constraint source="owner">Scope (D-27): event rules compare sprk_duedate, never sprk_finalduedate.</constraint>
+    <constraint source="project">Scope: each policy declares sprk_lane Do, sprk_shortname, sprk_worktype (Finish or reschedule for overdue task; Coming due for due within 3 days; Chase a response for the work assignment) and sprk_enabled No until the owner reviews; each version's sprk_decisionplan uses only task 036's Do-lane codes (overdue task: mark-complete, reschedule, reassign; due soon: mark-complete, reschedule; work assignment: send-reminder, extend-response-date).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-43): the overdue threshold is a knob in the body (criterion 1), starting at 1 DAY overdue (v4); tune in UAT. The cutover (task 064) is therefore not like-for-like with the Briefing's 5-day constant, by design.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-31): author a FOURTH policy, overdue To Do, covering ALL To Dos (sprk_todo, open, sprk_duedate before today per item), lane Do, work type Finish or reschedule, plan mark-complete, reschedule, reassign. A To Do or task groups under its CORE record, matter OR project (D-34; a project-filed item is no longer "no matter", which also answers D-16's open project question); a To Do with no matter and no project gets a Signal owned by and visible only to the To Do's owner, under "Not filed" (D-35, task 037); a To Do with no matter under a Secure project groups under that project with a Secure-team-owned Signal (D-38 dropped the narrow skip). The To Do rule is per-user by construction (FR-30 note).</constraint>
+    <constraint source="project">Scope: Do-lane policies are evaluated NIGHTLY ONLY (cadence from sprk_lane).</constraint>
+    <constraint source="project">Scope: these are NOT differentiated (every matter-management system shows overdue tasks). They join for completeness and adoption, never for the pitch. That is why the lane split exists.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: each message template is literal or uses only TemplateEligibleFields, and passes ValidateForSave.</constraint>
+    <constraint source="ADR-038">Scope: the proof runs against real spaarkedev1 rows (live counts), not mocks.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36, D-38): the work-assignment response-overdue policy groups each Signal under the work assignment itself (its own core record). No To Do is skipped (D-38): a To Do with no matter under a Secure project gets a Secure-team-owned Signal grouped under that project.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-54): the work-assignment rule is "active work assignment past sprk_responseduedate AND no response recorded", reading the response columns task 047 adds (the responded-on column is null); recording a response closes the Signal at the next pass as ConditionCleared unless a decision closed it (Acted).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Do-lane policies</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/daily-briefing-ontology-fit.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Collector query shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs">The predicates the bodies reproduce (QueryTodosAsync for the To Do rule); read, do not modify.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above. D-43 sets the initial overdue value to 1 day.</step>
+    <step order="1">Author the four policy and version rows (Off), validating each body and template with ValidateForSave.</step>
+    <step order="2">Enable them in dev for the proof only; run task 031's job (test host) and compare each policy's Signals with the collector's own result for the same day.</step>
+    <step order="3">Change the overdue knob and re-run: membership changes with no deployment.</step>
+    <step order="4">Record the rows, the comparison and the reader-scope result (via task 038 if landed) in notes; set the policies back to the state the owner chooses.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the work-assignment rule cannot read the D-54 response columns as a single subject-only filter, STOP and escalate.</trigger>
+    <trigger>If a body cannot reproduce the collector's predicate as a single subject-only filter, STOP and escalate rather than modifying the collector or adding a join.</trigger>
+    <trigger>If a work-assignment-subject Signal does not group under the work assignment itself (D-36: a work assignment is its own core record), STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DailyBriefingCollector computes the same lists with hardcoded predicates; the policy tables and the evaluator (tasks 024, 031, 037) now exist.</existing>
+    <extension>Yes: four policy ROWS on existing machinery; no code. The collector stays as the Briefing's source until the cutover (task 064).</extension>
+    <cost-of-doing-nothing>Membership stays hardcoded, so there is no stated reason on a line, no versioning, no suppression, no freshness and no deterministic answer to why is this not here. Those five properties are the entire reason the Briefing items become Work Items.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-mcp">Author and read the policy rows</tool>
+    <tool name="dotnet">Run the evaluator in a test host</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: four Do-lane policy and version rows</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/061-do-lane-policies.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the four Do-lane policies, when the nightly evaluator runs, then each produces Signals over existing dev data whose subjects match the collector's list for the same day (differences explained in notes).</criterion>
+    <criterion testable="true">Given the overdue-days knob changed on the version, when evaluation re-runs, then membership changes with NO deployment.</criterion>
+    <criterion testable="true">Given each Signal, when read, then sprk_lane is Do, sprk_duedate is the subject's due (or response due) date, and the grouping matter is derived per task 037.</criterion>
+    <criterion testable="true">Negative: DailyBriefingCollector is unchanged in the diff; no body reads sprk_finalduedate.</criterion>
+    <criterion testable="true">Negative: Do-lane policies are not evaluated by the event triggers.</criterion>
+    <criterion testable="true">Each version has a decision plan using only task 036's Do-lane codes, and each policy has a work type.</criterion>
+    <criterion testable="true">Given a task or To Do filed under a project, when evaluated, then its Signal groups under the project; given a To Do with no matter and no project, then its Signal is owner-only (D-34, D-35).</criterion>
+    <criterion testable="true">Given a work assignment past its response due date, when evaluated, then its Signal groups under that work assignment (D-36).</criterion>
+    <criterion testable="true">Given a work assignment past its response date with a response recorded, when evaluated, then no Signal is raised (D-54); given the overdue knob at 1 day, then a task 1 day overdue fires (D-43).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-30 (amended: D-16, D-25, D-27), FR-45 (amended, D-31), FR-47, FR-49; D-31 (overdue To Do for all To Dos, decided), D-33; reconciliation W-8, W-15, W-17, C-6, C-7 and B.2 row 061. Amended 2026-10-07: the original framing (move the predicates into the collector) is replaced by D-16's single evaluator.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

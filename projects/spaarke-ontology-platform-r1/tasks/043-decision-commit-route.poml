@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The decision commit route: one review, record last, idempotent</title>
+    <phase>4b Commit and actions</phase>
+    <gate>040, 036, 044, 046, 070 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The one route that turns a human decision into effects in the world and an append-only record; partial failure and authorization are the hard parts.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive orchestration with irreversible side effects (an email send), five upstream tasks and partial-failure semantics.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>058, 049 and 055 depend on this route; it composes 040, 044, 046 and 070.</parallel-reason>
+    <deps>040, 036, 044, 046, 070</deps>
+    <tags>bff-api,auth,security,endpoints,decision-record</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the single BFF route that records a decision: validate the review against the plan, run the taken actions' Dataverse writes, create the Next steps, send email last, write the one Decision Record listing actual outcomes, then close the resolved Signals; on failure write no record and report which writes landed.</prompt>
+  <role>SPAARKE backend developer. Record last; a record that is wrong cannot be fixed.</role>
+  <goal>POST one review to the commit route and get either a recorded decision (one sprk_decisionrecord, Signals closed Acted or Dismissed, follow-on ids listed) or a structured failure naming the writes that landed and no record.</goal>
+
+  <context>
+    <background>D-17 (spec section 9; v4-prototype-vs-solution #24, #16): one BFF commit route, record last: validate, internal writes, email last, the one Decision Record listing actual outcomes, close Signals. On failure no record is written and the user sees which writes landed; idempotent per review; passes the #1312 route-authorization census. The record is append-only, so a failure after it is written cannot be corrected on it, and a Graph send cannot be rolled back. Follow-ons must be created before the record so their ids can be listed (#23, sprk_followons). A decision may close several Decide Signals on the same matter, only those ticked; a Do item never resolves another (reconciliation R-7). Skip every action = a dismissal with a reason (Z-7).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-17): the order is fixed: (1) validate the whole review (plan, catalog, excludes, required parameters, caller authorization) before any write; (2) Dataverse writes of taken actions in plan order; (3) Next-step creators; (4) email sends last; (5) write the ONE Decision Record via task 040's writer listing every offered action (taken or skipped, values, outcome), the follow-on ids (sprk_followons) and the strictest gate tier among taken actions (sprk_gatetier); (6) close the resolved Signals (Acted, or Dismissed when nothing was taken) with sprk_decisionrecord set.</constraint>
+    <constraint source="owner">Scope (D-17): if any step before (5) fails, write NO record, close NO Signal, and return a structured result listing each write that landed (entity, id) and the failing step. Do not attempt compensating deletes.</constraint>
+    <constraint source="owner">Scope (D-17): idempotent per review: the client sends a review id; a repeated review id returns the first outcome and performs no write. Store the review id where the retry can find it (in sprk_steps of the record once written, and a short-lived idempotency entry before that via the BFF's existing IDistributedCache).</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): RequireAuthorization; census entry naming the record-level check; for every Signal in the review the caller must be able to read its matter and write each action's target as the caller (IDataverseUserClient); an unresolved caller gets #1312's single 403.</constraint>
+    <constraint source="project">Scope: Also resolve only accepts Decide-lane Signals on the same matter as the primary Signal; a Do-lane Signal is only ever resolved by its own review (R-7).</constraint>
+    <constraint source="project">Scope: a dismissal requires a reason from task 036's closed list ("code - detail"); Other requires detail. The record class comes from the catalog, never the client.</constraint>
+    <constraint source="project">Scope: actions whose record class task 036 marks unresolved (C-3) are refused with a clear error, not defaulted.</constraint>
+    <constraint source="project">Scope: no AI-internal type is injected (ADR-013); the Inquiry body draft, if any, arrives from the client as a field value.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: integration tests as real low-privilege users for authorization; the partial-failure path is tested by forcing a failure at each step boundary.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34): "same matter" for Also resolve reads "same CORE record" (matter or project). A D-35 Signal (no core record) can never be an Also-resolve target and never resolves another.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-52): the decision wizard's Confirm step IS the human confirmation. The gate tier text for each taken action comes from a PURE function exposed through the AI PublicContracts facade (ADR-013), with no chat session and no ConfirmationPolicyEngine session state; the strictest tier is written to sprk_gatetier.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Decision commit orchestration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Define the review contract (review id, primary Signal, also-resolve ids, per-action taken/skipped + values, Next steps, dismissal reason) and its validation.</step>
+    <step order="2">Implement DecisionCommitService in the fixed order, calling 044's executors, 046's work-assignment create, 070's Inquiry executor and 040's writer.</step>
+    <step order="3">Implement idempotency and the structured partial-failure result.</step>
+    <step order="4">Add the endpoint and census entry; integration tests: a two-action review plus one Next step; a dismissal; a forced failure at each step; a retry of the same review id; each authorization case.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an external action (the email send) succeeds and the record write then fails, STOP and escalate with the observed state: the review id, the landed writes and the send. The owner decides what the user is told and whether a retry may write the record; do not invent a compensating action.</trigger>
+    <trigger>If the gate-tier text cannot be produced by a pure function behind the PublicContracts facade without opening a chat session, STOP and escalate (D-52).</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No route writes a Decision Record or closes a Signal (#24). The ADR-039 gate resolve route (Api/Ai/ChatEndpoints.cs, sessions/{sessionId}/gates/{gateId}/resolve) is chat-session-only. Each existing write path (events complete, child-records, communications send) commits one write.</existing>
+    <extension>No: none of those routes can sequence several writes and an append-only record with record-last semantics; this route calls them (or their cores) rather than duplicating them.</extension>
+    <cost-of-doing-nothing>One click in the wizard cannot both act and record: FR-18's "every resolution writes one record" is unenforceable, follow-on ids cannot be listed in an append-only record, and the Console User Write on sprk_signal (task 049) cannot be removed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Path B review taking send-budget-inquiry and revise-budget plus one add-todo Next step, when committed, then the revision and the To Do exist, the email was sent last, exactly one Decision Record lists all three offered actions (approve-variance as skipped) and the To Do id, and the Signal is Acted with sprk_decisionrecord set.</criterion>
+    <criterion testable="true">Given a review that takes nothing with reason Not material, when committed, then one Dismissal-class record exists with reason "not-material - ..." and the Signal is Dismissed.</criterion>
+    <criterion testable="true">Given a failure injected at each step before the record, when committed, then no record exists, no Signal changed, and the response lists exactly the writes that landed.</criterion>
+    <criterion testable="true">Given the same review id posted twice, when committed, then the second call performs no write and returns the first outcome.</criterion>
+    <criterion testable="true">Given Also resolve naming a Decide Signal on the same matter, then both Signals reference the one record; naming a Do Signal or a Signal on another matter, then the review is refused before any write.</criterion>
+    <criterion testable="true">Negative: a caller who cannot read the matter gets 404 before any write; one who cannot write an action's target is refused before any write; an unresolved caller gets 403; the route is in the census.</criterion>
+    <criterion testable="true">Negative: a dismissal without a reason, or Other without detail, is refused; an action with an unresolved record class is refused.</criterion>
+    <criterion testable="true">Tests cover the stated contract and failure points; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a review taking send-budget-inquiry, when committed, then no chat session is opened and sprk_gatetier holds the tier from the PublicContracts pure function (D-52).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-18 (amended), FR-22, FR-36 (amended), FR-51, FR-52, NFR-10; D-17, D-18, D-19, D-29. Supersedes task 053's gate-host wiring. Reconciliation X-6: a revision recorded here closes the Signal as Acted, and task 032's trigger must not re-close it. NOTE (from the 036/026 review, 2026-10-07): FR-54's Do-lane rule (a reader sees only their own work; a no-core Do item is owner-only, D-35) is enforced by task 038's read route, not here, and 038's POML states it. This route must not trust that the Signal id it receives came from that route: check each Signal id with SignalCoreRecordAccess.AuthorizeAsync (task 036) before using it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

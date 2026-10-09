@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Dead and misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deletes a privacy-contract shim (C-21) and several delete-or-adopt items where a wrong call removes live code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree or the other wave-I tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt086, branch chore/remove-dead-shared-code (already created off origin/master; the main session has already committed the ADR-012 example removal and its CHANGELOG entry there). Land C-19 and resolve C-21, C-14, C-20, C-26, C-6, C-27 and the C-19 residual.</prompt>
+  <role>SPAARKE full-stack developer. Cleanup is convergence and deletion with evidence, never a behaviour change in disguise.</role>
+  <goal>Every item is either deleted with zero consumers proven, or kept with its documentation corrected; nothing that reads as live is dead.</goal>
+
+  <context>
+    <background>C-19: the CommandRegistry cluster (registry, EntityConfigurationService, CustomCommandFactory, Toolbar/CommandToolbar) is dead infra from a deleted PCF and carried a loop-over-selection deleteRecord. Task 080 deleted it on the ontology branch (commit 1c56cd29b). It KEPT useKeyboardShortcuts.ts because PageChrome/CommandBar.tsx imports it, but CommandBar itself appeared to have no consumers (#1113). C-21: OWNER DECISION 2026-10-03 is DELETE the Pillar-9 getAgentVisibleState client derivation (pillar9-visibility.ts and getWorkspaceWidgetVisibleStateFn). The server re-derives the shape itself and trims it to identity fields; wiring the client copy live would feed browser-computed data into an LLM prompt (#1112). C-14, C-20, C-26, C-6, C-27 are listed in the reuse audit table.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/</file>
+      <file role="modify">src/solutions/</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/task-080-six-hazards-deviations.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111. Owner decision 2026-10-03: cleanup unrelated to ontology is fixed now (never deferred to an issue) but kept off the ontology branch so that PR stays reviewable.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: run the affected package tests BEFORE applying any change (that run is the master baseline) and AFTER. Report both. A failure is pre-existing only if it appears in the baseline run; never assert pre-existing without that evidence.</constraint>
+    <constraint source="project">Scope: install dependencies with npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md section 12). Discard every package-lock.json diff that npm install produces; lockfile churn is never part of this PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify. If a pre-commit hook fails, fix the cause (usually a missing node_modules).</constraint>
+    <constraint source="project">Scope: you CANNOT write .claude/ paths. If one is needed, stop and report the exact text for the main session.</constraint>
+    <constraint source="project">Scope: when applying C-19 from the commit, EXCLUDE the StatusBadge hunk of src/client/shared/Spaarke.UI.Components/src/components/index.ts; StatusBadge is ontology work that stays on the ontology branch.</constraint>
+    <constraint source="project">Scope: C-21 is DELETE, decided by the owner 2026-10-03. Trace every consumer of SerializedWidgetState.ts and WorkspaceTab.ts first and delete only the shim; keep any type with a live consumer. Do not change the server's C# re-derivation, which is the authoritative path.</constraint>
+    <constraint source="project">Scope: C-26 deletes PcfDataverseClient, useDocumentMultiSelect and DraftSummaryFollowOnStep but KEEPS cancelHandoff, which is self-documented as intentional.</constraint>
+    <constraint source="project">Scope: C-27 is a RECORD only. Do NOT delete the output_pane widget components; they are lazily reachable. Record in the architecture doc that lists them that 6 of 7, plus redline-viewer and matters-dashboard, have no server producer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup with evidence</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/cleanup-placement-plan.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
+    <step order="2">Apply the C-19 changes already written and verified on the ontology branch: git diff 1c56cd29b~1 1c56cd29b -- &lt;paths below&gt; | git apply. The commit is in the shared object store, so it is reachable from this worktree. Paths: src/client/shared/Spaarke.UI.Components/jest.config.js src/client/shared/Spaarke.UI.Components/src/components/Toolbar/ src/client/shared/Spaarke.UI.Components/src/services/ src/client/shared/Spaarke.UI.Components/src/types/index.ts src/client/shared/Spaarke.UI.Components/src/components/index.ts (Toolbar hunk only).</step>
+    <step order="3">C-19 residual (#1113): trace PageChrome/CommandBar.tsx reachability across src/solutions and src/client/pcf, including lazy and dynamic imports. If unreachable, delete it and useKeyboardShortcuts.ts; if reachable, keep both and say where they are used.</step>
+    <step order="4">C-21: delete the Pillar-9 client shim per the owner decision, after tracing SerializedWidgetState.ts and WorkspaceTab.ts consumers.</step>
+    <step order="5">C-14, C-20, C-26, C-6: for each, prove zero consumers by grep (including lazy imports) and delete; where an item has a live consumer, keep it and correct the misleading docstring or header instead.</step>
+    <step order="6">C-27: record the producer gap in the architecture doc; delete nothing.</step>
+    <step order="7">Put 'Closes #1112' and 'Closes #1113' in the PR body.</step>
+    <step order="8">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
+    <step order="9">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="10">Report back: the PR URL, each acceptance criterion with evidence, files changed, the baseline and after test output, and any escalation.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a delete-or-adopt item (C-14 AI.Context hooks / ChatApiClient / chat-history trio, C-20 wizardRegistry, C-6 LegalWorkspaceRenderer) has a live consumer AND adopting it would change behaviour, STOP on that item and report it to the main session for an owner decision. Do not file it as an issue, and complete the others.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Install and run package tests</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/</output>
+    <output type="doc">docs/architecture/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A repo-wide grep finds no CommandRegistry, EntityConfigurationService, CustomCommandFactory or CommandToolbar outside git history and comments explaining the deletion.</criterion>
+    <criterion testable="true">The Pillar-9 client shim is deleted and every type that had a live consumer still compiles.</criterion>
+    <criterion testable="true">Each of C-14, C-20, C-26, C-6 is either deleted with zero consumers shown, or kept with its documentation corrected and the consumer cited.</criterion>
+    <criterion testable="true">Negative: cancelHandoff and the output_pane widget components still exist.</criterion>
+    <criterion testable="true">The PR closes #1112 and #1113.</criterion>
+    <criterion testable="true">A pull request against master is open, ready for review, with the item ids in its body.</criterion>
+    <criterion testable="true">Negative: the PR contains no package-lock.json changes and no file outside this task's scope.</criterion>
+    <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">PR #1120 (056254e55, 16926ecf4, 8082b03d5, b443e4779); closes #1112 and #1113. Deleted: C-19 cluster plus CommandExecutor (main session verified its only other reference on master is the barrel this PR edits), PageChrome/CommandBar and useKeyboardShortcuts, the C-21 Pillar-9 shim (owner decision), C-14, C-20, C-26 (cancelHandoff kept), C-6. C-27 recorded only. Follow-ups: stale C# doc comments corrected (main session verified comment-only, so no publish-size delta), unused @spaarke/auth removed from AI.Context. ADR-012 table updated by the main session. Found a test already red on master (register-workspace-widgets, since 0e5d0fafd), routed to task 054. ChatSessionCard formatter judged most correct; routed to task 081. Open for reviewer: ADR-020 SemVer path-A exception for removing exports from private file-linked packages.</completion>
+  <notes>Largest of the wave-I PRs. The ADR-012 concise-copy edit (CommandRegistry removed from the present-tense example) and its CHANGELOG entry are pre-committed on this branch by the main session, because sub-agents cannot write .claude/.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

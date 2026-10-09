@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The predicate compiler: exists plus notExists over a fixed window</title>
+    <phase>2 Policy and rule bodies</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The one item in the project whose value is unproven, and the notExists half has no prior art anywhere in the repo.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New code with no in-repo template, on the critical path, where a silent wrong answer is a false negative that looks like a confident true negative.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>The project risk item. Serial by choice so its FetchXML is proven on real data before anything depends on it.</parallel-reason>
+    <deps>020,005</deps>
+    <tags>bff-api,fetchxml,dataverse,critical-path</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Compile an Existence rule body into ONE Dataverse filter implementing the exists conjunct and the notExists conjunct, and prove it on the seeded data including both negative controls.</prompt>
+  <role>SPAARKE backend developer with FetchXML depth. Treat the anti-join as new work.</role>
+  <goal>A compiler that turns the Path B body into a single FetchXML query which returns the positive matter and does NOT return either negative control.</goal>
+
+  <context>
+    <background>This is the only item carrying product risk; everything else is mechanism. The EXISTS half has one in-repo reference (DataversePrecedentBoard.cs:182-190, INNER AddLink plus LinkCriteria). The NOT EXISTS half has NO prior art: every ConditionOperator.Null in the repo filters a column on the PRIMARY entity, and every LeftOuter join enriches rather than anti-joins. ILiveFactResolver dispatch is config-driven but its predicates are a closed C# switch, so neither conjunct is reachable by adding a case.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the compiled output MUST be ONE Dataverse filter (CM-3). Two queries joined in C# is NOT acceptable: it reintroduces the variable passing and sequencing that made predicates preferable to node graphs.</constraint>
+    <constraint source="project">Scope: NO cross-clause variable passing. Two independent ANDed clauses over a fixed window. The slight imprecision (a revision landing early in the window) is accepted; a correlated variant is a later change IF evidence shows it matters.</constraint>
+    <constraint source="project">Scope: do NOT read sprk_budget.modifiedon as evidence of a revision. Any unrelated field edit bumps it, so a stray edit would read as the budget was revised and SUPPRESS A TRUE SIGNAL. That is a false negative, the direction decision 13 rules against.</constraint>
+    <constraint source="project">Scope: prove the notExists half on REAL data before task 030 depends on it. A FetchXML anti-join that silently returns everything, or nothing, looks exactly like a working predicate.</constraint>
+    <constraint source="ADR-013">Scope: consume LiveFactResolver outputs and Dataverse reads only; no AI-internal types.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>FetchXML predicate compilation and anti-joins</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/mvp-technical-spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="EXISTS via INNER link-entity" location="src/server/api/Sprk.Bff.Api/Services/Insights/Precedents/DataversePrecedentBoard.cs">Lines 182-190 are the only in-repo prior art: INNER AddLink plus LinkCriteria. Copy the shape.</pattern>
+      <pattern name="NOT EXISTS anti-join" location="none in repo">There is no template. Build it as an outer link-entity plus a null test on the linked primary key, and verify the generated FetchXML by hand before trusting it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Write the target FetchXML BY HAND first, for the Path B body, and run it against the seeded data. Confirm it returns the positive matter and excludes both negative controls. Do this before writing any compiler code.</step>
+    <step order="2">Record the hand-written FetchXML in notes/ as the reference output the compiler must reproduce.</step>
+    <step order="3">Implement the compiler: body JSON to FetchXML, handling exists as an INNER link-entity with LinkCriteria and notExists as an outer link-entity with a null test on the linked primary key.</step>
+    <step order="4">Add the window as a relative date filter on the clause entity date field named in the body.</step>
+    <step order="5">Write tests that assert the GENERATED FetchXML matches the hand-verified reference, not merely that the query runs.</step>
+    <step order="6">Write integration tests over the seeded rows: positive fires, negative control 1 (revision present) does not, negative control 2 (no classified communication) does not.</step>
+    <step order="7">Measure and record the query count and shape, since the evaluator will run this per policy per matter.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a single FetchXML filter cannot express the notExists conjunct, STOP and escalate per CLAUDE.md section 6. Do NOT fall back to two queries joined in C#: that breaks CM-3 and is the architectural property the predicate approach exists to preserve. This is a genuine judgement boundary, and a documented stop here is a legitimate outcome.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SignalEvaluationService exists but its ISignalRule is a private nested interface instantiated in the constructor (SignalEvaluationService.cs:268 and :116-120), so it is not an extension point. CommunicationRuleGate has scope and threshold matching but NO predicate at all. ILiveFactResolver predicates are a closed C# switch (MatterLiveFactResolver.cs:166-174) and nothing reads sprk_communication.</existing>
+    <extension>No. Verified three candidate seams; none accepts a new predicate without new code. The GenerateDeterministicId idempotency key (:241-258) is matter plus type only and has no room for a polymorphic subject.</extension>
+    <cost-of-doing-nothing>The differentiated claim is not computable. Without this, the project ships mechanism with nothing differentiated to run through it, and success criterion 2 cannot pass.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/PredicateCompilerTests.cs</output>
+    <output type="test">tests/integration/seam/SignalPredicateTests.cs</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/pathb-fetchxml-reference.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Path B body, when compiled, then the output is a SINGLE FetchXML query containing both conjuncts.</criterion>
+    <criterion testable="true">Given the seeded positive matter, when the compiled query runs, then that matter is returned.</criterion>
+    <criterion testable="true">Negative: given negative control 1 (classified communication AND a budget revision inside the window), when the query runs, then the matter is NOT returned.</criterion>
+    <criterion testable="true">Negative: given negative control 2 (over-budget snapshot, no classified communication), when the query runs, then the matter is NOT returned.</criterion>
+    <criterion testable="true">Negative: given an empty source table, when the query runs, then it returns nothing rather than everything. (An anti-join that inverts is the specific failure mode here.)</criterion>
+    <criterion testable="true">Given the generated FetchXML, when compared with the hand-verified reference in notes/, then they match.</criterion>
+    <criterion testable="true">No predicate reads sprk_budget.modifiedon.</criterion>
+    <criterion testable="true">All unit and integration tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-06, FR-07 and NFR-07. design.md section 8.0.1. THE RISK ITEM: serial, opus, xhigh. The acceptance criterion about an empty source table is deliberate, because a broken anti-join most often fails by returning every row or no row, and both read as a working predicate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion date="2026-10-04" rigor="FULL" escalation-fired="false">
+    <summary>PredicateCompiler compiles an Existence rule body into ONE FetchXML query: exists = inner link-entity with the filter inside the link; notExists = outer link-entity with the filter in the ON clause plus a root null test on the linked primary key. The hand-written query was run on spaarkedev1 first; the compiler output is pinned byte-for-byte to it. Full evidence: notes/pathb-fetchxml-reference.md.</summary>
+    <real-data-result>Compiled from the live sprk_rulebody and run verbatim (pac org fetch, read-only, as the operator): 4 matters returned, namely REAL-2026-123456.01 (positive) plus PAT-477689, EMPL-307998 and Form D - 2023. Those three hold real fee/scope communications from 2026-09-29 with no budget revision, confirmed independently through Dataverse SQL. NC1 (b68299c6) and NC2 (d14d79f4) are not returned; narrowed per matter: .01 = 1 row, NC1 = 0, NC2 = 0. Empty exists source = 0 rows; empty notExists source = exactly the exists set (5), not 62.</real-data-result>
+    <acceptance>All 8 criteria met. Criterion 8: BFF builds with 0 warnings; full BFF unit suite "Passed! - Failed: 0, Passed: 14355, Skipped: 54, Total: 14409, Duration: 26 m 35 s" (uncontended, after the Step 9.5 fixes).</acceptance>
+    <quality-gates>Independent code-review + adr-check: pass with findings, no Critical, no section 6.5 conflict. High F1 (unverified join path) fixed with a closed VerifiedJoins list; F2, F3, F5, F6, F7, F8, F9, F11, F12, F15, F16, F17, F19, F21 and F22 fixed; F14 and F23 rejected with reasons; F10, F13 and F20 logged for task 030 and rule authors. Disposition table: notes/pathb-fetchxml-reference.md section 6.</quality-gates>
+    <not-observed>Not run as the writer principal 3121bf1b. The live seam test SignalPredicateTests is written but NOT yet run: the workstation DefaultAzureCredential (local tooling, not the app managed identity) could not obtain a token. Read depth is therefore asserted only from notes/security-roles.md section 9 until task 030 runs as the writer in the app. Boolean filter values (emitted as 1/0) are not exercised on real data.</not-observed>
+    <carried-to-030>Verify the evaluating principal's LIVE read depth for the subject and every clause entity, failing closed per policy (EvaluatorGlobalReadableEntities mirrors role configuration and can drift). Consider column-level security (F10). Page distinct results (order element is emitted).</carried-to-030>
+    <publish-size>Fresh worktrees, Compress-Archive, PDBs included, 212 files each side: master 62277d50a 45.66 MB; HEAD plus task 45.67 MB; task delta +8,189 bytes. CVE scan clean, csproj unchanged.</publish-size>
+    <coordinator-flag>Task 020's RuleBodySchemaValidatorTests.cs is still at the non-KEEP path tests/unit/Sprk.Bff.Api.Tests/Services/Signals/ (review F5); not moved here because it is another task's file.</coordinator-flag>
+  </completion>
+</task>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -461,6 +462,88 @@ public class AssociationStatusMapperTests
 
         decision.Status.Should().Be(AssociationStatusCodes.Suggested);
         decision.Provenance.Decision.TopDeterministicConfidence.Should().BeApproximately(0.70, 0.001);
+    }
+
+    // ── AP-12 regression: the reported confidence must fall inside the reported band ────────────
+    // (task 083). The bug: the "Reinforced confidence X in [0.50, 0.85)" message was emitted even
+    // when X was actually ≥ the threshold (e.g. a C-1-narrowed rung 2/3 match reinforcing above
+    // threshold on its own) — the band was tested against topDeterministicConfidence while the
+    // message interpolated topConfidence. Per project CLAUDE.md §0.3/§3.1, a message may assert
+    // only what was actually tested.
+
+    [Theory]
+    [InlineData(0.90, RungKind.ParticipantCorrelation)] // C-1 narrowing: rung 2 alone, above threshold
+    [InlineData(0.97, RungKind.StructuralDetector)]      // rung 3 alone, above threshold — the exact reported shape
+    [InlineData(0.86, RungKind.RecordNameMatch)]         // surface-deterministic, non-auto-file-eligible, above threshold
+    public void Decide_NonAutoFileEligibleRungAloneAtOrAboveThreshold_ReasonDoesNotClaimFalseBandContainment(
+        double confidence, RungKind rung)
+    {
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, confidence, rung) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        var reason = decision.Provenance.Decision.Reason;
+
+        // The old bug text; must never appear when the reported confidence is at/above threshold.
+        reason.Should().NotContain(
+            "in [0.50, 0.85)",
+            "the reported confidence is at/above the threshold and must not be described as inside the Suggested band");
+        reason.Should().Contain("≥ threshold 0.85");
+        reason.Should().Contain($"{confidence:F2}");
+    }
+
+    [Theory]
+    [InlineData(0.50, RungKind.StructuralDetector)]   // lower edge of the band (SuggestFloor itself)
+    [InlineData(0.60, RungKind.ThreadContinuity)]
+    [InlineData(0.70, RungKind.ParticipantCorrelation)]
+    [InlineData(0.84, RungKind.ExplicitReference)]     // just under threshold
+    public void Decide_ConfidenceGenuinelyBelowThreshold_ReasonBandContainsTheReportedConfidence(
+        double confidence, RungKind rung)
+    {
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, confidence, rung) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        var reason = decision.Provenance.Decision.Reason;
+
+        var m = Regex.Match(reason, @"Reinforced confidence (?<val>[0-9.]+) in \[(?<lo>[0-9.]+), (?<hi>[0-9.]+)\)");
+        m.Success.Should().BeTrue($"expected the band-form reason for a genuinely-below-threshold confidence, got: {reason}");
+
+        var val = double.Parse(m.Groups["val"].Value);
+        var lo = double.Parse(m.Groups["lo"].Value);
+        var hi = double.Parse(m.Groups["hi"].Value);
+
+        val.Should().BeGreaterThanOrEqualTo(lo, "the message claims the confidence is inside this band");
+        val.Should().BeLessThan(hi, "the message claims the confidence is inside this band");
+    }
+
+    [Fact]
+    public void Decide_AiRungAboveThreshold_ReasonConfidenceMatchesTheAiRungClaim()
+    {
+        // Companion to the two theories above: when an AI rung IS involved, the "only with an AI
+        // rung" message must itself claim a confidence ≥ threshold (not an in-band claim) — guards
+        // the branch adjacent to the one task 083 fixed from regressing the same way.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.92, RungKind.AiClassification) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        var reason = decision.Provenance.Decision.Reason;
+
+        reason.Should().NotContain("in [0.50, 0.85)");
+        reason.Should().Contain("≥ threshold 0.85");
+        reason.Should().Contain("0.92");
     }
 
     // ── Conflict → Ambiguous (owner priority (c)) ────────────────────────────────

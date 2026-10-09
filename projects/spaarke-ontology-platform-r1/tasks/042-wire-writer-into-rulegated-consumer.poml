@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Wire the Decision Record writer into the consumer on both paths</title>
+    <phase>4 The Decision Record</phase>
+    <gate>040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped consumer; missing the deny path loses half the record and the gate must not be touched.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One insertion point, already located.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>bff-api,decision-record</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Insert the Decision Record write into RuleGatedAssessedConsumer so every authorize AND every deny persists, without touching the gate. NOTE (verified 2026-10-03): RuleGatedAssessedConsumer is declared at src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs:222 - the SAME FILE as CommunicationRuleGate. So "without touching the gate" means do not change the CommunicationRuleGate class or its decision logic; it does NOT mean avoid that file. You will be editing it.</prompt>
+  <role>SPAARKE backend developer. One line before the branch.</role>
+  <goal>Both the authorize and the deny path write a Decision Record, and the deny path is queryable per matter.</goal>
+
+  <context>
+    <background>CommunicationRuleDecision already carries the full decision on BOTH paths and is currently written to ILogger and lost. The consumer already holds the object, so the write is a line before the branch. The gate itself is not modified.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: DO NOT modify the gate (ConfirmationPolicyEngine or the rule gate itself). The gate is the audit boundary; this task persists a value it already produces.</constraint>
+    <constraint source="project">Scope: the DENY path must write too. Criterion 3 requires the deny path to be queryable per matter, and there is no answer to why did nothing happen without it.</constraint>
+    <constraint source="project">Scope: a failure to write the record must not silently drop it. If the write throws, emit to App Insights rather than swallowing.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17): task 040's writer now takes one REVIEW outcome. Call it with a one-step review: the gate's proposed action as the single offered step, taken with outcome Authorized on the authorize path, not taken with outcome Denied on the deny path (sprk_action and sprk_actioncode null on deny, FR-01). No Next steps, no Signal ids unless the gate decision resolves a Signal. The record class is Judgement on both paths.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (NFR-10): this task adds no route; it does not go through the decision commit route (task 043), which serves the worklist wizard. Do not route the consumer through it.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34): the gate decision's record subject is the communication's CORE record (matter or project) as CoreAncestorResolver derives it, passed to task 040's writer; do not read sprk_regardingmatter directly.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36, D-37): the communication's core record may be any of the four core types; pass it to task 040's writer via the generic columns; ties follow D-37.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Gate decision persistence</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Locate the branch in RuleGatedAssessedConsumer where the authorize and deny paths diverge.</step>
+    <step order="2">Insert the Decision Record write BEFORE the branch, so both paths are covered by one call site.</step>
+    <step order="3">Map the gate outcome to sprk_decisionoutcome, and set sprk_gatesessionid to link the ADR-040 SessionGate entry.</step>
+    <step order="4">Add App Insights emission if the write throws.</step>
+    <step order="5">Add tests: authorize writes; deny writes; the deny record is queryable per matter; a write failure is observable.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the authorize and deny paths cannot share one call site without changing the gate, STOP and escalate. Modifying the gate is out of scope for this task and the gate is the audit boundary.</trigger>
+    <trigger>D-33 (2026-10-07) makes every Decision Record on a Secure matter a secure child via task 040's writer; O-20 is dissolved (Restricted/Limited exclude only external contacts). If the communications gate's records cannot go through 040's resolver path unchanged, STOP and escalate.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+    <trigger>If the communication's core record cannot be resolved by D-37's rule (direct filed-under, then matter over project), STOP and ask the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communications</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authorize outcome, when the consumer runs, then a Decision Record exists.</criterion>
+    <criterion testable="true">Given a deny outcome, when the consumer runs, then a Decision Record exists with outcome Denied.</criterion>
+    <criterion testable="true">Given a matter with both outcomes, when queried, then both records return.</criterion>
+    <criterion testable="true">Given a record, when read, then sprk_gatesessionid links the SessionGate entry.</criterion>
+    <criterion testable="true">Negative: the gate code is unchanged (diff shows no modification to ConfirmationPolicyEngine or the rule gate).</criterion>
+    <criterion testable="true">Negative: a write failure is observable in App Insights rather than silently swallowed.</criterion>
+    <criterion testable="true">Given a deny, when written, then sprk_steps lists the proposed action as not taken with outcome Denied and sprk_actioncode is null.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a gate decision on a communication filed under a project, when written, then the record's sprk_project is that project (D-34).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-23 and success criterion 3. Amended 2026-10-07: the writer takes a review-shaped input (D-17, task 040); O-20 dissolved by D-33 (records on Secure matters are secure children through task 040).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>BFF Signal read route: matter-access filter, Do-lane reader scope, deterministic order</title>
+    <phase>3 Evaluator, Signal lifecycle and read</phase>
+    <gate>050, 031, 037 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New authorized BFF route over secured rows; it is the only thing standing between a Signal's sentence and a reader who cannot open its matter.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive read path (record-level authorization, route census) with an owner-flagged exposure (#17).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>050, 031, 037</deps>
+    <tags>bff-api,auth,security,signals,endpoints</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the one BFF route the worklist reads Signals through: it runs the worklist configuration's FetchXML, drops every Signal whose matter the caller cannot read, returns only the caller's own work in the Do lane, and orders deterministically.</prompt>
+  <role>SPAARKE backend developer. Security fails closed; the caller's own rights decide what they see.</role>
+  <goal>GET (or POST for paging) on one Signal read route returns, per lane, the caller's visible Signals with the display columns the row needs, passes the #1312 census, and leaks nothing about matters the caller cannot read.</goal>
+
+  <context>
+    <background>D-15 (spec section 9; v4-prototype-vs-solution #17): Signals are owned by the writer with the matter's business unit and read at Parent: Child BU depth, so every Console User in the BU tree can read a Signal (sentence and evidence) on a matter they cannot open, and every colleague's overdue tasks. D-33 (2026-10-07) replaced the evaluator's Restricted/Limited skip with secure-child registration (task 039: Signals on Secure matters are owned by the Secure Record Owners team and mirrored to the matter's sharees); the rest of D-15 stands: the worklist reads Signals ONLY through a BFF route that checks the caller can read each row's matter; the Do lane shows only the reader's own work. Event "mine" is owner decision B from task 097 (owner OR assigned to my contact OR sprk_createdbyperson = me). Every new route is classified in #1312's census and an unresolved caller gets the single 403 (D-29).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Signals/SignalReadEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/RecordRouteAccessAuthorizationFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/IDataverseUserClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-15): the route reads Signals AS THE CALLER (IDataverseUserClient, so Dataverse first trims by the Signal's own business unit), then keeps only rows whose grouping matter the CALLER can read, decided by one batched caller-identity read of the matter ids (IDataverseUserClient), never by a client-supplied list. A row whose matter the caller cannot read is dropped without trace (no count, no placeholder).</constraint>
+    <constraint source="owner">Scope (D-15, amended D-44): Do-lane rows are returned only when the subject is the caller's own work. Event: task 097 owner decision B (owner, assigned to the caller's contact, or sprk_createdbyperson = the caller). To Do: the To Do's owner is the caller (FR-30 note). Work assignment (D-44): BOTH its assigner (sprk_createdbyperson = the caller) AND its assignee (a contact-assignee lookup that maps to the caller's contact, the 097 decision B mapping) see it.</constraint>
+    <constraint source="project">Scope: membership and order come from the worklist sprk_gridconfiguration FetchXML (task 050); the route executes it server-side and does not re-implement the predicate. Excluded: Resolved and suppressed Signals in the main lists; the three secondary queries (closed today, suppressed, closed earlier) from task 050 are separate parameters of the same route.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-42): order per lane, deterministic, no model input: severity (sprk_policy.sprk_severity, Critical first) then sprk_highpriority (the flag the Briefing reads today, DailyBriefingCollector ~:500-502) then oldest sprk_firstdetected then record number (the core record's number field from its sprk_recordtype_ref row), keeping a core record's items together at its best-ranked item.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): the route is added to RouteAuthorizationGuardTests.Ledger.cs with its record-level check named; an unresolved caller gets #1312's single 403; RequireAuthorization on the group.</constraint>
+    <constraint source="project">Scope: the response carries only display columns the row needs (D-23: subject name, due date/state inputs, rule short name, matter, lane, status, evidence refs, policy version id) and nothing from a matter the caller cannot read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: integration tests run as real low-privilege users (the 097 pattern), not mocked identities, for the authorization cases.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35, D-36): the route checks the caller can read each row's CORE record, whatever its type, with one batched caller-identity read per core type present on the page, the entity named by the row's sprk_corerecordtype catalog row (sprk_recordlogicalname) and the record by sprk_corerecordid; display name and number come from the catalog row's field names. No code names a core type. A row with NO core record (D-35) is returned ONLY to the Signal's owner, only in the Do lane, flagged for the "Not filed" group.</constraint>
+    <constraint source="owner">RECORDED 2026-10-07 (owner asked; read-only check of spaarkedev1 roleprivileges): the D-35 "owner only" rule is enforced by this route, not by privilege. This is acceptable because it reveals nothing new: Spaarke Core User and Spaarke Basic User hold prvReadsprk_Todo and prvReadsprk_Event at Deep (Parent: Child BU) depth, and Spaarke Console User holds prvReadsprk_Signal at the same Deep depth, so a colleague who could read a no-core Signal outside the Console (model-driven app, direct Web API) can already read the To Do or event itself, whose due date and status are all the Signal states. Residual assumption to keep true: every holder of Console User also holds Core User or Basic User; if a role layout ever gives Signal read without To Do / event read, re-open this.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): D-36 (extensibility, owner 2026-10-07): the core-record types are the access-control core taxonomy (CoreAncestorResolver.CoreRecordEntities: matter, project, work assignment, service request today) and the record-type catalog (sprk_recordtype_ref). Nothing in this task may branch on a specific core type: read the type from sprk_corerecordtype (the catalog row) and the id from sprk_corerecordid (task 007), and take display name and number fields from the catalog row (sprk_recorddisplaynamefield, sprk_regardingrecordnumberfield). A test adds a fake fifth core type through the taxonomy + a catalog row and shows this task's code handles it unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-level route authorization</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Caller-rights route" location="src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs">Task 097's events routes: caller-rights probe, single 403, census entry, live low-privilege tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement SignalReadService: run the configuration FetchXML, batch the caller's matter access, apply the Do-lane "mine" rules, order.</step>
+    <step order="2">Add the endpoint group with RequireAuthorization and the census entry.</step>
+    <step order="3">Integration tests as real users: a reader in another business unit, a reader without matter access, a Do-lane reader with and without assigned events.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a work assignment carries several assignee lookups and it is unclear which make the caller "the assignee" (for example the law-firm lookup sprk_assignedlawfirm1), STOP and ask the owner; D-44 names the assigner and the assignee, and the contact-assignee lookups are the reading applied here.</trigger>
+    <trigger>If the caller's matter access cannot be decided in a bounded number of queries per page (for example it needs one query per row at realistic volumes), STOP and escalate rather than sampling or caching across callers.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+    <trigger>If any part of the route would need to name a specific core type (D-36 extensibility), STOP and escalate rather than adding a type branch.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No route reads sprk_signal (sprk_signal does not appear in master's server code, #17). RecordRouteAccessAuthorizationFilter authorizes a single record id per route, not a list filtered by each row's parent. Reading as the caller alone is not enough: Signal read depth is Parent: Child BU, which is exactly the exposure.</existing>
+    <extension>The filter is reused for the census pattern and the single-403 contract; it cannot be extended to filter a list by each row's matter without changing its contract for every route. A list route with a batched caller check is the smallest new surface.</extension>
+    <cost-of-doing-nothing>Every Console User in the BU tree reads Signals on matters they cannot open, and every colleague's overdue tasks (#17, owner-flagged security exposure).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Signals/SignalReadEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs</output>
+    <output type="code">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Signal on matter M and a caller who can read M, when the route is called, then the Signal is returned with its display columns.</criterion>
+    <criterion testable="true">Negative: given a caller in the same BU tree who cannot read M, when the route is called, then the Signal is absent and nothing in the response reveals M.</criterion>
+    <criterion testable="true">Given Do-lane Signals on events, when called by a user who owns, is assigned (via contact) or created the event, then they are returned; when called by a colleague, then they are not.</criterion>
+    <criterion testable="true">Given Do-lane Signals on To Dos, when called by the To Do's owner, then returned; by anyone else, then not.</criterion>
+    <criterion testable="true">Negative: an unauthenticated call gets 401; a caller who cannot be resolved gets 403; the route is in the census ledger and the census test passes.</criterion>
+    <criterion testable="true">Given two calls over the same data, when compared, then the order is identical and follows the stated keys; no model output influences it.</criterion>
+    <criterion testable="true">Given the closed-today, suppressed and closed-earlier parameters, when called, then each returns only its set, under the same caller filters.</criterion>
+    <criterion testable="true">Tests cover the stated contract and the authorization cases; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a Signal grouped under project P and a caller who can read P, when called, then it is returned; a caller who cannot read P does not get it (D-34).</criterion>
+    <criterion testable="true">Given a D-35 Signal (no core record), when called by the To Do's owner, then it is returned in the Do lane marked Not filed; when called by anyone else, including a user in the same business unit, then it is not (D-35).</criterion>
+    <criterion testable="true">Given Signals grouped under a work assignment and under a service request, when called by a caller who can read each, then both are returned; by one who cannot read the work assignment, then that row is absent (D-36).</criterion>
+    <criterion testable="true">Given a work assignment, when its assigner and its assignee each call the route, then both see its Do-lane rows and a third colleague does not (D-44).</criterion>
+    <criterion testable="true">Given two lanes of rows, when ordered, then severity, then sprk_highpriority, then oldest, then record number decide the order, and two calls give the same order (D-42).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-24 (amended, D-15, D-33), FR-54, NFR-10; D-15 (read route and Do-lane scoping stand), D-23, D-29, D-33. On a Secure matter the caller reads the matter and the Signal through mirrored shares, so the matter check gives the same answer (scoping note section 4.6). Rank formula remains spec section 11 Q1 (O-2).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

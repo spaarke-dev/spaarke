@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="087" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Events and EventsPage migration leftovers, own PR (C-2, C-24, C-25)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified cleanup with named files and a verification path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree or the other wave-I tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt087, branch chore/events-migration-leftovers (already created off origin/master). Resolve C-2, C-24 and C-25.</prompt>
+  <role>SPAARKE full-stack developer. Cleanup is convergence and deletion with evidence, never a behaviour change in disguise.</role>
+  <goal>The superseded Events forks and the EventsPage migration fallout are gone, and EventsPage declares only dependencies it imports.</goal>
+
+  <context>
+    <background>C-2: a superseded Events ColumnHeaderMenu fork (573 lines) carries a known dark-mode bug. C-24: the Events ColumnFilterHeader has the same collision and the same silent no-op failure. C-25: EventsPage was rewritten onto the shared UI components and now imports nothing from @spaarke/events-components while still declaring it; useEventsBulkActions, an Events-local FetchXmlService module, the ViewSelectorDropdown chain and five context selectors are dead.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Events.Components/</file>
+      <file role="modify">src/solutions/EventsPage/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111. Owner decision 2026-10-03: cleanup unrelated to ontology is fixed now (never deferred to an issue) but kept off the ontology branch so that PR stays reviewable.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: run the affected package tests BEFORE applying any change (that run is the master baseline) and AFTER. Report both. A failure is pre-existing only if it appears in the baseline run; never assert pre-existing without that evidence.</constraint>
+    <constraint source="project">Scope: install dependencies with npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md section 12). Discard every package-lock.json diff that npm install produces; lockfile churn is never part of this PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify. If a pre-commit hook fails, fix the cause (usually a missing node_modules).</constraint>
+    <constraint source="project">Scope: you CANNOT write .claude/ paths. If one is needed, stop and report the exact text for the main session.</constraint>
+    <constraint source="project">Scope: the FetchXmlService to delete is the EVENTS-LOCAL module. Spaarke.UI.Components/src/services/FetchXmlService.ts is a different, live service cited by ADR-012 and must not be touched.</constraint>
+    <constraint source="project">Scope: PR #1114 edits Spaarke.Events.Components/src/components/index.ts. Keep edits to that file minimal and say so in the PR body, so whichever merges second resolves cleanly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup with evidence</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/cleanup-placement-plan.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
+    <step order="2">Identify which ColumnHeaderMenu and ColumnFilterHeader are the superseded forks versus the shared versions, then prove zero consumers of the forks and delete them.</step>
+    <step order="3">C-25: prove zero consumers for each listed EventsPage leftover and delete it.</step>
+    <step order="4">Compare EventsPage's declared dependencies with its imports and drop @spaarke/events-components if nothing imports it.</step>
+    <step order="5">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
+    <step order="6">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="7">Report back: the PR URL, each acceptance criterion with evidence, files changed, the baseline and after test output, and any escalation.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install and run package tests</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Events.Components/</output>
+    <output type="code">src/solutions/EventsPage/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A repo-wide grep finds no import of the deleted Events ColumnHeaderMenu or ColumnFilterHeader forks.</criterion>
+    <criterion testable="true">EventsPage's package.json dependencies match its imports.</criterion>
+    <criterion testable="true">Negative: Spaarke.UI.Components/src/services/FetchXmlService.ts is unchanged.</criterion>
+    <criterion testable="true">EventsPage builds.</criterion>
+    <criterion testable="true">A pull request against master is open, ready for review, with the item ids in its body.</criterion>
+    <criterion testable="true">Negative: the PR contains no package-lock.json changes and no file outside this task's scope.</criterion>
+    <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">PR #1119 (215a63006 + f18fc2d85). C-2/C-24 forks deleted with zero imports; C-25 leftovers deleted; @spaarke/events-components dropped from EventsPage. Follow-up (owner fix-now rule): @spaarke/sdap-client and @spaarke/smart-todo-components also dropped, each proven by a byte-identical vite bundle (731.62 kB), not by import absence. Baseline built with Build-AllClientComponents.ps1 -Component SharedLibs (13/13 pass on master). Shared FetchXmlService untouched. Main session verified the hand-edited EventsPage lockfile: npm --package-lock-only re-adds nothing for the removed deps; residual 7-line diff is pre-existing metadata drift.</completion>
+  <notes>C-25 makes the 'remove the dependency' half of the old task 081 scope concrete.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

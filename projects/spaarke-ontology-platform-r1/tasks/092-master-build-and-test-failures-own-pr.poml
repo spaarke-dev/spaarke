@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Master build and test failures surfaced by task 089, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Root-cause work on a broken production build path (PCF build:prod) across several packages; modifies .ts/.tsx/build config.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield root-cause diagnosis with a reproducible failure and a clear pass condition.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr,pcf,testing</tags>
+    <estimated-effort>3-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt092, branch fix/master-build-test-baseline (created off origin/master when this task starts). Reproduce, root-cause and fix the master build and test failures that task 089 observed.</prompt>
+  <role>SPAARKE full-stack developer. A consistently failing build or test is a defect to diagnose, never noise to tolerate (ADR-038).</role>
+  <goal>Every PCF that task 089 saw fail npm run build:prod builds on master, and the failing suites in the three shared packages either pass or are shown, with evidence, to be environment-only.</goal>
+
+  <context>
+    <background>Found 2026-10-04 by task 089 (PR #1121), which compared each failure against the unmodified master file. Owner rule 2026-10-03: defects found during this cleanup are fixed now, never deferred to an issue; unrelated ones go in their own PR.
+(1) BUILD: six PCFs fail npm run build:prod on master with a pdfjs / SprkChat babel-traverse error. Named by 089: CommunicationActions, CommunicationConnections, CommunicationConversationPanel, CommunicationMessageActions, plus two more (the PR #1121 body has the full table). 089's hypothesis: a full-barrel import of @spaarke/ui-components pulls SprkChat and pdfjs into PCF bundles. A PCF that cannot build from master cannot be redeployed.
+(2) TESTS, failing on master per 089's baseline runs: Spaarke.Communication.Components 2 suites; Spaarke.AI.Widgets 4 suites (089 calls them OOM-flaky; the worker swaps which failures show); Spaarke.DailyBriefing.Components 5 suites.
+(3) ADDED 2026-10-04 from task 091's baseline (clean master, 3 runs): Spaarke.UI.Components suites failing deterministically: TimelineComposeBox.test.tsx, ConversationView.forward.test.tsx, RichFilePreview.test.tsx, configResolution.test.ts, buildDynamicWorkspaceConfig.test.ts, surfaceLaunchRegistry.test.ts. EXCLUDED: todoScoreMappings.test.ts (PR #1118 edits it; confirm green there). Load-sensitive candidates to run in isolation: ConversationView.emailInFlow.test.tsx, AccessGrantModal.userShare.test.tsx.</background>
+    <relevant-files>
+      <file role="reference">https://github.com/spaarke-dev/spaarke/pull/1121 (per-consumer table: build + test, baseline vs after)</file>
+      <file role="modify">src/client/pcf/</file>
+      <file role="modify">src/client/shared/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111 and not in #1121.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: REPRODUCE FIRST, in the fresh worktree, before changing anything. If a failure does not reproduce on a clean master checkout with a clean install, it is environmental: report it with the evidence and do not "fix" code for it.</constraint>
+    <constraint source="project">Scope: for each reproduced failure, find WHY CI did not catch it (is the package built or tested in CI at all?) and the commit that introduced it, if identifiable. Both go in the PR body.</constraint>
+    <constraint source="project">Scope: fix the root cause. Do not skip, delete or loosen a failing test, and do not raise a timeout or memory limit, unless the evidence shows that IS the root cause, and say so.</constraint>
+    <constraint source="project">Scope: PCF builds use npm run build:prod, never npm run build (root CLAUDE.md section 12). Do not bump PCF versions or deploy: no behaviour ships in this PR, only the ability to build.</constraint>
+    <constraint source="project">Scope: install with npm install --legacy-peer-deps --no-audit --no-fund. Discard package-lock.json diffs unless a dependency change IS the fix, and then justify it.</constraint>
+    <constraint source="project">Scope: run test suites ONE AT A TIME with nothing else heavy running; contended runs in this session have produced false failures. Never use --no-verify. You CANNOT write .claude/ paths.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Build and test baseline repair</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Create the worktree off origin/master, install, and reproduce each failure from the background. Record the exact error for each.</step>
+    <step order="2">For each reproduced failure, establish whether CI covers it and which commit introduced it.</step>
+    <step order="3">Fix the root causes. Prefer a shared fix (for example a narrower import surface) over per-PCF patches when one cause explains several failures.</step>
+    <step order="4">Re-run every affected build and suite, one at a time, and quote before and after.</step>
+    <step order="5">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push and open a pull request against master, ready for review. The PR body lists each failure, its root cause, the introducing commit, the CI gap, and the fix, says it comes from the spaarke-ontology-platform-r1 cleanup, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="6">Report back: PR URL, each acceptance criterion with evidence, files changed, before and after output, any escalation.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the fix needs a dependency upgrade or a change to @spaarke/ui-components' public exports that other active projects consume, STOP and report the options before making it.</trigger>
+    <trigger>If the CI gap means a whole class of packages is never built or tested in CI, report it as a finding; changing CI workflows is not in scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Install, build and test</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/</output>
+    <output type="code">src/client/shared/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each PCF that failed npm run build:prod in 089's table either builds on the branch, or is shown not to fail on a clean master checkout.</criterion>
+    <criterion testable="true">Each failing suite in Spaarke.Communication.Components, Spaarke.AI.Widgets, Spaarke.DailyBriefing.Components and the six Spaarke.UI.Components suites passes on the branch, or is shown with evidence to be environment-only.</criterion>
+    <criterion testable="true">The PR body names, for each failure, the root cause, the CI coverage gap and the introducing commit (or says it could not be identified).</criterion>
+    <criterion testable="true">Negative: no test was skipped, deleted or loosened, and no timeout or memory limit raised, without the PR body showing that was the root cause.</criterion>
+    <criterion testable="true">A pull request against master is open and ready for review; it contains no unjustified package-lock.json change and no file outside this task's scope.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-04 from task 089's report under the owner's fix-now rule. Dispatched after task 021's full BFF suite reports, so the two do not contend for CPU.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1123 (fix/master-build-test-baseline), head 1e60a90ca, 26 files, no lockfile changes, open and ready for review. Code-review + adr-check: no Critical or Warning. (1) Six Communication PCFs fail build:prod since CVE bump 66a45cf6 (2026-08-14, pdfjs-dist upgrade): the SprkChat barrel export pulls pdfjs-dist/mammoth dynamic imports into single-chunk PCF bundles and pcf-scripts babel crashes on pdfjs. Fixed with webpack aliases to throwing stubs (src/client/pcf/shared/stubs/); reachability traced: no PCF imports SprkChat. Deployed versions likely predate the break. (2) ONE user-visible fix: buildDynamicWorkspaceConfig.ts restores the FR-02 clamped-section ceiling broken by 803c77ace1 (2026-07-03), shown unintentional via dataset-grid-framework-r2 lessons-learned. (3) Tests: UI.Components 6 suites, Communication.Components 2, DailyBriefing.Components 5, AI.Widgets OOM (one file re-requiring the whole ui-components source barrel per test; fixed with a narrow jest.doMock at the default heap, no memory/maxWorkers change) plus the masked communications-list exact-once bug (supersedes task 054's planned fix). Hand-written mocks guarded with satisfies Partial&lt;typeof import(...)&gt;. ReconciliationWorkspace: one assertion's timeout 1000-&gt;4000 ms, justified by a same-commit render trace (87-97% -&gt; 20/20 under load). Left alone with evidence: emailInFlow (byte-identical, load-sensitive), AccessGrantModal.userShare (17/17 alone), todoScoreMappings (fixed by #1118), 2 describe.skip smoke tests (other workstream's DEF). CI finding: no workflow runs PCF build:prod; client-tests.yml is a deliberate nightly advisory Phase 1 baseline (continue-on-error by design, promotion after a green baseline).</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

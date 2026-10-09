@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deploy the BFF with the evaluator to dev and verify</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>034 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment to a shared environment; the silent-file-lock failure mode makes deploy success untrustworthy without hash verification.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted deploy with a documented verification procedure.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
+    <deps>034</deps>
+    <tags>deploy,bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the BFF to spaarke-bff-dev using the hardened script, verify by hash and health, and confirm the scheduled job is registered.</prompt>
+  <role>SPAARKE platform engineer. Never trust a deploy success message alone.</role>
+  <goal>The evaluator runs in dev, the job appears in the admin jobs endpoint, and the publish size is measured against a fresh master build.</goal>
+
+  <context>
+    <background>az webapp deploy has been observed returning HTTP 200 and Kudu success while NOT replacing the DLLs, because the running host holds file locks. The hardened script hash-verifies six critical files and auto-recovers. Separately, master moves fast enough that a stale baseline misattributes other projects growth to this one.</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: MERGE MASTER FIRST. Master moved 66 commits in a day during this project. Deploying without merging reverts other projects work.</constraint>
+    <constraint source="project">Scope: measure publish size against a FRESH BUILD OF MASTER, not the recorded baseline number, from a SHORT path, with FILE COUNTS compared on both sides, naming the zip tool. A deep path triggers MSB3030 and produces a smaller partial zip that reads as an improvement.</constraint>
+    <constraint source="project">Scope: hash-verify PASS plus health-check timeout means the deploy is CORRECT and the app is still booting (Linux cold start is 90-120s). Do NOT redeploy in that case.</constraint>
+    <constraint source="project">Scope: use pwsh, not powershell. Windows PowerShell 5.x in some harnesses does not auto-load Get-FileHash.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-04: no silent failure. The writer fails closed by design, so a broken credential, a refused privilege or a dead job would otherwise look exactly like 'no conditions found'. As part of this deploy, add two alert rules to infrastructure/bicep/modules/alerts.bicep using its existing pattern and action group: (1) CRITICAL when ontology.writer.failures &gt; 0 in a 15-minute window; (2) CRITICAL when no ontology.evaluator.runs with outcome=succeeded in 26 hours (nightly cadence plus margin). Deploying the alert rules is an Azure change: confirm with the owner before applying, as with any deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Merge origin/master into the branch and resolve any conflicts. Confirm 0 behind.</step>
+    <step order="2">Run /conflict-check before the PR.</step>
+    <step order="3">Measure publish size: fresh worktree at origin/master, publish, zip with Compress-Archive from a short path; then the same for the branch. Compare both absolute sizes, the delta, and the FILE COUNTS.</step>
+    <step order="4">Run pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1.</step>
+    <step order="5">Confirm the output reports all critical files matching by SHA-256.</step>
+    <step order="6">Confirm /healthz returns 200, allowing up to 120s for Linux cold start.</step>
+    <step order="7">Confirm the scheduled job appears in the admin jobs endpoint.</step>
+    <step order="8">Record the measured sizes and the deploy outcome in notes/.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If hash-verify reports a MISMATCH after the script auto-recovery, STOP and escalate. The deployed code is not what was built, and continuing to test against it produces conclusions about code that is not running.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Run the deployment script</tool>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deploy script, when it completes, then all critical files match local build hashes.</criterion>
+    <criterion testable="true">Given /healthz, when polled within 120s, then it returns 200.</criterion>
+    <criterion testable="true">Given the admin jobs endpoint, when queried, then the signal re-evaluation job is registered.</criterion>
+    <criterion testable="true">Publish size is reported as both absolute sides plus the delta, measured against a fresh master build, with file counts equal on both sides and the zip tool named.</criterion>
+    <criterion testable="true">Negative: no endpoint behind RequireAuthorization returns 404 (which would indicate an incomplete package); they return 401.</criterion>
+    <criterion testable="true">The branch was merged up to master before deploying.</criterion>
+    <criterion testable="true">Both alert rules exist on dev and are wired to the existing action group.</criterion>
+    <criterion testable="true">Negative: with the writer client id app setting temporarily blanked on dev, the writer-failure alert fires (then restore the setting and confirm the next run succeeds). This is also the first real proof that the writer's managed-identity token path works when the setting is present.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md NFR-01. CLAUDE.md section 10 bullet 4 and its four hazards.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

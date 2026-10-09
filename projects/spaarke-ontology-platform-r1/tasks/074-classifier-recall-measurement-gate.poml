@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Measure classifier recall against the floor (exit gate)</title>
+    <phase>7 Inquiry and the classifier</phase>
+    <gate>072 complete</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is a measurement that can FAIL THE PROJECT; it is a gate, not an implementation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires judgement about labelling, what counts as recall, and how to report a result that may block the project.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>A project exit gate; its result must be singular and unambiguous.</parallel-reason>
+    <deps>072</deps>
+    <tags>ai,classifier,testing,quality-gate,dataverse,schema</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Measure classifier recall on the two load-bearing categories against a labelled set, and report it against the floor. This can fail the project.</prompt>
+  <role>SPAARKE ML-aware developer. Report the number you measured, not the number you wanted.</role>
+  <goal>A recorded recall figure for Scope or budget change and Fee or rate change on a labelled set of at least 50 items, compared against the 80 percent floor.</goal>
+
+  <context>
+    <background>The predicate is a CONJUNCTION, so it inherits its weakest input, and that input is the LLM classifier. At 70 percent recall the differentiated claim silently misses 30 percent of real cases WHILE EVERY OTHER SUCCESS CRITERION PASSES GREEN. D-10 set the floor at 80 percent on at least 50 items.</background>
+    <relevant-files>
+      <file role="new">projects/spaarke-ontology-platform-r1/notes/classifier-recall-measurement.md</file>
+      <file role="new">tests/fixtures/ontology-classifier-recall</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the floor is 80 percent recall on a labelled set of AT LEAST 50 items. Below the floor, the project does NOT exit until recall improves or the section 0 claim is re-scoped. This is a gate, not an observation.</constraint>
+    <constraint source="project">Scope: label the set INDEPENDENTLY of the classifier output. Labelling by reviewing what the classifier said is not a measurement, it is a confirmation.</constraint>
+    <constraint source="project">Scope: report RECALL specifically (of the communications that ARE fee or scope changes, what fraction did the classifier catch). Precision is informative but is not the floor, because a miss is worse than noise for NOTIFYING (decision 13).</constraint>
+    <constraint source="project">Scope: report the number measured. If it is below the floor, say so plainly and escalate; do not re-label to reach the floor.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-49): persist the measurement on sprk_triagecategory in three NEW columns (recall, labelled-set size, measured-on), one value set per measured category. Create them with the task 007 Web API recipe (explicit PascalCase SchemaName, MSCRM.SolutionUniqueName = OntologyPlatformSolution, DateTimeBehavior on the date; never MCP create_table): sprk_measuredrecall (decimal, 0-100, 2 places), sprk_labelledsetsize (whole number), sprk_recallmeasuredon (date only). sprk_triagecategory is shared with the email-communication-intelligence project: run /conflict-check and record that project's agreement BEFORE the column adds. Writing the values uses an identity that holds Write on sprk_triagecategory (the administrator role, task 008), recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Classifier evaluation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Assemble at least 50 real communications spanning fee or scope changes and clear negatives.</step>
+    <step order="2">Label each INDEPENDENTLY of classifier output, recording who labelled it and on what basis.</step>
+    <step order="3">Run the live classifier over the set.</step>
+    <step order="4">Compute recall per category and overall, plus precision for information.</step>
+    <step order="5">Record the result, the set size, the labelling basis and the date in notes/classifier-recall-measurement.md.</step>
+    <step order="6">Commit the labelled set as a test fixture so the measurement is repeatable.</step>
+    <step order="7">Compare against the 80 percent floor and state pass or fail plainly.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If measured recall is BELOW 80 percent, STOP and escalate per CLAUDE.md section 6. Do not proceed to project wrap-up. The options are to improve the classifier (guidance, prompt, model tier) or to re-scope the section 0 claim with the owner, and both are owner decisions rather than implementer ones.</trigger>
+    <trigger>If the email project objects to the three columns on sprk_triagecategory, STOP and escalate before creating them (D-49).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No labelled evaluation set exists for these categories, and no recall measurement has ever been taken.</existing>
+    <extension>No. There is nothing to extend; this is the first measurement of the input the whole conjunction depends on.</extension>
+    <cost-of-doing-nothing>The differentiated claim can silently miss a third of real cases while every other success criterion passes green. Without the number, nobody knows whether the product works, and the first person to find out is a customer.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/classifier-recall-measurement.md</output>
+    <output type="test">tests/fixtures/ontology-classifier-recall</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the labelled set, when counted, then it contains at least 50 items with both positives and negatives.</criterion>
+    <criterion testable="true">Given the labelling record, when reviewed, then labels were assigned independently of classifier output and the basis is documented.</criterion>
+    <criterion testable="true">Given the measurement, when recorded, then recall is stated per category and overall, with precision reported for information.</criterion>
+    <criterion testable="true">Given the recorded recall, when compared with 80 percent, then a plain pass or fail is stated.</criterion>
+    <criterion testable="true">Negative: if recall is below the floor, the task escalates rather than proceeding, and no label was changed to reach the floor.</criterion>
+    <criterion testable="true">The labelled set is committed as a repeatable fixture.</criterion>
+    <criterion testable="true">Given sprk_triagecategory, when described, then sprk_measuredrecall, sprk_labelledsetsize and sprk_recallmeasuredon exist in OntologyPlatformSolution; given the two measured categories, then each row holds the measured recall, the set size and the date (D-49).</criterion>
+    <criterion testable="true">The email project's agreement (conflict-check result) is recorded in notes before the column adds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-40 and success criterion 11. design.md section 8.0c (D-10). This task CAN FAIL THE PROJECT and that is its purpose.</notes>
+
+  <completion status="blocked" date="2026-10-07" branch="stream/d-074">
+    <summary>BLOCKED at the escalation trigger: no labelled set exists, and building one from spaarkedev1 needs owner judgement. No recall was measured; the gate has neither passed nor failed, and R1 cannot exit on criterion 11 until it is resolved.</summary>
+    <done>D-49 conflict check with the email project: clean (no open PRs on triage; r2 complete and archived; r3 design-only and excludes triage at design.md:126). Three columns created on sprk_triagecategory in spaarkedev1 via the 007 Web API recipe (sprk_MeasuredRecall decimal 0-100 p2, sprk_LabelledSetSize integer, sprk_RecallMeasuredOn DateOnly/DateOnly), PublishXml on the entity only, read back as componenttype-2 members of OntologyPlatformSolution. Values left null (no measurement yet).</done>
+    <blocked-on>Owner decisions 1-5 in notes/classifier-recall-measurement.md section 4: (1) source of items (real redacted mail recommended, or a blind owner-labelled synthetic set, or a hybrid); (2) whether the 50 counts positives (proposal: 25 or more per gated category plus 30 or more negatives, 80-100 items in all); (3) which recall gates (proposal: predicate-level Fee-or-Scope recall of 80 percent or more, with strict per-category recall reported); (4) labelling protocol; (5) in-memory live harness at 2 model calls per item, about 160-200 calls.</blocked-on>
+    <evidence>notes/classifier-recall-measurement.md</evidence>
+  </completion>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

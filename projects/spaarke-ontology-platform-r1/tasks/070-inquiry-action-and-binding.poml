@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Inquiry: one Action row, one Binding, an executor the decision commit route calls (SLA deferred)</title>
+    <phase>7 Inquiry and the classifier</phase>
+    <gate>001, 036 complete</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is the task that makes something happen in the world; it sends outward-facing mail through a gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Uses the shipped ADR-039 dispatch spine; the deliverable is data plus wiring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task 071 depends on Inquiries existing.</parallel-reason>
+    <deps>001, 036</deps>
+    <tags>bff-api,action,gate,inquiry</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Ship the Inquiry as one Action row plus one Binding on the shipped dispatch spine, exposed as the send-budget-inquiry executor that the decision commit route (task 043) calls, so a confirmed decision produces an outbound service request. No SLA in R1 (D-20).</prompt>
+  <role>SPAARKE backend developer. Nothing is sent without human confirmation.</role>
+  <goal>The send-budget-inquiry executor creates a sprk_servicerequest with direction Outbound and sends the inquiry email, returning ids and outcome to the commit route, which writes the Decision Record last.</goal>
+
+  <context>
+    <background>Criterion 10 exists because criteria 1 to 9 cover detect, record, surface, suppress, tune and render, and NOT ONE of them required an effect. Without an effect the section 0 fourth row (the record of what was decided and what resulted) is unexercised, which is also how an incumbent alerting product behaves.</background>
+    <relevant-files>
+      <file role="new">Dataverse: one sprk_analysisaction row plus one Binding</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: R1 needs the Action ROW plus the shipped ADR-039 spine (ConfirmationPolicyEngine, GateDecisionV2, SideEffectGateAIFunction, OutputRouter). Do NOT build the Action ENGINE: the management plane above the spine is R2, and R1 rows are its input, not a rewrite.</constraint>
+    <constraint source="project">Scope: the LLM may DRAFT the Inquiry body; the human edits and sends. Nothing is sent without confirmation.</constraint>
+    <constraint source="owner">Scope: set sprk_direction Outbound (task 001). AMENDED 2026-10-07 (D-20, D-56): the inquiry SLA is deferred after R1 (no SLA rule, no Escalate / Extend SLA / Close inquiry actions), and the inquiry carries NO response-due date in R1: leave sprk_responseduedate unset.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17): the executor does NOT write the Decision Record or close the Signal. It is called by the commit route (task 043) as the LAST external step (email last), returns the service request id, the send outcome and any error, and the commit route writes the one record and closes the Signal as Acted.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (ADR-013; #32): the executor makes no AI call; the inquiry body arrives as a field value from the wizard. Drafting help inside the wizard is open (O-14).</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (NFR-10): the executor checks, as the caller, Create on sprk_servicerequest and AppendTo on the matter before writing.</constraint>
+    <constraint source="ADR-039">Scope: project-scoped exception per D-9 path A applies to the policy evaluator, NOT to this task. Dispatch here follows ADR-039 normally.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-52): no chat session is opened by this executor; the human confirmation is the wizard's Confirm step (task 043 records the tier).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Action dispatch and gated side effects</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action plus Binding wiring" location="docs/guides/ai-guide-consumer-wiring.md">The maker tutorial for Action and Binding authoring, all three entry paths, and the gate and resume behaviour.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Author the Inquiry Action row following the consumer-wiring guide, with its input schema and output format.</step>
+    <step order="2">Author the Binding that routes it.</step>
+    <step order="3">Expose the executor (send-budget-inquiry) for task 043; do NOT wire it from a row (amended 2026-10-07, D-17).</step>
+    <step order="4">Create the sprk_servicerequest with direction Outbound as the caller and send the email through the existing communications send core; no SLA computation.</step>
+    <step order="5">Return the service request id and send outcome to the caller (task 043 writes the record and closes the Signal).</step>
+    <step order="6">Add tests: the executor produces a service request with direction Outbound and a sent email; a caller without rights produces nothing.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Inquiry cannot be dispatched without building management-plane machinery (a registry, templates, triggers, scheduling), STOP and escalate. That is the Action ENGINE and it is explicitly out of scope; R1 needs a row on the existing spine.</trigger>
+    <trigger>If anything requires sprk_responseduedate to be set on the inquiry, STOP: D-56 says no response-due date in R1.</trigger>
+    <trigger>If dispatching through the ADR-039 spine requires a chat session, STOP and escalate: D-52 says the wizard's Confirm step is the confirmation and the gate tier comes from a pure PublicContracts function (task 043).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The ADR-039 dispatch spine ships in full: ConfirmationPolicyEngine, GateDecisionV2, SideEffectGateAIFunction, OutputRouter and its eight dispositions. 79 sprk_analysisaction rows already exist.</existing>
+    <extension>Yes, extend: this is one new Action ROW plus one Binding on existing machinery, not new code. The only code is the wiring from the worklist action to the dispatch call.</extension>
+    <cost-of-doing-nothing>The section 0 fourth row (the record of what was decided and what resulted) is never exercised, nothing compounds into the Report Card, and criterion 10 cannot pass. Detection alone is how an incumbent alerting product behaves.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: Inquiry Action row and Binding</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the executor called by the commit route, when it runs, then a sprk_servicerequest exists with sprk_direction Outbound and the inquiry email was sent, and the id and outcome are returned.</criterion>
+    <criterion testable="true">Negative: the executor itself writes no Decision Record and closes no Signal (task 043 does, after it).</criterion>
+    <criterion testable="true">Negative: no SLA rule, SLA computation, or Escalate / Extend SLA / Close inquiry action exists.</criterion>
+    <criterion testable="true">Negative: a caller without Create on sprk_servicerequest or AppendTo on the matter is refused before any write or send.</criterion>
+    <criterion testable="true">Negative: given an unconfirmed Signal, when nothing is confirmed, then NO service request is created and nothing is sent.</criterion>
+    <criterion testable="true">Negative: no management-plane machinery (registry, templates, triggers, scheduling) was built.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Negative: the created sprk_servicerequest has no sprk_responseduedate (D-56).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-36 (amended: D-17, D-20) and success criterion 10 (amended). design.md CM-11 and section 1.1 on the Action versus Action Engine distinction. Amended 2026-10-07 per reconciliation B.2 row 070: deps 001 + 036 (no longer 053); the gate tier outside chat is O-13 (task 043).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
