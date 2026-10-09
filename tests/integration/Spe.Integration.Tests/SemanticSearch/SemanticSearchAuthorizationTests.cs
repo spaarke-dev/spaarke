@@ -400,6 +400,7 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     [Theory]
     [InlineData("entity")]
     [InlineData("all")]
+    [InlineData("documentIds")]
     public async Task Search_ARestrictedDocumentUnderAReadableMatter_IsNotReturned(string scope)
     {
         var callerId = Guid.NewGuid().ToString();
@@ -407,22 +408,31 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
         var restricted = Guid.NewGuid();
         var readable = Guid.NewGuid();
         _fixture.Access.GrantRecord(callerId, "sprk_matters", matter, AccessRights.Read);
+        // documentIds: the route filter's per-document gate is satisfied for both, so the trim alone must
+        // withhold the restricted one (defence in depth: the two checks must agree, and the trim fails closed).
+        _fixture.Access.GrantDocument(callerId, restricted.ToString(), AccessRights.Read);
+        _fixture.Access.GrantDocument(callerId, readable.ToString(), AccessRights.Read);
         _fixture.Search.Results =
         [
             CrossRecordRow(restricted.ToString(), "matter", matter.ToString()) with { Highlights = ["SECRET-1511-highlight"] },
             CrossRecordRow(readable.ToString(), "matter", matter.ToString()),
         ];
         var userClient = new ReadableDocumentsUserClient(readable);
-        _fixture.Trim.Inner = new Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim(
-            _fixture.Services.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
-            userClient,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim>.Instance);
+        _fixture.Trim.Inner = RealTrim(userClient);
         try
         {
             var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
-            var request = scope == "entity"
-                ? EntityScopeRequest()
-                : new SemanticSearchRequest { Query = "test query", Scope = "all" };
+            var request = scope switch
+            {
+                "entity" => EntityScopeRequest(),
+                "all" => new SemanticSearchRequest { Query = "test query", Scope = "all" },
+                _ => new SemanticSearchRequest
+                {
+                    Query = "test query",
+                    Scope = "documentIds",
+                    DocumentIds = new List<string> { restricted.ToString(), readable.ToString() }
+                },
+            };
 
             var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
@@ -441,6 +451,39 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
             _fixture.Trim.Reset();
         }
     }
+
+    [Fact]
+    public async Task Search_WhenTheDocumentAccessCheckFails_ReturnsNoRows()
+    {
+        var callerId = Guid.NewGuid().ToString();
+        var matter = Guid.Parse(TestEntityId);
+        var document = Guid.NewGuid();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", matter, AccessRights.Read);
+        _fixture.Search.Results = [CrossRecordRow(document.ToString(), "matter", matter.ToString())];
+        var userClient = new ReadableDocumentsUserClient(document) { FailWithStatus = 429 };
+        _fixture.Trim.Inner = RealTrim(userClient);
+        try
+        {
+            var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+            var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+            content!.Results.Should().BeEmpty("a throttled access check withholds every row (fail closed)");
+            content.Metadata.ReturnedResults.Should().Be(0);
+            content.Metadata.TotalResults.Should().Be(0);
+        }
+        finally
+        {
+            _fixture.Trim.Reset();
+        }
+    }
+
+    private Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim RealTrim(ReadableDocumentsUserClient userClient) => new(
+        _fixture.Services.GetRequiredService<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
+        userClient,
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim>.Instance);
 
     private static SearchResult CrossRecordRow(string documentId, string? parentType, string? parentId) => new()
     {
