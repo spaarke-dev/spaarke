@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Virtual PCF: form-bound viewer for the shared CommunicationTimeline component in regarding mode on the 11 ADR-024 regarding-family entity forms (task 021, FR-04)." languagecode="1033" />
     </Descriptions>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationTimeline" version="1.0.2" display-name-key="Communication Timeline" description-key="Virtual PCF: form-bound viewer for the shared CommunicationTimeline polling message timeline (task 060) on the OOB sprk_communication and sprk_communicationthread forms. Renders persisted messages (email + chat interleaved), unread indicator, and compose/send box, polling the BFF via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 061)." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="CommunicationTimeline" version="1.0.3" display-name-key="Communication Timeline" description-key="Virtual PCF: form-bound viewer for the shared CommunicationTimeline polling message timeline (task 060) on the OOB sprk_communication and sprk_communicationthread forms. Renders persisted messages (email + chat interleaved), unread indicator, and compose/send box, polling the BFF via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 061)." control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

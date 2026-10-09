@@ -342,7 +342,7 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
         const formData = new FormData();
         formData.append("file", selectedFile);
 
-        const url = `${apiBaseUrl}/api/ai/visualization/related-from-content?tenantId=${encodeURIComponent(tenantId)}`;
+        const url = `${apiBaseUrl}/api/ai/visualization/related-from-content`;
         const response = await authenticatedFetch(url, {
           method: "POST",
           body: formData,
