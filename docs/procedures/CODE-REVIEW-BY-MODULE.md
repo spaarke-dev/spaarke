@@ -80,7 +80,7 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 - [ ] **Theme Tokens**: Colors use semantic tokens (`tokens.colorNeutralBackground1`), not hard-coded hex values; dark mode must work
 - [ ] **FluentProvider Wrapper**: Root component wrapped in `<FluentProvider theme={webLightTheme}>` (or auto-detected theme)
 - [ ] **Version Footer**: Control displays version in UI footer (`v{X.Y.Z} - Built {date}`)
-- [ ] **Version Bump (4 locations)**: If releasing, version updated in: ControlManifest.Input.xml, UI footer, solution.xml, solution ControlManifest.xml
+- [ ] **Version Bump**: If releasing, version updated in every location the `pcf-deploy` skill's version table lists (ControlManifest.Input.xml, UI footer, solution.xml, solution ControlManifest.xml, pack.ps1)
 - [ ] **Shared Component Library (ADR-012)**: Reusable components imported from `@spaarke/ui-components`, not duplicated locally
 - [ ] **No `any` Types**: TypeScript strict mode; no `any` without explicit justification comment
 - [ ] **Destroy Cleanup**: `destroy()` method calls `ReactDOM.unmountComponentAtNode(container)` and removes event listeners

@@ -101,7 +101,7 @@ When a task has these tags, ALWAYS include these knowledge files:
 **Critical: PCF tasks MUST reference PCF-DEPLOYMENT-GUIDE.md**
 
 The `PCF-DEPLOYMENT-GUIDE.md` guide contains **mandatory version bumping instructions**:
-- Version must be updated in 4 locations before deployment
+- Version must be updated in every location the `pcf-deploy` skill's version table lists before deployment
 - Footer must show version number
 - Failure to follow this results in stale deployments
 
@@ -375,9 +375,9 @@ DEPLOYMENT TASK MAPPING:
 │                      │ - Tags: [deploy, azure, bff-api]                           │
 │                      │ - Skill: (azure deployment commands)                       │
 ├──────────────────────┼────────────────────────────────────────────────────────────┤
-│ PCF Controls         │ - Deploy PCF to Dataverse (pac pcf push)                   │
+│ PCF Controls         │ - Deploy PCF via solution-ZIP import (never pac pcf push)  │
 │                      │ - Tags: [deploy, dataverse, pcf]                           │
-│                      │ - Skill: dataverse-deploy                                  │
+│                      │ - Skill: pcf-deploy                                        │
 ├──────────────────────┼────────────────────────────────────────────────────────────┤
 │ Dataverse Fields     │ - Deploy solution to Dataverse                             │
 │                      │ - Configure Relevance Search (if applicable)               │
@@ -389,7 +389,7 @@ DEPLOYMENT TASK MAPPING:
 │                      │ - Tags: [deploy, azure, azure-ai]                          │
 │                      │ - Skill: (bicep/infrastructure scripts)                    │
 ├──────────────────────┼────────────────────────────────────────────────────────────┤
-│ Background Workers   │ - Deploy worker to Azure Container Apps                    │
+│ Background Workers   │ - Deploy per the ADR-052 placement decision                │
 │                      │ - Tags: [deploy, azure, worker]                            │
 └──────────────────────┴────────────────────────────────────────────────────────────┘
 
@@ -580,7 +580,8 @@ FOR each wave in the Parallel Execution Plan:
           surfaced in the transcript;
       (3) git status shows only the waves' expected file changes.
       OR: a BLOCKED.md exists under projects/{name}/ documenting a root-CLAUDE.md §6 escalation, shown in transcript.
-      Stop after {N_tasks × 6} turns if neither state is reached.
+      Stop after {N_tasks × 6} turns if neither state is reached. (A default the operator may raise in
+      the goal condition for FULL-rigor waves; hitting it means re-launch after reading the transcript for the cause — project-pipeline Step 5 retry rule.)
 
   RECORD in TASK-INDEX.md Parallel Execution Plan:
     Wave 2 (parallel, 3 agents): 020, 021, 022 — prereq: Wave 1 — goal-eligible: YES
@@ -603,7 +604,7 @@ This task is MANDATORY for all projects and must include these steps:
   1. Run final quality gates:
      - /code-review on all project code (identifies remaining issues)
      - /adr-check on all project code (validates architecture compliance)
-     - Fix any critical issues before proceeding
+     - Classify findings per task-execute Step 9.5 and fix every F-class finding before proceeding
 
   2. Run repository cleanup:
      - /repo-cleanup projects/{project-name} (audits and cleans ephemeral files)
