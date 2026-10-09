@@ -47,7 +47,7 @@
     Never run -Apply at the same time as another ribbon import into the same tables (Set-AccessRibbon.ps1,
     Deploy-SecureChildNewCommands.ps1): each one exports, merges and re-imports the whole ribbon of a table, so two
     interleaved runs lose one run's change. Run them one after another. This script and Deploy-SecureChildNewCommands.ps1
-    both refuse an export that lacks anything the environment holds (Test-RibbonExportCurrent.ps1); Set-AccessRibbon.ps1
+    both refuse an export that lacks, or holds different content for, anything the environment holds (Test-RibbonExportCurrent.ps1); Set-AccessRibbon.ps1
     exports fresh itself.
 
 .PARAMETER EnvironmentUrl
@@ -178,8 +178,14 @@ function Get-PlannedAppActionHides([string] $token) {
             $row = Invoke-Dv ("appactions($($h.appactionid))?`$select=uniquename,ismanaged,hidden,statecode," +
                 'onclickeventjavascriptfunctionname,_appmoduleid_value') $token
         }
-        catch { }
-        $problem = if (-not $row) { 'not found' }
+        catch {
+            $status = $null
+            if ($_.Exception.Response) { $status = [int] $_.Exception.Response.StatusCode }
+            if ($status -ne 404) {
+                throw "hideAppActions $($h.appactionid): reading the appaction failed ($(if ($status) { "HTTP $status" } else { 'no HTTP response' })): $($_.Exception.Message)"
+            }
+        }
+        $problem = if (-not $row) { 'not found (HTTP 404)' }
         elseif ($row.uniquename -ne $h.uniquename) { "uniquename is '$($row.uniquename)', expected '$($h.uniquename)'" }
         elseif ($row.ismanaged) { 'managed (not ours to change)' }
         elseif (-not $launchers.ContainsKey($row.onclickeventjavascriptfunctionname)) { "calls '$($row.onclickeventjavascriptfunctionname)', not a create launcher" }
@@ -363,7 +369,7 @@ foreach ($solution in $Solutions) {
     $lost = @(& (Join-Path (Split-Path -Parent $PSScriptRoot) 'Test-RibbonExportCurrent.ps1') -EnvironmentUrl $EnvironmentUrl `
         -Token $token -UnpackedDir $unpacked)
     if ($lost.Count -gt 0) {
-        throw "${solution}: the export lacks what the environment holds ($($lost -join '; ')); importing it would delete them. Nothing was imported."
+        throw "${solution}: the export lacks, or holds an older version of, what the environment holds ($($lost -join '; ')); importing it would delete them. Nothing was imported."
     }
     foreach ($ribbonDiff in $ribbonDiffs) { [void] $covered.Add($ribbonDiff.Directory.Name.ToLowerInvariant()) }
 }
@@ -389,21 +395,29 @@ foreach ($solution in $unpackedBySolution.Keys) {
     if ($LASTEXITCODE -ne 0) { throw "pac solution import $solution failed ($LASTEXITCODE). Solutions before it in -Solutions were imported; re-run -Apply (idempotent)." }
 }
 
-# 4b. The owner-decided appaction hides: PATCH hidden = true, publish the app, read the row back.
-foreach ($h in $plannedHides) {
-    if ($h.Hidden) { Write-Host "appaction $($h.UniqueName): already hidden"; continue }
+# 4b. The owner-decided appaction hides: PATCH hidden = true where it is not yet, then ALWAYS publish the app(s) of the
+# listed hides (a re-run heals a publish that failed after the PATCH), then read every row back.
+if ($plannedHides.Count -gt 0) {
     $writeHeaders = @{
         Authorization = "Bearer $token"; Accept = 'application/json'; 'Content-Type' = 'application/json'
         'OData-Version' = '4.0'; 'OData-MaxVersion' = '4.0'; 'If-Match' = '*'
     }
-    Invoke-RestMethod -Method Patch -Uri "$EnvironmentUrl/api/data/v9.2/appactions($($h.Id))" -Headers $writeHeaders `
-        -Body '{"hidden":true}' | Out-Null
-    $publish = @{ ParameterXml = "<importexportxml><appmodules><appmodule>$($h.AppModuleId)</appmodule></appmodules></importexportxml>" } |
-        ConvertTo-Json
+    foreach ($h in $plannedHides) {
+        if ($h.Hidden) { Write-Host "appaction $($h.UniqueName): already hidden (no PATCH; the app is still published below)"; continue }
+        Invoke-RestMethod -Method Patch -Uri "$EnvironmentUrl/api/data/v9.2/appactions($($h.Id))" -Headers $writeHeaders `
+            -Body '{"hidden":true}' | Out-Null
+        Write-Host "appaction $($h.UniqueName): hidden = true written"
+    }
+    $appModules = (@($plannedHides | ForEach-Object AppModuleId | Where-Object { $_ } | Select-Object -Unique) |
+        ForEach-Object { "<appmodule>$_</appmodule>" }) -join ''
+    $publish = @{ ParameterXml = "<importexportxml><appmodules>$appModules</appmodules></importexportxml>" } | ConvertTo-Json
     Invoke-RestMethod -Method Post -Uri "$EnvironmentUrl/api/data/v9.2/PublishXml" -Headers $writeHeaders -Body $publish | Out-Null
-    $back = Invoke-Dv "appactions($($h.Id))?`$select=hidden,uniquename" $token
-    if (-not $back.hidden) { throw "appaction $($h.UniqueName): hidden did not read back as true after the PATCH." }
-    Write-Host "appaction $($h.UniqueName): hidden = true (read back), app $($h.AppModuleId) published" -ForegroundColor Green
+    Write-Host "Published app module(s): $appModules"
+    foreach ($h in $plannedHides) {
+        $back = Invoke-Dv "appactions($($h.Id))?`$select=hidden,uniquename" $token
+        if (-not $back.hidden) { throw "appaction $($h.UniqueName): hidden did not read back as true." }
+        Write-Host "appaction $($h.UniqueName): hidden = true (read back)" -ForegroundColor Green
+    }
 }
 
 # 5. Verify, retrying while the effective ribbon catches up with the publish.

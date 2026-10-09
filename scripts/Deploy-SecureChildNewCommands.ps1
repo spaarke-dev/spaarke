@@ -43,7 +43,7 @@
          exported per .claude/skills/ribbon-edit/SKILL.md - never SpaarkeCore) with
          infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1. Before anything is written, the
          export is checked against the environment (infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1): if it
-         lacks any unmanaged ribbon command, rule, custom / hide action or label the environment holds for an exported
+         lacks, or holds different content for, any unmanaged ribbon command, rule, custom / hide action or label the environment holds for an exported
          table - an export taken before another ribbon import, e.g. task 180's Create-privilege rules - nothing is written.
       3. Packs (pac solution pack) and imports the solution into -EnvironmentUrl (pac solution import --environment), then
          publishes all customizations.

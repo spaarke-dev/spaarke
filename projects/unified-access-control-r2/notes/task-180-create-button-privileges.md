@@ -156,7 +156,7 @@ Prerequisites: none (no web resource or BFF change; the rule is declarative). Do
 ribbon import into matter / project / work assignment / event / document / analysis / email (tasks 175/179's
 `Set-AccessRibbon.ps1`, task 147's `Deploy-SecureChildNewCommands.ps1`). Run before or after them, not during.
 
-Stale exports (verifier K1/K2, fixed): every importer of these tables now refuses an export that lacks anything live.
+Stale exports (verifier K1/K2, fixed): every importer of these tables now refuses an export that lacks anything live or holds an older version of it (ids AND normalised content of each command, rule, custom / hide action and label; content compare added in the re-check of e090df15b).
 - `Set-CreatePrivilegeRibbon.ps1 -Apply` and `Deploy-SecureChildNewCommands.ps1` (with `-ExportDir`) both run
   `infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1`. It checks every unmanaged ribbon command, rule,
   custom action, hide action and label the environment holds for each exported table, and it runs before anything is

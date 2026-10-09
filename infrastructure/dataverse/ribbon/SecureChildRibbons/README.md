@@ -57,7 +57,7 @@ web resources (`sprk_/scripts/bff_auth.js`, `sprk_/scripts/assignedaccess_postsa
 ```powershell
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com            # dry run
 # export a dedicated ribbon solution (SpaarkeSecureChildRibbons; the nine tables, ribbon only) per the ribbon-edit skill, unpack it
-# (right before -Apply: -Apply refuses, writing nothing, an export that lacks any ribbon customisation the environment holds
+# (right before -Apply: -Apply refuses, writing nothing, an export that lacks, or holds an older version of, any ribbon customisation the environment holds
 #  for its tables - infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1; e.g. one taken before task 180's import)
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ExportDir <unpacked> -Apply
 & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify

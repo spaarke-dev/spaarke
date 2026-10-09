@@ -39,13 +39,13 @@ already in them (and with a well-formed comment: the snippets did not parse as X
 
 ## Deployment (MANUAL GATE G180-1 — main session)
 
-`-Apply` exports four dedicated ribbon solutions fresh. Before importing anything it refuses if an export lacks any
+`-Apply` exports four dedicated ribbon solutions fresh. Before importing anything it refuses if an export lacks, or holds different content for, any
 unmanaged ribbon command, rule, custom action, hide action or label the environment holds for an exported table
 ([`../Test-RibbonExportCurrent.ps1`](../Test-RibbonExportCurrent.ps1)), or if a table with a live create command is in
 none of them. Then it merges, imports with publish, and verifies. **Do not run it while another ribbon import into the
 same tables is in flight** (tasks 175/179's `Set-AccessRibbon.ps1`, `Deploy-SecureChildNewCommands.ps1`): each
 re-imports a table's whole ribbon. `Deploy-SecureChildNewCommands.ps1` imports an export the operator supplies; it now
-runs the same currency check and writes nothing if that export lacks anything live (so an export taken before this
+runs the same currency check and writes nothing if that export lacks anything live or holds an older version of it (so an export taken before this
 task's import cannot strip the Create-privilege rules), but export it right before its `-Apply` all the same.
 
 ```powershell
