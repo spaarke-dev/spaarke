@@ -203,7 +203,9 @@
     </CommandDefinition>
     <CommandDefinition Id="sprk.Project.NewWizard.Grid.Command">
       <EnableRules />
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateProjectStandalone" Library="$webresource:sprk_wizard_commands" />
       </Actions>
@@ -245,7 +247,11 @@
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_project" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.Access.sprk_project.CanUpdateAccess.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />

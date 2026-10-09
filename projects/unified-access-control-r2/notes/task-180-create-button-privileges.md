@@ -1,0 +1,144 @@
+# Task 180 — custom Create / wizard buttons follow the Create privilege
+
+Owner round 89 item 2 (2026-10-09, binding): every custom Create / wizard ribbon button hides when the user lacks the
+Create privilege on the target table, using Dataverse's standard privilege rule, no code. A read-only role then sees no
+create commands.
+
+## The rule (one per target table)
+
+```xml
+<DisplayRule Id="sprk.CreatePrivilege.<table>.DisplayRule">
+  <EntityPrivilegeRule EntityName="<table>" PrivilegeType="Create" PrivilegeDepth="Basic" />
+</DisplayRule>
+```
+
+- **Display rule, not enable rule.** `EntityPrivilegeRule` is a display-rule type, and the owner asked for the button to
+  hide. It is added next to the command's existing rules (`FormStateRule Existing` etc.), so both must hold.
+- **`PrivilegeDepth="Basic"`** = holds Create at any depth (user, BU, parent:child BU, organization).
+- **`EntityName` is always explicit**: a form button on a matter that creates a project checks `sprk_project`, not the
+  form's table.
+- **Selection by launcher function, not command id.** `infrastructure/dataverse/ribbon/CreatePrivilegeRibbons/create-launchers.json`
+  maps each JavaScript launcher to the table it creates. A command whose action calls a mapped launcher gets the rule.
+  A new button on an existing launcher is found without editing the list, and `-Verify` reads every host table's
+  effective ribbon for any command calling a launcher.
+- Out-of-the-box New buttons are untouched (goal 4). The platform subgrid New (`Mscrm.AddNewRecordFromSubGridStandard`)
+  and task 147's secure-child New (`sprk.SecureChild.<table>.New.Command`) already carry the platform's
+  `Mscrm.CreateSelectedEntityPermission` (checked live on dev). They are therefore listed in `notCreate`, not changed.
+
+## (1) Inventory
+
+Deployed on dev = present in spaarkedev1's unmanaged `ribboncommands` (read-only Web API, 2026-10-09). Before this
+task, none of them carried a Create privilege rule. The grid wizard commands had no rules at all; the matter form
+wizards had only `FormStateRule Existing`.
+
+### Deployed on dev — ruled by this task
+
+| # | Host table / surface | Command | Launcher | Creates (rule on) | Repo sources changed |
+|---|---|---|---|---|---|
+| 1 | sprk_matter form | `sprk.Wizard.Matter.CreateProject.Command` | `openCreateProjectWizard` | sprk_project | SpaarkeMaster sprk_Matter, spaarke_insights sprk_Matter, MatterRibbons/customizations.xml |
+| 2 | sprk_matter form | `sprk.Wizard.Matter.CreateEvent.Command` | `openCreateEventWizard` | sprk_event | same three |
+| 3 | sprk_matter form | `sprk.Wizard.Matter.CreateTodo.Command` | `openCreateTodoWizard` | sprk_todo | same three |
+| 4 | sprk_matter form | `sprk.Wizard.Matter.UploadDocuments.Command` | `openDocumentUploadWizard` | sprk_document | same three |
+| 5 | sprk_matter form | `sprk.Wizard.Matter.PlaybookLibrary.Command` | `openPlaybookLibrary` | sprk_analysis | same three |
+| 6 | sprk_matter home grid | `sprk.Matter.NewWizard.Grid.Command` (replaces the hidden OOB New) | `openCreateMatterStandalone` | sprk_matter | SpaarkeMaster sprk_Matter, spaarke_insights sprk_Matter |
+| 7 | sprk_project home grid | `sprk.Project.NewWizard.Grid.Command` (replaces the hidden OOB New) | `openCreateProjectStandalone` | sprk_project | SpaarkeMaster sprk_Project |
+| 8 | sprk_event home grid | `sprk.Event.NewWizard.Grid.Command` (replaces the hidden OOB New) | `openCreateEventStandalone` | sprk_event | SpaarkeMaster sprk_Event |
+| 9 | sprk_workassignment home grid | `sprk.WorkAssignment.NewWizard.Grid.Command` (replaces the hidden OOB New) | `openCreateWorkAssignmentStandalone` | sprk_workassignment | SpaarkeMaster sprk_WorkAssignment, WorkAssignmentRibbons/Entities/sprk_workassignment/RibbonDiff.xml |
+| 10 | sprk_document home grid | `sprk.Document.NewUpload.Grid.Command` (replaces the hidden OOB New) | `Spaarke_UploadDocumentsStandalone` | sprk_document | SpaarkeMaster sprk_Document |
+| 11 | sprk_document subgrid | `Spaarke.Document.AddMultiple.Command` | `Spaarke_AddMultipleDocuments` | sprk_document | SpaarkeMaster sprk_Document, spaarke_containers sprk_Document, DocumentRibbons/Entities/sprk_Document/RibbonDiff.xml |
+| 12 | sprk_analysis subgrid | `Spaarke.Analysis.NewAnalysisSubgrid.Command` (replaces the hidden OOB New) | `Spaarke_NewAnalysisFromSubgrid` | sprk_analysis | SpaarkeMaster sprk_analysis, AnalysisRibbons/Entities/sprk_analysis/RibbonDiff.xml |
+| 13 | email form | `sprk.Email.ArchiveEmail.Command` ("Save to Document") | `Spaarke.Email.saveToDocument` | sprk_document | SpaarkeMaster Email, EmailRibbons/Entities/email/RibbonDiff.xml |
+
+### In the repo, not deployed on dev — ruled in source so a later deploy carries it
+
+| # | Host / surface | Command | Creates (rule on) | Source |
+|---|---|---|---|---|
+| 14–23 | analysis, budget, communication, contact, document, event, invoice, organization, project, work assignment forms | `sprk.Wizard.<Host>.CreateTodo.Command` | sprk_todo | `<Host>Ribbons/createtodo-button.xml` (generated by `scripts/Generate-CreateTodoRibbonXmlForTenEntities.ps1`, generator updated) |
+| 24–25 | sprk_project form | `sprk.Wizard.Project.UploadDocuments.Command`, `...PlaybookLibrary.Command` | sprk_document, sprk_analysis | ProjectRibbons/customizations.xml |
+| 26–27 | sprk_event form | `sprk.Wizard.Event.UploadDocuments.Command`, `...PlaybookLibrary.Command` | sprk_document, sprk_analysis | EventRibbons/customizations.xml |
+| 28–29 | sprk_analysisplaybook grid / form | `Spaarke.Playbook.NewFromList.Command`, `Spaarke.Playbook.NewFromForm.Command` | sprk_analysisplaybook | src/client/webresources/ribbon/sprk_analysisplaybook_ribbon.xml |
+| 30 | sprk_event form | `Spaarke.Event.AddMemo.Command` | sprk_memo | src/solutions/EventCommands (EventRibbonDiffXml.xml, solution export/customizations.xml) |
+| 31 | sprk_kpiassessment subgrid on matter | `sprk.matter.subgrid.kpi.AddKpiButton.Command` ("+ Add KPI") | sprk_kpiassessment | src/solutions/SpaarkeCore/entities/sprk_matter/RibbonDiff/add-kpi-ribbon.xml |
+
+### Reviewed, not create commands (unchanged)
+
+| Command | Why |
+|---|---|
+| `sprk.Wizard.*.SummarizeFiles.Command` | Summarizes uploaded files (`/api/workspace/files/summarize`). It creates nothing itself. Its optional follow-on cards (create project, work on analysis) are separate creates, refused server-side without the privilege. |
+| `sprk.Wizard.*.FindSimilar.Command` | Search only. |
+| `sprk.SecureChild.<table>.New.Command` (9 tables), `Mscrm.AddNewRecordFromSubGridStandard` overrides | Already `Mscrm.CreateSelectedEntityPermission` (task 147 kept the platform rule). |
+| `Sprk.Registration.Approve/Reject.*` | Admin action on a registration request, not a create button. Server-gated. |
+| `sprk.Navigator.*.Open`, `sprk.Global.*`, `sprk.matter/project.fieldmapping.push`, `sprk.Document.*` (check-in, delete, …), `Spaarke.ChatContextMap.RefreshCache`, theme menus | Not creates. |
+| Access ribbon (`sprk.Access.*`, Share commands) | Not touched (tasks 175/179 own it). |
+
+### Secondary-table gaps (a wizard ruled on its primary table only)
+
+- Create Work Assignment also creates a `sprk_event` (`workAssignmentService`).
+- Create Event and Create To Do create `sprk_document` rows for attached files (`createDocumentRecords`).
+- The create wizards' follow-on cards (e.g. a Summarize Files "create project" card, the matter wizard's follow-ons) create other tables.
+
+A user with Create on the primary table but not on the secondary one still sees the button. That secondary create
+fails with the platform privilege error, or the BFF's server-side check (`prvCreate*` in
+`QuickCreateSourceAccessFilter` / `TodoSourceAccessFilter` / `EventEndpoints` / `AnalysisAuthorizationFilter`). No
+data is written wrongly. Hiding the button on every secondary table would also hide it from users who can do the
+primary job, so this is deliberate.
+
+## Repo-vs-dev drift (read-only comparison, 2026-10-09)
+
+1. **`src/dataverse/solutions/SpaarkeMaster/` matches dev** for every deployed create command (same ids, actions,
+   rules; exported 2026-10-08). It is the source that mirrors dev.
+2. **`infrastructure/dataverse/ribbon/` is partly stale or never deployed:**
+   - The 10 `createtodo-button.xml` snippets (Create To Do on analysis, budget, communication, contact, document,
+     event, invoice, organization, project, work assignment) are **not on dev**. Dev has Create To Do on the matter
+     form only.
+   - `ProjectRibbons/customizations.xml` and `EventRibbons/customizations.xml` (Upload Documents, Summarize Files, Find
+     Similar, Playbook Library on the project and event forms) are **not on dev**.
+   - `MatterRibbons/customizations.xml` matches dev's seven matter form wizard buttons, except the library name: the
+     repo has `$webresource:sprk_wizard_commands.js`, dev has `$webresource:sprk_wizard_commands`.
+   - The grid "New … wizard" commands for matter, project, event and document are **on dev and in SpaarkeMaster**,
+     but not in `infrastructure/dataverse/ribbon/` (only the work assignment one is, in `WorkAssignmentRibbons/`).
+   - `README.md` there lists only the form wizard buttons and says their only rules are `FormStateRule Existing`.
+     Updated in this task.
+3. **Not on dev at all**: `sprk_analysisplaybook_ribbon.xml` (New Playbook), `src/solutions/EventCommands` (Add Memo
+   and the other event commands), and `add-kpi-ribbon.xml` (+ Add KPI).
+4. **The 10 `createtodo-button.xml` snippets were not well-formed XML.** Their comment contained
+   `--publish-changes`, and a double hyphen is not allowed in an XML comment. No tool could merge them. The generator
+   comment is reworded and the files are regenerated.
+
+## (3) Deploy commands, in order (main-session gate G180-1; nothing was run live)
+
+Prerequisites: none (no web resource or BFF change; the rule is declarative). Do not run it concurrently with another
+ribbon import into matter / project / work assignment / event / document / analysis / email (tasks 175/179's
+`Set-AccessRibbon.ps1`, task 147's `Deploy-SecureChildNewCommands.ps1`). Run before or after them, not during.
+
+```powershell
+cd infrastructure/dataverse/ribbon/CreatePrivilegeRibbons
+pwsh ./Set-CreatePrivilegeRibbon.ps1                                                          # 1. dry run (sources)
+pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com     # 2. + live read, read-only
+pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply      # 3. LIVE (exports
+#    SpaarkeAccessRibbons, SpaarkeSecureChildRibbons, AnalysisRibbons, EmailRibbons; refuses before any import if an
+#    export would delete a live command or a create-command table is uncovered; merges; imports with publish; verifies)
+pwsh ./Set-CreatePrivilegeRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify `
+    -BeforeList <WorkDir printed by step 3>/before.json                                       # 4. read-only -Verify
+```
+
+The `-Verify` is per ribbon (per host table): each of the 15 host tables in `create-launchers.json` is checked. Every
+create command must carry its rule, and the rule must be exactly the canonical one. Every before-command must still be
+present.
+
+Live gate G180-2 (after step 4, main session): a read-only test role (Create removed on matter, project, work
+assignment, event, to do, document, analysis) sees no custom create command on the Matter, Project and Work Assignment
+forms and home grids. Summarize Files and Find Similar still show. A Spaarke Basic User still sees them all.
+
+## Dev evidence (read-only, 2026-10-09)
+
+- Unmanaged create commands on dev: rows 1–13 above. Their definitions came from `ribboncommands`, their locations
+  from `ribbondiffs` (the four `HomepageGrid.<table>.NewRecord.Hide` entries confirm the grid wizards replace the
+  platform New), and their rules from `ribbonrules`.
+- Solutions holding the tables (`solutioncomponents`, type 1):
+  - SpaarkeAccessRibbons: matter, project, work assignment.
+  - SpaarkeSecureChildRibbons: event, document, communication, invoice, report card, budget, KPI assessment, to do,
+    billing event.
+  - AnalysisRibbons: analysis (full), plus document and analysis playbook (shell).
+  - EmailRibbons: email (shell).
+  - The single-table solutions (MatterRibbons, ProjectRibbons, ...) hold their table as a shell.

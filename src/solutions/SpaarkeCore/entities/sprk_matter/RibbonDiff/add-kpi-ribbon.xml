@@ -49,7 +49,9 @@
       <EnableRules>
         <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_/scripts/kpi_ribbon_actions.js"
                             FunctionName="Spaarke.KpiRibbon.openQuickCreate">
@@ -60,7 +62,11 @@
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_kpiassessment" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <!-- Task 147 r1c: the secure-child template's rule, verbatim (infrastructure/dataverse/ribbon/SecureChildRibbons). -->
       <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule">
