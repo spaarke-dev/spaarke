@@ -60,21 +60,22 @@ import type {
   EntityMetadata,
   FetchMultipleResult,
 } from './IDataverseClient';
+import type { ResponseFetchFn } from '../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 /**
- * `authenticatedFetch` function type.
+ * `authenticatedFetch` function type — the EITHER-shape fetch ({@link ResponseFetchFn}).
  *
- * Structurally identical to `AuthenticatedFetchFn` exported by `@spaarke/auth`;
- * kept as a local alias so this package has zero runtime dependency on the
- * auth library. The expected caller is `authenticatedFetch` from
- * `import { authenticatedFetch } from '@spaarke/auth'` — it handles token
- * acquisition, 401 retry, and `Authorization: Bearer <jwt>` header attachment.
+ * The only in-repo host is the external SPA (`gridDataverseClient.ts`), whose fetch RETURNS non-2xx
+ * responses; this client maps those to the typed errors below. (`@spaarke/auth`'s `authenticatedFetch`
+ * throws them instead — its `ApiError` propagates unmapped.) Kept as a local alias, not `@spaarke/auth`'s
+ * throwing `AuthenticatedFetchFn`, so this package has no dependency on the auth library and the
+ * returning host still compiles.
  */
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetchFn = ResponseFetchFn;
 
 /**
  * Constructor options for {@link BffDataverseClient}.

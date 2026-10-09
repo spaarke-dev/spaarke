@@ -45,6 +45,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { buildBffApiUrl, isApiError, isAuthFailure } from '@spaarke/auth';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Types (mirror BFF WorkspaceLayoutDto shape)
@@ -85,8 +86,12 @@ export interface WorkspaceLayoutDto {
  */
 export type WorkspaceLoadingStatus = 'loading' | 'loaded' | 'error' | 'first-visit';
 
-/** Authenticated fetch function (ADR-028 — function-based contract). */
-export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Response>;
+/**
+ * Authenticated fetch function (ADR-028 — function-based contract): `@spaarke/auth`'s throwing
+ * `AuthenticatedFetchFn`, which resolves only with a success and throws `ApiError` / `AuthError` for a
+ * failure. Every host (SpaarkeAi, LegalWorkspace) passes the real `authenticatedFetch`.
+ */
+export type AuthenticatedFetch = AuthenticatedFetchFn;
 
 /**
  * Options accepted by `useWorkspaceLayouts`.
