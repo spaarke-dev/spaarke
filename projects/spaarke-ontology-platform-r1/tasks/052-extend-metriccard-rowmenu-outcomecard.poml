@@ -4,7 +4,7 @@
     <title>Extend MetricCard into the lane count filters; C-9 RowActionMenu cleanup (DocumentRowMenu/OutcomeCard reuse dropped, D-46)</title>
     <phase>5 The worklist surface</phase>
     <gate>051 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Component-reuse rule is binding; building past a named existing component is a section 11 violation.</rigor-reason>
     <model-tier>sonnet</model-tier>

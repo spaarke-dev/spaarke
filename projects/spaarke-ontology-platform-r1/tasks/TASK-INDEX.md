@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (57 ✅ · 5 🔄 · 41 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
+> (spec §9) · **116 tasks** across 14 phases (57 ✅ · 7 🔄 · 39 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -217,9 +217,9 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 |---|---|---|---|---|---|---|
 | 🔲 [open] 050 | [Worklist grid configuration row (membership + order)](050-worklist-gridconfiguration-row.poml) | STANDARD | sonnet/medium | 034, 007 | — | Membership by rule evaluation, never a user filter. **Amended**: per-lane + 3 secondary sets; executed server-side by 038 (D-15); no actions |
 | ✅ [done] 051 | [**The one row component: MatterCard + IssueLine**](051-worklist-row-component.poml) | FULL | **sonnet/xhigh** | 057, 012, 007 | — | 🔴 A second row component is a design failure. **Amended**: v4 row (no controls in a line; whole line opens the wizard); UI-composed headline (**D-23**). Builds on fixtures |
-| 🔲 [open] 052 | [Extend MetricCard (count filters); C-9 RowActionMenu cleanup](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | E | **D-24** selected / note / progress. DocumentRowMenu/OutcomeCard reuse **dropped (D-46)**; C-9 continues on its own (shared UI: own PR) |
+| 🔄 [wip] 052 | [Extend MetricCard (count filters); C-9 RowActionMenu cleanup](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | E | **D-24** selected / note / progress. DocumentRowMenu/OutcomeCard reuse **dropped (D-46)**; C-9 continues on its own (shared UI: own PR) |
 | 🚫 [cancelled] 053 | [~~Gate host + acting~~](053-gate-host-and-acting.poml) | FULL | sonnet/high | — | — | **Superseded 2026-10-07** by **058** (wizard) + **043** (commit route), per D-17 / D-26. POML status `deferred`; do not execute |
-| 🔲 [open] 054 | [Reconciliation tab + aggregate item](054-reconciliation-tab-and-aggregate-item.poml) | STANDARD | sonnet/medium | 051, 057 | E | ONE registration (already exists, #18 — verify). **Amended**: AggregateCard at the top of the Do lane; count from the Email Review feed (#36) |
+| 🔄 [wip] 054 | [Reconciliation tab + aggregate item](054-reconciliation-tab-and-aggregate-item.poml) | STANDARD | sonnet/medium | 051, 057 | E | ONE registration (already exists, #18 — verify). **Amended**: AggregateCard at the top of the Do lane; count from the Email Review feed (#36) |
 | 🔲 [open] 055 | [**Deploy** Console + shared components](055-deploy-console-and-shared-components.poml) | FULL | sonnet/high | 059, 043, 035 | — | **Real Dataverse** verification. **Amended**: one full wizard review (2 actions + 1 Next step) live; BFF with 038/043 deployed first |
 | ✅ [done] 057 | [Console UI kit: EvidenceLine, StatusBar, RecordRow, AggregateCard](057-console-ui-kit.poml) | FULL | sonnet/high | 012 | K | **D-24** reuse first (Accordion, MessageBar, Link, ConfirmModal, StatusBadge + success). Can start now |
 | 🔲 [open] 058 | [**The decision wizard** (WizardShell, in-app)](058-decision-wizard-consumer.poml) | FULL | sonnet/**xhigh** | 056, 057, 036, 026, 034, 043 | — | **D-26**, **D-17**: writes nothing itself. **Templated (non-AI) drafts (D-53)**. Build on fixtures before 043 is live |

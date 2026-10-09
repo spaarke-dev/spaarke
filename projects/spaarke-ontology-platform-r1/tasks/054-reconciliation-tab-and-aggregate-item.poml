@@ -4,7 +4,7 @@
     <title>Mount reconciliation as a Console tab plus one aggregate Work Item</title>
     <phase>5 The worklist surface</phase>
     <gate>051, 057 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One registration file plus a computed count; the surface itself already exists.</rigor-reason>
     <model-tier>sonnet</model-tier>
