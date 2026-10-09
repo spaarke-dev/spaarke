@@ -110,7 +110,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
-        success.IdempotencyKey.Should().Be(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId));
+        success.IdempotencyKey.Should().Be(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture));
 
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
@@ -240,7 +240,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     public async Task AC5_Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
         var run = BuildRun();
-        var expectedKey = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId);
+        var expectedKey = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H10",
@@ -457,15 +457,71 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     // ---------- AC-15 idempotency key format determinism ----------
 
     [Fact]
-    public void AC15_IdempotencyKey_IsDeterministicByCustomerOnly()
+    public void AC15_IdempotencyKey_IsDeterministicByCustomerAndCatalog()
     {
-        var k1 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme");
-        var k2 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme");
-        k1.Should().Be(k2);
-        k1.Should().Be("appuser-acme");
+        var k1 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme", ThreeRoleFixture);
+        var k2 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("acme", ThreeRoleFixture.Reverse().ToArray());
+        k1.Should().Be(k2, "role order does not matter");
+        k1.Should().MatchRegex("^appuser-acme-g[0-9a-f]{8}$");
 
-        var k3 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other");
-        k3.Should().NotBe(k1);
+        H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other", ThreeRoleFixture).Should().NotBe(k1);
+    }
+
+    [Fact]
+    public async Task T261_ARunCompletedUnderAnOlderCatalog_ReRunsTheReconcile_NotANoOp()
+    {
+        // A stamp whose H10 completed before task 261 recorded the old key ("appuser-acme"); a re-dispatch must not
+        // short-circuit on it, or the 11-role grant would never be removed.
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H10", IdempotencyKey = "appuser-acme", StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+        });
+        var granter = FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" });
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-t261f"), FakeCreator.Success(),
+            FakeVerifier.Verified(UamiSystemUserId), granter, FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        granter.RemovalCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task T261_ExtrasListedJustAfterARemoval_AreReReadWithBackoff_AndPassOnceGone()
+    {
+        // Graph is eventually consistent: the first re-read still lists the role H10 just deleted.
+        var parity = FakeParityVerifier.Verified(3, extrasSequence: new GraphAppRoleExtrasResult[]
+        {
+            new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }),
+            new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }),
+            new GraphAppRoleExtrasResult.None(),
+        });
+        var handler = BuildHandler(new FakeRepository(BuildRun(), etag: "etag-t261g"), FakeCreator.Success(),
+            FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" }),
+            parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        parity.ExtrasCallCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task T261_ExtrasStillListedAfterThisCallRemovedThem_IsResumable_NotQuarantine()
+    {
+        var parity = FakeParityVerifier.Verified(3, extras: new GraphAppRoleExtrasResult.Found(new[] { "Directory.ReadWrite.All" }));
+        var repo = new FakeRepository(BuildRun(), etag: "etag-t261h");
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId),
+            FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" }), parity, FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable, "a healthy stamp must not be quarantined for replication lag");
+        failure.RejectionCode.Should().Be(H10Rejections.GraphRoleExtrasUnverified);
+        parity.ExtrasCallCount.Should().Be(5, "the bounded re-read ran to its limit before deciding");
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
     }
 
     // ---------- AC-16 real L2GraphAppRolesRegistry mirror — all 15 GUIDs ----------
@@ -537,7 +593,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     }
 
     [Fact]
-    public async Task T261_ExtraStillPresentAfterRemoval_IsQuarantined()
+    public async Task T261_ExtraListedThatTheRemovalPassDidNotSee_IsQuarantined()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-t261c");
         var parity = FakeParityVerifier.Verified(3, extras: new GraphAppRoleExtrasResult.Found(new[] { "Sites.ReadWrite.All" }));
@@ -710,7 +766,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         FakeParityVerifier parityVerifier,
         FakeRegistry registry)
     {
-        var options = Options.Create(new H10DataverseAppUserGraphParityOptions());
+        var options = Options.Create(new H10DataverseAppUserGraphParityOptions { ExtrasRecheckDelay = TimeSpan.Zero });
         return new H10DataverseAppUserGraphParityHandler(
             repo, creator, verifier, granter, parityVerifier, registry, options,
             NullLogger<H10DataverseAppUserGraphParityHandler>.Instance);
@@ -896,17 +952,21 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     {
         private readonly GraphAppRoleParityResult _result;
         private readonly GraphAppRoleExtrasResult _extras;
+        private readonly Queue<GraphAppRoleExtrasResult>? _sequence;
         public int CallCount { get; private set; }
         public int ExtrasCallCount { get; private set; }
 
-        private FakeParityVerifier(GraphAppRoleParityResult result, GraphAppRoleExtrasResult? extras = null)
+        private FakeParityVerifier(GraphAppRoleParityResult result, GraphAppRoleExtrasResult? extras = null,
+            IEnumerable<GraphAppRoleExtrasResult>? sequence = null)
         {
             _result = result;
             _extras = extras ?? new GraphAppRoleExtrasResult.None();
+            _sequence = sequence is null ? null : new Queue<GraphAppRoleExtrasResult>(sequence);
         }
 
-        public static FakeParityVerifier Verified(int count, GraphAppRoleExtrasResult? extras = null)
-            => new(new GraphAppRoleParityResult.Verified(count), extras);
+        public static FakeParityVerifier Verified(int count, GraphAppRoleExtrasResult? extras = null,
+            IEnumerable<GraphAppRoleExtrasResult>? extrasSequence = null)
+            => new(new GraphAppRoleParityResult.Verified(count), extras, extrasSequence);
 
         public static FakeParityVerifier Partial(IReadOnlyList<string> missing, int granted, int expected)
             => new(new GraphAppRoleParityResult.Partial(missing, granted, expected));
@@ -924,7 +984,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             IReadOnlyList<GraphAppRoleEntry> allowedRoles, CancellationToken ct)
         {
             ExtrasCallCount++;
-            return Task.FromResult(_extras);
+            return Task.FromResult(_sequence is { Count: > 0 } ? _sequence.Dequeue() : _extras);
         }
     }
 

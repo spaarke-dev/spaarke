@@ -153,6 +153,19 @@ public sealed class GraphAppRoleParityT3ProbeTests
     }
 
     [Fact]
+    public async Task ProbeAsync_NullExtrasResult_IsInfraFault_OnlyNonePasses()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value));
+        verifier.ReturnNullExtras = true;
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>();
+    }
+
+    [Fact]
     public async Task ProbeAsync_ExtrasReReadFails_IsInfraFault_NeverPassed()
     {
         var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
@@ -608,6 +621,7 @@ public sealed class GraphAppRoleParityT3ProbeTests
         public int ExtrasCallCount { get; private set; }
         public IReadOnlyList<GraphAppRoleEntry>? LastAllowedRoles { get; private set; }
         public GraphAppRoleExtrasResult? ExtrasOverride { get; set; }
+        public bool ReturnNullExtras { get; set; }
 
         public Task<GraphAppRoleExtrasResult> FindUnexpectedRolesAsync(
             string uamiServicePrincipalObjectId,
@@ -620,6 +634,10 @@ public sealed class GraphAppRoleParityT3ProbeTests
             if (_throwOnCall is not null)
             {
                 throw _throwOnCall;
+            }
+            if (ReturnNullExtras)
+            {
+                return Task.FromResult<GraphAppRoleExtrasResult>(null!);
             }
             if (ExtrasOverride is not null)
             {

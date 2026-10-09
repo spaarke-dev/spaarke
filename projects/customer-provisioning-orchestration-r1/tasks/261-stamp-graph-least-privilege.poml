@@ -3,7 +3,7 @@
   <metadata>
     <title>Stamp Graph least privilege (G31): H10 grants the stamp identity exactly the evidence-backed Graph app roles and removes the rest</title>
     <phase>Model 1 dedicated-stamp remediation — G31 (owner approved 2026-10-09: "ensure this is accurately scoped")</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Directory write rights of every customer stamp identity inside Spaarke's own tenant (F1 tenant isolation).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -50,6 +50,7 @@
     <constraint source="CLAUDE.md §9 / D16 / D24">No secret or certificate anywhere; never touch app bfac7f6e; nothing added to "Spaarke Exchange Admin"; keep the Graph Explorer grant and group sprk-t251-spike-scope.</constraint>
     <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/**: proposed .claude edits are returned verbatim.</constraint>
     <constraint source="CLAUDE.md §10">BFF-touching: bff-extensions.md obligations incl. publish-size delta.</constraint>
+    <constraint source="review">Do not remove the L2 Worker's old Graph roles until an app-only POST /applications under Application.ReadWrite.OwnedBy is live-verified to leave the Worker as owner (note §10.1 K3).</constraint>
   </constraints>
 
   <steps mode="directional">
@@ -70,5 +71,11 @@
     <criterion testable="true">dotnet build Spaarke.sln 0 errors / 0 warnings; ControlPlane tests, relevant BFF tests and Spaarke.ArchTests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>(filled at completion)</notes>
+  <notes>
+    Completed 2026-10-09 (FULL rigor, no live action). Stamp set = FileStorageContainer.Selected (Entra) + Mail.Read/ReadWrite/Send
+    (Exchange, H14a); H10 removes every other Graph role; L2 Worker catalog separate. Evidence: notes/t261-stamp-graph-least-privilege.md.
+    Review round 1 (verifier A) fixed: replication-lag re-read, H10 idempotency fingerprint + Remove-StampGraphExtraRoles.ps1,
+    full-set demo gate, fail-closed REST (no value array, page cap, nextLink host), Grant script stamp guard. Filed ISS-018 / #1543.
+    Publish size: see the final report.
+  </notes>
 </task>

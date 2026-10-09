@@ -38,7 +38,8 @@ internal static class GraphAppRoleRest
 {
     internal static readonly string[] GraphScope = { "https://graph.microsoft.com/.default" };
 
-    private const string GraphBase = "https://graph.microsoft.com/v1.0";
+    private const string GraphHost = "graph.microsoft.com";
+    private const string GraphBase = "https://" + GraphHost + "/v1.0";
 
     /// <summary>Resolves the Graph resource SP and its app-role definitions.</summary>
     public static async Task<GraphResourcePrincipal> ResolveGraphResourceAsync(
@@ -86,7 +87,7 @@ internal static class GraphAppRoleRest
         HttpClient http, AccessToken token, string principalSpId, string graphResourceSpId, CancellationToken ct)
     {
         var result = new List<GraphAppRoleAssignment>();
-        Uri? next = new($"{GraphBase}/servicePrincipals/{principalSpId}/appRoleAssignments");
+        Uri? next = new($"{GraphBase}/servicePrincipals/{Uri.EscapeDataString(principalSpId)}/appRoleAssignments");
         var pages = 0;
         while (next is not null)
         {
@@ -96,21 +97,35 @@ internal static class GraphAppRoleRest
                     $"appRoleAssignments for {principalSpId} did not finish within 50 pages — refusing to decide on a partial list.");
             }
             using var doc = await GetJsonAsync(http, next, token, ct).ConfigureAwait(false);
-            if (doc.RootElement.TryGetProperty("value", out var values) && values.ValueKind == JsonValueKind.Array)
+            // A 200 without a `value` array is NOT an empty list — it is an answer we cannot read. Deciding "nothing
+            // extra" (or "nothing granted") on it would pass a stamp that holds roles; fail closed instead.
+            if (!doc.RootElement.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
             {
-                foreach (var entry in values.EnumerateArray())
-                {
-                    var resourceId = entry.TryGetProperty("resourceId", out var r) ? r.GetString() : null;
-                    if (!string.Equals(resourceId, graphResourceSpId, StringComparison.OrdinalIgnoreCase)) continue;
-                    var appRoleId = entry.TryGetProperty("appRoleId", out var a) ? a.GetString() : null;
-                    var assignmentId = entry.TryGetProperty("id", out var i) ? i.GetString() : null;
-                    if (string.IsNullOrWhiteSpace(appRoleId)) continue;
-                    result.Add(new GraphAppRoleAssignment(assignmentId ?? string.Empty, appRoleId));
-                }
+                throw new InvalidOperationException(
+                    $"GET appRoleAssignments for {principalSpId} returned 200 without a 'value' array — refusing to treat it as an empty list.");
             }
-            next = doc.RootElement.TryGetProperty("@odata.nextLink", out var link) && link.GetString() is { Length: > 0 } nextLink
-                ? new Uri(nextLink)
-                : null;
+            foreach (var entry in values.EnumerateArray())
+            {
+                var resourceId = entry.TryGetProperty("resourceId", out var r) ? r.GetString() : null;
+                if (!string.Equals(resourceId, graphResourceSpId, StringComparison.OrdinalIgnoreCase)) continue;
+                var appRoleId = entry.TryGetProperty("appRoleId", out var a) ? a.GetString() : null;
+                var assignmentId = entry.TryGetProperty("id", out var i) ? i.GetString() : null;
+                if (string.IsNullOrWhiteSpace(appRoleId)) continue;
+                result.Add(new GraphAppRoleAssignment(assignmentId ?? string.Empty, appRoleId));
+            }
+            next = null;
+            if (doc.RootElement.TryGetProperty("@odata.nextLink", out var link) && link.GetString() is { Length: > 0 } nextLink)
+            {
+                // The bearer token is only ever sent to Microsoft Graph.
+                if (!Uri.TryCreate(nextLink, UriKind.Absolute, out var nextUri)
+                    || nextUri.Scheme != Uri.UriSchemeHttps
+                    || !string.Equals(nextUri.Host, GraphHost, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"appRoleAssignments @odata.nextLink '{nextLink}' is not on https://{GraphHost} — refusing to send the Graph token there.");
+                }
+                next = nextUri;
+            }
         }
         return result;
     }
@@ -119,7 +134,7 @@ internal static class GraphAppRoleRest
     public static async Task PostGrantAsync(
         HttpClient http, AccessToken token, string principalSpId, string graphResourceSpId, string appRoleId, CancellationToken ct)
     {
-        var uri = new Uri($"{GraphBase}/servicePrincipals/{principalSpId}/appRoleAssignments");
+        var uri = new Uri($"{GraphBase}/servicePrincipals/{Uri.EscapeDataString(principalSpId)}/appRoleAssignments");
         var payload = new Dictionary<string, object?>
         {
             ["principalId"] = principalSpId,
@@ -144,7 +159,7 @@ internal static class GraphAppRoleRest
     public static async Task DeleteAssignmentAsync(
         HttpClient http, AccessToken token, string principalSpId, string assignmentId, CancellationToken ct)
     {
-        var uri = new Uri($"{GraphBase}/servicePrincipals/{principalSpId}/appRoleAssignments/{Uri.EscapeDataString(assignmentId)}");
+        var uri = new Uri($"{GraphBase}/servicePrincipals/{Uri.EscapeDataString(principalSpId)}/appRoleAssignments/{Uri.EscapeDataString(assignmentId)}");
         using var request = new HttpRequestMessage(HttpMethod.Delete, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         using var response = await http.SendAsync(request, ct).ConfigureAwait(false);

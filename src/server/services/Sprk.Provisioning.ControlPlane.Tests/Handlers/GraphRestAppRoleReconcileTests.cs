@@ -159,6 +159,58 @@ public sealed class GraphRestAppRoleReconcileTests
     }
 
     [Fact]
+    public async Task A200WithoutAValueArray_IsNotAnEmptyList_ItFailsClosed()
+    {
+        // "Nothing extra" must never be concluded from an answer we cannot read.
+        var graph = new ScriptedGraph { RawAssignmentsBody = "{\"@odata.context\":\"x\"}" };
+
+        var extras = await Verifier(graph).FindUnexpectedRolesAsync(StampSpId, TenantId, Allowed, CancellationToken.None);
+        var removal = await Granter(graph).RemoveUnexpectedRolesAsync(StampSpId, StampClientId, TenantId, Allowed, CancellationToken.None);
+        var parity = await Verifier(graph).VerifyAsync(StampSpId, TenantId, Allowed, CancellationToken.None);
+
+        extras.Should().BeOfType<GraphAppRoleExtrasResult.Unknown>();
+        removal.Should().BeOfType<GraphAppRoleRemovalOutcome.Failure>();
+        parity.Should().BeOfType<GraphAppRoleParityResult.Partial>("an unreadable list is not a verified grant");
+        graph.Deletes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PagingThatNeverEnds_StopsAtFiftyPages_AndFailsClosed()
+    {
+        var graph = new ScriptedGraph { EndlessPages = true };
+
+        var extras = await Verifier(graph).FindUnexpectedRolesAsync(StampSpId, TenantId, Allowed, CancellationToken.None);
+        var removal = await Granter(graph).RemoveUnexpectedRolesAsync(StampSpId, StampClientId, TenantId, Allowed, CancellationToken.None);
+
+        extras.Should().BeOfType<GraphAppRoleExtrasResult.Unknown>().Which.Diagnostic.Should().Contain("50 pages");
+        removal.Should().BeOfType<GraphAppRoleRemovalOutcome.Failure>();
+        graph.AssignmentReads.Should().Be(100, "50 pages per call, two calls — no more");
+        graph.Deletes.Should().BeEmpty("a partial list never drives a removal");
+    }
+
+    [Fact]
+    public async Task ANextLinkOffMicrosoftGraph_IsNeverFollowed_WithTheBearerToken()
+    {
+        var graph = new ScriptedGraph { NextLinkHost = "evil.example.com" };
+        graph.Assignments(page1: new[] { ("a-fsc", FscSelected, GraphSpId) });
+
+        var extras = await Verifier(graph).FindUnexpectedRolesAsync(StampSpId, TenantId, Allowed, CancellationToken.None);
+
+        extras.Should().BeOfType<GraphAppRoleExtrasResult.Unknown>().Which.Diagnostic.Should().Contain("not on https://graph.microsoft.com");
+        graph.Hosts.Should().OnlyContain(h => h == "graph.microsoft.com");
+    }
+
+    [Fact]
+    public async Task APrincipalIdWithPathCharacters_IsEscaped_NotInterpretedAsAPath()
+    {
+        var graph = new ScriptedGraph();
+
+        await Verifier(graph).FindUnexpectedRolesAsync("x/../servicePrincipals/other", TenantId, Allowed, CancellationToken.None);
+
+        graph.Requests.Should().Contain(r => r.Contains("/servicePrincipals/x%2F..%2FservicePrincipals%2Fother/appRoleAssignments"));
+    }
+
+    [Fact]
     public async Task FindUnexpected_OnlyAllowed_IsNone()
     {
         var graph = new ScriptedGraph();
@@ -214,14 +266,18 @@ public sealed class GraphRestAppRoleReconcileTests
         public List<string> Deletes { get; } = new();
         public List<string> PostBodies { get; } = new();
         public int AssignmentReads { get; private set; }
+        public string? RawAssignmentsBody { get; init; }
+        public bool EndlessPages { get; init; }
+        public string? NextLinkHost { get; init; }
+        public List<string> Hosts { get; } = new();
 
         public void Assignments((string Id, string RoleId, string ResourceId)[] page1, (string Id, string RoleId, string ResourceId)[]? page2 = null)
         {
             static string Rows((string Id, string RoleId, string ResourceId)[] rows) => string.Join(",", rows.Select(r =>
                 $"{{\"id\":\"{r.Id}\",\"appRoleId\":\"{r.RoleId}\",\"resourceId\":\"{r.ResourceId}\"}}"));
-            _page1 = page2 is null
+            _page1 = page2 is null && NextLinkHost is null
                 ? $"{{\"value\":[{Rows(page1)}]}}"
-                : $"{{\"value\":[{Rows(page1)}],\"@odata.nextLink\":\"https://graph.microsoft.com/v1.0/servicePrincipals/{StampSpId}/appRoleAssignments?$skiptoken=p2\"}}";
+                : $"{{\"value\":[{Rows(page1)}],\"@odata.nextLink\":\"https://{NextLinkHost ?? "graph.microsoft.com"}/v1.0/servicePrincipals/{StampSpId}/appRoleAssignments?$skiptoken=p2\"}}";
             _page2 = page2 is null ? null : $"{{\"value\":[{Rows(page2)}]}}";
         }
 
@@ -229,7 +285,8 @@ public sealed class GraphRestAppRoleReconcileTests
         {
             var path = request.RequestUri!.AbsolutePath;
             var query = Uri.UnescapeDataString(request.RequestUri.Query);
-            Requests.Add($"{request.Method} {path}{query}");
+            Requests.Add($"{request.Method} {request.RequestUri.AbsolutePath}{query}");
+            Hosts.Add(request.RequestUri.Host);
 
             if (request.Method == HttpMethod.Get && path == "/v1.0/servicePrincipals" && query.Contains("00000003-0000-0000-c000-000000000000"))
             {
@@ -247,6 +304,12 @@ public sealed class GraphRestAppRoleReconcileTests
             {
                 AssignmentReads++;
                 if (AssignmentsStatus != HttpStatusCode.OK) return Json(AssignmentsStatus, "{\"error\":{\"code\":\"x\"}}");
+                if (RawAssignmentsBody is not null) return Json(HttpStatusCode.OK, RawAssignmentsBody);
+                if (EndlessPages)
+                {
+                    return Json(HttpStatusCode.OK, "{\"value\":[],\"@odata.nextLink\":\"https://graph.microsoft.com/v1.0/servicePrincipals/" +
+                        StampSpId + "/appRoleAssignments?$skiptoken=again\"}");
+                }
                 return Json(HttpStatusCode.OK, query.Contains("skiptoken=p2") ? _page2! : _page1);
             }
             if (request.Method == HttpMethod.Post && path == $"/v1.0/servicePrincipals/{StampSpId}/appRoleAssignments")

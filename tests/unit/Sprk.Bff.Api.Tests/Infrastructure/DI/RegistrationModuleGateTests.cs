@@ -18,16 +18,43 @@ public class RegistrationModuleGateTests
     private static IConfiguration Config(params (string Key, string? Value)[] values)
         => new ConfigurationBuilder().AddInMemoryCollection(values.Select(v => new KeyValuePair<string, string?>(v.Key, v.Value))).Build();
 
-    [Theory]
-    [InlineData(null, false)]
-    [InlineData("", false)]
-    [InlineData("   ", false)]
-    [InlineData("demo.spaarke.com", true)]
-    public void IsDemoProvisioningEnabled_FollowsTheFeaturesRequiredAccountDomain(string? accountDomain, bool expected)
+    /// <summary>The complete set the feature needs (every [Required] key of DemoProvisioningOptions and its licenses).</summary>
+    private static (string Key, string? Value)[] FullSet() => new (string, string?)[]
     {
-        var config = Config(("DemoProvisioning:AccountDomain", accountDomain));
+        ("DemoProvisioning:AccountDomain", "demo.spaarke.com"),
+        ("DemoProvisioning:DemoUsersGroupId", "00000000-0000-0000-0000-0000000000d1"),
+        ("DemoProvisioning:Licenses:PowerAppsPlan2TrialSkuId", "00000000-0000-0000-0000-0000000000d2"),
+        ("DemoProvisioning:Licenses:FabricFreeSkuId", "00000000-0000-0000-0000-0000000000d3"),
+        ("DemoProvisioning:Licenses:PowerAutomateFreeSkuId", "00000000-0000-0000-0000-0000000000d4"),
+        ("DemoProvisioning:AdminNotificationEmails:0", "admin@spaarke.com"),
+    };
 
-        RegistrationModule.IsDemoProvisioningEnabled(config).Should().Be(expected);
+    [Fact]
+    public void IsDemoProvisioningEnabled_TrueOnlyForTheCompleteSet()
+    {
+        RegistrationModule.IsDemoProvisioningEnabled(Config(FullSet())).Should().BeTrue();
+        RegistrationModule.IsDemoProvisioningEnabled(Config()).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("DemoProvisioning:AccountDomain")]
+    [InlineData("DemoProvisioning:DemoUsersGroupId")]
+    [InlineData("DemoProvisioning:Licenses:PowerAppsPlan2TrialSkuId")]
+    [InlineData("DemoProvisioning:Licenses:FabricFreeSkuId")]
+    [InlineData("DemoProvisioning:Licenses:PowerAutomateFreeSkuId")]
+    [InlineData("DemoProvisioning:AdminNotificationEmails:0")]
+    public void IsDemoProvisioningEnabled_AnyMissingOrBlankRequiredKey_DisablesTheFeature_NotTheHost(string missing)
+    {
+        // A PARTIAL set would make DemoExpirationService's options read throw at host start. It fails closed instead.
+        var withoutKey = FullSet().Where(v => v.Key != missing).ToArray();
+        var blank = FullSet().Select(v => v.Key == missing ? (v.Key, (string?)"  ") : v).ToArray();
+
+        RegistrationModule.IsDemoProvisioningEnabled(Config(withoutKey)).Should().BeFalse();
+        RegistrationModule.IsDemoProvisioningEnabled(Config(blank)).Should().BeFalse();
+
+        var services = new ServiceCollection();
+        services.AddRegistrationModule(Config(withoutKey));
+        services.Should().NotContain(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DemoExpirationService));
     }
 
     [Fact]
@@ -78,7 +105,7 @@ public class RegistrationModuleGateTests
     {
         var services = new ServiceCollection();
 
-        services.AddRegistrationModule(Config(("DemoProvisioning:AccountDomain", "demo.spaarke.com")));
+        services.AddRegistrationModule(Config(FullSet()));
 
         services.Should().Contain(d => d.ServiceType == typeof(GraphUserService));
         services.Should().Contain(d => d.ServiceType == typeof(DemoProvisioningService));

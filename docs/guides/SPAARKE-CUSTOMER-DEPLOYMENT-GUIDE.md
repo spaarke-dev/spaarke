@@ -1268,12 +1268,17 @@ live evidence: `projects/customer-provisioning-orchestration-r1/notes/t261-stamp
   in the tenant.
 
 The stamp needs no directory role: the demo self-service registration feature (the BFF's only app-only `/users` and
-`/groups` writer) is registered only where `DemoProvisioning:AccountDomain` is set — Spaarke's platform BFF, never a
+`/groups` writer) is registered only where the COMPLETE `DemoProvisioning` settings are present (AccountDomain, DemoUsersGroupId, the three
+license SKUs, at least one AdminNotificationEmails — a partial set disables it rather than crashing start) — Spaarke's platform BFF, never a
 stamp — and H11's invitations run as the L2 Worker.
 
 **T2 verification**: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1.
 **T3 verification**: UAMI SP `appRoleAssignments` on Microsoft Graph holds exactly `FileStorageContainer.Selected` —
-nothing else (`h10-trap-T3-unexpected-roles` QuarantineRequired; H13 T3 re-checks).
+nothing else (H10 re-reads with backoff — Graph is eventually consistent; extras still listed after its own removal →
+Resumable `h10-graph-role-extras-unverified`; extras it did not see → QuarantineRequired `h10-trap-T3-unexpected-roles`;
+H13 T3 re-checks). H10's idempotency key carries a fingerprint of the Entra role set, so a re-dispatch after a catalog
+change re-runs the reconcile. A stamp whose H10 completed before task 261 is cleaned with
+`scripts/provisioning/Remove-StampGraphExtraRoles.ps1` (dry run by default).
 
 **H11** provisions the customer's users (T232, owner D2 — Model 1 users are **B2B guests in Spaarke's tenant**, and a
 Model 1 run takes only `B2BGuest`):

@@ -60,7 +60,7 @@ Learn URL form: `https://learn.microsoft.com/en-us/graph/api/<slug>?view=graph-r
 
 Exchange RBAC for Applications grants are additive to Entra grants: "the union of an unscoped Mail.Read grant from Microsoft Entra and a resource-scoped Mail.Read grant in Application RBAC results in no effective resource scoping" — [application-rbac](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac). Hence the mailbox roles must never be Entra grants on a stamp (T251, H13 T3).
 
-### 3.3 Directory — demo self-service registration only (gate: `DemoProvisioning:AccountDomain`, task 261)
+### 3.3 Directory — demo self-service registration only (gate: the complete `DemoProvisioning` settings, task 261)
 
 | Endpoint (beta) | Method | Caller file:line | Feature / route | Least-privileged app role (Learn) | Verdict |
 |---|---|---|---|---|---|
@@ -70,7 +70,7 @@ Exchange RBAC for Applications grants are additive to Entra grants: "the union o
 | `/groups/{gid}/members/$ref`, `/groups/{gid}/members?$filter`, `…/members/{id}/$ref` | POST / GET / DELETE | `GraphUserService.cs:268,384,301` | approve; `DemoExpirationService` (daily) | GroupMember.ReadWrite.All — [group-post-members](https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0) | not on stamps |
 | `/users/{id}` `{accountEnabled:false}` (+GET) | PATCH / GET | `GraphUserService.cs:332,320` | `DemoExpirationService` | User.EnableDisableAccount.All + User.Read.All — [user-update](https://learn.microsoft.com/en-us/graph/api/user-update?view=graph-rest-1.0) | not on stamps |
 
-Before task 261 these were registered and mapped on every stamp (`Program.cs:133`, `EndpointMappingExtensions.cs`), with no stamp setting for `DemoProvisioning:*` — so the feature could not work on a stamp, and its hosted service `DemoExpirationService` reads `IOptions<DemoProvisioningOptions>.Value` (`[Required]` keys) in its constructor, which throws at host start (§8 F1, fixed). `RegistrationModule.IsDemoProvisioningEnabled` now registers `GraphUserService`, `DemoProvisioningService`, `EmailDomainValidator` and `DemoExpirationService`, and maps `/api/registration/*`, only where `DemoProvisioning:AccountDomain` is set — Spaarke's platform BFF (`spaarke-bff-dev` has it; no stamp channel writes it, which the ArchTest checks).
+Before task 261 these were registered and mapped on every stamp (`Program.cs:133`, `EndpointMappingExtensions.cs`), with no stamp setting for `DemoProvisioning:*` — so the feature could not work on a stamp, and its hosted service `DemoExpirationService` reads `IOptions<DemoProvisioningOptions>.Value` (`[Required]` keys) in its constructor, which throws at host start (§8 F1, fixed). `RegistrationModule.IsDemoProvisioningEnabled` (binds the section and validates every `[Required]` key, license SKUs included; a PARTIAL set disables the feature, fail-closed, instead of crashing host start) now registers `GraphUserService`, `DemoProvisioningService`, `EmailDomainValidator` and `DemoExpirationService`, and maps `/api/registration/*`, only where the full set is present — Spaarke's platform BFF (`spaarke-bff-dev` has all six keys, read live 2026-10-09; no stamp channel writes it, which the ArchTest checks).
 
 ### 3.4 Security — platform operator only (gate: `SpeAdmin:PlatformOperatorEnvironment`)
 
@@ -183,6 +183,15 @@ So on the live tenant today **H10 removes nothing**: no stamp identity exists. T
 - L2: `L2GraphAppRolesRegistry.cs`, `IGraphAppRolesRegistry.cs`, `IGraphAppRoleGranter.cs` (`RemoveUnexpectedRolesAsync`), `GraphRestAppRoleGranter.cs`, `IGraphAppRoleParityVerifier.cs` (`FindUnexpectedRolesAsync`), `GraphRestAppRoleParityVerifier.cs`, new `GraphAppRoleRest.cs` (shared REST, now paged), `H10DataverseAppUserGraphParityHandler.cs` (steps 12b/13b), `H10Rejections.cs` (3 codes), `E2EAcceptance/GraphAppRoleParityT3Probe.cs`, new `Handlers/ControlPlaneGraphAppRoles.cs`.
 - Scripts: `Grant-GraphAppRoles.ps1`, `provisioning/Grant-ControlPlaneIdentity.ps1`, `provisioning-prereqs/prereqs.yaml` (PRQ-E-07, manifest 11).
 - Tests: `StampGraphAppRoleEvidenceTests` (ArchTests), `RegistrationModuleGateTests` (BFF unit), `GraphRestAppRoleReconcileTests` + H10 / T3 / H14a / T4 test updates (ControlPlane), nightly parity test, `Prereqs-Recipes.Tests.ps1`.
+
+## 10.1 Review fixes (verifier pass A, 2026-10-09)
+
+- **Replication lag (F1).** H10 re-reads "nothing extra" up to 5 times with a growing delay (`ExtrasRecheckAttempts` / `ExtrasRecheckDelay`). Extras still listed after the call itself removed roles → Resumable `h10-graph-role-extras-unverified` (a healthy stamp is never quarantined for lag); extras the removal pass did not see → QuarantineRequired.
+- **Stamps completed before T261 (F2).** The H10 idempotency key is now `appuser-{customerId}-g{fingerprint of the Entra role ids}`: any re-dispatch after a catalog change re-runs the (idempotent) reconcile. The reconciler does not re-dispatch a run already past H10, so for such a stamp use `scripts/provisioning/Remove-StampGraphExtraRoles.ps1` (dry run default, `-Apply` deletes; same target check as H10: appId = the stamp's client id, type ManagedIdentity). No stamp exists yet (§9), so this path is for the future only.
+- **Gate on the full required set (F2)**, T3 probe text and an explicit `None`-only pass (F2), fail-closed REST: a 200 without a `value` array, a 51st page, or a `@odata.nextLink` off graph.microsoft.com stops the decision (K1); principal ids are URL-escaped.
+- `Grant-GraphAppRoles.ps1` refuses an `mi-spaarke-*` identity unless `-AllowStampPrincipal` (K2).
+- **K3 — the old L2 roles stay until ownership is proven.** Do NOT remove the Worker's old roles (`Directory.ReadWrite.All`, `User.ReadWrite.All`, …) until the live check "an app-only `POST /applications` under `Application.ReadWrite.OwnedBy` leaves the Worker as owner" (§11 step 4) has passed; removing first could leave H3 with no working path. Same rule in the POML.
+- **K4 — app-only SPE search.** `POST /api/spe/search/items` cannot work with any app role (Learn: delegated only); T261 does not hide that: it is filed as ISS-018 F2 / #1543 for the SPE admin owner (sdap-SPE-admin-app-r2). Dropping `Files.Read.All` removes only the ability to search all of Spaarke's SharePoint, not a working feature (no call in 30 days of dev telemetry).
 
 ## 11. Live steps owed (each needs the owner's OK)
 

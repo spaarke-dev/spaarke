@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Registration;
 using Sprk.Bff.Api.Services.Registration.CommunicationProvisioning;
@@ -12,24 +13,41 @@ public static class RegistrationModule
 {
     /// <summary>
     /// The demo self-service registration feature (approve a demo request → create a Spaarke-tenant workforce user,
-    /// license it, add it to the demo group; expire it daily) runs only where <c>DemoProvisioning:AccountDomain</c> is
-    /// configured — Spaarke's own platform/demo BFF. No stamp channel writes <c>DemoProvisioning:*</c> (task 261 test
-    /// <c>StampGraphAppRoleEvidenceTests</c>), so on every customer stamp the feature is not registered and its
-    /// <c>/api/registration/*</c> routes are not mapped.
+    /// license it, add it to the demo group; expire it daily) runs only where the <b>complete</b>
+    /// <c>DemoProvisioning</c> settings are present — Spaarke's own platform/demo BFF. No stamp channel writes
+    /// <c>DemoProvisioning:*</c> (task 261 test <c>StampGraphAppRoleEvidenceTests</c>), so on every customer stamp the
+    /// feature is not registered and its <c>/api/registration/*</c> routes are not mapped.
     /// </summary>
     /// <remarks>
     /// Task 261 (G31): this is what keeps directory WRITE roles (<c>User.ReadWrite.All</c>, <c>GroupMember.ReadWrite.All</c>,
     /// <c>Directory.ReadWrite.All</c>) off stamp identities — the feature is the BFF's only app-only caller of
     /// <c>/users</c> and <c>/groups</c>. It also stops a stamp from failing at start: <see cref="DemoExpirationService"/>
-    /// (a hosted service) reads <c>IOptions&lt;DemoProvisioningOptions&gt;.Value</c> in its constructor, and the
-    /// options' <c>[Required]</c> keys are absent on a stamp. The feature's own required key is the switch, so the
-    /// platform BFF that has it configured keeps working with no setting change.
+    /// (a hosted service) reads <c>IOptions&lt;DemoProvisioningOptions&gt;.Value</c> in its constructor, which throws
+    /// unless every <c>[Required]</c> key is present (<c>AccountDomain</c>, <c>DemoUsersGroupId</c>, the license SKUs,
+    /// at least one <c>AdminNotificationEmails</c>). The gate therefore requires the whole set — the section bound and
+    /// validated with DataAnnotations, license SKUs included — not one key; a PARTIAL set disables the feature (fails
+    /// closed: no directory-writing service is registered) instead of crashing host start. The platform BFF, which has
+    /// the full set, keeps working with no setting change.
     /// </remarks>
     public static bool IsDemoProvisioningEnabled(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        return !string.IsNullOrWhiteSpace(configuration[$"{DemoProvisioningOptions.SectionName}:AccountDomain"]);
+        var section = configuration.GetSection(DemoProvisioningOptions.SectionName);
+        if (!section.Exists())
+        {
+            return false;
+        }
+        var options = section.Get<DemoProvisioningOptions>();
+        if (options is null)
+        {
+            return false;
+        }
+        return IsValid(options) && IsValid(options.Licenses)
+            && options.AdminNotificationEmails.Any(e => !string.IsNullOrWhiteSpace(e));   // [MinLength(1)] accepts a blank element
     }
+
+    private static bool IsValid(object instance)
+        => Validator.TryValidateObject(instance, new ValidationContext(instance), new List<ValidationResult>(), validateAllProperties: true);
 
     public static IServiceCollection AddRegistrationModule(this IServiceCollection services, IConfiguration configuration)
     {

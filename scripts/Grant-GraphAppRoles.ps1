@@ -129,7 +129,13 @@ param(
 
     [string]$GraphAppRolesPath,
 
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    # Task 261: a customer STAMP identity (mi-spaarke-{customerId}-{env}) is reconciled by H10 — it holds exactly
+    # FileStorageContainer.Selected in Entra and H10 removes everything else. This script is add-only and its default
+    # catalog carries the mailbox roles that are Exchange-scoped on stamps, so it refuses a stamp identity unless the
+    # operator says so explicitly.
+    [switch]$AllowStampPrincipal
 )
 
 $ErrorActionPreference = "Stop"
@@ -442,6 +448,11 @@ try {
     exit 3
 }
 Write-Success "UAMI SP: '$($uamiSp.displayName)' (type=$($uamiSp.servicePrincipalType), appId=$($uamiSp.appId))"
+
+if ($uamiSp.displayName -like 'mi-spaarke-*' -and -not $AllowStampPrincipal) {
+    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity. H10 owns it (grants FileStorageContainer.Selected, removes every other Graph role); this script would ADD roles, including mailbox roles that must stay Exchange-scoped (task 261). Re-run with -AllowStampPrincipal only if that is deliberate."
+    exit 6
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 4 — Read current app-role assignments on UAMI SP (Graph-resource-scoped)

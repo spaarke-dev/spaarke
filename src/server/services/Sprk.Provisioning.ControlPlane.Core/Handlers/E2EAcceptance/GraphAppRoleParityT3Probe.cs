@@ -5,8 +5,8 @@
 // -- REAL T3 probe replacing the single-outcome InfraFault branch in
 // PlaceholderTrapVerifier for TrapKind.T3GraphAppRoleParity. Per DS-4 s6 T3
 // row: "Graph /servicePrincipals/{id}/appRoleAssignments vs GraphAppRoles.cs
-// (15 GUIDs must be present -- task 005 populated 14; task 144 added
-// User.Invite.All)".
+// (every catalog GUID must be present -- the stamp set since task 261; and, since
+// task 261, no other Graph app role)".
 //
 // STANDALONE CLASS (deliberately no shared interface dependency):
 //   6 sibling Wave-G-7 trap tasks (171 T1, 177 T2, 178 T3 [this task], 180 T4,
@@ -82,8 +82,8 @@
 //       instead of throwing).
 //     * NULL-AppRoleId escalation -- IGraphAppRolesRegistry has one or more
 //       entries with null/whitespace AppRoleId. This mirrors H10's own
-//       s8 escalation gate: since tasks 005/144 populated all 15 GUIDs, a
-//       null here means the catalog was silently regressed. The probe REFUSES
+//       s8 escalation gate: every catalog GUID is populated (re-read live
+//       2026-10-09, task 261), so a null here means the catalog was silently regressed. The probe REFUSES
 //       to verdict because a null-AppRoleId entry cannot be verified as
 //       "granted" (the verifier compares by AppRoleId). This is the "wrong-
 //       catalog regression" belt-and-braces for task 067's nightly parity
@@ -281,8 +281,8 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
             var diagnostic =
                 $"T3 probe cannot verdict -- IGraphAppRolesRegistry has {nullGuidRoles.Count} of " +
                 $"{allRoles.Count} entries with null/whitespace AppRoleId " +
-                $"({string.Join(", ", nullGuidRoles)}). Post-tasks-005/144, the catalog is fully " +
-                "populated (15/15 GUIDs live-verified against tenant a221a95e-...) -- a null here " +
+                $"({string.Join(", ", nullGuidRoles)}). The catalog is fully populated (every GUID " +
+                "live-verified against tenant a221a95e-..., task 261) -- a null here " +
                 "means the catalog was silently regressed. Cannot verdict: an entry without an " +
                 "AppRoleId cannot be compared to the UAMI's granted appRoleAssignments. Operator: " +
                 "restore the missing GUIDs from git history OR re-run live `az ad sp show " +
@@ -468,11 +468,16 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                             ? $" Mailbox role(s) {string.Join(", ", mailboxInEntra)} are granted through Exchange, scoped to the " +
                               "customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope."
                             : string.Empty) +
-                        " Resume H10 in a new run (it removes them), or remove the Entra appRoleAssignment(s) (Graph DELETE " +
+                        " Re-run H10 (it removes them; a changed catalog re-runs a completed H10), run scripts/provisioning/Remove-StampGraphExtraRoles.ps1, or remove the Entra appRoleAssignment(s) (Graph DELETE " +
                         $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — and find whoever granted them.";
                     _logger.LogWarning("T3 probe FAILED (roles outside the stamp set): {Diagnostic}", diagnostic);
                     return new TrapVerificationOutcome.Failed(Kind, diagnostic);
                 }
+                case GraphAppRoleExtrasResult.None:
+                    break;   // the only subtype that lets T3 pass
+                default:
+                    return new TrapVerificationOutcome.InfraFault(Kind,
+                        "T3 verdict deferred: the extras check returned no recognisable result (null or an unknown subtype).");
             }
         }
 
