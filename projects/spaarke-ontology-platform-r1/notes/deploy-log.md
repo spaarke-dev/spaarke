@@ -118,3 +118,23 @@ Owner browser checks (dev external SPA, test data prefixed zz-122-):
 - Edited 2 views + 2 chart rows (before/after in notes/129-finalduedate-definitions.md); one PublishXml (entity sprk_event). Matter Tasks cardDescription fixed to `{overdue} overdue`.
 - VisualHost: `pac solution import` without --publish-changes succeeded; served bundle only flipped after PublishXml of the two cc_Spaarke.Visuals.VisualHost web resources (bundle.js now 783,088 B, has 1.4.39). `customcontrols.version` still 1.4.38 (no scoped publish element for custom controls). No PublishAllXml.
 - Stale-bundle guard: PR #1463 (f173e1b8f), not merged. C:\wt129 removal started.
+
+## 2026-10-09 - D-89: task 120 (ISS-018) live steps, spaarkedev1 only - STOPPED at step 5 (two new defects)
+
+| Step | Result (UTC) |
+|---|---|
+| Pre-check | dev BFF ran `d7fdcafc3` (ancestor of master; 31 commits behind). Not newer; proceed. |
+| 1 BFF | Fresh detached worktree `C:\wt120d` at origin/master `e9f08b764` (PR #1461 + ADR-034 97d6e0be3). `pwsh scripts/Deploy-BffApi.ps1` 02:24:04-02:25:53Z. Package 36.33 MB; 4 critical files SHA-256 verified; /healthz Healthy; CORS OK. Deployed DLL InformationalVersion `1.0.0+e9f08b76490ac6527489c42e49c76fd4f815d669`; /healthz/dataverse 200. Console untouched (#1456 auto-deploy). |
+| 2 D-80 audit | org isauditenabled=True (unchanged). `sprk_playbooknode` IsAuditEnabled False -> True (PUT 02:27:06Z), PublishXml for sprk_playbooknode ONLY 02:27:15Z, read back True. Attributes configjson/dependsonjson/executortype/isactive/name/outputvariable already audit-enabled. |
+| 3 Sync (4) | `Deploy-NotificationPlaybooks.ps1 -Only 'Tasks Overdue','Tasks Due Soon','New Work Assignments','Matter/Project Activity Summary'`: -DryRun 02:27:29Z (4/4 OK), real 02:28:14-02:28:32Z, 4/4 OK, every node + playbook row read back equal to the definition. Records: `notes/task-120-records/*.before.json` / `*.after.json`. Docs/Emails/Events NOT synced (uac-r2 #1355). |
+| 4 Alert | `az deployment group create -g spe-infrastructure-westus2 -n iss018-notification-alert ...` first attempt failed (Git Bash rewrote `/subscriptions/...` into a Windows path; nothing created); re-run with MSYS_NO_PATHCONV=1 02:29:47Z Succeeded. Rule `notification-playbook-total-failure-dev`: enabled, Sev 1, every 15 min / 1 h window, scope spe-insights-dev-67e2xz, action group ag-spaarke-oncall-dev (enabled, dev@spaarke.com). |
+| 5 Live proof | zz-120 rows 02:32:31-02:33:05Z: matter fc04e4a8 (created by operator 1d02f31c, then owner = team "Spaarke" 09fbf21c), Task events 428e45bd (due 2026-10-06), 448e45bd (due 2026-10-10), work assignment 01af6abc, all team-owned -> only the fetchInGuids membership branch can match. Cleared sprk_lastrundate on the 4 synced playbooks (before: Overdue/Due Soon 2026-10-08 18:00:39/18:00:26, WA/MA 11:00:27/11:00:19 as returned by the Web API); triggered `POST /api/admin/jobs/notification-playbook-scheduler/trigger` 02:33:42Z, run 4d79e284 (correlation 51190a4bfc7c4789b3230ad060e4d268) completed 02:34:30Z **Failed**. **STOPPED.** |
+| 6 Live test | Not re-run (stopped at step 5). |
+
+Run 4d79e284 results: Matter Activity Failed 0/15; Tasks Overdue Failed 0/15; Tasks Due Soon PartialFailure 1/15; New Work Assignments PartialFailure 1/15; Emails/Docs/Events Skipped (not due). D-78 worked: Error traces "failed for every user" for MA and Overdue (02:33:55Z, 02:34:19Z), lastrundate not advanced, job run Failed; the alert KQL returns both rows (fires at next evaluation).
+
+Per-user errors (App Insights, run window): 14 users x 4 playbooks "Create Notification ... Notification body is required" (Condition false but Create still runs); 1 user (operator) on Overdue/MA "priority 300000000 / 100000000 outside the valid range. Accepted 200000000, 200000001".
+
+Delivered (appnotification, all to operator 1d02f31c only): Due Soon 7 (6 real + "Due soon: zz-120-due-soon task", regardingId 448e45bd, viaMatter.name "zz-120-matter (ISS-018 live proof)"), WA 1 ("New assignment: zz-120-work assignment", regardingId 01af6abc, viaMatter.name zz-120-matter). No zz-120 notification for any other user. Overdue and MA zz-120 not delivered (priority defect).
+
+Cleanup 02:36Z: deleted 2 zz-120 notifications, 2 events, 1 work assignment, 1 matter; confirmed 0 zz-120 matters/events/work assignments/notifications. The 6 real Due Soon notifications stay (product output).

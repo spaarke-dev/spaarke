@@ -34,5 +34,5 @@ In-app the parent-document `dialogCloseIconButton` click and `window.close()` ne
 
 ## Measurements
 
-- **SpaarkeAi bundle** (`npm run build`, clean `.vite`): 5,928,045 bytes on master `65177354f` -> 6,068,818 bytes; **+140,773 bytes (+2.4%)** (before the review fixes; re-measured below if changed). The Upload, Find Similar and Layout wizard code is now bundled into the Console (Summarize Files was already in).
+- **SpaarkeAi bundle** (`npm run build`, clean `.vite`): 5,928,045 bytes on master `65177354f` -> 6,077,355 bytes; **+149,310 bytes (+2.5%)**. The Upload, Find Similar and Layout wizard code is now bundled into the Console (Summarize Files was already in).
 - Not run: the POML `<ui-tests>` (live open of each wizard, dark mode). Task 114 deploys.

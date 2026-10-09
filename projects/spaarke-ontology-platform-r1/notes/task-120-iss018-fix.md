@@ -64,3 +64,14 @@ with:
 > - **MUST NOT** (corrected 2026-10-08, ISS-018 #1452) put a membership id list in the `value` attribute of a FetchXML list operator (`in`, `not-in`, `between`, …), e.g. `value="{{joinIds myMatters.ids}}"`: Dataverse reads list values only from `<value>` children, so the list is empty and the query fails for every user. `fetchInGuids` writes one `<value>` per GUID and, for an empty or invalid list, the impossible match `Guid.Empty` (selects nothing). `FetchXmlShapeValidator` enforces this in the QueryDataverse executor, deploy lint C and the repo regression test.
 
 Suggested FAILURE-MODES entry (AP-16): "A FetchXML list operator with a `value` attribute: Dataverse ignores the attribute and reads values only from `<value>` children, so `in value="a,b"` is an empty list and fails ('ConditionOperator.In is empty'); a zero-child `in` fails too. No test executed a real list condition and the one simulator split the commas itself — 89 days of silent failure (ISS-018)."
+
+## 6. D-89 live run (2026-10-09, spaarkedev1) - stopped at step 5
+
+Full log: `notes/deploy-log.md` "D-89". Steps 1-4 done (BFF e9f08b764 live; sprk_playbooknode audit on; 4 playbooks synced, records in `notes/task-120-records/`; alert rule live). Step 5 stopped: run 4d79e284 Failed - MA 0/15, Overdue 0/15, Due Soon 1/15, WA 1/15.
+
+New defects (never reached before ISS-018; fix-now, need a code PR + JSON change):
+1. **False Condition with no falseBranch does not skip its trueBranch node** (`PlaybookOrchestrationService` branch gate, ~line 993: `TryExtractSelectedBranch` returns null when the condition is false and `falseBranch` is unset, and the loop `continue`s, so the gate is not counted). CreateNotification then runs with an empty body -> "Notification body is required" for every user with nothing to notify. Fix: count a ConditionResult dependency as a branching gate even when SelectedBranch is null. Test: false condition, no falseBranch -> downstream skipped.
+2. **appnotification priority**: accepted values are 200000000 (Normal) and 200000001 (High). Repo JSONs use 300000000 (Overdue) and 100000000 (MA, Emails, Events) -> create fails. Fix in the 7 JSONs (Overdue 200000001; others 200000000) + a lint/validation check.
+3. Cosmetic: DateOnly due dates render as "2026-10-10T00:00:00.0000000" in notification bodies (QueryDataverse converts DateTime with "o").
+4. Looked wrong (K, for uac-r2): viaMatter.memberships for the team-owned zz-120 matter listed role "ownerid" (likely the async membership junction lagging the owner change).
+5. Docs/Emails/Events (not synced) under the NEW BFF: Emails/Events will fail loudly at their next due tick (priority / null left / body) -> alert; Docs may deliver notifications with a blank matter name in the body. Their next ticks: Emails ~07:00Z, Docs/Events ~14:00Z Oct 9.
