@@ -573,6 +573,7 @@
             <Handler functionName="Spaarke.SmartTodo.RegardingRecordNumberHyperlink.onLoad" libraryName="sprk_regardingrecordnumber_hyperlink" handlerUniqueId="{2fb8a5c1-e246-4bc9-ae19-b427899df1f4}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{c2f7b3d5-3333-4b3c-ad4e-1b2c3d4e5f03}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.SmartTodo.ScoreOnChange.onLoad" libraryName="sprk_todo_score_onchange" handlerUniqueId="{c2f7b3d5-4444-4b3c-ad4e-1b2c3d4e5f04}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.AccessPermissionInherited.onLoad" libraryName="sprk_accesspermission_inherited" handlerUniqueId="{39238844-e9e5-0657-d31e-35e66f9f3f62}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>
@@ -581,6 +582,7 @@
         <Library name="sprk_todo_regarding_presave" libraryUniqueId="{b1e6a2c4-1111-4a2b-9c3d-0a1b2c3d4e01}" />
         <Library name="sprk_todo_score_onchange" libraryUniqueId="{b1e6a2c4-2222-4a2b-9c3d-0a1b2c3d4e02}" />
         <Library name="sprk_todo_hide_tabnav" libraryUniqueId="{3dfe9d9e-ba65-422b-9fa2-aa8fe6f9833f}" />
+        <Library name="sprk_accesspermission_inherited" libraryUniqueId="{0c02751b-ab8d-f8ca-8fe8-460dd2868e14}" />
       </formLibraries>
     </form>
     <IsCustomizable>1</IsCustomizable>

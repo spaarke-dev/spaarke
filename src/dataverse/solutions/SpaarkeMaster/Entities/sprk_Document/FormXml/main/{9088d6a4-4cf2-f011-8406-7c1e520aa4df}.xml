@@ -14,6 +14,21 @@
           <columns>
             <column width="66%">
               <sections>
+                <section name="sprk_access_permission" id="21b09808-ffea-33f2-6822-c9c85808409b" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="ACCESS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{126f4315-2ce8-fa53-5314-7ac5daef4eb8}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Access Permission" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_accesspermission" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_accesspermission" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
                 <section name="Overview_section_regardingrecord" id="957c0fd8-a7c9-4874-99e7-6d7229875f22" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115" visible="false">
                   <labels>
                     <label description="REGARDING RECORD" languagecode="1033" />
@@ -598,6 +613,16 @@
           </NavBarByRelationshipItem>
         </NavBar>
       </Navigation>
+      <events>
+        <event name="onload" application="false" active="false">
+          <Handlers>
+            <Handler functionName="Spaarke.AccessPermissionInherited.onLoad" libraryName="sprk_accesspermission_inherited" handlerUniqueId="{bab90fce-bdd9-9734-c349-fe514971a183}" enabled="true" parameters="" passExecutionContext="true" />
+          </Handlers>
+        </event>
+      </events>
+      <formLibraries>
+        <Library name="sprk_accesspermission_inherited" libraryUniqueId="{140e954e-627f-bb48-2fdd-a8e836093271}" />
+      </formLibraries>
     </form>
     <IsCustomizable>1</IsCustomizable>
     <CanBeDeleted>1</CanBeDeleted>

@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<ImportExportXml version="9.2.26094.133" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26094.133" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26094.00138">
+<ImportExportXml version="9.2.26094.133" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26094.133" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26094.00142">
   <SolutionManifest>
     <UniqueName>SpaarkeMaster</UniqueName>
     <LocalizedNames>
@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Complete Spaarke platform solution - all sprk_ components plus customized standard entities" languagecode="1033" />
     </Descriptions>
-    <Version>1.2.0.0</Version>
+    <Version>1.2.1.0</Version>
     <Managed>2</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
@@ -16,7 +16,7 @@
         <LocalizedName description="Spaarke" languagecode="1033" />
       </LocalizedNames>
       <Descriptions>
-        <Description description="Spaarke Publisher" languagecode="1033" />
+        <Description description="Spaarke Solutions Publisher" languagecode="1033" />
       </Descriptions>
       <EMailAddress xsi:nil="true"></EMailAddress>
       <SupportingWebsiteUrl xsi:nil="true"></SupportingWebsiteUrl>
@@ -41,7 +41,7 @@
           <PostalCode xsi:nil="true"></PostalCode>
           <PostOfficeBox xsi:nil="true"></PostOfficeBox>
           <PrimaryContactName xsi:nil="true"></PrimaryContactName>
-          <ShippingMethodCode>1</ShippingMethodCode>
+          <ShippingMethodCode xsi:nil="true"></ShippingMethodCode>
           <StateOrProvince xsi:nil="true"></StateOrProvince>
           <Telephone1 xsi:nil="true"></Telephone1>
           <Telephone2 xsi:nil="true"></Telephone2>
@@ -69,7 +69,7 @@
           <PostalCode xsi:nil="true"></PostalCode>
           <PostOfficeBox xsi:nil="true"></PostOfficeBox>
           <PrimaryContactName xsi:nil="true"></PrimaryContactName>
-          <ShippingMethodCode>1</ShippingMethodCode>
+          <ShippingMethodCode xsi:nil="true"></ShippingMethodCode>
           <StateOrProvince xsi:nil="true"></StateOrProvince>
           <Telephone1 xsi:nil="true"></Telephone1>
           <Telephone2 xsi:nil="true"></Telephone2>
@@ -361,6 +361,7 @@
       <RootComponent type="61" schemaName="sprk_/icons/status/warning.svg" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/js/registrationribbon.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/access_ribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/accessstatus_banner.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/assignedaccess_postsave.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/bff_auth.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/communications_grid_onload.js" behavior="0" />
@@ -368,6 +369,7 @@
       <RootComponent type="61" schemaName="sprk_/scripts/matter_insight_onload.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/noaccessentry_postsave.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/secure_child_ribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_accesspermission_inherited" behavior="0" />
       <RootComponent type="61" schemaName="sprk_aichatcontextmap_ribbon.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_alldocuments" behavior="0" />
       <RootComponent type="61" schemaName="sprk_analysis_commands.js" behavior="0" />
@@ -379,7 +381,6 @@
       <RootComponent type="61" schemaName="sprk_communicationconversationpage.html" behavior="0" />
       <RootComponent type="61" schemaName="sprk_communicationreconciliation" behavior="0" />
       <RootComponent type="61" schemaName="sprk_communicationspage.html" behavior="0" />
-      <RootComponent type="61" schemaName="sprk_corporateworkspace" behavior="0" />
       <RootComponent type="61" schemaName="sprk_createeventwizard" behavior="0" />
       <RootComponent type="61" schemaName="sprk_createinvoicewizard" behavior="0" />
       <RootComponent type="61" schemaName="sprk_creatematterwizard" behavior="0" />
