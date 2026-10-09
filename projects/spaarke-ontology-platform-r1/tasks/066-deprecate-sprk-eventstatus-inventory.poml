@@ -4,7 +4,7 @@
     <title>Deprecate sprk_eventstatus: inventory its readers and writers, then move them to statuscode</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>098 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches event status reads across the BFF and clients; the column itself is removed only with owner sign-off.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,8 @@
   </acceptance-criteria>
 
   <notes>Input from task 060 (2026-10-08): sprk_eventstatus disagrees with statuscode on many sprk_event rows in spaarkedev1 (e.g. a0cb27af-992e-f111-88b5-7ced8d1dc988 is Completed in sprk_eventstatus but Draft in statuscode; most Draft rows have it null); not fixed in 060. spec.md FR-62; D-28.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1528 merged into docs/ontology-platform-design (10afd29a3) after independent review + 1 fix round. Inventory in notes/066-eventstatus-inventory.md; BFF create-task apply/ad-hoc/undo, event ribbon commands, Events page, calendar chip, side pane and reconcile tab moved to statuscode (+ statecode pairing); request field renamed status -> statusCode with 422 STATUS_FIELD_RETIRED for the old field. Column, form and views untouched. DEPLOY: BFF FIRST, then the Console (AI.Widgets) + CommunicationReconciliation bundles, ribbon web resource (from src/solutions/EventCommands), EventsPage, EventDetailSidePane. Column removal prerequisites + the six views / grid configs / charts / personal view / Event modal form fix: F-36 (post-project). D-106 items F-33..F-38.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
