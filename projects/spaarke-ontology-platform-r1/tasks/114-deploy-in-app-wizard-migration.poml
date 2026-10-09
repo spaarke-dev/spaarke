@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy the in-app wizard migration and verify on dev</title>
     <phase>5b Modal system (D-26)</phase>
-    <gate>111, 113, 121 complete</gate>
+    <gate>111, 113 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment of the Console and Legal Workspace code pages to a shared environment.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deployment to a shared environment; never concurrent with another deploy.</parallel-reason>
-    <deps>111, 113, 121</deps>
+    <deps>111, 113</deps>
     <tags>deploy,frontend,modal</tags>
     <estimated-effort>0.5-1 day</estimated-effort>
   </metadata>
@@ -90,7 +90,8 @@
     <criterion testable="true">Negative: verification was not done against a mock; the branch was merged up to master first; the environment is named in the log.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-60; D-26.</notes>
+  <notes>spec.md FR-60; D-26.
+2026-10-09: dependency on 121 (LegalWorkspace deploy path) removed — 121 deferred by D-106; 114 runs as part of the D-112 end-to-end dev deploy.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
