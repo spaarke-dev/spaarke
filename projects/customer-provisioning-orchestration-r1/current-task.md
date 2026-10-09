@@ -1,70 +1,50 @@
 # Current Task State — `customer-provisioning-orchestration-r1`
 
-> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas". Decisions → `notes/decisions.md`. Session narrative → commit messages. History: git + `notes/handoff-history/` (do not load on recovery).
+> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas". Decisions → `notes/model1-dedicated-remediation-plan.md` D-table (D30/D31 = 2026-10-09). Session narrative → commit messages.
 
-> **Last Updated**: 2026-10-09 SESSION 45 end (context-handoff before /compact). Two parallel waves done and on the branch; **PR #1502 open, every check green (44 pass / 3 skip, CLEAN) — waiting for the owner's OK to merge.** Board: 214 of 228 tasks ✅.
+> **Last Updated**: 2026-10-09 SESSION 46. Owner answered the 11 decisions (D31). #1502 merged; SpaarkeMaster 1.2.1.0 published; T252, T257, T259, ISS-015 built + merged on the branch (pushed `531119b3d`+). Next: the single control-plane deploy (after its two prerequisites) and the owner's open answers.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Merge PR #1502** (owner OK needed) → owner-blocked items → **T186** (first live E2E on a NEW environment). |
-| **Status** | waiting on the owner. No agents or background jobs running. |
-| **Next Action** | (1) On owner OK: `gh pr checks 1502` — every check terminal + green (CI head `0e14cc113`); master was 1 commit ahead, trial merge clean → `gh pr merge 1502 --merge`; verify master: grep BFF `.ForApp(` = 31, `dotnet test tests/Spaarke.ArchTests` (build it — ArchTests is not in Spaarke.sln). (2) Push the local checkpoint commit(s) (see Branch). (3) Work the owner decisions below as they arrive. |
-| **Branch** | `work/customer-provisioning-orchestration-r1`. Remote head `0e14cc113` (= PR #1502 head). **This checkpoint is committed LOCALLY only — not pushed, so PR CI is not restarted. Push it after #1502 merges** (or with the next change). |
-| **Main repo** | `C:\code_files\spaarke` master not fast-forwarded: another session's uncommitted researcher-memory edits block it. Leave them; the owner decides. |
+| **Task** | Control-plane redeploy (dev) carrying run guard + ReservedTenants + T252 + ISS-015 + T259 + T257; then T186. |
+| **Status** | waiting on the owner for 5 answers (below). No agents or background jobs running. |
+| **Next Action** | (1) Open a PR work-branch → master (all lanes merged; verified build 0/0, ControlPlane 2636/2637, ArchTests 889) and merge when EVERY check is green. (2) With owner OK per step: create the "Spaarke Copilot Agent" client app (deployment guide §7.12 step 1); run `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1` on the admin env (adds `sprk_bffappid`, `sprk_copilotauthconfigid` — MUST precede the deploy, else H13's registry PATCH fails); set `copilotAgentClientAppId` in the dev bicepparam. (3) `scripts/provisioning/Deploy-ControlPlane.ps1` (dev) from master; post-deploy checks from T252 report: Worker KV refs = only `ExchangeSidecar__SharedSecret`; 4 `*__Credentials__*` settings; `/healthz` 200 both apps; `sprk-controlplane-dev-kv` same 7 secrets, unchanged timestamps; `Seed-PlatformKeyVault.ps1 -DryRun` creates none; `CustomerRunGuard__Enabled=True`; prove a 2nd concurrent run for one customer is refused (ISS-008). |
+| **Branch** | `work/customer-provisioning-orchestration-r1`, pushed. All lane branches merged (worktree-agent-afb0e56…, -a48e19db…, -ae886473…, -a179c693…). |
 
-## ✅ Completed this session (all on the branch, verified)
+## 🔔 Waiting on the owner
 
-- **T253** the L2 Worker runs no shell tool: H4b via ARM SDK (both slots, merge, parity test); H6 org settings via Dataverse Web API, no application installer (PRQ-C-07 retired); H12a/H12b embedded manifests; ArchTest bans `Process.Start` in L2.
-- **T256** H7b Secure Record setup (unit, owner team, Secure Record Owner role in the unit; `sprk_noaccessentry` gate before H9; dry run `secureRecordSetupDryRun`) **+ identity-link profile memberships** (Readers ← default teams; Writers ← H10's two BFF app users).
-- **T258** stamp BFF startup settings (PublicConfig:*, Graph:Scopes, ServiceBus:QueueName via H4b; Onboarding consent callback gated off → 404).
-- **T255 (code)** customer workforce tenant list for every model + H3 `acct` claim; new required L2 setting `ReservedTenants__*` / Bicep `ciamTenantIds`; package rule now includes alternate keys on standard tables.
-- **T206/T207** every prereq recipe exits 1 on failure; skill Step 0.5b `Invoke-PrereqPass`; **new Step 1e-ter** runs the 18 `once_per_customer` checks; PRQ-T-05/T-06 retired.
-- **T208** prereqs validator gates merges via router job `prereqs` (standalone workflow deleted). **T209** done (ruleset 21824191). **T250** superseded (master `bb8ba7251`). **204e** ADR-032 + IOptions-drift ArchTests. Punch list 203b/204a/204f/204g closed.
-- Fixes: H9 dead Deploy-Release scan removed; CA2024; bicep dry-run uses the dev .bicepparam; tier2 Markdown timeout 2→5 min.
-- Branch verification: build 0 errors / 0 warnings; ControlPlane 2532/2533; ArchTests 889; LoadTests 5/5; recipe Pester 39/39; catalog `-Verify` OK; validate.ps1 OK (41 prereqs); BFF publish 38,110,809 B (+218 B vs master).
-- Design notes written for owner review: `notes/t257-copilot-agent-design.md`, `notes/t240d-ciam-external-contacts-design.md`.
+1. **ISS-014 / #1527** — OK to add a read-only BFF endpoint `POST /api/platform/secure-record-isolation-census` behind the existing `KeylessProofAuthorizationFilter` (no new role), so H13 requires `isolated`? (new BFF route + auth → needs explicit OK). Until then T186 runs the census by hand after H11.
+2. **T240d** — does the "yes" override the standing "never touch `spaarkeextid`" rule for spike S1 + §7 one-time steps (SP provisioning, `User.Create` grant, test local account, CIAM app registrations)? Nothing written there until confirmed. T240d step 2 (code) is gated on S1.
+3. **G36** — create a "Spaarke Customers" management group + common policy (tenant-level, owner action), then a small task (constants + PRQ check).
+4. **G31** — task to inventory the Graph calls a customer BFF makes and cut H10's tenant-wide directory WRITE grants to that set.
+5. **T242c demo** — recommendation: rebuild demo as a provisioned stamp (D27) after T186 rather than hand-refresh (hand-refresh needs a new Content Safety resource; demo stays Stopped). Exact hand-refresh commands are in the POML note's source report if the owner prefers. Open: fate of the unmanaged `spaarke-demo` Dataverse env.
+- **T240b** — owner at the keyboard: Business Standard licence for ralph@deweycheatham; word-add-in-r1's diagnostics build installed in Dewey Cheatham (Integrated apps); then Outlook/Word desktop+web sign-in, Diagnostics shows `tid`=Spaarke, `acct`=1. Unblocks T240c.
 
-## 🔔 Owner decisions / live actions waiting (each needs an explicit OK)
+## ✅ Done this session (SESSION 46)
 
-1. **Merge PR #1502.**
-2. **SpaarkeMaster re-export** with the contact alternate key `sprk_ExternalObjectIdUniqueKey` (Assemble → Export from spaarkedev1, then CI publish `publish-dataverse-solutions-manifest.yml` publish=true). Unblocks T255's last item; then remove the `KeyAwaitingExport` pin in `ContactIdentityBindingSchemaPackagedTests`. Without it every external-contact create fails on a new stamp.
-3. **ISS-010 / #1486** (T186 blocker): guests in the root BU read every secure record. Decide the customer business unit placement (recommend H10 creates the unit + app users in it; H11 creates guests in it; H13 runs the isolation census) + one intake value (customer display name). Then build it.
-4. **ISS-008 / #1484**: run guard off — make the L2 UAMI an Application User on the admin environment (`Grant-ControlPlaneIdentity.ps1`), set `customerRunGuardEnabled=true` in the dev bicepparam, redeploy.
-5. **Control-plane redeploy** with `ReservedTenants__*` (`ciamTenantIds` in the bicepparam) — `Deploy-ControlPlane.ps1` refuses the new code without it.
-6. **T240d** design note review (+ spike S1 approval, CIAM-tenant one-time actions, `User.Create` sign-off).
-7. **T257** design note review (7 questions, recommended answers in §4).
-8. **T240b** owner re-test (add-in 1.1.2, Dewey Cheatham guest; Diagnostics shows `acct` 1) → unblocks **T240c**.
-9. **T242c** demo BFF refresh and **T252** control-plane vault sentinels — live, OK per action.
-10. Dewey Cheatham's tenant id (T186 intake `customerWorkforceTenantIds`); the SPE container type id for the T186 stamp.
-11. Still open from before: G36 (management group), G31 (H10 tenant-wide roles) — do NOT act; board Status/Reason mismatch on #438.
+- **#1502** merged (`b35c0a9c2`). **SpaarkeMaster 1.2.1.0**: Assemble (+contact key) → Export → PR #1518 merged → publish dry run + publish=true (run 37969187349); latest.json = 1.2.1.0. **T255 ✅.** Removed component: WebResource `sprk_corporateworkspace` (retired).
+- **ISS-008**: dev bicepparam `customerRunGuardEnabled = true` (UAMI `sprk-controlplane-dev-uami` 965a4a01 already an app user on spaarkedev1 with role "Spaarke Provisioning Registry"). Takes effect at the deploy.
+- **T252** (code): control plane secret-free by default (`requireSecretFreeIdentity=true`, dev explicit); Seed script stops seeding the two sentinels. Deploy changes dev's Worker chain from the (broken, sentinel) ClientSecret to `[ManagedIdentityFederated]`.
+- **ISS-015 / #1524** (found by T252): H3 now keeps a 2nd FIC `spaarke-l2-worker` (subject = L2 Worker UAMI principalId) on each customer BFF app so H6/H7/H7b can sign in. Rollout: for a stamp whose H3 already ran, resume H3 before H6.
+- **T257** (code): Copilot agent template + render script + publish workflow; `copilotAgentClientAppId` Bicep param → H3 pre-authorization; registry columns `sprk_bffappid` (H13 promotes) + `sprk_copilotauthconfigid`; skill 6f gate; scope corrected to `user_impersonation`. Filed ISS-017 / #1523 (unused AgentToken options; BFF owner).
+- **T259** (ISS-010, D30): H10 customer BU (intake `displayName`, now REQUIRED at POST /api/runs) + app users in it; H11 moves guests in before roles; H7 links the customer BU to the container; H7b refuses Secure-Record users / app users outside. #1486 closed; census split to ISS-014.
+- **T242c** step 1 (read-only) recorded in its POML.
 
-## 📋 Remaining tasks (TASK-INDEX)
+## 📋 Remaining tasks
 
-- **Open, owner-gated:** 240b, 240c, 240d, 257, 242c, 252, 255 (export only).
-- **Blocked:** 186 (first live E2E — needs items 2–5 + 10 above and ISS-010 built), 162, 089, 212, 213 (historical gates folded into 186).
-- **Post-186:** 203d. **Wrap-up:** 090 (`/test-diet`, lessons learned, archive).
-- **To build after decisions:** ISS-010 customer BU (new task), T240c directory endpoint, T240d per the accepted design, T257 per the accepted design.
+- **Owner-gated:** 240b, 240c, 240d, 242c, ISS-014 build. **T257 live steps** (client app, schema columns, bicepparam, publish template, per-customer auth config, Dewey live test).
+- **T186** (first live E2E, mock customer homed in Dewey Cheatham `bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b`; container type = dev `fb3817a8-…` "Spaarke Model 1", already in constants). Needs: the deploy above; census by hand after H11 (until ISS-014); intake `displayName`.
+- **Post-186:** 203d. **Wrap-up:** 090.
 
-## 🐞 Filed defects (open)
+## 🐞 Open defects
 
-#1484 ISS-008 run guard · #1485 ISS-009 E11 bind-by-email (UAC-r2; before CIAM on stamps) · #1486 ISS-010 guests/secure records (before T186) · #1487 ISS-011 BFF gate asymmetries (latent) · #1499 ISS-012 Graph:Scopes unread (owner: drop validator?) · #1500 ISS-013 consent callback (Model 2) · #1504 office server tests near 20-min cap (word-add-in-r1) · #1432 ISS-006 RAG Dedicated · #1376 ISS-003 · #1377 ISS-004.
-
-## Cross-project
-
-- **UAC-r2**: #1364 confirmation (H7b implements the check); E11 fix (#1485); open question — Model 1 sign-in authority: if clients sign customer staff in through Spaarke's tenant, `tid` = Spaarke and the T255 member test denies them (coordinate with external-access-r3). `Set-ContactIdentityBindingSchema.ps1` still defaults to `SpaarkeCore` (theirs).
-- **word-add-in-r1**: first prod deploy waits for T240c; #1504 is theirs.
-- **external-access-r3**: T240d design (link carries only the customer key; no BFF URL in links); Teams client app id.
-
-## T186 (first live E2E) — plan
-
-- Mock customer homed in Dewey Cheatham (paid M365 Business); stamp in Spaarke's tenant (own subscription, Dataverse env `spaarke-{customerId}`, BFF app reg, `sprk-{customerId}-users`). Run 2 (later) adds a second customer tenant for isolation (ISS-003/004).
-- Live checks to watch: H4b ARM write both slots + `/healthz`; H6 org PATCH (`maxuploadfilesize` 25600000) + import with no MissingDependency; H7b dry run then apply; H12a/H12b embedded manifests; stamp BFF starts with no hand-set settings, `GET /api/config` correct, consent callback 404; jobs on `sdap-jobs`; keyless proofs `proved`; H3 `acct` on registration + token; H4b workforce list + stale removal, T7 passes; earlier lists (T228 H5 WhoAmI, T218b async import, T227 PATCHes, T251 group name, T240a client access + CORS).
-- H12a seeds 4 of 12 artifacts (playbooks + consumers pending — task 150).
+#1527 ISS-014 census unreachable from H13 · #1484 ISS-008 (closes after the deploy proof) · #1485 ISS-009 E11 bind-by-email (UAC-r2) · #1487 ISS-011 · #1499 ISS-012 · #1500 ISS-013 · #1523 ISS-017 · #1504 office tests near cap (word-add-in-r1) · #1432 ISS-006 · #1376 ISS-003 · #1377 ISS-004.
 
 ## Live state
 
-- Store `sprkcpartifactsdev/provisioning-artifacts`: SpaarkeMaster **1.2.0.0** published (managed + unmanaged, SHA-256); `latest.previous` = hand-made 2026-08-21 manifest. Demo holds 1.0.0.0 unmanaged.
-- Dev control plane (`rg-spaarke-platform-dev`): deployed from `35c20287c` — does NOT yet carry this branch's L2 code (needs item 5).
-- Dev BFF `spaarke-bff-dev` (rg-spaarke-dev): hand-set `Graph__Scopes__0`, `ServiceBus__QueueName`, `PublicConfig__*`, `Onboarding__EnableDevBypass`; deploy only from master.
+- Store `sprkcpartifactsdev/provisioning-artifacts`: SpaarkeMaster **1.2.1.0** latest (`latest.previous` = 1.2.0.0).
+- Dev control plane (`rg-spaarke-platform-dev`): still the old deploy — no T252/T255/T257/T259/ISS-015 code, guard off, no ReservedTenants settings.
+- Demo BFF `spaarke-bff-demo`: Stopped, .NET 8 (T242c).
+- Dev BFF `spaarke-bff-dev`: hand-set settings as before; deploy only from master.
