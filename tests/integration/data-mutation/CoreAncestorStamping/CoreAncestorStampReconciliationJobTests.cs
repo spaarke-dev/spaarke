@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -510,11 +510,11 @@ public class CoreAncestorStampReconciliationJobTests
     private static Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore TaskCore(
         StampWorld world, IReadOnlyDictionary<string, Guid>? recordTypes = null)
     {
-        var lookup = NSubstitute.Substitute.For<ICommunicationDataverseService>();
-        lookup.QueryRecordTypeRefAsync(NSubstitute.Arg.Any<string>(), NSubstitute.Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult<Microsoft.Xrm.Sdk.Entity?>(
-                recordTypes is not null && recordTypes.TryGetValue(call.ArgAt<string>(0), out var refId)
-                    ? new Microsoft.Xrm.Sdk.Entity("sprk_recordtype_ref", refId) { ["sprk_recorddisplayname"] = call.ArgAt<string>(0) }
+        var lookup = new Mock<ICommunicationDataverseService>();
+        lookup.Setup(l => l.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string logicalName, CancellationToken _) => Task.FromResult<Microsoft.Xrm.Sdk.Entity?>(
+                recordTypes is not null && recordTypes.TryGetValue(logicalName, out var refId)
+                    ? new Microsoft.Xrm.Sdk.Entity("sprk_recordtype_ref", refId) { ["sprk_recorddisplayname"] = logicalName }
                     : null));
 
         return new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore(
@@ -522,7 +522,7 @@ public class CoreAncestorStampReconciliationJobTests
             world.Resolver,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
-            lookup,
+            lookup.Object,
             NullLogger.Instance);
     }
 
