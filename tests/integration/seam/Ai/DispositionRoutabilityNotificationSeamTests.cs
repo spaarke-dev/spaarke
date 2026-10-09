@@ -75,7 +75,7 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         h.OpenAi.RawJsonToReturn =
             "{\"notification\":{\"title\":\"Document ready\",\"body\":\"Your NDA summary is ready to review.\"," +
             "\"recipientId\":\"" + RecipientId + "\",\"category\":\"chat-notification\",\"actionUrl\":\"/main.aspx?id=1\"," +
-            "\"priority\":300000000,\"toastType\":200000000,\"regardingId\":\"" + ActionId + "\",\"regardingType\":\"sprk_matter\"}}";
+            "\"priority\":200000001,\"toastType\":200000000,\"regardingId\":\"" + ActionId + "\",\"regardingType\":\"sprk_matter\"}}";
 
         var chunks = await h.DispatchAsync(new { selectionText = "notify me when the summary is ready" });
 
@@ -103,7 +103,7 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         h.Captured.RecipientId.Should().Be(RecipientId);
         h.Captured.Category.Should().Be("chat-notification");
         h.Captured.ActionUrl.Should().Be("/main.aspx?id=1");
-        h.Captured.Priority.Should().Be(300000000);
+        h.Captured.Priority.Should().Be(200000001);
         h.Captured.ToastType.Should().Be(200000000);
         h.Captured.RegardingId.Should().Be(ActionId);
         h.Captured.RegardingType.Should().Be("sprk_matter");

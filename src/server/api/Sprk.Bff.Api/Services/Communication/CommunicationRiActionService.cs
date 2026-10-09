@@ -262,7 +262,7 @@ public sealed class CommunicationRiActionService
                 title: subject,
                 body: BuildActionDescription(signal, decision),
                 category: "communication",
-                priority: 200000000, // Informational
+                priority: Sprk.Bff.Api.Services.AppNotificationOptions.Priority.Normal,
                 actionUrl: null,
                 regardingId: signal.CommunicationId,
                 aiMetadata: null,

@@ -44,7 +44,7 @@ public sealed class NotificationService
     /// <param name="title">Notification title (required, max 256 chars).</param>
     /// <param name="body">Notification body text (optional, max 4000 chars).</param>
     /// <param name="category">Notification category for grouping (e.g., "documents", "analysis", "email").</param>
-    /// <param name="priority">Priority level: 200000000 = Informational (default), 200000001 = Warning, 200000002 = Critical.</param>
+    /// <param name="priority">Priority option value: <see cref="AppNotificationOptions.Priority.Normal"/> (default) or <see cref="AppNotificationOptions.Priority.High"/>; any other value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="actionUrl">Optional deep-link URL for the notification action.</param>
     /// <param name="regardingId">Optional ID of the related record.</param>
     /// <param name="aiMetadata">Optional AI-generated metadata (stored as JSON in custom field).</param>
@@ -57,7 +57,7 @@ public sealed class NotificationService
         string title,
         string? body = null,
         string? category = null,
-        int priority = 200000000, // Informational
+        int priority = AppNotificationOptions.Priority.Normal,
         string? actionUrl = null,
         Guid? regardingId = null,
         Dictionary<string, object?>? aiMetadata = null,
@@ -67,6 +67,10 @@ public sealed class NotificationService
             throw new ArgumentNullException(nameof(userId), "Target user ID is required");
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentNullException(nameof(title), "Notification title is required");
+        if (!AppNotificationOptions.IsValidPriority(priority))
+            throw new ArgumentOutOfRangeException(
+                nameof(priority), priority,
+                $"priority {priority} is not an appnotification option (accepted: {AppNotificationOptions.Priority.Normal} Normal, {AppNotificationOptions.Priority.High} High)");
 
         _logger.LogDebug(
             "Creating appnotification for user {UserId}: {Title} (category={Category}, priority={Priority})",
@@ -86,7 +90,7 @@ public sealed class NotificationService
                 entity["body"] = body;
             }
 
-            // Priority (option set): 200000000=Informational, 200000001=Warning, 200000002=Critical
+            // Priority (option set): 200000000=Normal, 200000001=High (AppNotificationOptions.Priority)
             entity["priority"] = new OptionSetValue(priority);
 
             // Icon type based on category for visual distinction
@@ -139,12 +143,12 @@ public sealed class NotificationService
     {
         return category.ToLowerInvariant() switch
         {
-            "documents" or "upload" => 100000001,   // Success
-            "analysis" or "ai" => 100000000,    // Info
-            "email" or "communication" => 100000004, // Mention
-            "tasks" or "assignment" => 100000003,    // Warning (attention needed)
-            "error" or "failure" => 100000002,     // Failure
-            _ => 100000000      // Info (default)
+            "documents" or "upload" => AppNotificationOptions.IconType.Success,
+            "analysis" or "ai" => AppNotificationOptions.IconType.Info,
+            "email" or "communication" => AppNotificationOptions.IconType.Mention,
+            "tasks" or "assignment" => AppNotificationOptions.IconType.Warning, // attention needed
+            "error" or "failure" => AppNotificationOptions.IconType.Failure,
+            _ => AppNotificationOptions.IconType.Info
         };
     }
 

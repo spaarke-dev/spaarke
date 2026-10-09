@@ -94,9 +94,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     internal const string StatusCancelled = "cancelled";
 
     private const string NotificationCategory = "external-access";
-    private const int PriorityInformational = 200000000;
-    private const int PriorityWarning = 200000001;
-    private const int PriorityCritical = 200000002;
+    // appnotification has only Normal and High. The 7-day window and the last-day reminder were Warning / Critical
+    // before; both are High now, so the same reminders are raised at the same times.
+    private const int HighPriorityWithinDays = 7;
 
     // The interactive systemuser access modes: 0 Read-Write, 1 Administrative, 2 Read. Excludes 3 Support User,
     // 4 Non-interactive and 5 Delegated Admin — live dev has Support and Delegated Admin users (task 100 review).
@@ -450,7 +450,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                     body: $"Access for {grant.GranteeText} to the {grant.Root.Label} \"{grant.RootName}\" ends after {grant.ExpiresDateText}. " +
                           $"To keep it, set a new expiration date in Manage Access on the {grant.Root.Label}.",
                     category: NotificationCategory,
-                    priority: grant.DaysLeft <= 1 ? PriorityCritical : grant.DaysLeft <= 7 ? PriorityWarning : PriorityInformational,
+                    priority: grant.DaysLeft <= HighPriorityWithinDays ? Sprk.Bff.Api.Services.AppNotificationOptions.Priority.High : Sprk.Bff.Api.Services.AppNotificationOptions.Priority.Normal,
                     actionUrl: $"/main.aspx?etn={grant.Root.EntityName}&id={grant.RootId}&pagetype=entityrecord",
                     regardingId: grant.RootId,
                     cancellationToken: ct).ConfigureAwait(false);

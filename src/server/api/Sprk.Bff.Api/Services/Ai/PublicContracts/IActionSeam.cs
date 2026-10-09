@@ -71,11 +71,11 @@ public sealed record CreateNotificationRequest
 
     public string? Category { get; init; }
 
-    /// <summary>Priority option-set value. Default 200000000 (Important) — matches the node default.</summary>
-    public int Priority { get; init; } = 200_000_000;
+    /// <summary>Priority option-set value: Normal 200000000 (default) or High 200000001 (<c>AppNotificationOptions.Priority</c>).</summary>
+    public int Priority { get; init; } = Sprk.Bff.Api.Services.AppNotificationOptions.Priority.Normal;
 
-    /// <summary>Toast option-set value. Default 200000000 (Timed) — matches the node default.</summary>
-    public int ToastType { get; init; } = 200_000_000;
+    /// <summary>Toast option-set value: Timed 200000000 (default) or Hidden 200000001.</summary>
+    public int ToastType { get; init; } = Sprk.Bff.Api.Services.AppNotificationOptions.ToastType.Timed;
 
     public string? ActionUrl { get; init; }
     public Guid? RegardingId { get; init; }
