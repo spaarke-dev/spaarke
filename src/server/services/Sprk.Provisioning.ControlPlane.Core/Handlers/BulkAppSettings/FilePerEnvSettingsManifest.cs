@@ -3,8 +3,10 @@
 //
 // Task 201 — production impl of IPerEnvSettingsManifest. Reads the SAME
 // embedded manifest.yaml resource FileKvSecretManifest embeds (single source
-// of truth per task 084 contract), but exposes only the `per_env_settings:`
-// top-level list. Absent list → Success with 0 entries (v1 backwards-compat).
+// of truth per task 084 contract) and exposes the `per_env_settings:`
+// top-level list plus (task 253) each secret's `app_settings` — the Key Vault
+// references H4b writes. Absent list → Success with 0 entries (v1
+// backwards-compat).
 //
 // PARSER (YamlDotNet), naming convention UnderscoredNamingConvention:
 //   per_env_source     -> PerEnvSource (string, then TryParse to enum)
@@ -12,6 +14,7 @@
 //   iOptionsModule     -> IOptionsModule
 //   required           -> Required
 //   notes              -> ignored (documentation-only)
+//   secrets[].canonical_name / app_settings -> KeyVaultReferences (task 253)
 //
 // Determinism: entries returned in alphabetical-by-Key order (parity with
 // generator sort at emit time).
@@ -113,12 +116,20 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
             return new PerEnvSettingsManifestReadResult.Failure(diagnostic);
         }
 
+        // Task 253: the Key Vault references (secrets[].app_settings) — the other half of what the generated
+        // Configure script writes, and H4b writes now.
+        if (!TryReadKeyVaultReferences(document, out var keyVaultReferences, out var referencesFailure))
+        {
+            return new PerEnvSettingsManifestReadResult.Failure(referencesFailure);
+        }
+
         // Absent per_env_settings:  Success with 0 entries (v1 backwards-compat).
         if (document.PerEnvSettings is null || document.PerEnvSettings.Count == 0)
         {
             _logger.LogInformation(
-                "H4b FilePerEnvSettingsManifest: manifest.yaml carries no per_env_settings; H4b run will be a no-op.");
-            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>(), ArtifactVersion.Of(yaml));
+                "H4b FilePerEnvSettingsManifest: manifest.yaml carries no per_env_settings; H4b writes only the {Count} Key Vault references.",
+                keyVaultReferences.Count);
+            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>(), ArtifactVersion.Of(yaml), keyVaultReferences);
         }
 
         var entries = new List<PerEnvSettingEntry>(document.PerEnvSettings.Count);
@@ -175,10 +186,59 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         entries.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
 
         _logger.LogInformation(
-            "H4b FilePerEnvSettingsManifest: loaded {Count} per_env_settings entries",
-            entries.Count);
+            "H4b FilePerEnvSettingsManifest: loaded {Count} per_env_settings entries and {ReferenceCount} Key Vault references",
+            entries.Count, keyVaultReferences.Count);
 
-        return new PerEnvSettingsManifestReadResult.Success(entries, ArtifactVersion.Of(yaml));
+        return new PerEnvSettingsManifestReadResult.Success(entries, ArtifactVersion.Of(yaml), keyVaultReferences);
+    }
+
+    /// <summary>
+    /// Task 253 — reads every <c>secrets[].app_settings</c> pair: secrets in <c>canonical_name</c> order (ordinal), each
+    /// secret's settings in listed order. Fails on a setting with no secret name, a blank setting key, or one setting
+    /// key claimed by two secrets (which reference would the BFF get? The generator's answer depends on its sort, so
+    /// the manifest must not ask the question).
+    /// </summary>
+    private static bool TryReadKeyVaultReferences(
+        ManifestYamlDocument document,
+        out IReadOnlyList<KeyVaultReferenceSetting> references,
+        out string failure)
+    {
+        var result = new List<KeyVaultReferenceSetting>();
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        references = result;
+        failure = string.Empty;
+
+        var secrets = (document.Secrets ?? new List<SecretYamlEntry>())
+            .OrderBy(s => s.CanonicalName ?? string.Empty, StringComparer.Ordinal);
+        foreach (var secret in secrets)
+        {
+            if (secret.AppSettings is null || secret.AppSettings.Count == 0)
+            {
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(secret.CanonicalName))
+            {
+                failure = "manifest.yaml contains a secrets entry with app_settings but no canonical_name.";
+                return false;
+            }
+            foreach (var key in secret.AppSettings)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    failure = $"manifest.yaml secret '{secret.CanonicalName}' lists a blank app_settings entry.";
+                    return false;
+                }
+                if (owners.TryGetValue(key, out var other))
+                {
+                    failure = $"manifest.yaml app setting '{key}' is listed under two secrets ('{other}' and " +
+                              $"'{secret.CanonicalName}') — it can reference only one.";
+                    return false;
+                }
+                owners[key] = secret.CanonicalName;
+                result.Add(new KeyVaultReferenceSetting(key, secret.CanonicalName));
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -226,7 +286,15 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
 
     private sealed class ManifestYamlDocument
     {
+        public List<SecretYamlEntry>? Secrets { get; set; }
         public List<PerEnvYamlEntry>? PerEnvSettings { get; set; }
+    }
+
+    // Task 253: only the two fields H4b needs (canonical_name, app_settings); H4's reader owns the rest.
+    private sealed class SecretYamlEntry
+    {
+        public string? CanonicalName { get; set; }
+        public List<string>? AppSettings { get; set; }
     }
 
     private sealed class PerEnvYamlEntry

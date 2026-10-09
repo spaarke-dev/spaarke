@@ -132,9 +132,9 @@ public static class BffDeployRejectionCodes
 
     // ---- r3-era gate failures (SUPERSEDED by task 132 — see ArtifactManifestRejected
     //      above; retained per this file's stability policy — "do NOT rename;
-    //      mark old ones @[Obsolete] on removal" — no code path emits these
-    //      anymore, but DotnetR3GateVerifier.cs / IR3GateVerifier.cs remain on
-    //      disk unregistered, so the constants stay defined) ----
+    //      mark old ones @[Obsolete] on removal" — no code path emits these;
+    //      DotnetR3GateVerifier.cs / IR3GateVerifier.cs were deleted by task 253,
+    //      the constants stay defined for the stability policy) ----
 
     /// <summary>
     /// r3-era analyzers-as-errors gate failed — <c>dotnet build</c> exited

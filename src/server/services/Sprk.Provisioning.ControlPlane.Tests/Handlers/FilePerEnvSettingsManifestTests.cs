@@ -287,4 +287,65 @@ public sealed class FilePerEnvSettingsManifestTests
 
         second.Count.Should().Be(first.Count, "Lazy-cached -- Singleton lifetime contract");
     }
+
+    // ---------- task 253: the Key Vault references (secrets[].app_settings) H4b writes ----------
+
+    [Fact]
+    public void Parse_SecretsWithAppSettings_ServesEachAsAKeyVaultReference_SecretsInCanonicalOrder()
+    {
+        var yaml = """
+            secrets:
+              - canonical_name: 'TenantId'
+                app_settings:
+                  - 'AzureAd__TenantId'
+                  - 'TENANT_ID'
+              - canonical_name: 'BFF-API-ClientSecret'
+                app_settings: []
+              - canonical_name: 'AzureOpenAI-Endpoint'
+                app_settings:
+                  - 'AzureOpenAI__Endpoint'
+            per_env_settings:
+              - key: 'Customer__Id'
+                per_env_source: 'from-intake-parameter:customer_id'
+                iOptionsModule: 'CustomerModule'
+                required: true
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Success>()
+            .Which.KeyVaultReferences.Should().Equal(
+                new KeyVaultReferenceSetting("AzureOpenAI__Endpoint", "AzureOpenAI-Endpoint"),
+                new KeyVaultReferenceSetting("AzureAd__TenantId", "TenantId"),
+                new KeyVaultReferenceSetting("TENANT_ID", "TenantId"));
+    }
+
+    [Fact]
+    public void Parse_OneAppSettingUnderTwoSecrets_FailsTheRead()
+    {
+        var yaml = """
+            secrets:
+              - canonical_name: 'BFF-API-ClientId'
+                app_settings: ['AzureAd__ClientId']
+              - canonical_name: 'Other-ClientId'
+                app_settings: ['AzureAd__ClientId']
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Failure>()
+            .Which.Diagnostic.Should().Contain("AzureAd__ClientId").And.Contain("BFF-API-ClientId").And.Contain("Other-ClientId");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CredentialSecretsHaveNoKeyVaultReference()
+    {
+        // E-3 closure: the two BFF-identity credential secrets are rollback slots only — an app setting referencing
+        // either would point the BFF at a soft-deleted (or never-created) secret (provisioning.md "KV credential lifecycle").
+        var success = (PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+
+        success.KeyVaultReferences.Should().NotBeEmpty();
+        success.KeyVaultReferences.Select(r => r.SecretName)
+            .Should().NotContain(new[] { "BFF-API-ClientSecret", "Dataverse-ClientSecret" });
+    }
 }

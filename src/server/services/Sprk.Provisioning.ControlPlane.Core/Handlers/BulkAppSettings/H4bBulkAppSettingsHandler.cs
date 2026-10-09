@@ -1,15 +1,20 @@
 // -----------------------------------------------------------------------------
 // H4bBulkAppSettingsHandler.cs
 //
-// Task 201 — H4b BulkAppSettings handler. Thin wrapper around task 084's
-// shipped Configure-AppServiceSettings.generated.ps1 script (extended by
-// this task with per-env-literal lines emitted from the new
-// per_env_settings: manifest section). Kills the F20 / F20a progressive
-// fail-fast chain by applying ALL required BFF app settings in ONE batched
-// call → ONE App Service restart cycle, then polls /healthz to prove the BFF
-// booted; on failure, fetches container docker logs from Kudu SCM + parses
-// for the failing IOptions module name to make operator triage 30-second
-// instead of 15-30 min.
+// Task 201 — H4b BulkAppSettings handler. Applies ALL required BFF app
+// settings from the canonical secret-catalog manifest — every secret's
+// app_settings as a Key Vault reference plus the per_env_settings values —
+// in ONE write per slot → ONE App Service restart cycle, then polls /healthz
+// to prove the BFF booted; on failure, fetches container docker logs from
+// Kudu SCM + parses for the failing IOptions module name. Kills the F20 /
+// F20a progressive fail-fast chain.
+//
+// Task 253 (G38): H4b used to run `pwsh -File` on the generated
+// Configure-AppServiceSettings.generated.ps1. The Worker host (App Service
+// DOTNETCORE|10.0) has no pwsh and no scripts/ folder, so H4b now computes the
+// same settings in C# (BuildDesiredSettings — parity-tested against the
+// generated script) and merges them through IAppServiceSettingsWriter (ARM
+// SDK). The generated script stays an operator artifact; nothing in L2 runs it.
 //
 // FLOW:
 //   (1) Load ProvisioningRun.
@@ -17,15 +22,17 @@
 //       InterStepState.KeyVaultName / ResourceGroupName / AppServiceName
 //       (task 245a — these were read from run parameters nobody wrote).
 //       environmentName = IntakeParameterCatalog.ResolveEnvironmentName.
-//   (3) Read the per_env_settings manifest; its content version is secretsVer
-//       (task 245b — formerly a run parameter nothing wrote).
+//   (3) Read the manifest; its content version is secretsVer (task 245b —
+//       formerly a run parameter nothing wrote).
 //   (4) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
 //   (5) Resolve each non-literal entry through PerEnvSourceCatalog (typed
 //       InterStepState output or intake value); required-and-missing =
-//       Resumable Failure BEFORE any script call.
-//   (6) Shell pwsh Configure-AppServiceSettings.generated.ps1 with fixed
-//       args (-VaultName / -AppServiceName / -ResourceGroupName) + one
-//       -<PsVarName> per unique per-env source. Non-zero exit = Resumable.
+//       Resumable Failure BEFORE any write. An optional (`required: false`)
+//       entry without a value is not written, and a value already on the site
+//       is left alone (T254).
+//   (6) Merge the settings into the production site and the staging slot
+//       (IAppServiceSettingsWriter — merge, never replace; no write when a slot
+//       already matches). An ARM refusal = Resumable.
 //   (7) Poll /healthz with 8-min backoff. Success = advance state.
 //   (8) On healthz timeout, fetch docker logs from Kudu + parse for
 //       `Unhandled exception. System.InvalidOperationException:` line +
@@ -33,11 +40,10 @@
 //       actionable diagnostic.
 //   (9) MarkComplete — write CompletedPhase(H4b, idempotencyKey).
 //
-// ADR-028 discipline: per-env cleartext values pass through this handler as
-// LOCAL VARIABLES ONLY — they are forwarded to IProcessRunner as argv, never
-// serialized back into Cosmos.Parameters, InterStepState, or Log* calls. The
-// generated script's stdout/stderr is REDACTED (bounded tail only) in log
-// lines to avoid accidentally leaking a value echoed by the child process.
+// ADR-028 discipline: per-env values (endpoints, public GUIDs) pass through
+// this handler as LOCAL VARIABLES ONLY — handed to the writer, never
+// serialized back into Cosmos.Parameters, InterStepState, or Log* calls (the
+// writer logs setting NAMES only).
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -86,7 +92,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IPerEnvSettingsManifest _manifest;
-    private readonly IProcessRunner _processRunner;
+    private readonly IAppServiceSettingsWriter _settingsWriter;
     private readonly IHealthzProbe _healthzProbe;
     private readonly IContainerLogFetcher _logFetcher;
     private readonly BulkAppSettingsOptions _options;
@@ -99,7 +105,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     public H4bBulkAppSettingsHandler(
         IProvisioningRunRepository repository,
         IPerEnvSettingsManifest manifest,
-        IProcessRunner processRunner,
+        IAppServiceSettingsWriter settingsWriter,
         IHealthzProbe healthzProbe,
         IContainerLogFetcher logFetcher,
         IOptions<BulkAppSettingsOptions> options,
@@ -107,7 +113,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(manifest);
-        ArgumentNullException.ThrowIfNull(processRunner);
+        ArgumentNullException.ThrowIfNull(settingsWriter);
         ArgumentNullException.ThrowIfNull(healthzProbe);
         ArgumentNullException.ThrowIfNull(logFetcher);
         ArgumentNullException.ThrowIfNull(options);
@@ -115,7 +121,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
         _repository = repository;
         _manifest = manifest;
-        _processRunner = processRunner;
+        _settingsWriter = settingsWriter;
         _healthzProbe = healthzProbe;
         _logFetcher = logFetcher;
         _options = options.Value;
@@ -166,7 +172,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 "Run parameter 'tenantId' is required by H4b (§4D I1 no-hardcoded-tenant).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, SubscriptionIdParameterKey, out var _))
+        if (!TryGetNonEmpty(parameters, SubscriptionIdParameterKey, out var subscriptionId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingSubscriptionId,
@@ -180,7 +186,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingKeyVaultName,
-                "InterStepState.KeyVaultName (H2a output) is required by H4b (Configure script -VaultName arg). H2a must complete first.",
+                "InterStepState.KeyVaultName (H2a output) is required by H4b (the vault its Key Vault references name). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
         var resourceGroupName = run.InterStepState.ResourceGroupName;
@@ -188,7 +194,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingResourceGroupName,
-                "InterStepState.ResourceGroupName (H2a output) is required by H4b (Configure script -ResourceGroupName arg). H2a must complete first.",
+                "InterStepState.ResourceGroupName (H2a output) is required by H4b (the BFF App Service's resource group). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
         var appServiceName = run.InterStepState.AppServiceName;
@@ -196,7 +202,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingAppServiceName,
-                "InterStepState.AppServiceName (H2a output) is required by H4b (Configure script -AppServiceName arg + /healthz + Kudu URLs). H2a must complete first.",
+                "InterStepState.AppServiceName (H2a output) is required by H4b (the App Service it writes + /healthz + Kudu URLs). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
         // One stamp environment for every handler (CreateRun stores it; a pre-245a run resolves
@@ -245,7 +251,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
         // (5) Resolve per-env values through PerEnvSourceCatalog (task 245a): each
         //     source names the typed InterStepState output or intake value it
-        //     reads. Required-and-missing fails early BEFORE any script call.
+        //     reads. Required-and-missing fails early BEFORE any write.
         //     Deduplicate by source key (several manifest entries may share one
         //     source, e.g. Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
         //     both use uami_client_id).
@@ -254,8 +260,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         {
             if (entry.PerEnvSource == PerEnvSettingSource.Literal)
             {
-                // Literals do not contribute a script parameter — they're emitted
-                // verbatim by the generator. Nothing for H4b to resolve here.
+                // Literals carry their value in the manifest — nothing to resolve.
                 continue;
             }
 
@@ -295,66 +300,42 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             resolvedPerEnv[sourceKey] = value;
         }
 
-        // (6) Build the pwsh argv + invoke IProcessRunner. Fixed args first,
-        //     then one -<PsVarName> per unique resolved source. Script param
-        //     names are the PascalCase of the source key (matches the
-        //     generator's ConvertTo-PascalCase output).
-        var args = new List<string>
-        {
-            "-NoProfile",
-            "-NonInteractive",
-            "-File", _options.ConfigureScriptPath,
-            "-ResourceGroupName", resourceGroupName,
-            "-AppServiceName", appServiceName,
-            "-VaultName", keyVaultName,
-        };
-        // Deterministic order for arg dumping / test reproducibility (alphabetical by source key).
-        foreach (var kv in resolvedPerEnv.OrderBy(k => k.Key, StringComparer.Ordinal))
-        {
-            args.Add("-" + ConvertToPascalCase(kv.Key));
-            args.Add(kv.Value);
-        }
+        // (6) Build the full settings set — exactly what the generated Configure script wrote — and merge it
+        //     into the production site and the staging slot (task 253: ARM SDK, no process).
+        var settings = BuildDesiredSettings(manifest, keyVaultName, resolvedPerEnv);
 
-        ProcessResult processResult;
+        AppServiceSettingsWriteResult writeResult;
         try
         {
-            processResult = await _processRunner.RunAsync(
-                _options.PwshExecutable,
-                args,
-                environment: null,
-                timeout: _options.ScriptTimeout,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException ex)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.AppSettingsWriteFailed,
-                $"Configure script timed out after {_options.ScriptTimeout.TotalSeconds:F0}s: {ex.Message}",
+            writeResult = await _settingsWriter.MergeAsync(
+                new AppServiceSettingsWriteRequest(subscriptionId, resourceGroupName, appServiceName, settings),
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            // Transport faults, an ARM call timing out (OperationCanceledException without caller cancellation) and
+            // credential failures land here: nothing is known to be written in full — Resumable, a re-run converges.
+            _logger.LogError(ex,
+                "H4b app-settings write infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.AppSettingsWriteFailed,
-                $"Configure script failed to start: {ex.Message}. Verify PwshExecutable + ConfigureScriptPath options.",
+                $"App-settings write to App Service '{appServiceName}' failed: {ex.GetType().Name}: {ex.Message}",
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (processResult.ExitCode != 0)
+        if (writeResult is AppServiceSettingsWriteResult.Failure writeFailure)
         {
-            var redacted = RedactProcessDiagnostic(processResult);
-            var diagnostic =
-                $"Configure-AppServiceSettings.generated.ps1 returned exit code {processResult.ExitCode}. " +
-                $"Redacted tail: {redacted}";
             return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.AppSettingsWriteFailed, diagnostic, cancellationToken)
+                BulkAppSettingsRejectionCodes.AppSettingsWriteFailed, writeFailure.Diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         _logger.LogInformation(
-            "H4b Configure script succeeded: runId={RunId} customerId={CustomerId} settingsWritten>=1 entriesResolved={EntryCount} literalsInlined={LiteralCount}",
-            envelope.RunId, envelope.CustomerId, resolvedPerEnv.Count,
-            entries.Count(e => e.PerEnvSource == PerEnvSettingSource.Literal));
+            "H4b app settings in place: runId={RunId} customerId={CustomerId} settings={SettingCount} " +
+            "keyVaultReferences={ReferenceCount} perEnvSourcesResolved={SourceCount} slotsWritten={SlotsWritten}",
+            envelope.RunId, envelope.CustomerId, settings.Count, manifest.KeyVaultReferences.Count, resolvedPerEnv.Count,
+            string.Join(",", ((AppServiceSettingsWriteResult.Success)writeResult).SlotsWritten));
 
         // (7) Poll /healthz.
         //
@@ -431,30 +412,55 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// Snake / kebab-case → PascalCase. MUST mirror the generator's
-    /// ConvertTo-PascalCase (Invoke-CatalogGenerator.ps1) — the generator's
-    /// script param names are computed the same way. Exposed internal for
-    /// test reproducibility. Empty / invalid input → "P" (matches generator).
+    /// Task 253 — the settings H4b writes, built exactly as the generated
+    /// <c>Configure-AppServiceSettings.generated.ps1</c> builds its <c>$settings</c> array:
+    /// <list type="number">
+    /// <item>every <c>secrets[].app_settings</c> key as <c>@Microsoft.KeyVault(VaultName={vault};SecretName={secret})</c>;</item>
+    /// <item>then every <c>per_env_settings</c> entry — a literal's <c>literal_value</c>, or its source's resolved run
+    ///   value. A per-env entry overrides a Key Vault reference with the same key (the script emitted per-env lines
+    ///   last and <c>az</c> keeps the last value), e.g. <c>AzureAd__TenantId</c>;</item>
+    /// <item>an optional (<c>required: false</c>) entry whose source has no value is left out — and so is never
+    ///   written over a value already on the site (T254).</item>
+    /// </list>
+    /// <paramref name="resolvedBySource"/> holds the resolved value per source key; a non-literal entry whose source
+    /// is absent from it is an optional one H4b skipped. Internal so the parity test can compare it with the script.
     /// </summary>
-    internal static string ConvertToPascalCase(string snakeOrKebab)
+    internal static IReadOnlyDictionary<string, string> BuildDesiredSettings(
+        PerEnvSettingsManifestReadResult.Success manifest,
+        string keyVaultName,
+        IReadOnlyDictionary<string, string> resolvedBySource)
     {
-        if (string.IsNullOrWhiteSpace(snakeOrKebab)) return "P";
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyVaultName);
+        ArgumentNullException.ThrowIfNull(resolvedBySource);
 
-        var parts = snakeOrKebab.Split(['_', '-'], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0) return "P";
-
-        var sb = new System.Text.StringBuilder();
-        foreach (var p in parts)
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var reference in manifest.KeyVaultReferences)
         {
-            if (p.Length == 0) continue;
-            sb.Append(char.ToUpperInvariant(p[0]));
-            if (p.Length > 1) sb.Append(p[1..]);
+            settings[reference.AppSettingKey] = FormatKeyVaultReference(keyVaultName, reference.SecretName);
         }
-        var result = sb.ToString();
-        if (result.Length == 0) return "P";
-        if (!char.IsLetter(result[0])) return "P" + result;
-        return result;
+
+        foreach (var entry in manifest.Entries)
+        {
+            if (entry.PerEnvSource == PerEnvSettingSource.Literal)
+            {
+                settings[entry.Key] = entry.LiteralValue ?? string.Empty;
+            }
+            else if (entry.ParameterKey is not null && resolvedBySource.TryGetValue(entry.ParameterKey, out var value))
+            {
+                settings[entry.Key] = value;
+            }
+        }
+
+        return settings;
     }
+
+    /// <summary>
+    /// The Key Vault reference form the generated script's <c>Format-KvRef</c> emits — the canonical single form
+    /// (App Service resolves it with the slot's <c>keyVaultReferenceIdentity</c>, H4 / trap T1).
+    /// </summary>
+    internal static string FormatKeyVaultReference(string keyVaultName, string secretName)
+        => $"@Microsoft.KeyVault(VaultName={keyVaultName};SecretName={secretName})";
 
     /// <summary>
     /// Parses a container docker log for the first fail-fast IOptions module
@@ -498,24 +504,6 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         }
         value = string.Empty;
         return false;
-    }
-
-    /// <summary>
-    /// Bounded / structural summary of a failed Configure-script invocation.
-    /// Redacts the stdout/stderr streams to the FIRST + LAST 200 chars each
-    /// to prevent inadvertent per-env cleartext value leak into log stores /
-    /// Cosmos error fields (ADR-028 discipline). Callers use this in place of
-    /// the raw stdout/stderr in every operator-facing message.
-    /// </summary>
-    internal static string RedactProcessDiagnostic(ProcessResult processResult)
-    {
-        static string Tail(string s, int n = 200)
-        {
-            if (string.IsNullOrEmpty(s)) return "(empty)";
-            if (s.Length <= n * 2) return s;
-            return s[..n] + " ...[truncated]... " + s[^n..];
-        }
-        return $"stdout={Tail(processResult.Stdout)} | stderr={Tail(processResult.Stderr)}";
     }
 
     private async Task<HandlerResult> FailAsync(

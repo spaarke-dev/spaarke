@@ -59,12 +59,11 @@ public static class HandlerIds
     public const string H4 = "H4";
 
     /// <summary>
-    /// H4b (task 201) -- BulkAppSettings handler. Thin wrapper around task
-    /// 084's shipped Configure-AppServiceSettings.generated.ps1 (extended
-    /// by task 201 with per_env_settings). Applies ALL required BFF app
-    /// settings (KV refs + per-env literals) in ONE batched call → ONE App
-    /// Service restart cycle, then polls /healthz + parses container docker
-    /// logs on failure. Kills the F20/F20a progressive-fail-fast chain.
+    /// H4b (task 201) -- BulkAppSettings handler. Applies ALL required BFF
+    /// app settings from the canonical secret-catalog manifest (KV refs +
+    /// per_env_settings) in ONE write per slot (ARM SDK since task 253) →
+    /// ONE App Service restart cycle, then polls /healthz + parses container
+    /// docker logs on failure. Kills the F20/F20a progressive-fail-fast chain.
     /// Runs AFTER H4, BEFORE H9.
     /// </summary>
     public const string H4b = "H4b";
