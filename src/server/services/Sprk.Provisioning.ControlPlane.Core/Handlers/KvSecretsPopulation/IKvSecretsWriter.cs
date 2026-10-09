@@ -108,9 +108,9 @@ public sealed record KvSecretWriteRequest(
         SecretParameters ?? new Dictionary<string, Models.KeyVaultSecretRef>(StringComparer.Ordinal);
 
     /// <summary>
-    /// T226 — non-secret topology constants keyed by manifest canonical name (e.g.
-    /// <c>SPE-ContainerTypeId</c>), consumed for <see cref="KvSecretValueSource.FromTopologyConstants"/>
-    /// entries. Never null (empty when the caller passes none).
+    /// Non-secret intake values keyed by manifest canonical name (e.g. <c>TenantId</c>), consumed for
+    /// <see cref="KvSecretValueSource.FromIntakeParameter"/> entries (task 245a). Never null (empty when the
+    /// caller passes none).
     /// </summary>
     public IReadOnlyDictionary<string, string> IntakeValues { get; init; } =
         IntakeValues ?? new Dictionary<string, string>(StringComparer.Ordinal);

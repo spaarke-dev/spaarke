@@ -59,7 +59,7 @@ import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
-import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getApiBaseUrl, resolveSignInIdentity } from '../../shared/utils/environmentVariables';
 import { FindSimilarViewerDialog } from '@spaarke/ui-components/dist/components/FindSimilarViewer';
 import {
   DocumentEmailWizard,
@@ -481,9 +481,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
     const doAuth = async () => {
       const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
-      const clientAppId = manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
-      const bffAppId = manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      // Environment variables first, form properties only as a fallback (#1453 — shipped forms carry dev values).
+      const { tenantId, clientAppId, bffAppId } = await resolveSignInIdentity(webApi, {
+        tenantId: manifestTenantId,
+        clientAppId: manifestClientAppId,
+        bffAppId: manifestBffAppId,
+      });
 
       await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
 
@@ -1839,7 +1842,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.82 • Built 2026-10-08</Text>
+        <Text size={100}>v1.1.84 • Built 2026-10-09</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

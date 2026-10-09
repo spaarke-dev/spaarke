@@ -144,8 +144,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// Produces exactly one <see cref="TrapVerificationOutcome"/> for
 /// <see cref="TrapKind.T1KeyVaultReferenceIdentity"/>. Assembly task 185
 /// composes this + 5 sibling probes into the aggregate <see cref="IE2ETrapVerifier"/>
-/// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
-/// registration.
+/// implementation that replaced <c>PlaceholderTrapVerifier</c>'s DI
+/// registration (the placeholder was deleted by task 230a).
 /// </summary>
 public sealed class KeyVaultReferenceIdentityT1Probe : ITrapProbe
 {

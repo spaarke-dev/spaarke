@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218e" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Close the package's content gaps (code pages, roles incl. the hand-made ones, sprk_noaccessentry, H11's guest role, unused folders) and commit the first SpaarkeMaster source export</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T218 (D7, G11) + T256 prerequisite; notes/t218-plan.md design 2, 6, 7</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live changes to the dev authoring environment's SpaarkeMaster membership and the first committed package source.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Decides the content every customer receives; coordinates with UAC-r2 (T256) and owning projects.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live dev changes need the owner in the loop; edits the provisioning constraints.</parallel-reason>
+    <tags>provisioning, dataverse, solution, security-roles</tags>
+    <deps>218c</deps>
+  </metadata>
+
+  <prompt>Make the package complete, then put it in git.</prompt>
+
+  <goal>
+    After 218c's drift report: every rule-matching component is in SpaarkeMaster in dev or listed (with a reason) in the
+    exclusions file; the roles customers need (incl. "Spaarke Office Add In User" and "Secure Record Owner", today made by
+    hand) are in the package; H11's guest role default names a shipped role; `sprk_noaccessentry` ships (with UAC-r2,
+    #1364 / T256); folders with no runtime reference are confirmed with their owning project and removed or excluded; the
+    first export (SpaarkeMaster 1.2.x) is unpacked into git with no environment-variable values.
+  </goal>
+
+  <context>
+    <background>t218-plan.md F7, F9, F11; inventory 2026-10-07: DemoRegistration (2 .md files) and
+      sprk_communicationconversationpage (comment-only reference) look unused; EventDetailSidePane IS used (EventsPage
+      eventConfig.ts:282); CalendarSidePane must keep working (root CLAUDE.md §17).</background>
+    <relevant-files>
+      <file>docs/data-model/package-scope.json (218c); src/dataverse/solutions/SpaarkeMaster/ (218c output)</file>
+      <file>Core/Handlers/UserProvisioning/H11UserProvisioningOptions.cs:51 (GuestSecurityRoleNames default)</file>
+      <file>docs/guides/office-addins-admin-guide.md:560-583; scripts/Set-SecureRecordOwnerRolePrivileges.ps1; src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="live">Each change to dev (Assemble run, role edits, version bump, export) is asked for first, with the -WhatIf report.</constraint>
+    <constraint source="ownership">Do not delete another project's folder without that project's confirmation (owner relays); exclusion with a reason is the default meanwhile.</constraint>
+    <constraint source="no values">The committed source carries no environment-variable values (218c guard).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Run 218c's drift report; classify each missing item ship / exclude (reason); owner OK for the list.</step>
+    <step order="2">Roles: confirm names in dev; add the hand-made roles to SpaarkeMaster; align H11's default (code + tests + guide). CORRECTED 2026-10-07 (218c review): "Spaarke Basic User" — H11's default — EXISTS and is already in SpaarkeMaster; the earlier "missing" note came from a 20-row-capped query. Verify the default against the committed package (AC3) and keep it.</step>
+    <step order="3">sprk_noaccessentry with UAC-r2 (#1364): schema settled → in SpaarkeMaster.</step>
+    <step order="4">Unused folders → coordination message; exclusions meanwhile. Also classify (by whether a form uses them — systemforms formxml) the four PCFs Build-SpaarkeMaster excluded in April and the 2026-08-21 list did not: UpdateRelatedButton, ThemeEnforcer, RegardingLink, ScopeConfigEditor (218c review F2-4).</step>
+    <step order="4b">Owner-approved removals from SpaarkeMaster in dev: what Test-SolutionCompleteness reports OUTSIDE THE RULE (2026-10-07: five Microsoft tables dragged in by the 2026-08-23 AddRequiredComponents=true rebuild, eight env-var values) and EXCLUDED BUT PACKAGED (Spaarke Provisioning Registry role); then re-add the eight shell-packaged sprk_ tables with subcomponents (Assemble).</step>
+    <step order="5">Owner OK → Assemble (adds), version bump, Export-SpaarkeMasterSource → commit the source; drift check green; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test-SolutionCompleteness against dev exits 0 after the assemble.</criterion>
+    <criterion testable="true">AMENDED 2026-10-08 (Secure Record Owner cannot be packaged: a child-unit role, contained by design; H7b/T256 creates it): src/dataverse/solutions/SpaarkeMaster contains sprk_spaarkeai, the Office Add In User role, and sprk_noaccessentry; the value guard passes.</criterion>
+    <criterion testable="true">H11's default guest role is a role present in the committed package (test reads the role list).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>UAC-r2's #1364 answer changes sprk_noaccessentry's schema after the export — re-export, do not hand-edit the unpacked XML.</trigger>
+  </escalation>
+
+  <notes>
+    <note date="2026-10-08">IN PROGRESS (SESSION 44, owner OK 2026-10-08 "yes update Spaarke Master"). Classification of the 54 missing: SHIP all but five PCFs. Excluded with reasons (package-scope.json): AnalysisBuilder + AssociationResolver (source gone from the repo, no form/view use), ThemeEnforcer, ScopeConfigEditor, UpdateRelatedButton (no form, view or default-control use in dev). Shipped although not on a form: RegardingLink (6 views), CommunicationAttachments (2 views), CommunicationActions/Connections/TimelineRegarding (email-communication-intelligence places them; architecture doc: all 11 regarding-family forms), the AI Setup admin app + site map (AI configuration and playbooks).
+    LIVE (dev SpaarkeMaster): Assemble added 53 components and re-added the 8 shell tables with subcomponents; -RemoveUnexplained took out of the SOLUTION (nothing deleted from the environment) the 5 Microsoft tables, the 8 env-var values and the Spaarke Provisioning Registry role. Version NOT bumped yet: one add refused.
+    FOUND + FIXED: (1) the 218c version bump produced five parts (1.0.0.0 -> 1.0.0.1.0: PowerShell parses "$parts[2] + 1, 0" comma-first) -> Get-NextPackageVersion + tests; -Version sets an explicit higher version (dev reads 1.0.0.0 although v1.1.0.0 was exported 2026-08-21; target 1.2.0.0). (2) Assemble could not remove -> -RemoveUnexplained; RemoveSolutionComponent's SolutionComponent reference takes the COMPONENT id (the solutioncomponent row id fails 0x8004f021). (3) An export into a deep folder (> ~155 chars) unpacks silently incomplete -> the export refuses an output folder over 140 characters. Probe export to C:	mp: 0 F12 leaks, 0 env-var values.
+    OPEN: "Secure Record Owner" was created in the child business unit "Secure Record"; Dataverse refuses it in a solution ("root component Role is missing" — only root-unit roles are solution-aware). Owner decision asked.</note>
+    <note date="2026-10-08">COMPLETED. Secure Record Owner: the owner first approved recreating it as a root-unit role; NOT done — UAC-r2's setup guide 5.2 keeps it contained in the Secure Record unit on purpose (a root role is assignable everywhere) and their privilege script refuses a root copy. The rule now takes roles from the ROOT business unit only; H7b (T256) creates the role per environment from config/secure-record-owner-role.json (T256 note; coordination notes/coordination/2026-10-08-to-uac-r2-2.md; owner agreed "i see your correction - ok"). Nothing changed in dev for that role. AC2 amended accordingly.
+    RESULT: dev SpaarkeMaster 1.2.0.0 (588 components; 520 in scope, 23 excluded); Test-SolutionCompleteness (full, incl. the refreshed inventory) exit 0; export committed in 65eb1cb2b (2,818 files, 0 F12 leaks, 0 env-var values); H11 default "Spaarke Basic User" in the committed package (test + controls). sprk_noaccessentry ships with all its columns (escalation trigger stays armed: if #1364 changes the schema, re-export).
+    QUALITY GATES: one full review pass — no F1/F3/F4; three F2 fixed (fitness-function controls + invariant name on the H11 test; error message names removals; runbook names -RemoveUnexplained / -Version). ControlPlane 2347/0 (1 skip); Pester 27/27.
+    KNOWN LIMITS: the 140-char export guard is a heuristic (15-char margin; an incomplete unpack still fails closed); a removal may need a second run to converge (bump blocked meanwhile); the Assemble orchestration is verified live, its selection logic by Pester; -Version silently wins over -VersionBumpKind. UPGRADE NOTE: components dropped from the package are deleted on the next MANAGED upgrade of an environment holding an older SpaarkeMaster — spaarke-model1-prod holds 1.0.0.0 managed (env-var values, the Provisioning Registry role, the five Microsoft tables' SpaarkeMaster layer would go); it is the retired shared tier (T241) and gets no upgrade. The repo grows by the bundles on every export (87 MB now) — accepted by the 218c design.</note>
+  </notes>
+</task>

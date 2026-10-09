@@ -17,6 +17,7 @@
 // real CachedAccessDataSource over an in-memory cache. No Mock<HttpMessageHandler>, no DI-registration assertion, no
 // constructor null-check.
 
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
@@ -159,9 +160,9 @@ public class DocumentContainerRelocatorTests
             Resolver = resolver;
             var gcf = Mock.Of<IGraphClientFactory>();
             Spe = new Mock<SpeFileStore>(MockBehavior.Loose,
-                new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
+                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
+                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
                 new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
                 null!);
             Spe.Setup(s => s.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

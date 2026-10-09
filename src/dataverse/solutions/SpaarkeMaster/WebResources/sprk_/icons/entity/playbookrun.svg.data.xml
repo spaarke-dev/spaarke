@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{ee5d27d0-9024-f111-88b6-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_/icons/entity/playbookrun.svg</Name>
+  <DisplayName>sprk_playbookrun Icon</DisplayName>
+  <Description>Fluent UI icon: Play20Regular - Playbook run — execution instance of an analysis playbook</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentityplaybookrunsvgEE5D27D0-9024-F111-88B6-7C1E520AA4DF</FileName>
+</WebResource>

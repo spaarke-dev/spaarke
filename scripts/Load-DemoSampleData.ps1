@@ -186,9 +186,9 @@ try {
     Write-Host "  Custom entities (sprk_matter, sprk_project, etc.) do not exist yet." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  To fix:" -ForegroundColor Cyan
-    Write-Host "    1. Build managed solution ZIPs from the main repo" -ForegroundColor Gray
-    Write-Host "    2. Run: .\Deploy-DataverseSolutions.ps1 -EnvironmentUrl $EnvironmentUrl" -ForegroundColor Gray
-    Write-Host "    3. Re-run this script after solutions are imported" -ForegroundColor Gray
+    Write-Host "    1. Import SpaarkeMaster: .\solution-authoring\Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl $EnvironmentUrl -PackageType <managed|unmanaged>" -ForegroundColor Gray
+    Write-Host "       (the CI-published package; the type is the environment's solutionPackageType in config/environments.json)" -ForegroundColor Gray
+    Write-Host "    2. Re-run this script after SpaarkeMaster is imported" -ForegroundColor Gray
     Write-Host ""
 
     if (-not $DryRun) {
@@ -585,7 +585,7 @@ if (-not $solutionsImported) {
     Write-Host "  Only contacts (standard entity) were processed." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Next steps:" -ForegroundColor Cyan
-    Write-Host "    1. Import managed solutions: .\Deploy-DataverseSolutions.ps1" -ForegroundColor Gray
+    Write-Host "    1. Import SpaarkeMaster:     .\solution-authoring\Import-SpaarkeMasterPackage.ps1" -ForegroundColor Gray
     Write-Host "    2. Re-run this script:       .\Load-DemoSampleData.ps1" -ForegroundColor Gray
     Write-Host "    3. Upload documents via UI:  Open Spaarke in the demo environment" -ForegroundColor Gray
     Write-Host ""

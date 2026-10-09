@@ -1,0 +1,309 @@
+/**
+ * Generic Subgrid Parent Rollup - Configuration-driven
+ *
+ * Web Resource Name: sprk_/scripts/subgrid_parent_rollup.js
+ *
+ * A reusable web resource for any parent-child rollup scenario.
+ * Register on any parent entity form's OnLoad event with a JSON
+ * configuration string to define the subgrid name, API endpoint,
+ * and entity type mapping.
+ *
+ * Supports multiple subgrids on the same form (each gets its own
+ * instance keyed by subgridName).
+ *
+ * Form Events:
+ *   Event: OnLoad
+ *   Library: sprk_/scripts/subgrid_parent_rollup.js
+ *   Function: Spaarke.SubgridRollup.onLoad
+ *   Pass execution context: Yes
+ *   Parameters: JSON config string (see below)
+ *
+ * Config parameter format:
+ * {
+ *   "subgridName": "subgrid_kpiassessments",
+ *   "apiPathTemplate": "/api/{entityPath}/{entityId}/recalculate-grades",
+ *   "entityPathMap": { "sprk_matter": "matters", "sprk_project": "projects" },
+ *   "refreshDelayMs": 1500
+ * }
+ *
+ * @see .claude/patterns/webresource/subgrid-parent-rollup.md
+ */
+
+/* eslint-disable no-undef */
+"use strict";
+
+var Spaarke = Spaarke || {};
+Spaarke.SubgridRollup = Spaarke.SubgridRollup || {};
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+/** Per-subgrid instance state. Keyed by subgridName. */
+Spaarke.SubgridRollup._instances = {};
+
+/** Version for console logging. */
+Spaarke.SubgridRollup._version = "1.0.0";
+
+// =============================================================================
+// ENVIRONMENT VARIABLE RESOLUTION
+// =============================================================================
+
+/** Cached BFF API base URL (module-level, shared across all instances). */
+Spaarke.SubgridRollup._cachedApiBaseUrl = null;
+
+/**
+ * Resolve the BFF API base URL from Dataverse Environment Variables.
+ * Queries environmentvariabledefinition + environmentvariablevalue for
+ * "sprk_BffApiBaseUrl". Caches the result in a module-level variable so
+ * subsequent calls (and multiple subgrid instances) skip the query.
+ *
+ * @returns {Promise<string>} BFF API base URL
+ * @throws {Error} If the environment variable is not configured
+ */
+Spaarke.SubgridRollup._getApiBaseUrl = function () {
+    // Return cached value immediately (wrapped in resolved promise)
+    if (Spaarke.SubgridRollup._cachedApiBaseUrl) {
+        return Promise.resolve(Spaarke.SubgridRollup._cachedApiBaseUrl);
+    }
+
+    var schemaName = "sprk_BffApiBaseUrl";
+
+    // Query the environment variable definition
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'&$select=environmentvariabledefinitionid,defaultvalue"
+    ).then(function (definitionResult) {
+        if (!definitionResult.entities || definitionResult.entities.length === 0) {
+            throw new Error(
+                '[SubgridRollup] Required environment variable "' + schemaName + '" not found in Dataverse. ' +
+                'Ensure it is defined as an Environment Variable Definition in the solution.'
+            );
+        }
+
+        var definition = definitionResult.entities[0];
+        var definitionId = definition.environmentvariabledefinitionid;
+        var defaultValue = definition.defaultvalue || null;
+
+        // Query for an override value
+        return Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariablevalue",
+            "?$filter=_environmentvariabledefinitionid_value eq '" + definitionId + "'&$select=value"
+        ).then(function (valueResult) {
+            var finalValue = null;
+            if (valueResult.entities && valueResult.entities.length > 0) {
+                finalValue = valueResult.entities[0].value;
+            } else {
+                finalValue = defaultValue;
+            }
+
+            if (!finalValue) {
+                throw new Error(
+                    '[SubgridRollup] Environment variable "' + schemaName + '" has no value. ' +
+                    'Set a default value on the definition or create an Environment Variable Value override.'
+                );
+            }
+
+            // Cache for subsequent calls
+            Spaarke.SubgridRollup._cachedApiBaseUrl = finalValue;
+            console.log("[SubgridRollup] Resolved BFF URL from env var: " + finalValue);
+            return finalValue;
+        });
+    });
+};
+
+// =============================================================================
+// FORM EVENT HANDLER
+// =============================================================================
+
+/**
+ * OnLoad event handler. Register on any parent entity form.
+ *
+ * @param {Object} executionContext - Execution context (pass execution context = yes)
+ * @param {string} configJson - JSON configuration string passed as event handler parameter
+ */
+Spaarke.SubgridRollup.onLoad = function (executionContext, configJson) {
+    try {
+        var formContext = executionContext.getFormContext();
+
+        // Parse configuration. Some Power Apps form designers pre-parse the OnLoad
+        // parameter and pass the JSON as an already-parsed object; others pass the
+        // raw string. Accept both.
+        var config;
+        if (configJson && typeof configJson === "object") {
+            config = configJson;
+        } else {
+            try {
+                config = JSON.parse(configJson || "{}");
+            } catch (parseError) {
+                console.error("[SubgridRollup] Invalid config JSON:", configJson, parseError);
+                return;
+            }
+        }
+
+        // Validate required fields
+        if (!config.subgridName || !config.apiPathTemplate) {
+            console.error("[SubgridRollup] Config must include subgridName and apiPathTemplate");
+            return;
+        }
+
+        // Apply defaults
+        config.refreshDelayMs = config.refreshDelayMs || 1500;
+        config.entityPathMap = config.entityPathMap || {};
+
+        // Resolve entity path for API URL
+        var entityName = formContext.data.entity.getEntityName();
+        var entityPath = config.entityPathMap[entityName] || entityName;
+
+        var key = config.subgridName;
+
+        // Resolve BFF URL from Dataverse Environment Variables (async)
+        Spaarke.SubgridRollup._getApiBaseUrl().then(function (apiBaseUrl) {
+            // Create instance state (supports multiple subgrids per form)
+            Spaarke.SubgridRollup._instances[key] = {
+                lastRowCount: -1,
+                refreshTimer: null,
+                config: config,
+                entityPath: entityPath,
+                apiBaseUrl: apiBaseUrl
+            };
+
+            // Wait for subgrid to render, then attach listener
+            Spaarke.SubgridRollup._waitForSubgrid(formContext, key, 0);
+
+            console.log("[SubgridRollup:" + key + "] v" + Spaarke.SubgridRollup._version +
+                " initialized for " + entityName + " (" + entityPath + ") → " + apiBaseUrl);
+        }).catch(function (error) {
+            console.error("[SubgridRollup:" + key + "] Failed to resolve BFF URL from environment variables:", error);
+        });
+    } catch (error) {
+        console.error("[SubgridRollup] Error in onLoad:", error);
+    }
+};
+
+// =============================================================================
+// SUBGRID LISTENER
+// =============================================================================
+
+/**
+ * Wait for the subgrid control to become available, then attach the listener.
+ * Retries up to 10 times with 500ms intervals.
+ */
+Spaarke.SubgridRollup._waitForSubgrid = function (formContext, key, attempt) {
+    var inst = Spaarke.SubgridRollup._instances[key];
+    var subgrid = formContext.getControl(inst.config.subgridName);
+
+    if (subgrid) {
+        // Capture initial row count
+        try {
+            var grid = subgrid.getGrid();
+            if (grid) {
+                inst.lastRowCount = grid.getTotalRecordCount();
+            }
+        } catch (e) {
+            // Grid data may not be loaded yet
+        }
+
+        // Attach subgrid OnLoad listener
+        subgrid.addOnLoad(function () {
+            Spaarke.SubgridRollup._onSubgridChange(formContext, subgrid, key);
+        });
+
+        console.log("[SubgridRollup:" + key + "] Listener attached. Rows: " + inst.lastRowCount);
+        return;
+    }
+
+    if (attempt < 10) {
+        setTimeout(function () {
+            Spaarke.SubgridRollup._waitForSubgrid(formContext, key, attempt + 1);
+        }, 500);
+    } else {
+        console.warn("[SubgridRollup:" + key + "] Subgrid not found after 10 attempts.");
+    }
+};
+
+/**
+ * Called when the subgrid refreshes. Checks if the row count changed
+ * and triggers the API call + form refresh if so.
+ */
+Spaarke.SubgridRollup._onSubgridChange = function (formContext, subgrid, key) {
+    var inst = Spaarke.SubgridRollup._instances[key];
+    try {
+        var currentCount = -1;
+        try {
+            currentCount = subgrid.getGrid().getTotalRecordCount();
+        } catch (e) {
+            return; // Grid in loading state
+        }
+
+        // Only act on actual data changes (prevents infinite refresh loops)
+        if (currentCount !== inst.lastRowCount && currentCount >= 0) {
+            console.log("[SubgridRollup:" + key + "] Rows: " +
+                inst.lastRowCount + " → " + currentCount);
+            inst.lastRowCount = currentCount;
+
+            var entityId = formContext.data.entity.getId().replace(/[{}]/g, "");
+            Spaarke.SubgridRollup._callApiAndRefresh(formContext, key, entityId);
+        }
+    } catch (error) {
+        console.warn("[SubgridRollup:" + key + "] Error in subgrid handler:", error);
+    }
+};
+
+// =============================================================================
+// API CALL + FORM REFRESH
+// =============================================================================
+
+/**
+ * Call the BFF calculator API, then refresh the form data after a delay.
+ * Debounces rapid subgrid events.
+ */
+Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId) {
+    var inst = Spaarke.SubgridRollup._instances[key];
+
+    // Debounce: cancel any pending operation
+    if (inst.refreshTimer) {
+        clearTimeout(inst.refreshTimer);
+        inst.refreshTimer = null;
+    }
+
+    // Build API URL from template
+    var apiUrl = inst.apiBaseUrl +
+        inst.config.apiPathTemplate
+            .replace("{entityPath}", inst.entityPath)
+            .replace("{entityId}", entityId);
+
+    console.log("[SubgridRollup:" + key + "] POST " + apiUrl);
+
+    fetch(apiUrl, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+    }).then(function (response) {
+        if (response.ok) {
+            console.log("[SubgridRollup:" + key + "] API succeeded. Refreshing in " +
+                inst.config.refreshDelayMs + "ms...");
+
+            // Wait for Dataverse to commit, then refresh form data
+            inst.refreshTimer = setTimeout(function () {
+                inst.refreshTimer = null;
+                formContext.data.refresh(false).then(
+                    function () {
+                        console.log("[SubgridRollup:" + key + "] Form refreshed.");
+                    },
+                    function (err) {
+                        console.warn("[SubgridRollup:" + key + "] Refresh failed:", err);
+                    }
+                );
+            }, inst.config.refreshDelayMs);
+        } else {
+            console.warn("[SubgridRollup:" + key + "] API returned " + response.status);
+        }
+    }).catch(function (error) {
+        console.warn("[SubgridRollup:" + key + "] API call failed:", error);
+    });
+};
+
+/* eslint-enable no-undef */

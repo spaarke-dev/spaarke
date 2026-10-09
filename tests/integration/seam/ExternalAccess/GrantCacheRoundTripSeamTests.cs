@@ -547,6 +547,7 @@ public sealed class GrantCacheRoundTripSeamTests
                 membership.Object, Participations, standing.Object, denyList.Object,
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                 NullLogger<AccessibleRecordSetService>.Instance);
         }
 
@@ -576,7 +577,8 @@ public sealed class GrantCacheRoundTripSeamTests
         public CacheBackedParticipationService(
             ITenantCache cache, IHttpContextAccessor accessor, ExternalGrantSet dataverseGrants, IEnumerable<Guid> secureRecordIds)
             : base(new HttpClient(), cache, configuration: null!, credential: null!, accessor,
-                   NullLogger<ExternalParticipationService>.Instance)
+                   NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
             _dataverseGrants = dataverseGrants;
             _secureRecordIds = secureRecordIds.ToHashSet();

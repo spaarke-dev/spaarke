@@ -305,8 +305,8 @@ per_env_constants:
   dev:
     containerTypeId: fb3817a8-5a55-42ba-8cc9-12cf055168b8
 ```
-It must match the bicepparam entry from Step 6. `bffApiAppId` in the same block predates D-13 (per-customer BFF app
-registrations); restructuring this file per model is T227 (G2) — do not populate it with a shared BFF app.
+It must match the bicepparam entry from Step 6. There is no BFF app id in this file (T227a): each customer's BFF app
+registration is created by H3 during that customer's run.
 
 ---
 
@@ -338,10 +338,11 @@ owning anything (topology doc §3A "How a BFF gets container access without owni
 
 - The **BFF app registration is per customer** (D-13) and is created by **H3** during that customer's provisioning
   run: single-tenant, **no client secret**, with its own federated credential `spaarke-uami-trust` trusting the
-  customer's BFF UAMI. This runbook does not create one. The former shared `Spaarke BFF - Trial 1` /
-  `Spaarke BFF - Model 1` registrations are retired (inventory doc, "Retired" section).
-- The **grant** for each customer's BFF app on the registration is per customer. **No handler owns it yet — T227 (G9).**
-  When it is done (by a handler or manually), use the v1.0 per-app grant API, as the owning app:
+  customer's BFF UAMI. This runbook does not create one; its name is `spaarke-bff-api-{customerId}`. There is no
+  shared-tier BFF registration (D-12/D-13; the script path that created one was deleted by T227a).
+- The **grants** for each customer are made by **H8** (T227b), as the owning app, before it creates the customer's
+  container: the stamp UAMI gets application `full`, the BFF app registration delegated `full`. To inspect or repair
+  one by hand, use the v1.0 per-app grant API, as the owning app:
   ```http
   PUT https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{bffAppId}
   Authorization: Bearer <owning-app token>
@@ -349,13 +350,13 @@ owning anything (topology doc §3A "How a BFF gets container access without owni
 
   {
     "delegatedPermissions": ["full"],
-    "applicationPermissions": ["full"]
+    "applicationPermissions": ["none"]
   }
   ```
   `201 Created` on success. Do not put `appId` in the body (it is in the URL). `PATCH` on the same URL updates an
   existing grant; `DELETE` removes it; `GET .../applicationPermissionGrants` lists them. Grants can take up to one
-  hour to propagate. Unlike the whole-registration PUT in Step 5, this touches only that app's grant. Choose the
-  permission set the BFF actually needs; `full` mirrors the owning app. Source:
+  hour to propagate. Unlike the whole-registration PUT in Step 5, this touches only that app's grant. H8 grants each
+  identity only the token kind it presents (UAMI: `applicationPermissions`; BFF app: `delegatedPermissions`). Source:
   [Learn — Create fileStorageContainerTypeAppPermissionGrant](https://learn.microsoft.com/en-us/graph/api/filestoragecontainertyperegistration-post-applicationpermissiongrants?view=graph-rest-1.0).
 - The BFF's own SPE admin surface (`SpeAdminGraphService`) still signs in as owning apps with Key Vault client secrets
   (ADR-028 exception E-1); moving it to MI-FIC is **T250**. Until T250 there is no secret-based

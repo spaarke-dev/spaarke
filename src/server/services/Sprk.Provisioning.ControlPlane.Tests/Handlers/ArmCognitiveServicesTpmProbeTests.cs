@@ -23,6 +23,7 @@ using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -122,37 +123,53 @@ public sealed class ArmCognitiveServicesTpmProbeTests
                 $"/subscriptions/{SubscriptionId}/providers/Microsoft.CognitiveServices/locations/{Region}/usages",
                 "the probe must call the REAL usages endpoint, not a hard-coded stub");
             return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """
-                { "value": [ { "unit": "Count", "name": { "value": "Standard.gpt-4o", "localizedValue": "gpt-4o" }, "currentValue": 50.0, "limit": 300.0 },
-                              { "unit": "Count", "name": { "value": "Standard.gpt-4o-mini", "localizedValue": "gpt-4o-mini" }, "currentValue": 50.0, "limit": 300.0 },
-                              { "unit": "Count", "name": { "value": "Standard.text-embedding-3-large", "localizedValue": "e3l" }, "currentValue": 5.0, "limit": 100.0 },
-                              { "unit": "Count", "name": { "value": "Standard.text-embedding-3-small", "localizedValue": "e3s" }, "currentValue": 5.0, "limit": 500.0 } ] }
+                { "value": [ { "unit": "Count", "name": { "value": "OpenAI.DataZoneStandard.gpt-4o", "localizedValue": "gpt-4o" }, "currentValue": 0.0, "limit": 300.0 },
+                              { "unit": "Count", "name": { "value": "OpenAI.Standard.gpt-4o", "localizedValue": "gpt-4o" }, "currentValue": 0.0, "limit": 0.0 },
+                              { "unit": "Count", "name": { "value": "OpenAI.DataZoneStandard.gpt4.1-mini", "localizedValue": "gpt-4.1-mini" }, "currentValue": 0.0, "limit": 2000.0 },
+                              { "unit": "Count", "name": { "value": "OpenAI.DataZoneStandard.text-embedding-3-large", "localizedValue": "e3l" }, "currentValue": 0.0, "limit": 1000.0 } ] }
                 """);
         });
         var probe = new ArmCognitiveServicesTpmProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmCognitiveServicesTpmProbe>.Instance);
         var input = new PreflightProbeInput(
             "acme", "tenant-1",
-            new Dictionary<string, string> { ["region"] = Region, ["subscriptionId"] = SubscriptionId });
+            new Dictionary<string, string> { ["openAiLocation"] = Region, ["subscriptionId"] = SubscriptionId });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
-        result.Passed.Should().BeTrue("all 4 default NFR-12 models fit within the fake usage/limit values");
+        result.Passed.Should().BeTrue(
+            "each stamp deployment's DataZoneStandard quota fits (fresh-subscription auto-grants, read 2026-10-06); " +
+            "the Standard gpt-4o entry (limit 0) is a different quota name and must not be consulted");
         result.CheckName.Should().Be(PreflightCheckNames.AzureOpenAiTpmHeadroom);
         handler.RequestedUris.Should().ContainSingle();
     }
 
     [Fact]
-    public async Task CheckAsync_MissingRegionParameter_ReturnsConfigErrorWithoutCallingArm()
+    public async Task CheckAsync_WithoutOpenAiLocation_QueriesTheTemplateDefaultRegion_NotThePrimaryRegion()
     {
-        var handler = ArmSdkTestFakes.NewHandler(_ => throw new InvalidOperationException("must not call ARM"));
+        // Task 247: the stamp's OpenAI account is in openAiLocation (customer.bicep default westus3), not in the
+        // primary `region` — the probe must ask Azure about the region the deployments are created in.
+        var handler = ArmSdkTestFakes.NewHandler(_ =>
+            ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{ "value": [] }"""));
         var probe = new ArmCognitiveServicesTpmProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmCognitiveServicesTpmProbe>.Instance);
         var input = new PreflightProbeInput(
             "acme", "tenant-1",
-            new Dictionary<string, string> { ["subscriptionId"] = SubscriptionId }); // no region
+            new Dictionary<string, string> { ["region"] = "westus2", ["subscriptionId"] = SubscriptionId });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
-        result.Passed.Should().BeFalse();
-        result.Diagnostic.Should().Contain("'region'");
-        handler.RequestedUris.Should().BeEmpty("config error must short-circuit before any ARM call");
+        handler.RequestedUris.Should().ContainSingle()
+            .Which.AbsolutePath.Should().Contain($"/locations/{PinnedModelCatalog.DefaultOpenAiLocation}/usages");
+        result.Passed.Should().BeFalse("no quota is reported for any stamp deployment");
+    }
+
+    [Fact]
+    public void RequestedTpm_IsTheSummedCapacityOfTheStampDeployments_PerQuotaName()
+    {
+        PinnedModelCatalog.RequestedTpmByQuotaName.Should().BeEquivalentTo(new Dictionary<string, int>
+        {
+            ["OpenAI.DataZoneStandard.gpt-4o"] = 150,
+            ["OpenAI.DataZoneStandard.gpt4.1-mini"] = 200,
+            ["OpenAI.DataZoneStandard.text-embedding-3-large"] = 350,
+        }, "a model no stamp deploys (e.g. text-embedding-3-small) must not be requested");
     }
 }

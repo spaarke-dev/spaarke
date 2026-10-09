@@ -252,69 +252,10 @@ secrets:
   # SharePoint Embedded (SPE)
   # ==========================================================================
 
-  - canonical_name: 'SPE-ContainerTypeId'
-    category: 'spe'
-    purpose: >-
-      SPE Container Type ID for the customer's tier (Model 1 / Model 2 /
-      Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier,
-      created ONCE per Spaarke tier by the operator via the one-time SPE
-      topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
-      Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214,
-      2026-08-30) READS this value from spaarke-constants.yaml
-      per_env_constants.<env>.containerTypeId at run dispatch and passes it
-      to Microsoft Graph as the containerTypeId when creating the
-      per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30
-      wrote here after 24-hour SPE container-type replication — that scope is
-      RETIRED per topology doc §R5 empirical verification: `client_credentials`
-      grant returns HTTP 403 accessDenied on container-TYPE creation regardless
-      of credential shape, so container-TYPE creation is now delegated-only
-      operator work, not a handler responsibility). H4 continues to pre-create
-      the KV slot at customer-provisioning time so App Service KV-reference
-      resolution has a target; the value comes from the topology constants,
-      populated when task 213.7 lands.
-    consumers:
-      - 'BFF: DEFAULT_CT_ID / SharePointEmbedded:ContainerTypeId'
-    rotation_cadence: 'N/A'
-    never_delete: false
-    exception_note: >-
-      SEMANTICS CHANGED 2026-08-30 (task 214, H8-B rewrite): value is
-      topology-scoped (once per tier from spaarke-constants.yaml), not
-      per-customer + populated by H8. Retirement of prior H8 write-here
-      behavior driven by topology doc §R5 empirical verification. See task
-      214 POML + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
-    aliases: []
-    value_source: 'from-topology-constants'
-    app_settings:
-      - 'DEFAULT_CT_ID'
-    tags: ['spe', 'public', 'topology-scoped']
-
-  - canonical_name: 'SPE-DefaultContainerId'
-    category: 'spe'
-    purpose: 'SPE default container ID (per-customer root container for uploaded files).'
-    consumers:
-      - 'BFF: Email:DefaultContainerId'
-    rotation_cadence: 'N/A'
-    never_delete: false
-    exception_note: ''
-    aliases: []
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'Email__DefaultContainerId'
-    tags: ['spe', 'public']
-
-  - canonical_name: 'SPE-CommunicationArchiveContainerId'
-    category: 'spe'
-    purpose: 'SPE communication-archive container ID (archived email / communication payloads).'
-    consumers:
-      - 'BFF: Communication:ArchiveContainerId'
-    rotation_cadence: 'N/A'
-    never_delete: false
-    exception_note: ''
-    aliases: []
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'Communication__ArchiveContainerId'
-    tags: ['spe', 'public', 'communication']
+  # (No SPE secrets.) SPE-ContainerTypeId was removed by task 227e (2026-10-06): nothing read it.
+  # The BFF reads the container type as the plain setting SharePointEmbedded__ContainerTypeId
+  # (per_env_settings, from the intake containerTypeId); the secret's KV-reference app setting
+  # DEFAULT_CT_ID had no reader. The customer's container ids are plain H4b settings too (T227c).
 
   # ==========================================================================
   # AI services (endpoints + keys)
@@ -382,23 +323,11 @@ secrets:
   #     message); no value exists in any Spaarke vault.
   # Their value source (copy from the Spaarke platform vault) went with them.
 
-  - canonical_name: 'ContentSafety-ApiKey'
-    category: 'ai'
-    purpose: >-
-      Azure AI Content Safety API key. Used by PromptShieldService +
-      GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity
-      Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey;
-      the KV ref remains for local-dev + fallback.
-    consumers:
-      - 'BFF: AiSafety:ContentSafety:ApiKey'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: 'Prefer MI when AiSafety:ContentSafety:ManagedIdentity:Enabled=true.'
-    aliases: []
-    value_source: 'from-run-parameter'
-    app_settings:
-      - 'AiSafety__ContentSafety__ApiKey'
-    tags: ['ai', 'key']
+  # T246 (owner D13, plan G26, 2026-10-06): 'ContentSafety-ApiKey' REMOVED. Every stamp now has its own
+  # Azure AI Content Safety account (customer.bicep, kind ContentSafety, local auth disabled) and the BFF
+  # calls it with the stamp UAMI (AiSafety__ContentSafety__ManagedIdentity__Enabled=true, Cognitive Services
+  # User on the account). The endpoint is a plain app setting (per_env_settings below, from H2a's
+  # `contentSafetyEndpoint` output). The entry was from-run-parameter, a channel nothing ever wrote.
 
   # ==========================================================================
   # Communication (email + webhooks)
@@ -894,6 +823,89 @@ per_env_settings:
     required: true
     notes: >-
       Auth-v4 §10.2 entry 8. Enables MI-authenticated Azure AI Content Safety
-      calls (PromptShieldService / GroundednessCheckService), preferring MI
-      over the ContentSafety-ApiKey secret per that secret's own exception
-      note above. Global literal.
+      calls (PromptShieldService / GroundednessCheckService). The stamp's
+      Content Safety account has local auth disabled (task 246), so MI is the
+      only path; no stamp is given an API key. Global literal.
+
+  - key: 'AiSafety__ContentSafety__Endpoint'
+    per_env_source: 'from-h2a-output:content_safety_endpoint'
+    iOptionsModule: 'AiSafetyOptions'
+    required: true
+    notes: >-
+      Task 246 (plan G26). The stamp's own Azure AI Content Safety endpoint
+      (customer.bicep output `contentSafetyEndpoint`). Not a secret: local
+      auth is disabled and the BFF calls with its UAMI. Outside Development
+      and Testing the BFF refuses to start without it (it used to fall back to
+      a hard-coded dev endpoint). customer.bicep sets the same value on
+      deploy; H4b keeps it on upgrades.
+
+  - key: 'AiSpendLimit__MonthlyLimitUsd'
+    per_env_source: 'from-intake-parameter:openai_monthly_limit_usd'
+    iOptionsModule: 'AnalysisServicesModule (AiSpendLimitOptions)'
+    required: false
+    notes: >-
+      Task 254 (owner G37 — "no cap, but allow for a per customer spend limit
+      if desired"). The stamp's OPTIONAL monthly Azure OpenAI spend limit in
+      USD: written only when the run carries intake `openAiMonthlyLimitUsd`;
+      absent = no limit. The BFF refuses model calls with 429 once its
+      estimate reaches it (Services/Ai/Metering/AiSpendLimit). Change or
+      remove it later with scripts/Set-AiSpendLimit.ps1 (both slots).
+
+  - key: 'EmailProcessing__DefaultContainerId'
+    per_env_source: 'from-h8-output:spe_container_id'
+    iOptionsModule: 'EmailProcessingOptions'
+    required: true
+    notes: >-
+      Task 227c (plan G18). The customer's SPE container (H8 creates one per
+      customer — owner D28: one container type per model, one container per
+      customer). A plain setting: a container id is not a secret. It used to be
+      the KV secret SPE-DefaultContainerId (from-bicep-output), which nothing
+      could write — H8 runs after H4 — so H4 quarantined every fresh stamp; and
+      it was wired to Email__DefaultContainerId, a key no BFF code reads (the
+      BFF reads EmailProcessing:DefaultContainerId). H4b runs after H8.
+
+  - key: 'Communication__ArchiveContainerId'
+    per_env_source: 'from-h8-output:spe_container_id'
+    iOptionsModule: 'CommunicationOptions'
+    required: true
+    notes: >-
+      Task 227c (plan G18). Archived communications go to the same per-customer
+      container (one container per customer, owner D28). Was the KV secret
+      SPE-CommunicationArchiveContainerId, which nothing wrote.
+
+  - key: 'AzureOpenAI__ChatModelName'
+    per_env_source: 'literal'
+    literal_value: 'gpt-4o-mini'
+    iOptionsModule: 'AiModule'
+    required: true
+    notes: >-
+      Task 247 (plan G27). The deployment NAME the BFF's IChatClient calls.
+      AiModule registers no IChatClient unless both AzureOpenAI:Endpoint and
+      this are set, so a stamp without it has no chat. The `gpt-4o-mini`
+      deployment runs gpt-4.1-mini (openai.bicep / PinnedModelCatalog) — the
+      name is what the BFF addresses, so it stays. Global literal: every
+      stamp deploys the same set.
+
+  - key: 'Cors__AllowedOrigins__0'
+    per_env_source: 'literal'
+    literal_value: 'https://addins.spaarke.com'
+    iOptionsModule: 'CorsModule'
+    required: true
+    notes: >-
+      T240a (2026-10-07). The production Office add-in site (Static Web App
+      swa-spaarke-office-addins-prod, owner-chosen custom domain). CorsModule
+      throws at startup outside Development when Cors:AllowedOrigins is empty,
+      so without these entries no stamp BFF starts. The customer's Dataverse
+      origins need no entry: CorsModule already admits *.dynamics.com and
+      *.powerapps.com by suffix. Global literal: every stamp is reached by the
+      same shared client sites.
+
+  - key: 'Cors__AllowedOrigins__1'
+    per_env_source: 'literal'
+    literal_value: 'https://external.spaarke.com'
+    iOptionsModule: 'CorsModule'
+    required: true
+    notes: >-
+      T240a (2026-10-07). The production External Access SPA, which is also the
+      Teams tab (Static Web App swa-spaarke-external-spa-prod, owner-chosen
+      custom domain). One origin covers the browser and Teams.

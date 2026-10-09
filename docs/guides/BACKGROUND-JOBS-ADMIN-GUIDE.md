@@ -274,7 +274,7 @@ The notification playbook scheduler is hourly, but each individual playbook resp
    curl -s -H "Authorization: Bearer {token}" \
      https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs
    ```
-   Look for `notification-playbook-scheduler.lastRunStatus`. If `"Succeeded"`, the scheduler ran but individual playbooks may have been skipped (not due) or failed for specific users. If `null`, the instance you reached has restarted since the run — history is not durable.
+   Look for `notification-playbook-scheduler.lastRunStatus`. If `"Succeeded"`, the scheduler ran but individual playbooks may have been skipped (not due) or failed for some (not all) users. Since ISS-018 (#1452, 2026-10-08) a run is `"Failed"` when any playbook failed for **every** user (or its fan-out threw): its `errorMessage` names the playbook(s), that playbook's `sprk_lastrundate` is not advanced so the next hourly tick retries it, and an Error trace "… failed for every user …" fires the `notification-playbook-total-failure-<env>` alert. If `null`, the instance you reached has restarted since the run — history is not durable.
 
 2. **Pull recent history**:
    ```bash

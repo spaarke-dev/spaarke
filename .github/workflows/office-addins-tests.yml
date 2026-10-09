@@ -437,6 +437,14 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
+      # The library's own suites ran nowhere in CI: this workflow already triggers on
+      # `src/client/shared/Spaarke.Auth/**` and installs the package here, but only built it.
+      # Its tenant-authority rules (#1453 — a Dataverse host never signs in through
+      # /organizations, which locks B2B guests out) live in these tests.
+      - name: "Test @spaarke/auth"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx jest --ci --maxWorkers=2
+
       - name: Install dependencies
         working-directory: src/client/office-addins
         # NOT `npm ci` (root CLAUDE.md §12); a bare `npm install` also fails here

@@ -1,0 +1,96 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{d5bdc3c7-8f8c-f111-8077-7ced8ddc4cc6}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{aa276966-9d51-4ee4-a7c4-c53a2c596e3f}" IsUserDefined="1" labelid="{4a4c1551-548a-4e20-a920-8a2c4ba7ea92}">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{796eb54b-d66d-412c-8bea-12925ecb1cca}" labelid="{59a3d585-ae07-4349-9fd0-fa8f8d6e7268}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{1cdab228-f302-4ae3-a534-937078a26f9a}" labelid="{50f5f044-104d-4a88-a9b6-0e5904a866d0}">
+                        <labels>
+                          <label description="Account Type Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_accounttypename" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_accounttypename" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{ea53bb3e-49b2-4b84-ba12-e8cf9b0cf483}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{c008c0c9-ac7d-4e8f-be89-4ddae556c5a6}" showlabel="false" labelid="{3c3cb04d-7bf5-4645-a68b-12c2ff464dbe}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{6507576a-7cb3-478d-860e-4b34cd57be61}" showlabel="false" labelid="{32d1fcd6-b130-4f51-adf7-d7cea0a6e0ea}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{986add4d-f938-415c-bde3-7fb70dda4006}" showlabel="false" labelid="{8ca2bc6c-54c0-4019-9f3e-b52cfb3e6789}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{5a49316d-973a-4fa3-a9ee-9a3dc4097a68}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{7976f8a7-4795-4b40-8b72-158815dc1eea}" showlabel="false" labelid="{daa1051e-62e1-4acb-9b20-2dc92fe12de4}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{8d4634ce-21d7-44df-9260-85f0e9e9b100}" showlabel="false" labelid="{bceaaaed-1d94-4377-a62c-4add30aaede8}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{860173f8-c8cf-4e20-8d94-863e60b7aa74}" showlabel="false" labelid="{0b01040e-865b-4c00-8a56-151585ac2024}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{d129cd37-e777-8de1-6cc5-762510e8b769}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Agreement Type main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

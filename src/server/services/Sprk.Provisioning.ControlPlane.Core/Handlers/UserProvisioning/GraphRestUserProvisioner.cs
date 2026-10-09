@@ -153,15 +153,14 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
 
-        var skuIds = new[] { _options.PowerAppsPlan2TrialSkuId, _options.FabricFreeSkuId, _options.PowerAutomateFreeSkuId }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
-
+        // Task 232: no SKU is a failure, never a silent skip (R7 "validated but not wired" — an unlicensed user cannot
+        // open the environment). H11 refuses such a run before creating anyone; this guards any other caller.
+        var skuIds = _options.LicenseSkuIds;
         if (skuIds.Count == 0)
         {
-            _logger.LogInformation(
-                "H11 no license SKUs configured — skipping assignLicense for user {UserId}", userId);
-            return new LicenseAssignmentOutcome.Success();
+            return new LicenseAssignmentOutcome.Failure(
+                "No licence SKU is configured (H11UserProvisioningOptions: PowerAppsPlan2TrialSkuId / FabricFreeSkuId / " +
+                "PowerAutomateFreeSkuId).");
         }
 
         AccessToken token;

@@ -13,12 +13,12 @@
 // PURPOSE (spec.md section 15 #14 / plan.md section 8 risk register):
 //   Queries actual month-to-date cost for the customer's subscription via
 //   ARM Cost Management, extrapolates to a full-month total, and returns a
-//   typed report comparing observed vs the expected envelope per tenancy
-//   model. Task 223 (D-12) migration: the pre-D-12 three-envelope schedule
-//   (Model1SharedFloor / Model1Marginal / Model2EmptyEnvelope) is reduced to
-//   two — Model1Shared → Model1MarginalEnvelopeUsd and Model2Dedicated →
-//   Model2EmptyEnvelopeUsd, exhaustively over the enum with no `_`-arm
-//   fallback. Model1SharedFloorEnvelopeUsd is deleted (shared-tier retirement).
+//   typed report comparing observed vs the expected envelope. Task 229: ONE
+//   envelope (H13AcceptanceOptions.DedicatedStampEnvelopeUsd) for every tenancy
+//   model — both deploy one customer.bicep stamp into the customer's own
+//   subscription, so the pre-D-12 per-model schedule (shared floor / Model 1
+//   marginal / Model 2 empty) is gone. The tenancy model stays on the request
+//   for the log line and the report summary.
 //   Cost drift over the documented advisory threshold (default 20% per
 //   section 15 #14) sets ExceedsAdvisoryThreshold=true on the report; H13
 //   decides advisory-warn vs fail-run based on
@@ -65,8 +65,8 @@
 //
 // THRESHOLD LOGIC (ported verbatim from AzCliCostEnvelopeChecker.cs; then
 // updated 2026-09-29 by Task 223 D-12 for the exhaustive-enum switch):
-//   1. SelectExpectedEnvelope(TenancyModel) -> Model2Dedicated -> Model2Empty,
-//      Model1Shared -> Model1Marginal. Enum-exhaustive; no fallback.
+//   1. expected = H13AcceptanceOptions.DedicatedStampEnvelopeUsd (task 229:
+//      the same for every tenancy model).
 //   2. ExtrapolateMonthly(mtdUsd) -> mtdUsd/daysElapsed*daysInMonth, using
 //      UtcNow.Day with Math.Max(1, ...) guard against div/0. Bit-identical.
 //   3. driftFraction = expected==0 ? 0 : (monthly-expected)/expected.
@@ -195,10 +195,9 @@ public sealed class ArmCostEnvelopeChecker : ICostEnvelopeChecker
                 "H2a's InterStepState must populate this before H13 runs.");
         }
 
-        // (2) Compute the expected envelope from tenancy model. Ported verbatim
-        //     from AzCliCostEnvelopeChecker.SelectExpectedEnvelope -- same
-        //     tenancy-model branches, same USD constants.
-        var expected = SelectExpectedEnvelope(request.TenancyModel);
+        // (2) The expected envelope: one empty dedicated stamp, whatever the
+        //     tenancy model (task 229).
+        var expected = _options.DedicatedStampEnvelopeUsd;
 
         // (3) Build the SDK-typed query definition. Ground-truthed to emit the
         //     exact same JSON body the retired az CLI produced (verified via
@@ -257,25 +256,6 @@ public sealed class ArmCostEnvelopeChecker : ICostEnvelopeChecker
 
         return new CostEnvelopeReport(monthlyUsd, expected, driftFraction, exceeds, summary);
     }
-
-    /// <summary>
-    /// Selects the expected monthly envelope in USD for the request's tenancy
-    /// model. Task 223 (D-12): accepts the typed enum (callers TryParse at their
-    /// entry point) — exhaustive switch, no `_` arm, no silent fallback. The
-    /// pre-D-12 `_` arm defaulted to <c>Model1SharedFloorEnvelopeUsd</c>; D-12's
-    /// shared-tier retirement makes that "floor" concept meaningless, so the
-    /// option is deleted (see H13AcceptanceOptions) and the arm along with it.
-    /// Exposed internal so unit tests can pin the classifier against
-    /// H13AcceptanceOptions directly.
-    /// </summary>
-    internal decimal SelectExpectedEnvelope(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel) => tenancyModel switch
-    {
-        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => _options.Model2EmptyEnvelopeUsd,
-        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => _options.Model1MarginalEnvelopeUsd,
-        _ => throw new InvalidOperationException(
-            $"Unhandled TenancyModel '{tenancyModel}' in ArmCostEnvelopeChecker.SelectExpectedEnvelope. " +
-            "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
-    };
 
     /// <summary>
     /// Extracts the aggregated MTD USD total from a QueryResult response. The

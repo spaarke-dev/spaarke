@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="246" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Per-customer Azure AI Content Safety, keyless (plan G26) — a ContentSafety account in every stamp, its endpoint carried H2a → H4b to the BFF, no API key anywhere, and no hard-coded dev-endpoint fallback in the BFF</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T246 (gap G26; hard prerequisite of T186 per D22)</phase>
+    <gate>startable now (T244 ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF startup (.cs, tag bff-api), stamp auth (tag auth), L2 handler outputs and tests; failure modes are a stamp BFF that sends customer prompt text to a foreign endpoint, or a BFF that refuses to boot.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Every piece copies an existing, merged pattern: content-safety.bicep ← doc-intelligence.bicep (T243/T244), the endpoint output chain ← redisEndpoint (T242), the boot check ← CacheModule's isLocalLike carve-out.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>customer.bicep / customer.json / manifest.yaml are shared by every stamp task; touches .claude/ (constraints, CHANGELOG) — main-session-only</parallel-reason>
+    <tags>bicep, auth, provisioning, bff-api, content-safety, ai, provisioning-handler, model1-dedicated, testing</tags>
+    <deps>244</deps>
+  </metadata>
+
+  <prompt>
+    Give every customer stamp its own Azure AI Content Safety account, reached only with the stamp UAMI, and make the BFF
+    use the endpoint the stamp provides — never Spaarke's dev endpoint.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer (Bicep, Azure RBAC, the L2 control plane, the BFF). Follow ADR-028, ADR-032, BFF §10 and the
+    provisioning constraints strictly.
+  </role>
+
+  <goal>
+    A stamp deployed from `customer.bicep` has a `kind: ContentSafety` account with a custom subdomain and local auth
+    disabled; the stamp UAMI holds Cognitive Services User on it; its endpoint reaches the stamp BFF as
+    `AiSafety__ContentSafety__Endpoint` (set by customer.bicep on deploy and by H4b from H2a's output on every run); the
+    manifest carries no `ContentSafety-ApiKey`; and the BFF refuses to start outside Development/Testing when the endpoint
+    is unset, instead of falling back to `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/`.
+  </goal>
+
+  <justification>
+    <existing>modules/content-safety.bicep already existed (unused, key-based); the endpoint chain reuses T242's redisEndpoint path (ARM output → BicepDeployOutputs → InterStepState → PerEnvSourceCatalog → per_env_settings); AiSafetyModule already registers the named client. Shared dev serves Content Safety from its AIServices account; stamps use kind OpenAI, which cannot.</existing>
+    <extension>Yes — extended every existing piece: the module (keyless + UAMI role), customer.bicep, one InterStepState property, one catalog source, one manifest setting, and AiSafetyModule's existing endpoint read. No new service, interface, endpoint, package or DI registration.</extension>
+    <cost-of-doing-nothing>A stamp BFF sends Prompt Shield / groundedness calls to the hard-coded dev endpoint (an account that does not exist): every scan fails open and the safety perimeter silently does nothing on every customer stamp (plan G26); D22 makes this a hard prerequisite of T186.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Plan G26 / D22: stamps deploy no Content Safety resource and the manifest has no endpoint setting, so a stamp BFF uses
+      the hard-coded fallback in `AiSafetyModule.cs` (`?? "https://spaarke-contentsafety-dev..."`) and Prompt Shield /
+      groundedness fail open. T246 must land before T186.
+      State read 2026-10-06 (read-only):
+      - `modules/content-safety.bicep` exists, used by no template (header documents a one-off dev deploy); it has
+        `disableLocalAuth: false` (comment: "key auth required until MI GA" — stale: the BFF already calls Content Safety
+        with MI on dev) and a `contentSafetyKey` output via `listKeys()`. No UAMI role param.
+      - The fallback host does not exist: the only Cognitive Services accounts in the dev subscription are
+        `spaarke-openai-dev` (AIServices) and an unrelated `website-article-agent-resource`. Dev BFF `spaarke-bff-dev` sets
+        `AiSafety__ContentSafety__Endpoint=https://spaarke-openai-dev.cognitiveservices.azure.com/` + MI Enabled=true —
+        unaffected by removing the fallback.
+      - Demo BFF `spaarke-bff-demo` (Stopped, ASPNETCORE_ENVIRONMENT=Production) has NO `AiSafety__*` setting — with the
+        boot check it would refuse to start on its next deploy. That deploy is T242c (demo refresh); T242c must set the
+        endpoint (record it on T242c — follow-on work this task absorbs as a note, not a live change).
+      - Shared prod `sprksharedprod-api` is Stopped and retired (D-12); no AiSafety settings; it is not redeployed.
+      - Stamp OpenAI is `kind: OpenAI` (not AIServices), so it cannot serve Content Safety the way dev's account does —
+        hence a dedicated ContentSafety account per stamp.
+      - Manifest: `ContentSafety-ApiKey` (value_source from-run-parameter — a channel with no writer) pinned as
+        `ContentSafety-ApiKey→T246` in `RunContextContractTests.PinnedManifestGaps` and used as the positive-control
+        example there; `AiSafety__ContentSafety__ManagedIdentity__Enabled=true` literal already in per_env_settings.
+      - Endpoint-chain pattern (T242 Redis): customer.bicep output `redisEndpoint` → `ArmDeploymentRunner.MapOutputs`
+        → `BicepDeployOutputs.RedisEndpoint` (required) → H2a `Check(...)` + `run.InterStepState.RedisEndpoint` →
+        `PerEnvSourceCatalog` `from-h2a-output:redis_endpoint` (+ generator `$script:AllowedPerEnvSources`) →
+        `HandlerRunInputs` H4b input → manifest per_env_settings `Redis__Endpoint`; customer.bicep also sets the same
+        app setting directly on the App Service.
+      - `scripts/Verify-ContentSafetyResource.ps1` reads the account key and optionally stores it in Key Vault.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/modules/content-safety.bicep (copy doc-intelligence.bicep's keyless + UAMI role shape)</file>
+      <file>infrastructure/bicep/customer.bicep (naming vars ~:197, AI modules ~:377-445, bffApi appSettings ~:603, outputs ~:818) + customer.json</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/{ArmDeploymentRunner,BicepDeployOutputs,H2aBicepInfraDeployHandler}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/InterStepState.cs; Handlers/BulkAppSettings/PerEnvSourceCatalog.cs; Reconciler/HandlerRunInputs.cs</file>
+      <file>scripts/canonical-secret-catalog/{manifest.yaml, Invoke-CatalogGenerator.ps1, generated/*}</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/RunContextContractTests.cs (PinnedManifestGaps, positive control, RunSecretsReaders comment)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiSafetyModule.cs (fallback); Infrastructure/DI/CacheModule.cs (isLocalLike pattern); Program.cs:191</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json + appsettings.Development.json.template (AiSafety section); Services/Ai/Safety/ContentSafetyAuthHandler.cs (doc comment)</file>
+      <file>tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs (CognitiveServices local-auth count)</file>
+      <file>scripts/Verify-ContentSafetyResource.ps1</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md (keyless stamp rule, T244)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md (publish-size procedure)</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (G26, D13, D22, T246)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner D13 / T244 keyless rule">
+      The account sets `disableLocalAuth: true` and `customSubDomainName` (Entra needs it). No `listKeys()` anywhere and no
+      key output. CustomerStampKeylessTemplateTests must cover it (raise the CognitiveServices local-auth count to 3).
+    </constraint>
+    <constraint source="ADR-028">
+      The stamp UAMI gets Cognitive Services User (a97b65f3-24c7-4388-baec-2e87135dc908) scoped to the account,
+      principalType ServicePrincipal, skipped when the principal id is empty — same shape as doc-intelligence.bicep.
+      Cognitive Services OpenAI User does NOT cover Content Safety dataActions.
+    </constraint>
+    <constraint source="region">
+      Prompt Shields + groundedness are regional. Add `contentSafetyLocation` to customer.bicep defaulting to `location`
+      (the stamp default is westus2, which the module documents as supported); do not hard-code a second region.
+    </constraint>
+    <constraint source="scope">
+      No live Azure change in this task (T186 deploys a stamp; T230 makes the real MI call). Do not change dev, demo or
+      shared-prod resources or settings. Keep `ContentSafetyAuthHandler`'s key branch (local dev may paste a key) — only the
+      stamp manifest and template lose the key.
+    </constraint>
+    <constraint source="BFF §10 / ADR-032">
+      The boot check follows CacheModule: required outside Development and Testing (throw InvalidOperationException naming
+      `AiSafety:ContentSafety:Endpoint`); in Development/Testing an unset endpoint registers the client with no base address
+      so scans fail open through the services' existing catch (no new service, no new package). Registrations stay
+      unconditional. Measure publish size against a fresh master build from short paths and run the CVE check.
+    </constraint>
+    <constraint source="manifest discipline">
+      Regenerate the catalog outputs with Invoke-CatalogGenerator.ps1 (never hand-edit `generated/*`); run its -Verify.
+      Remove the `ContentSafety-ApiKey→T246` pin; the known/pinned gap lists only shrink.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>Any stamp or L2 component other than the BFF's two safety services needs a Content Safety key or endpoint → STOP and report.</trigger>
+    <trigger>`kind: ContentSafety` cannot take `disableLocalAuth: true` + custom subdomain at the pinned API version, even after raising it → STOP and report options.</trigger>
+    <trigger>A BFF test host or deployed environment other than demo would fail the new boot check → STOP and report before changing its config.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="1">Module: content-safety.bicep keyless (disableLocalAuth true, custom subdomain), `userAssignedIdentityPrincipalId` param + Cognitive Services User assignment, drop the `contentSafetyKey` output and the stale comment; refresh the header.</step>
+    <step order="2">customer.bicep: naming var `sprk-{customer}-{env}-contentsafety`, `contentSafetyLocation` param, module call with the UAMI principal, `AiSafety__ContentSafety__Endpoint` in bffApi appSettings, LOAD-BEARING output `contentSafetyEndpoint`; recompile customer.json.</step>
+    <step order="3">L2: BicepDeployOutputs.ContentSafetyEndpoint (required) + MapOutputs + H2a Check + InterStepState.ContentSafetyEndpoint + PerEnvSourceCatalog `from-h2a-output:content_safety_endpoint` + generator allowed list + HandlerRunInputs H4b input; fix every test that builds BicepDeployOutputs.</step>
+    <step order="4">Manifest: per_env_settings `AiSafety__ContentSafety__Endpoint` (from-h2a-output:content_safety_endpoint, required); remove `ContentSafety-ApiKey` (comment like the T243 DocIntel removal); reword the MI literal's note; regenerate + -Verify; update RunContextContractTests (pin, positive control, RunSecretsReaders comment) and any manifest/H4b test naming the key.</step>
+    <step order="5">BFF: AiSafetyModule boot check (constraint BFF §10); unit tests for Production-unset throws, Testing-unset boots, set endpoint used; template/Development template + ContentSafetyAuthHandler comments corrected (stamps have a ContentSafety account; the dev template endpoint is spaarke-openai-dev).</step>
+    <step order="6">Verify-ContentSafetyResource.ps1: Entra token (`az account get-access-token --resource https://cognitiveservices.azure.com`) instead of the key; drop the Key Vault key-sync step.</step>
+    <step order="7">Docs: resource inventory (Content Safety row), customer deployment guide, provisioning.md keyless list, AI docs that cite the fallback; plan G26/T246; T242c POML note (demo must set the endpoint); CHANGELOG.</step>
+    <step order="8">Verify (bicep build + lint, customer.json = fresh compile, bicep-e2e-dry-run PASS, ControlPlane.Tests, ArchTests, BFF unit tests, publish size + CVE) + Step 9.5 + close + commit + push.</step>
+  </steps>
+
+  <outputs>
+    <output type="file-modified">modules/content-safety.bicep; customer.bicep + customer.json; ControlPlane BicepInfraDeploy/Models/BulkAppSettings/Reconciler files + tests; manifest.yaml + generated/*; RunContextContractTests; AiSafetyModule.cs + BFF tests + appsettings templates + ContentSafetyAuthHandler comment; CustomerStampKeylessTemplateTests; Verify-ContentSafetyResource.ps1; docs; plan; T242c POML</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Compiled customer.json has a `Microsoft.CognitiveServices/accounts` resource of kind ContentSafety with `disableLocalAuth: true` and a custom subdomain, a Cognitive Services User assignment for the stamp UAMI on it, the `AiSafety__ContentSafety__Endpoint` app setting and the `contentSafetyEndpoint` output; no `listKeys` anywhere.</criterion>
+    <criterion testable="true">H2a maps `contentSafetyEndpoint` into InterStepState and fails when it is missing; H4b resolves `from-h2a-output:content_safety_endpoint`; the manifest has no `ContentSafety-ApiKey` and PinnedManifestGaps no longer lists it.</criterion>
+    <criterion testable="true">`git grep -n "spaarke-contentsafety-dev" -- src` returns nothing; the BFF throws at startup outside Development/Testing when the endpoint is unset (negative test) and boots in Testing without it (positive test).</criterion>
+    <criterion testable="true">CustomerStampKeylessTemplateTests requires 3 CognitiveServices accounts with local auth off and passes; ControlPlane.Tests, ArchTests and BFF unit tests have no new failures; catalog -Verify passes; bicep-e2e-dry-run PASS.</criterion>
+    <criterion testable="true">BFF publish-size delta vs a fresh master build (both sides from short paths, same file count, Compress-Archive) and the CVE check are recorded in the notes.</criterion>
+    <criterion testable="true">Every escalation trigger is answered in the notes (fired or not, with evidence); demo's follow-on is recorded on T242c.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (session 38). Implementation commit 514a4638e. Template + code only — no live Azure change
+    (T186 deploys a stamp; T230 makes the stamp-side MI call).
+
+    FACTS (read-only, 2026-10-06): no `spaarke-contentsafety-dev` account exists (dev subscription Cognitive Services
+    accounts: spaarke-openai-dev [AIServices, eastus] + one unrelated). Dev BFF sets AiSafety__ContentSafety__Endpoint
+    = https://spaarke-openai-dev.cognitiveservices.azure.com/ (MI on) — unaffected. Demo BFF (Stopped, Production) has
+    no AiSafety setting → recorded on T242c + config/spaarke-resources.yaml. sprksharedprod-api Stopped/retired. Key
+    Vault spaarke-spekvcert holds no ContentSafety secret (live or soft-deleted).
+
+    DONE: content-safety.bicep keyless (disableLocalAuth true, custom subdomain, listKeys output removed) + Cognitive
+    Services User for the stamp UAMI; customer.bicep wires it (name sprk-{customer}-{env}-contentsafety, S0),
+    AiSafety__ContentSafety__Endpoint app setting, LOAD-BEARING output contentSafetyEndpoint. L2 chain copied from
+    T242 redisEndpoint: ArmDeploymentRunner.MapOutputs → BicepDeployOutputs.ContentSafetyEndpoint (required) → H2a
+    check + InterStepState.ContentSafetyEndpoint → PerEnvSourceCatalog from-h2a-output:content_safety_endpoint
+    (+ generator allow-list) → HandlerRunInputs H4b → manifest per_env_settings AiSafety__ContentSafety__Endpoint.
+    ContentSafety-ApiKey removed from the manifest (generated/* regenerated, -Verify OK) and from PinnedManifestGaps.
+    BFF AiSafetyModule: hard-coded dev fallback removed; endpoint required outside Development/Testing (startup
+    InvalidOperationException naming AiSafetyModule + the exempt environments); Development/Testing unset → no base
+    address → scans fail open via the services' existing catch; non-https rejected. Verify-ContentSafetyResource.ps1
+    keyless (Entra token) — RUN against dev: Prompt Shields 200, Groundedness 200 (eastus). Keyless ArchTest
+    CognitiveServices minimum 2 → 3.
+
+    DEVIATION (region, recorded): the POML constraint said contentSafetyLocation defaults to the stamp location. The
+    Microsoft region table (learn.microsoft.com/azure/ai-services/content-safety/region-availability, updated
+    2026-09-18) shows westus2 — the stamp default — has Prompt Shields but NO Groundedness Detection (US regions with
+    both: westus, eastus, eastus2, canadaeast). Following the stamp location would have made every groundedness check
+    fail open silently, so contentSafetyLocation defaults to westus (nearest to westus2), split-region like
+    openAiLocation. The module header's old "West US 2 required" note was wrong.
+
+    ADDED FROM REVIEW: ArmTemplateInspector rule R4 — H2a rejects, Resumable and before any ARM call
+    (template-outputs-missing), a resolved template that does not declare every output H2a requires
+    (ArmDeploymentRunner.RequiredOutputNames, pinned to MapOutputs by a source-scan test). Covers T242's redisEndpoint
+    too. Behavioural test: Testing + no endpoint → PromptShieldService.ScanAsync returns FailedOpen.
+
+    VERIFIED: ControlPlane.Tests 2122 passed / 0 failed / 1 skipped; ArchTests 363/363; BFF unit 14327 passed / 0
+    failed / 54 skipped (full run) + safety subset 84/0/1 after the last edits; catalog -Verify OK; customer.json =
+    fresh compile (semantic); bicep-e2e-dry-run Build PASS (8 warnings, all pre-existing lines). BFF §10: publish
+    Release, Compress-Archive Optimal, fresh short-path worktrees — master 23bdc5679 = 48,108,908 bytes (45.88 MB, 214
+    files) vs branch 514a4638e = 48,109,097 bytes (45.88 MB, 214 files): +189 bytes (~0.00 MB). CVE: `dotnet list
+    package --vulnerable --include-transitive` → no vulnerable packages; no package changes. Placement: design.md §17
+    T246 entry (existing module, no new surface).
+
+    ESCALATION TRIGGERS: (1) no other component needs a Content Safety key or endpoint — consumers are only
+    PromptShieldService + GroundednessCheckService via the named client (not fired). (2) kind ContentSafety accepts
+    disableLocalAuth + custom subdomain at 2024-10-01 (compiles; same API as openai.bicep) (not fired). (3) no test host
+    or deployed environment other than demo lacks the endpoint (dev sets it; shared-prod retired) (not fired; demo → T242c).
+
+    STEP 9.5: adr-check — V1 (exception message must name the exempt environments) FIXED; W2 placement FIXED (design.md
+    §17); W3 ValidateOnStart/options class — accepted, follows the T242 CacheModule startup-check precedent (throws at
+    host build); W4 Content Safety added to T230's MI-call list; W5 D13 "no flag day" vs boot check — governed by D22 +
+    plan row ("fail at boot when unset"), demo follow-on on T242c; W6 design.md/guide D-12 wording FIXED; W7 test
+    placement mirrors CacheModuleTests; W8 pre-T246 stamps keep a dead ApiKey KV ref — none exist; D-12 "shareable" is
+    permitted-not-required (no conflict; S0 has no fixed fee). code-review — 0 Critical; W1 FIXED (R4); W2 recorded
+    below; W3 FIXED (region default); W4 FIXED; W5 FIXED (script stderr/exit codes); W6 FIXED (justification); S1
+    FIXED; S2 kept (asserts the called URL); S7 FIXED (registry content_safety_endpoint; dev OpenAI region eastus).
+
+    FOLLOW-UPS (not T186 blockers unless noted): (a) worker upgrade with a run in flight whose H2a completed under the
+    old worker → H4b PerEnvInputMissing that resume cannot heal (re-run or patch InterStepState) — deploy the worker
+    with no run in flight (same for T242); (b) H2a's global-name pre-check does not cover Cognitive Services custom
+    subdomains (openai/docintel/contentsafety) — a collision quarantines mid-deploy; (c) Decommission-Customer.ps1 does
+    not purge soft-deleted Cognitive Services accounts (re-provisioning the same customerId/env fails until retention
+    ends); (d) H0 preflight could check the Content Safety region offers Groundedness; (e) upgrade runs of pre-T246
+    stamps would see the new app setting as what-if drift (no such stamps exist); (f) doc drift found: the retired dev
+    app `spe-api-dev-67e2xz` is still named in ~40 docs/skills (it no longer exists; dev BFF is spaarke-bff-dev).
+  </notes>
+</task>

@@ -114,9 +114,13 @@ internal static class NoAccessEnforcementTestDoubles
                 ids.Count > limit ? (ids.Take(limit).ToList(), true) : (ids, false));
         }
 
+        /// <summary>Task 064: runs as the covering-entry query answers — throw to fault it, or change rows after it.</summary>
+        public Action? CoveringHook { get; set; }
+
         internal override Task<(IReadOnlyList<Guid> Ids, bool Truncated)> ReadActiveEntryIdsCoveringAsync(
             Guid recordId, IReadOnlyCollection<Guid> organizationIds, int max, CancellationToken ct)
         {
+            CoveringHook?.Invoke();
             var ids = Entries.Values
                 .Where(e => e.IsActive
                             && (e.Row.sprk_objectrecordid == recordId.ToString()
@@ -186,8 +190,16 @@ internal static class NoAccessEnforcementTestDoubles
     {
         public FakeEnforcementStore Store { get; } = new();
 
-        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } =
-            new(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
+        /// <summary>The flag reads. Task 174: its effective-flag read walks <see cref="ChildWorld"/> (what the records are filed
+        /// under), as production walks Dataverse.</summary>
+        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; }
+
+        public Harness()
+        {
+            Participations = new(
+                defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false),
+                filing: DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object);
+        }
 
         public InMemoryContactIdentityStore Identities { get; } = new();
 

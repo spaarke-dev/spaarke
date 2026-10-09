@@ -18,9 +18,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 public interface IB2BInvitationClient
 {
     /// <summary>
-    /// Invites <paramref name="entry"/> as a B2B guest into the Spaarke
-    /// tenant. Idempotent — re-inviting an already-invited email resends the
-    /// invitation and returns the same <c>invitedUser.id</c>.
+    /// Makes <paramref name="entry"/> a B2B guest of the run's tenant. Idempotent without a second email (task 232):
+    /// an existing guest with that address is reused and NOT re-invited; only an unknown address is invited.
+    /// An address that belongs to a member of the tenant is refused.
     /// </summary>
     Task<B2BInvitationOutcome> InviteAsync(
         UserProvisioningEntry entry,
@@ -36,10 +36,10 @@ public abstract record B2BInvitationOutcome
 {
     private B2BInvitationOutcome() { }
 
-    /// <summary>Invitation sent (or re-sent — idempotent).</summary>
-    /// <param name="InvitedUserId">Entra ID object id of the invited guest (<c>invitedUser.id</c>).</param>
-    /// <param name="InvitationId">Graph invitation resource id.</param>
-    public sealed record Success(string InvitedUserId, string InvitationId) : B2BInvitationOutcome;
+    /// <summary>The user is a guest of the tenant — invited now, or already a guest (reused, no email).</summary>
+    /// <param name="InvitedUserId">Entra ID object id of the guest.</param>
+    /// <param name="InvitationId">Graph invitation resource id; <c>null</c> when an existing guest was reused.</param>
+    public sealed record Success(string InvitedUserId, string? InvitationId) : B2BInvitationOutcome;
 
     /// <summary>Invitation failed.</summary>
     /// <param name="Diagnostic">Human-readable diagnostic (HTTP status + body where applicable).</param>

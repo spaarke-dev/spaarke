@@ -120,6 +120,14 @@ public class Issue975_ChatAttachmentValidationProblemJsonTests
             null, // IConversationHistorySanitizer conversationHistorySanitizer
             null, // CrossMatterSafetyTelemetry crossMatterTelemetry
             null, // AiTelemetry aiTelemetry
+            // Task 254: AiSpendLimit — runs before the attachment check; no limit configured (the default).
+            new Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit(
+                new Microsoft.Extensions.Options.OptionsMonitor<Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitOptions>(
+                    new Microsoft.Extensions.Options.OptionsFactory<Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitOptions>([], []),
+                    [], new Microsoft.Extensions.Options.OptionsCache<Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitOptions>()),
+                new Sprk.Bff.Api.Services.Ai.Metering.InMemoryAiSpendLedger(),
+                TimeProvider.System,
+                NullLogger<Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit>.Instance),
             null, // ISessionPersistenceService? sessionPersistence
             null, // AssistantSuggestionService suggestionService
             httpContext,
