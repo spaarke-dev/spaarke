@@ -189,7 +189,8 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
     /// Pure merge of a slot's app settings: every existing setting is kept;
     /// <paramref name="settingName"/> is set to <paramref name="settingValue"/>.
     /// <c>Changed</c> is <c>false</c> when it already held exactly that value
-    /// (ordinal), so a re-run writes nothing.
+    /// (ordinal), so a re-run writes nothing. The one merge rule is
+    /// <see cref="BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings"/> (H4b's, task 253).
     /// </summary>
     internal static (IReadOnlyDictionary<string, string> Settings, bool Changed) MergeAppSetting(
         IEnumerable<KeyValuePair<string, string>>? currentSettings,
@@ -199,23 +200,10 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(settingName);
         ArgumentNullException.ThrowIfNull(settingValue);
 
-        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (currentSettings is not null)
-        {
-            foreach (var (key, value) in currentSettings)
-            {
-                settings[key] = value;
-            }
-        }
-
-        if (settings.TryGetValue(settingName, out var existing)
-            && string.Equals(existing, settingValue, StringComparison.Ordinal))
-        {
-            return (settings, false);
-        }
-
-        settings[settingName] = settingValue;
-        return (settings, true);
+        var (settings, changedNames) = BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings(
+            currentSettings,
+            new Dictionary<string, string>(StringComparer.Ordinal) { [settingName] = settingValue });
+        return (settings, changedNames.Count > 0);
     }
 
     private static async Task<T> WithTimeoutAsync<T>(

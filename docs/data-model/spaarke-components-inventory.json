@@ -4,12 +4,12 @@
     "publisher": "Spaarke",
     "publisherId": "6aeef721-ba73-f011-b4cb-6045bdd6a665",
     "publisherPrefix": "sprk",
-    "timestamp": "2026-10-08T10:20:27Z",
+    "timestamp": "2026-10-09T10:25:12Z",
     "totalSolutions": 76,
     "includedSolutions": 72,
     "excludedSolutions": 4,
-    "totalComponents": 2855,
-    "distinctComponents": 1788,
+    "totalComponents": 2853,
+    "distinctComponents": 1789,
     "excludePatterns": "Test$|Temp|SCRATCH|MasterTest|TestSpaarke"
   },
   "solutions": [
@@ -58,7 +58,7 @@
     {
       "uniqueName": "CommunicationConversationPanelSolution",
       "friendlyName": "Communication Conversation Panel Solution",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "isManaged": false,
       "solutionId": "79fef26b-244c-4168-bcfd-2f65f6c93155"
     },
@@ -86,7 +86,7 @@
     {
       "uniqueName": "CommunicationMessageActionsSolution",
       "friendlyName": "Communication Message Actions Solution",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "isManaged": false,
       "solutionId": "ed51e98c-ca13-402d-8244-41acbac019d3"
     },
@@ -100,7 +100,7 @@
     {
       "uniqueName": "CommunicationTimelineSolution",
       "friendlyName": "Communication Timeline Solution",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "isManaged": false,
       "solutionId": "409c5546-abc5-48ed-a807-5f5c09a3b4ff"
     },
@@ -352,7 +352,7 @@
     {
       "uniqueName": "SpaarkeDocumentRelationshipViewer",
       "friendlyName": "Spaarke Document Relationship Viewer",
-      "version": "1.0.36",
+      "version": "1.0.37",
       "isManaged": false,
       "solutionId": "6e676d7a-f337-4e83-92ad-8e2a3492e78c"
     },
@@ -373,21 +373,21 @@
     {
       "uniqueName": "SpaarkeRelatedDocumentCount",
       "friendlyName": "Spaarke Related Document Count",
-      "version": "1.21.4",
+      "version": "1.21.5",
       "isManaged": false,
       "solutionId": "728875d9-f6b1-4e7c-8e37-a35c5891af17"
     },
     {
       "uniqueName": "VisualHostSolution",
       "friendlyName": "Visual Host Solution",
-      "version": "1.4.38",
+      "version": "1.4.39",
       "isManaged": false,
       "solutionId": "530ec3c6-4e5c-4e1c-b42b-a5f67a8fb925"
     },
     {
       "uniqueName": "TrackingFieldTrioSolution",
       "friendlyName": "Tracking Field Trio Solution",
-      "version": "1.0.39",
+      "version": "1.0.43",
       "isManaged": false,
       "solutionId": "df7d9f81-22cd-4962-966a-a81697c885a8"
     },
@@ -457,7 +457,7 @@
     {
       "uniqueName": "CommunicationActionsSolution",
       "friendlyName": "Communication Actions Solution",
-      "version": "1.3.17",
+      "version": "1.3.18",
       "isManaged": false,
       "solutionId": "12002970-ea95-423f-8066-d19a9eae98d9"
     },
@@ -471,7 +471,7 @@
     {
       "uniqueName": "CommunicationTimelineRegardingSolution",
       "friendlyName": "Communication Timeline Regarding Solution",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "isManaged": false,
       "solutionId": "adad5bbe-1242-46ff-86e6-d8dd94e29251"
     },
@@ -492,14 +492,14 @@
     {
       "uniqueName": "SpaarkeSpeDocumentViewer",
       "friendlyName": "Spaarke SPE Document Viewer",
-      "version": "1.0.27",
+      "version": "1.0.28",
       "isManaged": false,
       "solutionId": "57e8d662-1e3c-452f-8012-f0979621d2a7"
     },
     {
       "uniqueName": "CommunicationAttachmentsSolution",
       "friendlyName": "Communication Attachments Solution",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "isManaged": false,
       "solutionId": "1905976c-7874-4093-ba1c-f0d04cf1b88a"
     },
@@ -667,7 +667,7 @@
     },
     {
       "typeName": "WebResource",
-      "count": 602
+      "count": 600
     }
   ],
   "distinctComponents": [
@@ -12161,6 +12161,13 @@
     {
       "ComponentType": 61,
       "ComponentTypeName": "WebResource",
+      "ObjectId": "73ae00c0-5ac3-f111-a05c-3833c5e9614d",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 61,
+      "ComponentTypeName": "WebResource",
       "ObjectId": "73ff63dc-049b-f111-b8de-70a8a590c51c",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeMaster"
@@ -12283,13 +12290,6 @@
       "ObjectId": "8ac89dcd-9024-f111-88b4-7ced8d1dc988",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeFeatures,SpaarkeMaster"
-    },
-    {
-      "ComponentType": 61,
-      "ComponentTypeName": "WebResource",
-      "ObjectId": "8b7e8863-020d-f111-8342-7ced8d1dc988",
-      "RootBehavior": 0,
-      "InSolutions": "SpaarkeFeatures,SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore"
     },
     {
       "ComponentType": 61,
@@ -12640,6 +12640,13 @@
       "ObjectId": "ae0dfca0-c00b-f111-8342-7ced8d1dc988",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeFeatures,SpaarkeMaster"
+    },
+    {
+      "ComponentType": 61,
+      "ComponentTypeName": "WebResource",
+      "ObjectId": "ae428b71-6bc3-f111-a05c-0022482913fc",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 61,

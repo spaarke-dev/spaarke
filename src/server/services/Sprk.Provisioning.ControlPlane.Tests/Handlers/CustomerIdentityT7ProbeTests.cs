@@ -14,6 +14,11 @@
 // incl. a case-only difference; ARM read fault; missing request field. Beyond it,
 // one test: names differing only in case with different values are ambiguous
 // (a code-review finding — the probe must not pass on whichever name it saw first).
+//
+// Task 255 (INCOMING-141): the same reads also prove the customer workforce tenant
+// list — missing on a slot, a stale extra index, an unparseable value, Spaarke's
+// tenant on a Model 1 stamp, and a run without the list all fail; order does not
+// matter; a case-variant or ':' name counts (the BFF binds it).
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -33,6 +38,9 @@ public sealed class CustomerIdentityT7ProbeTests
     private const string AppServiceName = "spaarke-acme-prod-api";
     private const string CustomerId = "acme";
     private const string KeyVaultRef = "@Microsoft.KeyVault(SecretUri=https://sprk-acme-prod-kv.vault.azure.net/secrets/Redis-ConnectionString/)";
+    private const string RunTenantId = "11111111-1111-1111-1111-111111111111";   // Model 1: Spaarke's tenant = AzureAd__TenantId
+    private const string WorkforceA = "d0e0c0a0-0000-4000-8000-000000000003";
+    private const string WorkforceB = "e1e1e1e1-0000-4000-8000-000000000004";
 
     [Fact]
     public async Task ProbeAsync_BothSlotsCarryRunCustomerId_ReturnsPassed()
@@ -111,6 +119,85 @@ public sealed class CustomerIdentityT7ProbeTests
         arm.Reads.Should().BeEmpty();
     }
 
+    // ---------- task 255: the customer workforce tenant list ----------
+
+    [Fact]
+    public async Task ProbeAsync_StagingLacksTheWorkforceList_ReturnsFailedNamingSlot()
+    {
+        var staging = Settings(CustomerId);
+        staging.Remove("WorkforceIdentity__CustomerTenantIds__0");
+        staging.Remove("WorkforceIdentity__CustomerTenantIds__1");
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), staging);
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain("staging [MISSING — no WorkforceIdentity__CustomerTenantIds__N");
+        failed.Diagnostic.Should().NotContain("Customer__Id='", "Customer__Id is fine on both slots");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_WorkforceListInAnotherOrder_ReturnsPassed()
+    {
+        var production = Settings(CustomerId);
+        production["WorkforceIdentity__CustomerTenantIds__0"] = WorkforceB;
+        production["WorkforceIdentity__CustomerTenantIds__1"] = WorkforceA;
+        var arm = new FakeSlotSettingsArm(production, Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>("the BFF's member test is a set");
+    }
+
+    [Theory]
+    [InlineData("WorkforceIdentity__CustomerTenantIds__2", "f2f2f2f2-0000-4000-8000-000000000005", "[MISMATCH")]   // a stale extra index
+    [InlineData("workforceidentity__customertenantids__7", "f2f2f2f2-0000-4000-8000-000000000005", "[MISMATCH")]   // case-variant name still binds
+    [InlineData("WorkforceIdentity:CustomerTenantIds:2", "f2f2f2f2-0000-4000-8000-000000000005", "[MISMATCH")]     // ':' form still binds
+    [InlineData("WorkforceIdentity__CustomerTenantIds__2", WorkforceA, "[MISMATCH")]                              // a duplicate
+    [InlineData("WorkforceIdentity__CustomerTenantIds__2", "not-a-guid", "[UNPARSEABLE")]
+    [InlineData("WorkforceIdentity__CustomerTenantIds__2", RunTenantId, "[SPAARKE TENANT")]                       // Model 1: AzureAd__TenantId listed
+    public async Task ProbeAsync_ProductionWorkforceListDiffers_ReturnsFailed(string extraKey, string extraValue, string expected)
+    {
+        var production = Settings(CustomerId);
+        production[extraKey] = extraValue;
+        var arm = new FakeSlotSettingsArm(production, Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain($"production {expected}").And.Contain("staging [OK]");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_RunCarriesNoWorkforceList_ReturnsFailed()
+    {
+        var arm = new FakeSlotSettingsArm(Settings(CustomerId), Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request() with { CustomerWorkforceTenantIds = null }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("predates T255");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_Model2_WorkforceTenantMayEqualTheRegistrationTenant()
+    {
+        // Model 2: the registration lives in the customer's tenant, so the two coincide (hand-off §3).
+        var production = Settings(CustomerId);
+        var staging = Settings(CustomerId);
+        foreach (var slot in new[] { production, staging })
+        {
+            slot["WorkforceIdentity__CustomerTenantIds__0"] = RunTenantId;
+            slot.Remove("WorkforceIdentity__CustomerTenantIds__1");
+        }
+        var arm = new FakeSlotSettingsArm(production, staging);
+
+        var outcome = await NewProbe(arm).ProbeAsync(
+            Request() with { TenancyModel = "Model2", CustomerWorkforceTenantIds = [RunTenantId] }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+    }
+
     [Fact]
     public void FindSetting_CaseVariantNamesWithDifferentValues_IsAmbiguous()
     {
@@ -137,6 +224,10 @@ public sealed class CustomerIdentityT7ProbeTests
         {
             settings["Customer__Id"] = customerId;
         }
+        // T255: what H4b writes — the run's workforce tenants, and H4b's AzureAd__TenantId (the run's tenantId).
+        settings["AzureAd__TenantId"] = RunTenantId;
+        settings["WorkforceIdentity__CustomerTenantIds__0"] = WorkforceA;
+        settings["WorkforceIdentity__CustomerTenantIds__1"] = WorkforceB;
         return settings;
     }
 
@@ -150,7 +241,9 @@ public sealed class CustomerIdentityT7ProbeTests
         UamiClientId: "44444444-4444-4444-4444-444444444444",
         KeyVaultName: "sprk-acme-prod-kv",
         AppServiceName: AppServiceName,
-        ResourceGroupName: ResourceGroupName);
+        ResourceGroupName: ResourceGroupName,
+        CustomerWorkforceTenantIds: [WorkforceA, WorkforceB],
+        TenancyModel: "Model1");
 
     private static CustomerIdentityT7Probe NewProbe(FakeSlotSettingsArm arm) => new(
         ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7828909415565352353"
+      "templateHash": "8034886676849951773"
     }
   },
   "parameters": {
@@ -124,6 +124,13 @@
       ],
       "metadata": {
         "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c)."
+      }
+    },
+    "ciamTenantIds": {
+      "type": "array",
+      "minLength": 1,
+      "metadata": {
+        "description": "Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts (config/spaarke-resources.yaml external_identity.ciam_tenant) -- threaded to BOTH control-plane modules as ReservedTenants__CiamTenantIds__N, next to ReservedTenants__SpaarkeTenantId (the deployment tenant). Task 255 (INCOMING-141): POST /api/runs, H4b and H13 refuse either as a customer workforce tenant -- a stamp BFF refuses to start with its CIAM tenant listed, and the Spaarke tenant would bind Spaarke staff into a customer environment. REQUIRED, no default: ReservedTenantsOptions.Validate() fails Api and Worker startup without it."
       }
     },
     "customerRunGuardEnabled": {
@@ -1173,6 +1180,9 @@
           "customerRunGuardEnabled": {
             "value": "[parameters('customerRunGuardEnabled')]"
           },
+          "ciamTenantIds": {
+            "value": "[parameters('ciamTenantIds')]"
+          },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
           },
@@ -1187,7 +1197,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9198315704373949356"
+              "templateHash": "15852394455888017560"
             }
           },
           "parameters": {
@@ -1286,6 +1296,13 @@
                 "description": "CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module's value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)"
               }
             },
+            "ciamTenantIds": {
+              "type": "array",
+              "minLength": 1,
+              "metadata": {
+                "description": "Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): POST /api/runs refuses either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Api startup without it. Same value the Worker module receives."
+              }
+            },
             "appInsightsConnectionString": {
               "type": "string",
               "metadata": {
@@ -1308,6 +1325,7 @@
             }
           },
           "variables": {
+            "reservedTenantSettings": "[concat(createArray(createObject('name', 'ReservedTenants__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('ciamTenantIds'))), lambda('i', createObject('name', format('ReservedTenants__CiamTenantIds__{0}', lambdaVariables('i')), 'value', parameters('ciamTenantIds')[lambdaVariables('i')]))))]",
             "appSettings": [
               {
                 "name": "AzureAd__Audience",
@@ -1369,7 +1387,8 @@
                 "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
                 "value": "~3"
               }
-            ]
+            ],
+            "allAppSettings": "[concat(variables('appSettings'), variables('reservedTenantSettings'))]"
           },
           "resources": [
             {
@@ -1396,7 +1415,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[variables('appSettings')]"
+                  "appSettings": "[variables('allAppSettings')]"
                 }
               }
             },
@@ -1423,7 +1442,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[variables('appSettings')]"
+                  "appSettings": "[variables('allAppSettings')]"
                 }
               },
               "dependsOn": [
@@ -1542,6 +1561,9 @@
           "preAuthorizedClientAppIds": {
             "value": "[parameters('preAuthorizedClientAppIds')]"
           },
+          "ciamTenantIds": {
+            "value": "[parameters('ciamTenantIds')]"
+          },
           "customerRunGuardTenantId": {
             "value": "[variables('effectiveJwtTenantId')]"
           },
@@ -1568,7 +1590,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "845271668656563014"
+              "templateHash": "11669241497465723003"
             }
           },
           "parameters": {
@@ -1743,6 +1765,13 @@
                 "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c)."
               }
             },
+            "ciamTenantIds": {
+              "type": "array",
+              "minLength": 1,
+              "metadata": {
+                "description": "Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -1780,6 +1809,7 @@
                 "value": "true"
               }
             ],
+            "reservedTenantSettings": "[concat(createArray(createObject('name', 'ReservedTenants__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('ciamTenantIds'))), lambda('i', createObject('name', format('ReservedTenants__CiamTenantIds__{0}', lambdaVariables('i')), 'value', parameters('ciamTenantIds')[lambdaVariables('i')]))))]",
             "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]",
             "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('preAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', parameters('preAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
           },
@@ -1808,7 +1838,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'), variables('entraAppRegSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'), variables('entraAppRegSettings'), variables('reservedTenantSettings'))]"
                 }
               }
             },

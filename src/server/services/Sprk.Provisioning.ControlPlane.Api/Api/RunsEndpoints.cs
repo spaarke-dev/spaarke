@@ -111,11 +111,13 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -371,6 +373,7 @@ public static class RunsEndpoints
         IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
         Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient registryClient,
+        IOptions<ReservedTenantsOptions> reservedTenants,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
@@ -379,6 +382,7 @@ public static class RunsEndpoints
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(runGuard);
         ArgumentNullException.ThrowIfNull(registryClient);
+        ArgumentNullException.ThrowIfNull(reservedTenants);
 
         if (request is null)
         {
@@ -485,6 +489,14 @@ public static class RunsEndpoints
                     $"allowed values are {IntakeParameterCatalog.ManagedSolutionPackage} | {IntakeParameterCatalog.UnmanagedSolutionPackage} " +
                     $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
             }
+
+            // T256: H7b's dry-run flag — the handler's own rule (SecureRecordSetupIntake) and its own rejection code.
+            if (!SecureRecordSetupIntake.TryReadDryRun(request.NonSecretParameters, out _))
+            {
+                return BadRequest(httpContext, SecureRecordSetupRejectionCodes.DryRunInvalid,
+                    $"nonSecretParameters['{IntakeParameterCatalog.SecureRecordSetupDryRun}'] must be 'true' or 'false' " +
+                    "(exact, lower case). Omit it to apply the Secure Record setup (H7b).");
+            }
         }
 
         // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
@@ -551,6 +563,20 @@ public static class RunsEndpoints
         {
             return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
         }
+
+        // T255 (INCOMING-141): the customer's workforce tenant list — the rule H4b and H13 apply
+        // (CustomerWorkforceTenantsRule): required for every model, never a CIAM tenant, never Spaarke's own tenant
+        // (nor, on Model 1, the run's tenantId). The stamp BFF refuses to start on a CIAM tenant and would admit
+        // Spaarke's staff on Spaarke's — so both are refused here, before anything is written.
+        request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var workforceTenantsValue);
+        var workforceTenants = CustomerWorkforceTenantsRule.Validate(
+            request.TenancyModel, tenantIdValue, workforceTenantsValue, reservedTenants.Value.Parsed());
+        if (workforceTenants is CustomerWorkforceTenantsOutcome.Invalid workforceTenantsViolation)
+        {
+            return BadRequest(httpContext, workforceTenantsViolation.RejectionCode,
+                $"nonSecretParameters: {workforceTenantsViolation.Diagnostic}");
+        }
+        var canonicalWorkforceTenants = ((CustomerWorkforceTenantsOutcome.Valid)workforceTenants).CanonicalValue;
 
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
@@ -726,6 +752,8 @@ public static class RunsEndpoints
         run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = normalizedDataverseEnvUrl;
         run.Parameters.NonSecret[IntakeParameterCatalog.SubscriptionId] = subscriptionGuid.ToString("D");
         run.Parameters.NonSecret[IntakeParameterCatalog.ContainerTypeId] = containerTypeGuid.ToString("D");
+        // T255: the canonical workforce tenant list (lowercase "D" GUIDs, JSON array) — what H4b writes and H13 expects.
+        run.Parameters.NonSecret[IntakeParameterCatalog.CustomerWorkforceTenantIds] = canonicalWorkforceTenants;
 
         try
         {

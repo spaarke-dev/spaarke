@@ -46,8 +46,25 @@ jest.mock('../../services/authInit', () => ({
 jest.mock('@spaarke/auth', () => {
   // The hooks' error path reads thrown failures with the real guards (isApiError / problemOf /
   // isAuthFailure); without them every caught error became a second TypeError inside the catch.
-  const { isApiError, problemOf, isAuthFailure } = jest.requireActual('@spaarke/auth');
+  const { isApiError, problemOf, isAuthFailure, ApiError } = jest.requireActual('@spaarke/auth');
   return {
+    // Mirrors the real helper: attaches the Bearer token, delegates to the suite's global.fetch mock and THROWS ApiError on non-2xx.
+    authenticatedFetch: async (url: string, init?: RequestInit) => {
+      const response: Response = await (global.fetch as typeof fetch)(url, {
+        ...init,
+        headers: { ...(init?.headers as Record<string, string>), Authorization: 'Bearer fake-integration-token' },
+      });
+      if (!response.ok) {
+        let problem = null;
+        try {
+          problem = await response.json();
+        } catch {
+          /* not ProblemDetails */
+        }
+        throw new ApiError(problem?.detail ?? problem?.title ?? `HTTP ${response.status}`, response.status, problem);
+      }
+      return response;
+    },
     isApiError,
     problemOf,
     isAuthFailure,

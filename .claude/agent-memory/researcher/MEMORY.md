@@ -90,6 +90,7 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
+- [Copilot agent for B2B guests (2026-10-08)](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents in resource tenant → home-tenant install; OAuth+PKCE AnyTenant; publish delegated-only
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo
 - [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology still preview, read-only over OneLake; complements, not replaces
 - [Authority-model MS platform scan (2026-09-21)](authority-model-ms-platform-scan-2026-09-21.md) — Entra Agent ID preview; Agent 365 GA; build authority model, adopt identity+audit

@@ -190,6 +190,10 @@ param preAuthorizedClientAppIds array = [
 ]
 
 
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts (config/spaarke-resources.yaml external_identity.ciam_tenant) -- threaded to BOTH control-plane modules as ReservedTenants__CiamTenantIds__N, next to ReservedTenants__SpaarkeTenantId (the deployment tenant). Task 255 (INCOMING-141): POST /api/runs, H4b and H13 refuse either as a customer workforce tenant -- a stamp BFF refuses to start with its CIAM tenant listed, and the Spaarke tenant would bind Spaarke staff into a customer environment. REQUIRED, no default: ReservedTenantsOptions.Validate() fails Api and Worker startup without it.')
+@minLength(1)
+param ciamTenantIds array
+
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
 
@@ -437,6 +441,8 @@ module appService 'modules/controlplane-app-service.bicep' = {
     // Task 242b: the Api host needs the registry URL (REG-07) and the SAME guard switch as the Worker.
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     customerRunGuardEnabled: customerRunGuardEnabled
+    // Task 255: the CIAM tenant(s) POST /api/runs refuses as a customer workforce tenant (same list as the Worker).
+    ciamTenantIds: ciamTenantIds
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
@@ -492,6 +498,8 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     controlPlanePrincipalId: uami.outputs.principalId
     speContainerTypeOwners: speContainerTypeOwners
     preAuthorizedClientAppIds: preAuthorizedClientAppIds
+    // Task 255: the CIAM tenant(s) H4b and H13 refuse as a customer workforce tenant (same list as the Api).
+    ciamTenantIds: ciamTenantIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
     // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses

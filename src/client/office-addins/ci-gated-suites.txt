@@ -381,3 +381,6 @@ shared/taskpane/__tests__/App.emailIdentity.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.emailAlreadySaved.test.tsx
 shared/taskpane/services/__tests__/documentIdentityService.emailIdentity.test.ts
 shared/taskpane/services/__tests__/openRecordLauncher.webOpen.test.ts
+shared/taskpane/components/__tests__/SaveFlow.messageId.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.messageId.test.tsx
+outlook/commands/__tests__/commands.messageId.test.ts

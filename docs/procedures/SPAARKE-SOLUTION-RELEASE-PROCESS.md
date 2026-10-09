@@ -25,6 +25,9 @@ needs; one solution keeps every dependency inside one import, one version and on
   option sets, relationships, forms, views, web resources (**including every code page**), PCF controls, security roles,
   model-driven apps and site maps, environment-variable **definitions**;
 - plus the `sprk_` columns on OOB tables listed in [`docs/data-model/oob-customizations.yaml`](../data-model/oob-customizations.yaml);
+- plus unmanaged `sprk_` **alternate keys on OOB tables** (T255 — an OOB table's key is not a column, so the column rule
+  missed it: the contact identity-binding key `sprk_ExternalObjectIdUniqueKey`, which the BFF creates contacts by, was
+  absent from the first exports; keys on `sprk_` tables ship with their table);
 - **minus** the entries in [`docs/data-model/package-scope.json`](../data-model/package-scope.json), each with a reason and a date.
   The rule lives in `scripts/solution-authoring/SpaarkePackageScope.psm1` (tests: `tests/scripts/SpaarkePackageScope.Tests.ps1`).
 
