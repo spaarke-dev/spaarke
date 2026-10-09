@@ -61,7 +61,14 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync, getOobModalSize, getXrm } from "@spaarke/ui-components";
+import {
+  WidgetErrorBoundary,
+  navigateToEntityRecordSurfaceAsync,
+  getOobModalSize,
+  getXrm,
+  SPRK_TODO_CHANNEL_NAME,
+  SPRK_TODO_CREATED,
+} from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import { authenticatedFetch } from "../services/authInit";
@@ -71,21 +78,17 @@ import { useFeedTodoSync } from "../hooks/useFeedTodoSync";
 // ---------------------------------------------------------------------------
 // R4 task 100 (W-2) — post-wizard-close refetch BroadcastChannel contract.
 //
-// The CreateTodoWizard Code Page (src/solutions/CreateTodoWizard/src/main.tsx)
-// posts a `{ type: SPRK_TODO_CREATED }` message on the SPRK_TODO_CHANNEL_NAME
-// channel after each successful `sprk_todo` create. This shim listens and
-// invokes the widget's captured `refetch` ref so the list refreshes within
-// ~150ms of wizard close (no page refresh required).
+// The Create To Do wizard — its Code Page (src/solutions/CreateTodoWizard/src/main.tsx)
+// and, since ontology-platform-r1 task 112, the in-app InAppWizardHost — posts a
+// `{ type: SPRK_TODO_CREATED }` message on the SPRK_TODO_CHANNEL_NAME channel after
+// each successful `sprk_todo` create. This shim listens and invokes the widget's
+// captured `refetch` ref so the list refreshes within ~150ms of wizard close (no
+// page refresh required).
 //
-// MUST stay in lockstep with the wizard wrapper's matching constants — they
-// are intentionally inlined on both sides (no shared module) because the
-// wizard Code Page does not depend on `@spaarke/smart-todo-components`.
-// Keep the values stable; bumping either constant requires a coordinated
-// edit to both files.
+// The constants come from the ONE shared module both wizard hosts use
+// (`@spaarke/ui-components` CreateTodoWizard/todoWizardHostSupport.ts), so the
+// sender and this listener cannot drift (they used to be inlined on both sides).
 // ---------------------------------------------------------------------------
-
-const SPRK_TODO_CHANNEL_NAME = "sprk_todo:lifecycle";
-const SPRK_TODO_CREATED = "sprk_todo:created";
 
 // ---------------------------------------------------------------------------
 // SmartTodo Code Page name — used when the widget's Open handler is called

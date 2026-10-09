@@ -2,15 +2,15 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. the "Multi-customer add-in (Model 1)" block). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-08. UAT round 12 (117-120) merged (#1431, `7bae5950f`), add-in deployed, dev BFF deployed. Waiting on the owner's round-12 live checks. Task 121 open.
+> **Last Updated**: 2026-10-08. Guest sign-in (#1453): tasks 122 + 124 RUNNING in parallel (agents); 123/125 next; 126 blocked on UAC-r2. Round 12 live in dev (#1431); pane button-wrap fix live (#1454, `b0a78f880`).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **UAT round 12** (`notes/042-uat-round12-2026-10-08.md`) — B2B guest (`ralph@deweycheatham.onmicrosoft.com`) in Outlook on the web + owner in Word. Tasks 117-120 done and live in dev. |
-| **Status** | #1431 merged (`7bae5950f`); add-in deploy for that SHA green; dev BFF deployed from `7bae5950f` (4/4 SHA-256, /healthz Healthy, `POST /api/documents/resolve-email-identity` and `GET /api/documents/{id}/identity` → 401 unauthenticated); deploy worktree removed. 121 (pane email save sends the Exchange item id as internetMessageId) is OPEN. |
-| **Next Action** | 1) Owner runs the round-12 live checks (below); fix anything they report. 2) Task 121 (POML ready) — implement via task-execute; it changes the save contract client + server and needs a further owner go for the dev BFF deploy. |
+| **Task** | Guest sign-in (#1453). **122 ✅ + 124 ✅** done 2026-10-08 (two verifier passes clean), committed; PR open with auto-merge. Review: `notes/122-guest-signin-review.md`; 124: `notes/124-spedocumentviewer-and-orphans.md`. |
+| **Status** | Gates: Spaarke.Auth jest 12/182, build+lint clean; SpeDocumentViewer build:prod PASS, jest 25; add-ins jest 102/1347, tsc prod 0 / 68, lint 0. CI now runs Spaarke.Auth tests (`office-addins-tests.yml` typecheck job). Issues filed: #1453, #1464 (G4 mail as user), #1468-#1470 (orphan controls, cleanup gate, app ids), #1471 (account match on shared browsers). |
+| **Next Action** | 1) Confirm the 122/124 PR merges. 2) Task 123 via task-execute (consumers pass the tenant; ribbons; scope) — TrackingFieldTrio overlaps UAC-r2 PR #1450: coordinate. 3) Task 125: owner go with the full deploy list (SpeDocumentViewer 1.0.28 is a plain import). 4) Task 126 after UAC-r2 answers `notes/coordination/2026-10-08-to-uac-r2-model1-guests.md`. 5) Task 121 still open. |
 
 ### Round 12 live checks for the owner
 Outlook (guest, web): Copy Link → Spaarke record link (not `aka.ms/spe-openfilelocation`); reopen a saved email → green "Saved to Spaarke" box + record / "File to record"; Find rows open (web uses a normal tab); Quick Save → progress → success + "Open in Spaarke", contact suggestion / new email → saved UNFILED with the message; an unticked attachment is inside the .eml; pictures in the body render in the .eml. Word: Copy Link = record link; Find rows open. Note: emails saved from the PANE before 121 store the Exchange item id; the already-saved lookup accepts both keys.

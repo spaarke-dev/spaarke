@@ -29,6 +29,7 @@ import {
   getBffBaseUrl,
   getBffOAuthScope,
   getMsalClientId,
+  getTenantId as getConfiguredTenantId,
   waitForConfig,
 } from "../config/runtimeConfig";
 
@@ -51,10 +52,11 @@ function getInitializer(): CodePageAuthInitializer {
   if (!_initializer) {
     _initializer = createCodePageAuthInitializer({
       clientId: getMsalClientId(),
+      // The environment's tenant (sprk_TenantId, via runtime config) — a tenant-specific authority is required
+      // for B2B guests (#1453). The library validates it and ignores an invalid value.
+      tenantId: getConfiguredTenantId(),
       bffBaseUrl: getBffBaseUrl(),
       bffApiScope: getBffOAuthScope(),
-      // DailyBriefing-specific: omit tenantId → factory falls back to Xrm
-      // (preserves pre-consolidation behavior).
       proactiveRefresh: false, // Short-lived dialog
       logLabel: "DailyBriefing",
       beforeInit: waitForConfig, // Wait for runtimeConfig.setRuntimeConfig() in main.tsx

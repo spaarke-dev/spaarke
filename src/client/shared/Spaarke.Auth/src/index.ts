@@ -44,6 +44,9 @@ export type { UseAuthResult } from './useAuth';
 // Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
 export { resolveTenantIdSync } from './resolveTenantIdSync';
 
+// Tenant validation (#1453) — the same check the library applies before building an authority
+export { isValidTenant } from './tenant';
+
 // Code Page auth initializer factory (FR-20a / ADR-028) — canonical consumption
 // pattern that replaces the 3 byte-similar solution-local `authInit.ts` copies.
 // See projects/spaarke-daily-update-service-r2/notes/auth-init-divergence.md

@@ -438,7 +438,7 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
-    /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
+    /// email-processing default (task 133; the AI staging container went with its setting in task 227f). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
     /// (the shared container stays where the configuration points; nothing is orphaned).
     /// </summary>
@@ -447,7 +447,6 @@ public static class ProvisionProjectEndpoint
         "Communication:ArchiveContainerId",
         "EmailProcessing:DefaultContainerId",
         "Email:DefaultContainerId",
-        "SharePointEmbedded:StagingContainerId"
     };
 
     // ── Share rights (task 061) ──────────────────────────────────────────────

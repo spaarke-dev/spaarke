@@ -19,8 +19,8 @@
     - Step 1 (SB namespace) — LIVE and idempotent: `spaarke-servicebus-dev` in RG
       `SharePointEmbedded` already exists (created 2025-09-29). Canonical
       infrastructure now provisions Service Bus via Bicep — see
-      `infrastructure/bicep/modules/service-bus.bicep` (used by both `platform.bicep`
-      and `customer.bicep`). This step remains a safe no-op.
+      `infrastructure/bicep/modules/service-bus.bicep` (used by `customer.bicep`
+      only). This step remains a safe no-op.
 
     - Step 2 (3 Office queues) — LIVE and idempotent: `office-upload-finalization`,
       `office-profile`, `office-indexing` all exist since 2026-01-26 and are actively

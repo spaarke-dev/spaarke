@@ -1,4 +1,4 @@
-# Deploy CorporateWorkspace Web Resource to Dataverse
+# Deploy DailyBriefing (sprk_dailyupdate) Web Resource to Dataverse
 param(
     [string]$DataverseUrl = $env:DATAVERSE_URL
 )
@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $orgUrl = $DataverseUrl
 
 Write-Host '====================================='
-Write-Host 'CorporateWorkspace Web Resource Deployment'
+Write-Host 'DailyBriefing (sprk_dailyupdate) Web Resource Deployment'
 Write-Host '====================================='
 
 # Get access token

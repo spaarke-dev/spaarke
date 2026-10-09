@@ -1,381 +1,216 @@
 # ============================================================================
-# publish-dataverse-solutions-manifest.yml -- Publish the 8-solution H6
-# artifact manifest (+ the managed solution ZIPs themselves) to the
-# provisioning-artifacts blob container.
+# publish-dataverse-solutions-manifest.yml — pack SpaarkeMaster from git and publish it to provisioning-artifacts
 # ============================================================================
 #
-# WHY THIS WORKFLOW EXISTS (customer-provisioning-orchestration-r1, Wave G-8
-# Batch 7, closes ledger Defect #17 -- projects/customer-provisioning-
-# orchestration-r1/notes/post-authoring-audit-2026-08-20.md row 75):
+# customer-provisioning-orchestration-r1 T218d (ADR-027 §3-§4 amended 2026-10-07). H6 imports ONE package,
+# SpaarkeMaster, managed by default and unmanaged on explicit instruction, from the provisioning-artifacts store. It
+# reads `dataverse-solutions-latest.json` (SolutionImportOptions.SolutionArtifactManifestBlobName) in the shape
+#   {"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}
+# (DataverseWebApiSolutionImporter.ParsePackageEntry). This workflow is that artifact's ONLY producer: it packs the
+# committed source `src/dataverse/solutions/SpaarkeMaster` (written by scripts/solution-authoring/
+# Export-SpaarkeMasterSource.ps1) — never a zip from a laptop.
 #
-#   DataverseWebApiSolutionImporter.cs (H6) resolves each of the 8
-#   authoritative Spaarke managed solutions from a versioned blob-artifact
-#   manifest -- `dataverse-solutions-latest.json` by default (see
-#   SolutionImportOptions.SolutionArtifactManifestBlobName) -- and REFUSES to
-#   fall back to a local filesystem path (DataverseWebApiSolutionImporter.cs
-#   ~line 251: "H6 refuses to fall back to a local filesystem path"). As of
-#   this workflow's authoring, no CI step produced that manifest (or the
-#   ZIPs), so a live H6 dispatch could never resolve a single solution --
-#   this workflow is the missing producer.
+# Steps: pack managed + unmanaged with the pac CLI → check both zips (name, version = Other/Solution.xml, managed
+# flag, no environment-variable values) and the source (no missing dependency on solution="Active" — F12) → write
+# the manifest with New-SpaarkeMasterManifest (the one producer of its shape; the C# parser and Pester tests share
+# Fixtures/spaarkemaster-manifest.sample.json) → keep everything as a run artifact.
+# Only a manual run on master with `publish: true` then uploads: both zips under versioned names, a versioned
+# manifest, a copy of the current latest manifest as `dataverse-solutions-latest.previous.json` (the rollback
+# pointer), then the new `dataverse-solutions-latest.json`, read back. A version publishes ONCE: a zip of that version
+# from a DIFFERENT commit refuses the run (bump with Assemble-SpaarkeMasterSolution.ps1 -Version and re-export); a zip
+# from the SAME commit (blob metadata `sourcesha`) is a re-run after a partial failure and is replaced. Nothing is
+# ever deleted.
 #
-# SCOPE (deliberately narrow -- matches ledger Defect #17's own framing
-# "CI workflow to publish dataverse-solutions-latest.json doesn't exist"):
-#   This workflow PUBLISHES already-built managed solution ZIPs + the
-#   manifest that points at them. It does NOT build/pack the ZIPs. Only 2 of
-#   the 8 canonical solution folders (SpaarkeCore, EventCommands) currently
-#   contain an unpacked-solution `solution.xml`; the remaining 6
-#   (webresources, CalendarSidePane, DocumentUploadWizard,
-#   EventDetailSidePane, EventsPage, LegalWorkspace) are Vite/React Code Page
-#   source trees with no unpacked-solution scaffolding at all -- packing them
-#   into importable managed solutions is a separate, materially larger
-#   follow-on item (Code Page build + web-resource wrap + customizations.xml
-#   generation), intentionally out of scope here to avoid silently
-#   overclaiming a fix this workflow does not provide. Per CLAUDE.md §11
-#   (component justification / avoid duplication): if a future workflow
-#   builds the ZIPs, it should write them to the SAME
-#   `{SolutionFolder}/bin/Release/*.zip` convention Deploy-DataverseSolutions.ps1's
-#   own Find-SolutionZip already searches (this workflow mirrors that exact
-#   search order) -- no new convention introduced.
-#
-# GROUND-TRUTHED AGAINST CODE, NOT THE TASK BRIEF (CLAUDE.md §2 "code wins"):
-#   The task brief that seeded this workflow suggested a trigger path of
-#   `src/dataverse/solutions/**` and a blob path of
-#   `provisioning-artifacts/dataverse-solutions/latest.json`. Both were
-#   verified WRONG against the actual C# + PS source before writing this
-#   file:
-#     - `src/dataverse/solutions/**` contains 3 UNRELATED solutions
-#       (spaarke_containers, spaarke_core, spaarke_documents) that do not
-#       overlap the H6 8-solution catalog at all.
-#     - The real solution source tree is `src/solutions/**`
-#       (SolutionImportOptions.SolutionPath's own default, Deploy-
-#       DataverseSolutions.ps1's own default `-SolutionPath`, and
-#       CanonicalSolutionCatalog.cs's FolderName values ALL agree on this).
-#     - The real blob path is the FLAT `dataverse-solutions-latest.json` at
-#       the `provisioning-artifacts` container root (SolutionImportOptions.
-#       SolutionArtifactManifestBlobName's literal default) -- NOT nested
-#       under a `dataverse-solutions/` virtual folder. A nested path would
-#       silently 404 against the importer's default binding.
-#   This workflow uses the CODE-VERIFIED values, not the brief's assumed
-#   ones. See the completing agent's final report for the full deviation
-#   note.
-#
-# THE 8-SOLUTION CATALOG BELOW is a third mirror of CanonicalSolutionCatalog.cs's
-# s_solutions array / Deploy-DataverseSolutions.ps1's $SolutionImportOrder
-# hashtable. Unlike the C#<->PS pair (guarded by
-# H6SolutionImportHandlerTests.Catalog_MatchesPowerShellScriptSolutionImportOrder),
-# THIS YAML COPY IS NOT test-guarded -- if the catalog changes, update all
-# three in lockstep. FolderName values must match `src/solutions/<Folder>`
-# exactly; SolutionUniqueName values are the manifest's JSON keys (the
-# importer keys off SolutionUniqueName, NOT FolderName).
-#
-# STORAGE TARGET: the SAME `provisioning-artifacts` blob container tasks
-# 116/117/132 already publish to (one container, one consumption story).
+# Runbook: docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md. Storage access: the existing OIDC identity
+# (azure/login, no key or SAS) — the same one publish-provisioning-arm-artifacts.yml uses on the same container.
 # ============================================================================
 
 name: Publish Dataverse Solutions Manifest
 
-# RELEASE-TIME ONLY — deliberately no `push` trigger.
-#
-# This workflow uploads 8 pre-built managed solution ZIPs and publishes the manifest
-# H6 reads. It does not BUILD the ZIPs, and it cannot: `src/solutions/*` are unpacked
-# solution folders (customizations.xml, entities/, ...) with no .cdsproj, and no
-# workflow in this repo packs them. The ZIPs come from a local
-# `pac solution pack` run, per docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md
-# step 9: build + verify drift-free locally, THEN run this workflow.
-#
-# It previously also triggered on `push: master` for `src/solutions/**`. On a push
-# runner the ZIPs have never existed, so the "Locate + validate the 8 canonical
-# solution ZIPs" step found 0 of 8 and the workflow failed on every solution change
-# — 3 of 3 recent runs, 100%. The trigger contradicted the workflow's own contract
-# (and its own error message, which tells you to go pack the solutions first).
-#
-# Removing the trigger is the fix. Do NOT add a `push` trigger back without also
-# adding a pack step — the two have to arrive together or this returns to permanent red.
 on:
   workflow_dispatch:
     inputs:
-      targetEnvironment:
-        description: 'Target environment label (informational metadata only -- the manifest blob path is NOT environment-segmented; H6 always reads the single flat dataverse-solutions-latest.json per SolutionImportOptions default)'
+      publish:
+        description: 'Upload to provisioning-artifacts and move dataverse-solutions-latest.json. false = dry run (pack + checks + manifest as a run artifact; nothing uploaded).'
         required: false
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-        default: 'dev'
+        type: boolean
+        default: false
+  # Dry run only: proves every change to the committed package source still packs and passes the checks.
+  pull_request:
+    paths:
+      - 'src/dataverse/solutions/SpaarkeMaster/**'
+      - 'scripts/solution-authoring/SpaarkePackageScope.psm1'
+      - '.github/workflows/publish-dataverse-solutions-manifest.yml'
 
 permissions:
   contents: read
-  id-token: write  # Required for OIDC-based Azure login (no stored storage-account key)
+  id-token: write  # OIDC login for the publish steps (no stored storage key)
 
 concurrency:
   group: publish-dataverse-solutions-manifest-${{ github.ref }}
-  cancel-in-progress: false  # Never cancel an in-flight artifact publish
+  cancel-in-progress: false  # never cancel an in-flight publish
+
+env:
+  SOURCE_FOLDER: src/dataverse/solutions/SpaarkeMaster
+  # Same pac version that unpacked the committed source (Export-SpaarkeMasterSource.ps1, 2026-10-08). Bump both together.
+  PAC_VERSION: '1.46.1'
+  CONTAINER: provisioning-artifacts
 
 jobs:
-  publish-manifest:
-    name: Locate solution ZIPs, upload, and publish manifest
+  pack-and-publish:
+    name: Pack SpaarkeMaster, check, (publish)
     runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}
+      # The OIDC subject trusts refs/heads/master only; a publish from another branch is refused up front.
+      ON_MASTER: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Compute build identifiers (buildId + sha + targetEnvironment)
-        id: build-id
+      - name: Refuse a publish from a branch other than master
+        if: env.PUBLISH == 'true' && env.ON_MASTER != 'true'
+        shell: bash
+        run: |
+          echo "::error::publish=true runs from master only (the OIDC federated subject trusts refs/heads/master). Merge first, or run with publish=false for a dry run."
+          exit 1
+
+      - name: Install pac CLI ${{ env.PAC_VERSION }}
         shell: bash
         run: |
           set -euo pipefail
-          # Same convention as build-provisioning-sidecar.yml (task 115) and
-          # publish-provisioning-arm-artifacts.yml (task 117): date + monotonic
-          # run-number -- deterministic, human-sortable, immune to same-day
-          # collisions. sha carried separately.
-          build_id="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
-          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
-          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "target_environment=${{ github.event.inputs.targetEnvironment || 'dev' }}" >> "$GITHUB_OUTPUT"
+          dotnet tool install --global Microsoft.PowerApps.CLI.Tool --version "${PAC_VERSION}"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
-      - name: Locate + validate the 8 canonical solution ZIPs
-        id: locate
+      - name: Pack managed + unmanaged
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p out
+          pac solution pack --zipfile out/SpaarkeMaster_managed.zip --folder "${SOURCE_FOLDER}" --packagetype Managed
+          pac solution pack --zipfile out/SpaarkeMaster.zip --folder "${SOURCE_FOLDER}" --packagetype Unmanaged
+          ls -l out
+          test -s out/SpaarkeMaster_managed.zip
+          test -s out/SpaarkeMaster.zip
 
-          # FolderName|SolutionUniqueName|DisplayName|Tier -- verbatim mirror
-          # of CanonicalSolutionCatalog.cs's s_solutions (see header comment).
-          declare -a SOLUTIONS=(
-            "SpaarkeCore|SpaarkeCore|Spaarke Core|1"
-            "webresources|SpaarkeWebResources|Spaarke Web Resources|2"
-            "CalendarSidePane|CalendarSidePane|Calendar Side Pane|3"
-            "DocumentUploadWizard|DocumentUploadWizard|Document Upload Wizard|3"
-            "EventCommands|EventRibbons|Event Ribbon Commands|3"
-            "EventDetailSidePane|EventDetailSidePane|Event Detail Side Pane|3"
-            "EventsPage|EventsPage|Events Page|3"
-            "LegalWorkspace|LegalWorkspace|Legal Workspace|3"
-          )
-
-          solution_path="src/solutions"
-          mkdir -p ./out
-          missing=()
-          found_count=0
-
-          # Emitted as a newline-delimited "found" table consumed by the next
-          # step (folder|uniqueName|displayName|tier|zipPath|version).
-          : > ./out/found-solutions.txt
-
-          for entry in "${SOLUTIONS[@]}"; do
-            IFS='|' read -r folder uniqueName displayName tier <<< "${entry}"
-            folder_path="${solution_path}/${folder}"
-
-            # Same search order as Deploy-DataverseSolutions.ps1's
-            # Find-SolutionZip: bin/Release, bin/Debug, the folder itself,
-            # then out/. Prefer a name containing "managed" when multiple
-            # candidates exist in the same directory (same PS heuristic).
-            zip_path=""
-            for candidate_dir in "${folder_path}/bin/Release" "${folder_path}/bin/Debug" "${folder_path}" "${folder_path}/out"; do
-              if [ -d "${candidate_dir}" ]; then
-                managed_match="$(find "${candidate_dir}" -maxdepth 1 -iname '*managed*.zip' 2>/dev/null | sort | tail -n1)"
-                any_match="$(find "${candidate_dir}" -maxdepth 1 -iname '*.zip' ! -iname '*unmanaged*' 2>/dev/null | sort | tail -n1)"
-                if [ -n "${managed_match}" ]; then
-                  zip_path="${managed_match}"
-                elif [ -n "${any_match}" ]; then
-                  zip_path="${any_match}"
-                fi
-              fi
-              if [ -n "${zip_path}" ]; then
-                break
-              fi
-            done
-
-            if [ -z "${zip_path}" ]; then
-              echo "::warning::No solution ZIP found for '${displayName}' (${uniqueName}) under ${folder_path}"
-              missing+=("${uniqueName} (expected under ${folder_path}/{bin/Release,bin/Debug,.,out}/*.zip)")
-              continue
-            fi
-
-            echo "Found: ${displayName} -> ${zip_path}"
-            echo "${folder}|${uniqueName}|${displayName}|${tier}|${zip_path}" >> ./out/found-solutions.txt
-            found_count=$((found_count + 1))
-          done
-
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo ""
-            echo "ERROR: ${#missing[@]} of 8 solution ZIP(s) not found:"
-            for m in "${missing[@]}"; do
-              echo "  - ${m}"
-            done
-            echo ""
-            echo "H6 requires ALL 8 solutions to resolve via the manifest (tier-ordered"
-            echo "import -- a missing entry breaks the tier gate). This workflow refuses"
-            echo "to publish a partial/incomplete manifest."
-            echo ""
-            echo "Build the missing managed solution ZIP(s) first, e.g.:"
-            echo "  pac solution pack --zipfile <SolutionFolder>/bin/Release/<name>_managed.zip \\"
-            echo "    --folder <SolutionFolder> --packagetype Managed"
-            echo ""
-            echo "(Building/packing the 8 solutions is a separate follow-on item -- see"
-            echo "this workflow's header comment for why it is intentionally out of scope"
-            echo "here.)"
-            exit 1
-          fi
-
-          echo "All 8 solution ZIPs located."
-
-      - name: Compute SHA-256 + size + read solution.xml version for each ZIP
-        id: hashes
-        shell: bash
+      - name: Check the packages and write the manifest
+        id: check
+        shell: pwsh
         run: |
-          set -euo pipefail
-          : > ./out/manifest-entries.json
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./scripts/solution-authoring/SpaarkePackageScope.psm1 -Force
+          $sourceXml = Join-Path $env:SOURCE_FOLDER 'Other/Solution.xml'
+          $version = ([xml](Get-Content $sourceXml -Raw)).ImportExportXml.SolutionManifest.Version
+          if ($version -notmatch '^\d+(\.\d+){1,3}$') { throw "Unreadable version '$version' in $sourceXml." }
 
-          first=true
-          echo "{" > ./out/solutions-object.json
-          while IFS='|' read -r folder uniqueName displayName tier zipPath; do
-            [ -z "${folder}" ] && continue
+          $leaks = @(Find-LeakyDependencies -SolutionXmlPath $sourceXml)
+          if ($leaks.Count -gt 0) { $leaks | ForEach-Object { Write-Host "LEAK: $_" }; throw "$($leaks.Count) missing dependency(ies) on solution=Active (F12) — re-export from dev after Assemble." }
 
-            sha256="$(sha256sum "${zipPath}" | cut -d' ' -f1)"
-            size="$(stat -c%s "${zipPath}")"
+          foreach ($p in @(@{ Zip = 'out/SpaarkeMaster_managed.zip'; Managed = $true }, @{ Zip = 'out/SpaarkeMaster.zip'; Managed = $false })) {
+              $info = Get-PackedSolutionInfo -ZipPath $p.Zip
+              if ($info.UniqueName -ne 'SpaarkeMaster') { throw "$($p.Zip) is '$($info.UniqueName)', not SpaarkeMaster." }
+              if ($info.Version -ne $version) { throw "$($p.Zip) is version $($info.Version); the source says $version." }
+              if ($info.Managed -ne $p.Managed) { throw "$($p.Zip) has managed=$($info.Managed); expected $($p.Managed)." }
+              $values = @(Find-EnvironmentVariableValues -Path $p.Zip)
+              if ($values.Count -gt 0) { throw "$($p.Zip) carries environment-variable values: $($values -join ', ')" }
+          }
 
-            # Read <SolutionManifest><Version> from the solution.xml entry
-            # inside the ZIP (case-insensitive match, same as
-            # DataverseWebApiSolutionImporter.TryReadSolutionVersionFromZip
-            # and the PS script's Get-SolutionVersionFromZip).
-            xml_entry="$(unzip -Z1 "${zipPath}" | grep -i '^solution\.xml$' | head -n1 || true)"
-            version=""
-            if [ -n "${xml_entry}" ]; then
-              version="$(unzip -p "${zipPath}" "${xml_entry}" | grep -oP '(?<=<Version>)[^<]+(?=</Version>)' | head -n1 || true)"
-            fi
-            if [ -z "${version}" ]; then
-              echo "::error::Could not read a <Version> from solution.xml inside ${zipPath} (uniqueName=${uniqueName})"
-              exit 1
-            fi
+          $managedBlob = "dataverse-solution-SpaarkeMaster-$version-managed.zip"
+          $unmanagedBlob = "dataverse-solution-SpaarkeMaster-$version-unmanaged.zip"
+          $buildId = "$((Get-Date).ToUniversalTime().ToString('yyyy.MM.dd'))-${{ github.run_number }}"
+          New-SpaarkeMasterManifest -Version $version -ManagedBlobName $managedBlob -UnmanagedBlobName $unmanagedBlob `
+              -ManagedSha256 (Get-FileHash out/SpaarkeMaster_managed.zip -Algorithm SHA256).Hash.ToLowerInvariant() `
+              -UnmanagedSha256 (Get-FileHash out/SpaarkeMaster.zip -Algorithm SHA256).Hash.ToLowerInvariant() `
+              -BuildId $buildId -SourceSha '${{ github.sha }}' | Set-Content out/manifest.json -Encoding utf8NoBOM
+          Get-Content out/manifest.json
 
-            blob_name="dataverse-solution-${folder}-${version}.zip"
+          # Producer <-> parser contract: the same sample the C# ParsePackageEntry test reads.
+          $made = Get-Content out/manifest.json -Raw | ConvertFrom-Json
+          $sample = Get-Content src/server/services/Sprk.Provisioning.ControlPlane.Tests/Fixtures/spaarkemaster-manifest.sample.json -Raw | ConvertFrom-Json
+          foreach ($pair in @(@($made, $sample), @($made.solutions.SpaarkeMaster, $sample.solutions.SpaarkeMaster))) {
+              $a = @($pair[0].PSObject.Properties.Name) -join ','; $b = @($pair[1].PSObject.Properties.Name) -join ','
+              if ($a -ne $b) { throw "Manifest keys '$a' differ from the parser sample's '$b' (Fixtures/spaarkemaster-manifest.sample.json)." }
+          }
 
-            if [ "${first}" = true ]; then
-              first=false
-            else
-              echo "," >> ./out/solutions-object.json
-            fi
-            cat >> ./out/solutions-object.json <<ENTRY
-              "${uniqueName}": {
-                "blobName": "${blob_name}",
-                "version": "${version}",
-                "displayName": "${displayName}",
-                "tier": ${tier},
-                "sourceFolder": "${folder}",
-                "sha256": "${sha256}",
-                "sizeBytes": ${size}
-              }
-          ENTRY
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "managed_blob=$managedBlob" >> $env:GITHUB_OUTPUT
+          "unmanaged_blob=$unmanagedBlob" >> $env:GITHUB_OUTPUT
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
 
-            # Carry blobName + local zipPath forward for the upload step.
-            echo "${folder}|${uniqueName}|${zipPath}|${blob_name}|${version}" >> ./out/manifest-entries.json
-          done < ./out/found-solutions.txt
-          echo "}" >> ./out/solutions-object.json
-
-          cat ./out/solutions-object.json
+      - name: Keep the packages and manifest as a run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: spaarkemaster-${{ steps.check.outputs.version }}-run${{ github.run_number }}
+          path: out/
+          retention-days: 14
 
       - name: Azure Login (OIDC)
+        if: env.PUBLISH == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Verify PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT repo variable is set
+      - name: Publish (versioned zips, versioned manifest, previous pointer, latest)
+        if: env.PUBLISH == 'true'
         shell: bash
+        env:
+          ACCOUNT: ${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}
+          VERSION: ${{ steps.check.outputs.version }}
+          MANAGED_BLOB: ${{ steps.check.outputs.managed_blob }}
+          UNMANAGED_BLOB: ${{ steps.check.outputs.unmanaged_blob }}
+          BUILD_ID: ${{ steps.check.outputs.build_id }}
         run: |
           set -euo pipefail
-          if [ -z "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" ]; then
-            echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."
-            echo "Set it (Settings -> Secrets and variables -> Actions -> Variables) to the"
-            echo "provisioning-artifacts storage account name, then re-run this workflow."
-            exit 1
-          fi
-          echo "Storage account: ${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}"
+          if [ -z "${ACCOUNT}" ]; then echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."; exit 1; fi
+          blob() { az storage blob "$@" --account-name "${ACCOUNT}" --container-name "${CONTAINER}" --auth-mode login; }
 
-      - name: Upload the 8 solution ZIPs to provisioning-artifacts (OIDC, no stored key)
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS='|' read -r folder uniqueName zipPath blobName version; do
-            [ -z "${folder}" ] && continue
-            echo "Uploading ${uniqueName} v${version} -> ${blobName}"
-            az storage blob upload \
-              --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
-              --container-name provisioning-artifacts \
-              --name "${blobName}" \
-              --file "${zipPath}" \
-              --auth-mode login \
-              --overwrite false
-          done < ./out/manifest-entries.json
-
-      - name: Generate + publish manifest (versioned + latest pointer -- AFTER all ZIPs upload)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Top-level shape matches SolutionArtifactManifestOptions' documented
-          # contract EXACTLY -- {"solutions": {<SolutionUniqueName>: {"blobName":
-          # ..., "version": ...}, ...}}. DataverseWebApiSolutionImporter.
-          # LoadArtifactManifestAsync only reads "solutions" + each entry's
-          # "blobName"/"version" via JsonElement.TryGetProperty, so the extra
-          # metadata fields below (displayName/tier/sourceFolder/sha256/
-          # sizeBytes) are additive and safely ignored by the consumer -- kept
-          # for audit/debugging parity with the ARM-artifact manifest's own
-          # sha256/sizeBytes fields.
-          cat > ./provisioning-dataverse-solutions-manifest.json <<EOF
-          {
-            "buildId": "${{ steps.build-id.outputs.build_id }}",
-            "sha": "${{ steps.build-id.outputs.sha }}",
-            "targetEnvironment": "${{ steps.build-id.outputs.target_environment }}",
-            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "solutions": $(cat ./out/solutions-object.json)
+          # A version publishes once. A zip of this version from ANOTHER commit refuses the run; one from THIS commit
+          # (metadata sourcesha) is a re-run after a partial failure and is replaced.
+          upload_zip() {  # name file
+            local exists src
+            exists=$(blob exists --name "$1" --query exists -o tsv)
+            if [ "${exists}" = "true" ]; then
+              src=$(blob metadata show --name "$1" --query sourcesha -o tsv)
+              if [ "${src}" != "${GITHUB_SHA}" ]; then
+                echo "::error::$1 already exists from commit ${src:-unknown} — SpaarkeMaster ${VERSION} is published. Bump the version (Assemble-SpaarkeMasterSolution.ps1 -Version), re-export, and run again."
+                exit 1
+              fi
+              echo "$1 exists from this commit (re-run) — replacing it."
+            fi
+            blob upload --name "$1" --file "$2" --overwrite true --metadata "sourcesha=${GITHUB_SHA}"
           }
-          EOF
-          cat ./provisioning-dataverse-solutions-manifest.json
+          upload_zip "${MANAGED_BLOB}" out/SpaarkeMaster_managed.zip
+          upload_zip "${UNMANAGED_BLOB}" out/SpaarkeMaster.zip
+          blob upload --name "dataverse-solutions-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
 
-          # Validate it is well-formed JSON before publishing anything.
-          python3 -c "import json,sys; json.load(open('./provisioning-dataverse-solutions-manifest.json'))"
+          # Rollback pointer: keep the manifest being replaced (the first run keeps the hand-made pre-T218 one).
+          latest_exists=$(blob exists --name dataverse-solutions-latest.json --query exists -o tsv)
+          if [ "${latest_exists}" = "true" ]; then
+            blob download --name dataverse-solutions-latest.json --file out/previous-latest.json --overwrite true
+            blob upload --name dataverse-solutions-latest.previous.json --file out/previous-latest.json --overwrite true
+          fi
+          blob upload --name dataverse-solutions-latest.json --file out/manifest.json --overwrite true
 
-          # Versioned copy -- immutable audit trail, one per buildId, never
-          # overwritten (parity with publish-provisioning-arm-artifacts.yml).
-          az storage blob upload \
-            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
-            --container-name provisioning-artifacts \
-            --name "dataverse-solutions-${{ steps.build-id.outputs.build_id }}.json" \
-            --file "./provisioning-dataverse-solutions-manifest.json" \
-            --auth-mode login \
-            --overwrite false
-
-          # Mutable "latest" pointer -- the EXACT blob name
-          # SolutionImportOptions.SolutionArtifactManifestBlobName defaults to
-          # (dataverse-solutions-latest.json, flat at the container root). This
-          # is the blob H6 reads unless an app-setting override is configured.
-          az storage blob upload \
-            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
-            --container-name provisioning-artifacts \
-            --name "dataverse-solutions-latest.json" \
-            --file "./provisioning-dataverse-solutions-manifest.json" \
-            --auth-mode login \
-            --overwrite true
+          # Read back what H6 will read.
+          blob download --name dataverse-solutions-latest.json --file out/readback.json --overwrite true
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('out/readback.json'))['solutions']['SpaarkeMaster']
+          assert m['version'] == os.environ['VERSION'], m
+          assert m['managedBlobName'] == os.environ['MANAGED_BLOB'] and m['unmanagedBlobName'] == os.environ['UNMANAGED_BLOB'], m
+          print('latest manifest read back:', m)
+          PY
 
       - name: Summary
         if: always()
         shell: bash
         run: |
           {
-            echo "### Dataverse solutions manifest publish"
-            echo "- Build ID: \`${{ steps.build-id.outputs.build_id }}\`"
-            echo "- SHA: \`${{ steps.build-id.outputs.sha }}\`"
-            echo "- Target environment (informational): \`${{ steps.build-id.outputs.target_environment }}\`"
-            echo "- Manifest: dataverse-solutions-${{ steps.build-id.outputs.build_id }}.json + dataverse-solutions-latest.json"
-            echo "- Container: provisioning-artifacts (account: \`${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}\`)"
-            echo ""
-            echo "| Solution | Blob |"
-            echo "|---|---|"
-            while IFS='|' read -r folder uniqueName zipPath blobName version; do
-              [ -z "${folder}" ] && continue
-              echo "| ${uniqueName} v${version} | ${blobName} |"
-            done < ./out/manifest-entries.json
+            echo "### SpaarkeMaster package"
+            echo "- Version: \`${{ steps.check.outputs.version }}\` — mode: $([ "${PUBLISH}" = "true" ] && echo '**published**' || echo 'dry run (nothing uploaded)')"
+            echo "- Blobs: \`${{ steps.check.outputs.managed_blob }}\`, \`${{ steps.check.outputs.unmanaged_blob }}\`"
+            echo "- Manifest: \`dataverse-solutions-${{ steps.check.outputs.build_id }}-${GITHUB_RUN_ATTEMPT}.json\` → \`dataverse-solutions-latest.json\` (container \`${CONTAINER}\`)"
           } >> "$GITHUB_STEP_SUMMARY"

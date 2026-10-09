@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -258,7 +259,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -272,13 +272,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Delete job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Delete job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -292,7 +290,10 @@ public sealed class BulkOperationService : BackgroundService
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await DeleteContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct);
+            // Per container: one this stamp does not own is refused before any read (task 227d, owner D29).
+            var (graphClient, clientError) = await ClientForContainerAsync(config, containerId, operationId, ct);
+            var error = clientError
+                ?? await DeleteContainerInScopeAsync(graphClient!, config, scope, containerId, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -334,7 +335,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -348,13 +348,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Permissions job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Permissions job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -367,8 +365,10 @@ public sealed class BulkOperationService : BackgroundService
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await GrantOnContainerInScopeAsync(
-                graphClient, config, scope, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
+            var (graphClient, clientError) = await ClientForContainerAsync(config, containerId, operationId, ct);
+            var error = clientError
+                ?? await GrantOnContainerInScopeAsync(
+                    graphClient!, config, scope, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -520,6 +520,39 @@ public sealed class BulkOperationService : BackgroundService
                 "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed with unexpected error.",
                 operationId, containerId);
             return new BulkOperationItemError(containerId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The app-only client for ONE container (task 227d, owner D29): refused — 404 <c>spe_container_not_owned</c> —
+    /// unless this stamp owns it. A refusal is reported as <see cref="ContainerNotInScopeError"/>, the same item error as
+    /// a container outside the caller's scope, so a batch reveals nothing about other customers' containers. Any other
+    /// failure to get the client is that item's error; the batch continues.
+    /// </summary>
+    internal async Task<(Microsoft.Graph.GraphServiceClient? Client, BulkOperationItemError? Error)> ClientForContainerAsync(
+        SpeAdminGraphService.ContainerTypeConfig config, string containerId, Guid operationId, CancellationToken ct)
+    {
+        try
+        {
+            return (await _graphService.GetClientForContainerAsync(config, containerId, ct), null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+        {
+            _logger.LogWarning(
+                "BulkOperationService: job {OperationId} — container '{ContainerId}' is not this stamp's; refused without a read.",
+                operationId, containerId);
+            return (null, new BulkOperationItemError(containerId, ContainerNotInScopeError));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "BulkOperationService: job {OperationId} — no Graph client for container '{ContainerId}'; not changed.",
+                operationId, containerId);
+            return (null, new BulkOperationItemError(containerId, ProblemDetailsHelper.Redact(ex.Message) ?? ex.GetType().Name));
         }
     }
 

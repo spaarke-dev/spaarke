@@ -1,0 +1,123 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Navigator.Todo.Form.Button.CustomAction" Location="Mscrm.Form.sprk_todo.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Todo.Form.Button" Command="sprk.Navigator.Todo.Open.Command" LabelText="$LocLabels:sprk.Navigator.Todo.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Todo.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Todo.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Todo.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Navigator.Todo.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_todo.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Todo.Grid.Button" Command="sprk.Navigator.Todo.Open.Command" LabelText="$LocLabels:sprk.Navigator.Todo.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Todo.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Todo.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Todo.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.SecureChild.sprk_todo.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_todo.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_todo.SubGrid.New" Command="sprk.SecureChild.sprk_todo.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_todo.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.AddNewRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="sprk.SecureChild.sprk_todo.NativeNewAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.HideAddNewForChildEntities" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Open.addNewFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+          <CrmParameter Value="FirstPrimaryItemId" />
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Navigator.Todo.Open.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Navigator.Todo.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_todo.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_todo.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_todo" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="sprk.Navigator.Todo.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_todo.NativeNewAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_todo.NewAvailable.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.Navigator.Todo.Button.Alt">
+      <Titles>
+        <Title description="Open the Navigator side pane" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Todo.Button.LabelText">
+      <Titles>
+        <Title description="Navigator" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Todo.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open or focus the Navigator (Recent, Bookmarks, Monitored, Views). Its enable rule also registers the pane on load." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_todo.New.LabelText">
+      <Titles>
+        <Title description="New To Do" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_todo.New.ToolTipDescription">
+      <Titles>
+        <Title description="Add a To Do to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

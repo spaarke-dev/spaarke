@@ -19,12 +19,23 @@
  */
 
 import { initAuth, getAuthProvider, authenticatedFetch, AuthError } from '@spaarke/auth';
-import type { SpaarkeAuthProvider } from '@spaarke/auth';
+import type { IRuntimeConfig, SpaarkeAuthProvider } from '@spaarke/auth';
 import { getXrm } from '@spaarke/ui-components';
 
 // Re-export core symbols for consumers
 export { initAuth, getAuthProvider, authenticatedFetch, AuthError };
 export type { SpaarkeAuthProvider };
+
+let _runtimeConfig: IRuntimeConfig | null = null;
+
+/**
+ * Record the runtime config resolved at bootstrap (index.tsx) so initializeAuth() can pass the
+ * BFF scope and the environment's tenant explicitly (#1453). Without a tenant a B2B guest signs
+ * in against their home tenant; without the scope the token is not for the BFF.
+ */
+export function setAuthRuntimeConfig(config: IRuntimeConfig): void {
+  _runtimeConfig = config;
+}
 
 /**
  * Initialize authentication for PlaybookBuilder with proactive token refresh.
@@ -36,7 +47,18 @@ export type { SpaarkeAuthProvider };
  * @returns The initial access token string
  */
 export async function initializeAuth(): Promise<string> {
-  const provider = await initAuth({ proactiveRefresh: true });
+  const provider = await initAuth({
+    proactiveRefresh: true,
+    ...(_runtimeConfig
+      ? {
+          clientId: _runtimeConfig.msalClientId,
+          bffBaseUrl: _runtimeConfig.bffBaseUrl,
+          bffApiScope: _runtimeConfig.bffOAuthScope,
+          // The library validates the tenant and ignores an invalid value.
+          tenantId: _runtimeConfig.tenantId,
+        }
+      : {}),
+  });
   return provider.getAccessToken();
 }
 

@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{2a18b89f-3b1e-f111-88b3-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_graphview</Name>
+  <DisplayName>Graph View Icon</DisplayName>
+  <Description>Icon used for the semantic search graph view visual toolbar</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_graphview2A18B89F-3B1E-F111-88B3-7CED8D1DC988</FileName>
+</WebResource>

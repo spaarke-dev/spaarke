@@ -137,11 +137,14 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["uami_client_id"] = ("-UamiClientId", "00000000-1111-2222-3333-555555555555"),
             ["service_bus_fqns"] = ("-ServiceBusFqns", "spaarke-acme-prod-sbus.servicebus.windows.net"),
             ["redis_endpoint"] = ("-RedisEndpoint", "sprk-acme-prod-redis.westus2.redis.azure.net:10000"),   // T242: H2a's RedisEndpoint
+            ["content_safety_endpoint"] = ("-ContentSafetyEndpoint", "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/"),   // T246: H2a's ContentSafetyEndpoint
             ["bff_app_client_id"] = ("-BffAppClientId", "00000000-aaaa-bbbb-cccc-999999999999"),
             ["tenant_id"] = ("-TenantId", TenantId),
             ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
             ["customer_id"] = ("-CustomerId", CustomerId),   // T238: the run's own customerId, verbatim
             ["dataverse_env_url"] = ("-DataverseEnvUrl", "https://acme.crm.dynamics.com/"),   // T245b: H5's DataverseEnvUrl
+            ["spe_container_id"] = ("-SpeContainerId", "b!h8-created-customer-container"),   // T227c: H8's SpeContainerId
+            ["openai_monthly_limit_usd"] = ("-OpenaiMonthlyLimitUsd", "500"),   // T254: the optional OpenAI spend limit (intake)
         };
         expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -165,6 +168,30 @@ public sealed class H4bBulkAppSettingsHandlerTests
             at.Should().BeGreaterThanOrEqualTo(0, $"source '{sourceKey}' must reach the script as {argument}");
             args[at + 1].Should().Be(value, $"source '{sourceKey}' must carry its own run value");
         }
+    }
+
+    // ---------- T254: an optional (required: false) setting the run does not carry ----------
+
+    [Fact]
+    public async Task T254_AnOptionalSettingTheRunDoesNotCarry_IsSkipped_AndPassesNoArgument()
+    {
+        // No openAiMonthlyLimitUsd at intake = no spend limit (owner G37): H4b writes nothing for it, and the generated
+        // script's parameter is optional, so the absent argument is not an error.
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove(IntakeParameterCatalog.OpenAiMonthlyLimitUsd);
+        var entries = new List<PerEnvSettingEntry>
+        {
+            new("AiSpendLimit__MonthlyLimitUsd", PerEnvSettingSource.FromHandlerParameter, LiteralValue: null,
+                ParameterKey: "openai_monthly_limit_usd", Required: false, IOptionsModuleName: "AnalysisServicesModule"),
+        };
+        var runner = FakeProcessRunner.Zero();
+        var handler = Build(new FakeRepository(run, "etag-t254"), FakePerEnvManifest.Success(entries),
+            runner, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        runner.LastArgs!.Should().NotContain("-OpenaiMonthlyLimitUsd");
     }
 
     // ---------- AC-2 per-env-input missing ----------
@@ -765,9 +792,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model1SharedTrial",
+            TenancyModel = "Model1",
             Status = RunStatus.Running,
-            Profile = "spaarke-hosted-model1",
+            Profile = "spaarke-hosted-model2",
         };
         // Intake values (IntakeParameterCatalog) — the only things in Parameters.NonSecret.
         var p = run.Parameters.NonSecret;
@@ -775,6 +802,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         p[H4bBulkAppSettingsHandler.SubscriptionIdParameterKey] = SubscriptionId;
         p[IntakeParameterCatalog.EnvironmentName] = EnvironmentName;
         p[IntakeParameterCatalog.ContainerTypeId] = "00000000-dead-beef-0000-000000000001";
+        p[IntakeParameterCatalog.OpenAiMonthlyLimitUsd] = "500";   // T254 (optional)
         // Upstream handler outputs (task 245a) — H2a's and H3's typed InterStepState.
         var s = run.InterStepState;
         s.KeyVaultName = KeyVaultName;
@@ -784,9 +812,11 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.CosmosEndpoint = "https://sprk-prod-cosmos.documents.azure.com/";
         s.MiClientId = "00000000-1111-2222-3333-555555555555";
         s.ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net";
+        s.ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/";   // H2a output (task 246 — AiSafety__ContentSafety__Endpoint)
         s.RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000";   // H2a output (task 242 — Redis__Endpoint)
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
+        s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
         return run;
     }
 

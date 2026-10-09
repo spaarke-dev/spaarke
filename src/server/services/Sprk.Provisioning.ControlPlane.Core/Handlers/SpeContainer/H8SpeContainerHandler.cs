@@ -18,8 +18,15 @@
 //   2. Idempotency check (spe-{customerId}) — durable no-op if already done
 //   3. Resolve the container's OWNER — the customer environment's ROOT business
 //      unit (H5 output DataverseEnvUrl) — BEFORE anything is created (task 165)
+//   3b. Task 227b (G9): ISpeContainerProvisioner.EnsureGrantsAsync — as the owning app, ensure the
+//       container-type registration grants the stamp UAMI (application full) and the customer BFF app
+//       registration (delegated full); GET-then-PUT/PATCH, so a re-run writes nothing
 //   4. Read this run's typed CREATION RECORD (InterStepState.SpeContainerCreation):
 //      a container this run already created is RESUMED, never created again
+//   4b. Task 227e: a LATER run of the customer reuses the customer's existing container — the one the
+//       environment records in sprk_SharePointEmbeddedContainerId (H7 writes it on the first run). It is
+//       recorded as ADOPTED; a failed bind never removes it. Record and environment disagreeing → Resumable
+//       naming both (never pick one)
 //   5. Otherwise call ISpeContainerProvisioner.ProvisionAsync (CREATE + ACTIVATE)
 //      and RECORD the container immediately, before anything that can fail or wait
 //   6. Call ISpeContainerVerifier.VerifyAsync (app-only GET) — 404 signals
@@ -27,6 +34,8 @@
 //      on record; a resume verifies the same container)
 //   7. BIND the verified container to its business unit (stamp, read back,
 //      REMOVE on failure — ISpeContainerProvisioner.BindRootContainerAsync)
+//   7b. Task 227e: ISpeContainerProvisioner.EnsureCustomerMarkerAsync — the spaarkeCustomerId custom property
+//       the customer's BFF recognises its containers by (T227d); GET first, written only when absent
 //   8. Persist the container GUID to InterStepState.SpeContainerId — H7 reads this
 //      to write Dataverse env-var sprk_SharePointEmbeddedContainerId. Written ONLY
 //      here, after the bind: H7 never consumes an unbound container (and H7
@@ -54,7 +63,8 @@
 //
 // DELETED FROM H8-A (pre-rewrite):
 //   - Container-TYPE creation (retired to operator prereq per §R5)
-//   - Container-type registration + owning-app permission grant (also §R5)
+//   - Container-type registration + owning-app permission grant (also §R5). The CONSUMING apps' grants
+//     (the customer's BFF identities) came back in task 227b — step 3b — as the owning app, app-only.
 //   - KV write of SPE-ContainerTypeId per customer (containerTypeId now comes
 //     from constants, not per-customer KV; H4 no longer pre-creates that slot)
 //   - sharePointDomain + subscriptionId + upgradeMode parameter guards (not
@@ -89,6 +99,16 @@
 //   │                                             │ operator fixes + resumes)│
 //   │ Missing DataverseEnvUrl / root business    │ Resumable (nothing       │
 //   │ unit unreadable, none or two (task 165)    │ created)                 │
+//   │ Grant identity missing (MiClientId /       │ Resumable                │
+//   │ BffAppRegId), or a refused / faulted       │ (nothing created; a grant│
+//   │ container-type grant (task 227b)           │ is re-checked on resume) │
+//   │ Recorded container unreadable, or record   │ Resumable (nothing       │
+//   │ and environment name different containers  │ created; both named —    │
+//   │ (task 227e)                                │ an operator decides)     │
+//   │ Bind of an ADOPTED container fails (227e)  │ QuarantineRequired (the  │
+//   │                                            │ container is NOT removed)│
+//   │ Marker refused / faulted (task 227e)       │ Resumable (bound, on     │
+//   │                                            │ record; resume marks it) │
 //   │ Run not found in Cosmos partition          │ Resumable                │
 //   │ Provisioner CreateFailure (Graph's answer) │ Resumable                │
 //   │ Provisioner CreateFailure, NO answer       │ QuarantineRequired       │
@@ -112,7 +132,7 @@
 // IDEMPOTENCY (unchanged from H8-A): key is <c>spe-{customerId}</c>. Level-3
 // (handler-body durable dedup): scans ProvisioningRun.CompletedPhases for
 // (Phase=="H8", IdempotencyKey==<key>). Match → Success no-op BEFORE any
-// external side effect. Enforces "one container per customer, never re-create"
+// external side effect. Enforces "one ROOT container per customer, never re-create"
 // (topology doc §6: containers are cheap but the customer's container = data).
 // The creation record extends this to an INCOMPLETE H8 (task 165).
 //
@@ -251,7 +271,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 "has not completed SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md OR SKILL payload construction was bypassed.",
                 cancellationToken).ConfigureAwait(false);
         }
-        // T226: H4 writes the trimmed value to the vault (BuildIntakeValues); Graph gets the same id.
+        // The intake id is operator-maintained text (spaarke-constants.yaml); Graph gets it trimmed.
         containerTypeId = containerTypeId.Trim();
         // (3) Owning app (task 245b) — L2 configuration keyed by the container type: the owning app the
         //     container type is bound to (topology R1). Not the customer BFF app: the BFF app is a
@@ -348,6 +368,87 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         //      for a recorded container (that created a second container on every resume and orphaned the first UNBOUND).
         var recorded = ReadRecordedCreation(run);
 
+        // (5c') Task 227e — a LATER run of this customer. The record covers re-entries of THIS run; a new run starts with
+        //       an empty one while the customer's container lives on — and H4b would repoint the customer's BFF at any
+        //       new, empty container. The environment records the customer's container: H7 writes
+        //       sprk_SharePointEmbeddedContainerId from H8's container at the end of the first run. That container is
+        //       reused (ADOPTED, kept on the record so no re-entry ever removes it); the record and the environment naming
+        //       different containers stops the run — H8 never picks one. All of this runs before any write (grants
+        //       included), so a run that stops here has changed nothing.
+        string? environmentContainerId;
+        try
+        {
+            environmentContainerId = await _rootBusinessUnitReader
+                .ReadRecordedContainerIdAsync(dataverseEnvUrl, tenantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 could not read the customer's recorded container: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.RecordedContainerUnreadable,
+                $"Reading sprk_SharePointEmbeddedContainerId from '{dataverseEnvUrl}' failed: {ex.GetType().Name}: {ex.Message}. " +
+                "H8 creates a container only when it can tell the customer has none — nothing was created. Fix, then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (environmentContainerId is not null
+            && recorded.RootContainerId is { } runsOwn
+            && !string.Equals(runsOwn, environmentContainerId, StringComparison.Ordinal))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.DuplicateCustomerContainers,
+                $"Two containers are customer '{envelope.CustomerId}''s: '{environmentContainerId}' (the environment's " +
+                $"sprk_SharePointEmbeddedContainerId) and '{runsOwn}' (this run's record{(recorded.RootIsAdopted ? "" : " — a container this run created, not yet bound")}). " +
+                "H8 never picks one and created nothing more. Decide which holds the customer's data: keep the environment's " +
+                "and bind or remove this run's (Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind), or correct the " +
+                "environment variable — then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // The container to reuse: newly found in the environment, or adopted by an earlier entry of this run.
+        var reuse = environmentContainerId is not null && recorded.RootContainerId is null && recorded.RootContainerInDoubtSince is null
+            ? environmentContainerId
+            : recorded.RootIsAdopted ? recorded.RootContainerId : null;
+        if (reuse is not null)
+        {
+            // READ-ONLY check before anything is written to it: an environment variable is data, not proof. The container
+            // must exist for the owning app, be of this run's container type, and carry no other customer's marker and no
+            // other business unit's stamp — otherwise H8 would re-stamp and re-mark another customer's container.
+            var refusal = await RefuseForeignContainerAsync(
+                    run, etag, envelope, tenantId, owningAppId, containerTypeId, rootBusinessUnitId, reuse, cancellationToken)
+                .ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return refusal;
+            }
+
+            if (!recorded.RootIsAdopted)
+            {
+                var adoption = await RecordCreationAsync(run, etag, new CreationUpdate(
+                        RootContainerId: reuse,
+                        AdditionalContainerIds: recorded.AdditionalContainerIds,
+                        RootContainerInDoubtSince: null,
+                        Status: SpeContainerCreationRecord.StatusAdopted),
+                    expectedRootContainerId: null, envelope)
+                    .ConfigureAwait(false);
+                if (adoption.Refusal is { } adoptionRefusal)
+                {
+                    return adoptionRefusal;
+                }
+
+                (run, etag) = (adoption.Run!, adoption.ETag!);
+                recorded = ReadRecordedCreation(run);
+                _logger.LogInformation(
+                    "H8 reuses the customer's existing container {ContainerId} (sprk_SharePointEmbeddedContainerId) — nothing " +
+                    "is created: runId={RunId} customerId={CustomerId}", reuse, envelope.RunId, envelope.CustomerId);
+            }
+        }
+
+        // The customer's EXISTING container is never removed by a failed bind (7c) — kept on the record, not re-derived.
+        var adopted = recorded.RootIsAdopted;
+
         // (5d) A container POST of this run got no authoritative answer (owner round 49 item 2, on H8-B): a container
         //      may exist, unbound, that no one names. The container type is shared, so H8 does not guess by listing it:
         //      it creates NO container until an operator has checked and cleared the quarantine below (a container they
@@ -368,6 +469,51 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 "H8-B container creation in doubt since {Since} was cleared by an operator — creating the container: runId={RunId}",
                 inDoubtSince, envelope.RunId);
             run.InterStepState.SpeContainerCreation!.RootContainerInDoubtSince = null;
+        }
+
+        // (5b') Task 227b (G9): the customer's BFF reaches SPE as two identities — app-only Graph calls as the stamp
+        //      UAMI (Graph__ManagedIdentity__ClientId) and OBO calls as its own app registration — and SPE admits an
+        //      app only through a grant on the container-type registration (topology §3A). Only the owning app may
+        //      write that registration, so H8 ensures both grants before creating the container. Missing ids or a
+        //      refused grant stop here, before anything is created (Resumable).
+        var uamiClientId = run.InterStepState.MiClientId;
+        var bffAppId = run.InterStepState.BffAppRegId;
+        if (string.IsNullOrWhiteSpace(uamiClientId) || string.IsNullOrWhiteSpace(bffAppId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.GrantIdentityMissing,
+                $"H8 grants the customer's BFF identities on container type '{containerTypeId}' but " +
+                $"{(string.IsNullOrWhiteSpace(uamiClientId) ? "InterStepState.MiClientId (H2a)" : "InterStepState.BffAppRegId (H3)")} " +
+                "is empty — re-run the producing handler, then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        SpeContainerTypeGrantOutcome grantOutcome;
+        try
+        {
+            grantOutcome = await _provisioner.EnsureGrantsAsync(
+                new SpeContainerTypeGrantRequest(tenantId, containerTypeId, owningAppId,
+                    BuildGrants(uamiClientId.Trim(), bffAppId.Trim())),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 container-type grant infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerTypeGrantInfraFault,
+                $"Ensuring the container-type grants failed: {ex.GetType().Name}: {ex.Message}. No container was created — Resumable.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (grantOutcome is SpeContainerTypeGrantOutcome.Failure grantFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerTypeGrantFailed,
+                $"Container-type grant for app '{grantFailure.AppId}' failed: {grantFailure.Diagnostic} The owning app " +
+                $"'{owningAppId}' needs FileStorageContainerTypeReg.Selected (admin-consented) and must own container type " +
+                $"'{containerTypeId}'. No container was created — fix, then resume.",
+                cancellationToken).ConfigureAwait(false);
         }
 
         CreatedContainers outputs;
@@ -610,7 +756,8 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                     TenantId: tenantId,
                     OwningAppId: owningAppId,
                     ContainerId: outputs.RootContainerId,
-                    BusinessUnitId: rootBusinessUnitId),
+                    BusinessUnitId: rootBusinessUnitId,
+                    RemoveIfNotBound: !adopted),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -623,7 +770,9 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 $"Binding container '{outputs.RootContainerId}' to business unit '{rootBusinessUnitId}' failed before " +
                 $"any Graph call: {ex.GetType().Name}: {ex.Message}. The container exists UNBOUND (no SPE admin route reaches " +
                 "it) and stays on the run's record — a resume binds it; or bind it with " +
-                "Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind, or remove it — QuarantineRequired.",
+                (adopted
+                    ? "Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind. It is the customer's EXISTING container (task 227e) — do NOT remove it."
+                    : "Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind, or remove it") + " — QuarantineRequired.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -667,6 +816,36 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             return additionalRefusal;
         }
 
+        // (7e) Task 227e: the marker the customer's BFF recognises its containers by (T227d — custom property
+        //      spaarkeCustomerId = Customer__Id = this customerId). Custom properties cannot be set at create, and the
+        //      container may be unaddressable until verified (7b), so it is written here. GET first; a re-run writes
+        //      nothing. The container stays on the run's record, so a resume marks it.
+        SpeContainerMarkerOutcome markerOutcome;
+        try
+        {
+            markerOutcome = await _provisioner.EnsureCustomerMarkerAsync(
+                new SpeContainerMarkerRequest(tenantId, owningAppId, outputs.RootContainerId, envelope.CustomerId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 container marker infrastructure fault: runId={RunId} containerId={ContainerId}",
+                envelope.RunId, outputs.RootContainerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerMarkerInfraFault,
+                $"Confirming the spaarkeCustomerId marker on container '{outputs.RootContainerId}' failed: " +
+                $"{ex.GetType().Name}: {ex.Message}. The container stays on the run's record; resume marks it.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (markerOutcome is SpeContainerMarkerOutcome.Failure markerFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerMarkerFailed,
+                $"{markerFailure.Diagnostic} The container stays on the run's record; resume marks it.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // (8) Advance Cosmos state — write InterStepState.SpeContainerId (the
         //     durable handoff H7 will read to materialize the real Dataverse
         //     env-var), the Verified gate, and the CompletedPhase entry.
@@ -683,6 +862,63 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
     }
 
     /// <summary>
+    /// Task 227e: refuses a container H8 is about to reuse unless it is the customer's — it exists for the owning app, is
+    /// of the run's container type, and carries neither another customer's <c>spaarkeCustomerId</c> nor another business
+    /// unit's stamp (absent is fine: a container from before either). Reads only. Returns the failure to return, or null.
+    /// </summary>
+    private async Task<HandlerResult?> RefuseForeignContainerAsync(
+        ProvisioningRun run, string etag, HandlerEnvelope envelope, string tenantId, string owningAppId,
+        string containerTypeId, Guid rootBusinessUnitId, string containerId, CancellationToken cancellationToken)
+    {
+        SpeContainerInspection inspection;
+        try
+        {
+            inspection = await _provisioner.InspectContainerAsync(
+                new SpeContainerInspectionRequest(tenantId, owningAppId, containerId), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            inspection = new SpeContainerInspection.Failure($"{ex.GetType().Name}: {ex.Message}");
+        }
+
+        string? problem = inspection switch
+        {
+            SpeContainerInspection.NotFound =>
+                $"Container '{containerId}' (the customer's recorded container) does not exist for the container type's " +
+                "owning app — it was deleted, or the record names a container of another type or tenant.",
+            SpeContainerInspection.Failure failure =>
+                $"Container '{containerId}' (the customer's recorded container) could not be read: {failure.Diagnostic}",
+            SpeContainerInspection.Found found when found.ContainerTypeId is null
+                || !Guid.TryParse(found.ContainerTypeId, out var actualType)
+                || !Guid.TryParse(containerTypeId, out var runType) || actualType != runType =>
+                $"Container '{containerId}' is of container type '{found.ContainerTypeId ?? "(not reported)"}', not this run's " +
+                $"'{containerTypeId}'.",
+            SpeContainerInspection.Found found when found.MarkerUnreadable
+                || (found.Marker is not null && !string.Equals(found.Marker, envelope.CustomerId, StringComparison.Ordinal)) =>
+                $"Container '{containerId}' carries a spaarkeCustomerId marker that is not customer '{envelope.CustomerId}''s.",
+            SpeContainerInspection.Found found when found.StampUnreadable
+                || (found.BusinessUnitId is { } unit && unit != rootBusinessUnitId) =>
+                $"Container '{containerId}' is bound to a business unit other than this environment's root " +
+                $"'{rootBusinessUnitId}'.",
+            _ => null,
+        };
+        if (problem is null)
+        {
+            return null;
+        }
+
+        var code = inspection is SpeContainerInspection.NotFound
+            ? SpeContainerRejectionCodes.RecordedContainerNotFound
+            : inspection is SpeContainerInspection.Failure
+                ? SpeContainerRejectionCodes.RecordedContainerUnreadable
+                : SpeContainerRejectionCodes.RecordedContainerNotTheCustomers;
+        return await FailAsync(run, etag, FailureClass.Resumable, code,
+            problem + " H8 wrote nothing to it and created nothing. Correct sprk_SharePointEmbeddedContainerId (or the run's " +
+            "interStepState.speContainerCreation) to the customer's container, then resume.",
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Computes the deterministic H8 idempotency key: <c>spe-{customerId}</c>.
     /// Exposed internal so unit tests can construct expected keys without
     /// duplicating the format. Key shape unchanged from H8-A (customerId-only,
@@ -693,6 +929,18 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
         return $"spe-{customerId}";
     }
+
+    /// <summary>
+    /// The grants a customer stamp needs on the container-type registration (task 227b): the stamp UAMI for app-only
+    /// calls (application <c>full</c>) and the BFF app registration for OBO calls (delegated <c>full</c>). Each
+    /// identity gets only the token kind it presents. Mirrors the full/full grants dev's BFF identities hold, split by
+    /// token kind; least-privilege trimming below <c>full</c> needs a BFF call-site audit and is out of scope.
+    /// </summary>
+    internal static IReadOnlyList<SpeContainerTypeGrant> BuildGrants(string uamiClientId, string bffAppId) =>
+    [
+        new SpeContainerTypeGrant(uamiClientId, ApplicationPermissions: ["full"], DelegatedPermissions: []),
+        new SpeContainerTypeGrant(bffAppId, ApplicationPermissions: [], DelegatedPermissions: ["full"]),
+    ];
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters,
@@ -903,7 +1151,8 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             RootContainerId: root,
             AdditionalContainerIds: additional,
             RootContainerInDoubtSince: creation?.RootContainerInDoubtSince,
-            Status: creation?.Status);
+            Status: creation?.Status,
+            AdoptedRootContainerId: Trimmed(creation?.AdoptedRootContainerId));
     }
 
     /// <summary>
@@ -1103,6 +1352,14 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 .Concat(update.AdditionalContainerIds ?? Array.Empty<string>())
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToList();
+            if (string.Equals(update.Status, SpeContainerCreationRecord.StatusAdopted, StringComparison.Ordinal))
+            {
+                // Task 227e: reusing the customer's existing container — nothing was created, nothing is unbound by H8.
+                return new HandlerResult.Failure(FailureClass.Resumable, SpeContainerRejectionCodes.CreationRecordNotPersisted,
+                    $"H8 reuses the customer's existing container '{update.RootContainerId}' but could not record that in run " +
+                    $"'{envelope.RunId}' ({reason}). Nothing was created or changed — resume. Do NOT remove that container.");
+            }
+
             var created = containers.Count == 0
                 ? update.RootContainerInDoubtSince is not null
                     ? "may have created a container it cannot name (its creation got no answer)"
@@ -1127,6 +1384,10 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
     private static void ApplyCreationRecord(ProvisioningRun run, CreationUpdate update)
     {
         run.InterStepState.SpeContainerId = null;
+        // Task 227e: once adopted, always adopted — status writes never turn the customer's container into one H8 made.
+        var adoptedRoot = string.Equals(update.Status, SpeContainerCreationRecord.StatusAdopted, StringComparison.Ordinal)
+            ? update.RootContainerId
+            : run.InterStepState.SpeContainerCreation?.AdoptedRootContainerId;
         var additional = update.AdditionalContainerIds?
             .Where(id => !string.Equals(id, update.RootContainerId, StringComparison.Ordinal))
             .ToList();
@@ -1136,6 +1397,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             AdditionalContainerIds = additional is { Count: > 0 } ? additional : null,
             RootContainerInDoubtSince = update.RootContainerInDoubtSince,
             Status = update.Status,
+            AdoptedRootContainerId = adoptedRoot,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
 
@@ -1154,8 +1416,13 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         string? RootContainerId,
         IReadOnlyList<string> AdditionalContainerIds,
         DateTimeOffset? RootContainerInDoubtSince,
-        string? Status)
+        string? Status,
+        string? AdoptedRootContainerId = null)
     {
+        /// <summary>Task 227e: the recorded root is the customer's existing container, reused — never removed.</summary>
+        public bool RootIsAdopted =>
+            RootContainerId is not null && string.Equals(RootContainerId, AdoptedRootContainerId, StringComparison.Ordinal);
+
         /// <summary>
         /// A recorded container that was never activated: its <c>/activate</c> failed, or an operator recorded it after a
         /// creation in doubt (whose activation was never sent).

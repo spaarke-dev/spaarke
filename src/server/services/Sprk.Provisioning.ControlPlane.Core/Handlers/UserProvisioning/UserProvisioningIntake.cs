@@ -24,6 +24,11 @@
 // Diagnostics name an entry by its 1-based position, never by its email or name,
 // and never echo parser internals.
 //
+// Task 232 (D2, G10): Model 1 customer users are B2B guests in Spaarke's tenant (owner D2), so a Model 1 run takes
+// only B2BGuest. A B2BGuest run names the customer environment's security group (`environmentSecurityGroupId`,
+// prerequisite PRQ-C-10): H11 adds each guest to it — without the group, every Model 1 environment (all in Spaarke's
+// tenant) would admit any user of that tenant, including another customer's guests.
+//
 // §11 justification — existing: H11UserProvisioningHandler's inline guards
 // (identityPreset / usersJson). Extension: those guards moved here, H11 calls
 // this; a second copy in RunsEndpoints would drift. Cost of doing nothing: a run
@@ -48,6 +53,9 @@ public static class UserProvisioningIntake
     /// <summary>The accepted identity presets (ordinal — exact case).</summary>
     public static IReadOnlyList<string> IdentityPresets { get; } = [B2BGuest, NativeAccount];
 
+    /// <summary><c>tenancyModel</c> value whose runs take only <see cref="B2BGuest"/> (owner D2).</summary>
+    public const string Model1TenancyModel = "Model1";
+
     /// <summary>Most users one run provisions (intake.schema.json <c>users.maxItems</c> — IntakeSchemaProfileParityTests).</summary>
     public const int MaxUsers = 500;
 
@@ -60,11 +68,12 @@ public static class UserProvisioningIntake
     };
 
     /// <summary>
-    /// Validates the run's <c>identityPreset</c> and <c>usersJson</c> values. Every entry is checked before the
-    /// result is returned, so a caller acting on <see cref="UserProvisioningIntakeOutcome.Valid"/> never meets an
-    /// unusable entry part-way through the list.
+    /// Validates the run's <c>identityPreset</c>, <c>usersJson</c> and (B2BGuest) <c>environmentSecurityGroupId</c>
+    /// for its <c>tenancyModel</c>. Every entry is checked before the result is returned, so a caller acting on
+    /// <see cref="UserProvisioningIntakeOutcome.Valid"/> never meets an unusable entry part-way through the list.
     /// </summary>
-    public static UserProvisioningIntakeOutcome Validate(string? identityPreset, string? usersJson)
+    public static UserProvisioningIntakeOutcome Validate(
+        string? tenancyModel, string? identityPreset, string? usersJson, string? environmentSecurityGroupId)
     {
         if (string.IsNullOrWhiteSpace(identityPreset))
         {
@@ -78,6 +87,31 @@ public static class UserProvisioningIntake
             return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidIdentityPreset,
                 $"'identityPreset' value '{echoed}' is not one of the two D6 presets " +
                 $"('{B2BGuest}', '{NativeAccount}'; exact case).");
+        }
+        if (isNativeAccount && string.Equals(tenancyModel, Model1TenancyModel, StringComparison.Ordinal))
+        {
+            return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.Model1RequiresB2BGuest,
+                $"'identityPreset' is '{NativeAccount}', but a {Model1TenancyModel} run takes only '{B2BGuest}' — " +
+                "Model 1 customer users are B2B guests in Spaarke's tenant (owner decision D2).");
+        }
+
+        string? securityGroupId = null;
+        if (!isNativeAccount)
+        {
+            if (string.IsNullOrWhiteSpace(environmentSecurityGroupId))
+            {
+                return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.MissingSecurityGroupId,
+                    $"'environmentSecurityGroupId' is required for '{B2BGuest}' — the object id of the customer " +
+                    "environment's security group (sprk-{customerId}-users), created by the operator and set on the " +
+                    "environment before the run (prerequisite PRQ-C-10). H11 adds each guest to it.");
+            }
+            // The canonical hyphenated form only — the schema's pattern (no braces, no bare 32 digits).
+            if (!Guid.TryParseExact(environmentSecurityGroupId, "D", out var groupGuid) || groupGuid == Guid.Empty)
+            {
+                return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidSecurityGroupId,
+                    "'environmentSecurityGroupId' must be the security group's object id (a GUID), not its name or email.");
+            }
+            securityGroupId = groupGuid.ToString("D");
         }
 
         if (string.IsNullOrWhiteSpace(usersJson))
@@ -117,10 +151,19 @@ public static class UserProvisioningIntake
                 $"'usersJson' has {users.Count} entries — at most {MaxUsers} users per run.");
         }
 
+        var firstPositionByEmail = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < users.Count; i++)
         {
             var entry = users[i];
             var position = i + 1;
+            // T232: a repeated address would be looked up before Graph shows the guest just invited for it, and invited
+            // (mailed) twice.
+            if (!isNativeAccount && entry is not null && !string.IsNullOrWhiteSpace(entry.Email)
+                && !firstPositionByEmail.TryAdd(entry.Email.Trim(), position))
+            {
+                return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidUserEntry,
+                    $"'usersJson' entry {position} repeats the email of entry {firstPositionByEmail[entry.Email.Trim()]}.");
+            }
             if (entry is null)
             {
                 return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidUserEntry,
@@ -140,7 +183,7 @@ public static class UserProvisioningIntake
             }
         }
 
-        return new UserProvisioningIntakeOutcome.Valid(isNativeAccount, users.Select(u => u!).ToList());
+        return new UserProvisioningIntakeOutcome.Valid(isNativeAccount, users.Select(u => u!).ToList(), securityGroupId);
     }
 }
 
@@ -152,7 +195,10 @@ public abstract record UserProvisioningIntakeOutcome
     /// <summary>The values are usable: the preset, and every entry checked.</summary>
     /// <param name="IsNativeAccount"><c>true</c> for <see cref="UserProvisioningIntake.NativeAccount"/>, <c>false</c> for <see cref="UserProvisioningIntake.B2BGuest"/>.</param>
     /// <param name="Users">1 to <see cref="UserProvisioningIntake.MaxUsers"/> entries; NativeAccount entries have a first and last name, B2BGuest entries an email.</param>
-    public sealed record Valid(bool IsNativeAccount, IReadOnlyList<UserProvisioningEntry> Users) : UserProvisioningIntakeOutcome;
+    /// <param name="EnvironmentSecurityGroupId">B2BGuest: the environment security group's object id (canonical GUID); <c>null</c> for NativeAccount.</param>
+    public sealed record Valid(
+        bool IsNativeAccount, IReadOnlyList<UserProvisioningEntry> Users, string? EnvironmentSecurityGroupId)
+        : UserProvisioningIntakeOutcome;
 
     /// <summary>The values break a rule.</summary>
     /// <param name="RejectionCode">An <see cref="H11Rejections"/> code — the same code at intake and in H11.</param>

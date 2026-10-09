@@ -522,9 +522,11 @@ Unified-access-control-r2 task 138 made the record-level **Access Permission** c
   "+ Organization". One message bar explains the state (Restricted Access / Secure – Restricted / Secure /
   Limited Access). The Manage Access *gate* (`can-manage-access`) deliberately ignores the flags: it
   answers "may you change who has access" (Write), not "which grant types apply".
-- **Communications** have no Access Permission of their own — they inherit the parent's (owner Q6). The
-  retired `sprk_communication.sprk_accesspermission` column is removed by
-  `scripts/Retire-CommunicationAccessPermission.ps1` (dry run by default).
+- **To Do, Event, Communication and Document** take their access from the parent (owner Q6, round 81). Their
+  `sprk_accesspermission` is a DISPLAY copy of the parent's value (the most restrictive across their parents),
+  written by the BFF and kept in step every two minutes by `SecureChildReconciliationJob`; it is locked on the form
+  while the record has a parent. No access decision reads it. A record with no parent keeps the value its user set
+  (recorded only). See [child-access-permission.md](../data-model/child-access-permission.md).
 
 **Operator checks.** A record that is Standard but has `sprk_issecure` NULL is treated as Standard by the
 server, but the Manage Access dialog fails closed and offers it as Limited until the NULL is cleaned up

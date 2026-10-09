@@ -13,9 +13,11 @@
  * Dataverse field mapping in exactly one place in the tree (the eventual
  * host wiring), per FR-14's entity-agnostic requirement.
  *
- * No Access Permission (unified-access-control-r2 task 138, owner Q6): a
- * communication inherits its parent's permission and its own column is
- * retired, so the trio renders WITHOUT the pill (`showAccessPermission={false}`).
+ * No Access Permission (unified-access-control-r2 task 138, owner Q6; task 173,
+ * owner round 81): a communication's access comes from its parent. Its own
+ * `sprk_accesspermission` is a display copy of the parent's value that only the
+ * BFF writes and enforcement never reads, so the trio renders WITHOUT the pill
+ * (`showAccessPermission={false}`; no TrackingFieldTrio pill on Communication).
  *
  * Fluent v9 tokens only (ADR-021, dark-mode correct). No `as
  * React.ComponentType` cast (NFR-05) — `TrackingFieldTrio` is consumed via

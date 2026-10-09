@@ -102,17 +102,10 @@ try {
         $usageJson = Get-Content -Raw -Path $UsageJsonPath
     }
     else {
-        if ($SubscriptionId) {
-            $null = az account set --subscription $SubscriptionId 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                $r = New-PreflightResult Fail @{ region = $Region; subscriptionId = $SubscriptionId } `
-                    "az account set failed for subscription '$SubscriptionId'. Run `az login` and verify subscription id."
-                $r | Write-Output
-                exit 3
-            }
-        }
-
-        $usageJson = az vm list-usage --location $Region --output json 2>&1
+        # Pass the subscription per call — never `az account set`, which changes the operator's
+        # default subscription for every other shell.
+        $subscriptionArgs = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
+        $usageJson = az vm list-usage --location $Region @subscriptionArgs --output json 2>&1
         if ($LASTEXITCODE -ne 0) {
             $r = New-PreflightResult Fail @{ region = $Region } `
                 "az vm list-usage failed for region '$Region'. Raw: $usageJson"
