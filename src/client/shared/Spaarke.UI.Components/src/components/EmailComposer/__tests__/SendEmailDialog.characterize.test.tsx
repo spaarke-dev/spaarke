@@ -185,7 +185,8 @@ describe('SendEmailDialog — prop contract (task 020 extends additively)', () =
     // Send moved to the header From row (owner UAT 2026-08-03 item 1); Cancel + Save Draft stay
     // in the bottom action bar. View-mode-only buttons (Reply/Forward) are absent in compose.
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
+    // Save Draft is hidden when the host does not wire onSaveDraftRequest (owner decision 2026-10-09).
+    expect(screen.queryByRole('button', { name: 'Save Draft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Forward' })).toBeNull();

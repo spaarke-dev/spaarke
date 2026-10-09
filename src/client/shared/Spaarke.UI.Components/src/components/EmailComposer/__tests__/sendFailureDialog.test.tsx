@@ -8,7 +8,7 @@
  *   - A request that never reaches the server (fetch TypeError) → the dialog, and `onError` receives a
  *     SendCommunicationError (status 0, code NETWORK).
  *   - `sendFailureDisplay="host"` → `onError` only, no built-in dialog (the host shows its own UI).
- *   - Save Draft with no draft persistence → "Draft not saved" dialog instead of a dead button.
+ *   - No draft persistence wired → no Save Draft button; a wired-but-failing save → "Draft not saved" dialog.
  */
 import * as React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -111,11 +111,22 @@ describe('SendEmailPage — a failed send shows a descriptive dialog (no onError
     expect(screen.getByDisplayValue(SUBJECT)).toBeInTheDocument();
   });
 
-  it('Save Draft with no draft persistence → "Draft not saved", not a dead button', async () => {
+  it('no draft persistence wired → no Save Draft button at all (owner decision 2026-10-09)', () => {
     renderPage(failingWith(500, null));
+    expect(screen.queryByRole('button', { name: /save draft/i })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('onSaveDraftRequest wired → Save Draft is present', () => {
+    renderPage(failingWith(500, null), { onSaveDraftRequest: jest.fn() });
+    expect(screen.getByRole('button', { name: /save draft/i })).toBeInTheDocument();
+  });
+
+  it('onSaveDraftRequest wired but failing → "Draft not saved" dialog', async () => {
+    renderPage(failingWith(500, null), { onSaveDraftRequest: jest.fn().mockRejectedValue(new Error('boom')) });
     fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
     const dialog = await screen.findByRole('alertdialog', { name: 'Draft not saved' });
-    expect(dialog.textContent).toContain("Saving a draft isn't available here yet.");
+    expect(dialog.textContent).toContain("The draft couldn't be saved.");
   });
 });
 
@@ -183,12 +194,13 @@ describe('Save Draft always tells the user — sendFailureDisplay governs SEND o
           initialBodyFormat="PlainText"
           onError={jest.fn()}
           sendFailureDisplay="host"
+          onSaveDraftRequest={jest.fn().mockRejectedValue(new Error('boom'))}
         />
       </FluentProvider>
     );
     fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
     const dialog = await screen.findByRole('alertdialog', { name: 'Draft not saved' });
-    expect(dialog.textContent).toContain("Saving a draft isn't available here yet.");
+    expect(dialog.textContent).toContain("The draft couldn't be saved.");
   });
 });
 

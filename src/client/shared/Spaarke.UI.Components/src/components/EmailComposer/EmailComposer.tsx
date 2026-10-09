@@ -1547,12 +1547,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSending={state.isSending}
         isSavingDraft={state.isSavingDraft}
         isDraftRecord={props.isDraftRecord}
+        canSaveDraft={draftSaveAvailable}
         onSaveDraft={() => {
           // A failed Save Draft ALWAYS tells the user — `sendFailureDisplay` governs send only, and there is
           // no draft onError a host could show it from (callers awaiting composerRef.current.saveDraft()
-          // directly still get the rejection). Without `onSaveDraftRequest` the save cannot work here; the owner
-          // has not yet chosen between this message and hiding the button — to hide it, gate the action bar's
-          // Save Draft on `draftSaveAvailable` instead.
+          // directly still get the rejection). The button is only rendered when `draftSaveAvailable` (owner
+          // decision 2026-10-09), so this runs for real save failures.
           saveDraft().catch((err: unknown) => {
             if (mountedRef.current) setFailureNotice(describeDraftSaveFailure(err, !draftSaveAvailable));
           });
