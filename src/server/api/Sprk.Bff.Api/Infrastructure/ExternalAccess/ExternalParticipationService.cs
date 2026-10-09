@@ -1324,7 +1324,15 @@ public class ExternalParticipationService
     /// </summary>
     public virtual Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindUnflaggedRootsReferencingOrganizationAsync(
         string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
-        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, "sprk_issecure ne true", ct);
+        => FindRootsReferencingOrganizationAsync(entityType, organizationId, maxRows, UnflaggedRootFilter, ct);
+
+    /// <summary>
+    /// The flag half of <see cref="FindUnflaggedRootsReferencingOrganizationAsync"/>'s <c>$filter</c>: not flagged secure,
+    /// a BLANK flag included. Dataverse's <c>ne</c> excludes nulls (SQL <c>&lt;&gt;</c>), so <c>ne true</c> alone would skip
+    /// a record whose <c>sprk_issecure</c> is empty — and leave its share in place (fail open). Extracted so the test double
+    /// evaluates the very filter production sends.
+    /// </summary>
+    internal const string UnflaggedRootFilter = "(sprk_issecure ne true or sprk_issecure eq null)";
 
     private async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindRootsReferencingOrganizationAsync(
         string entityType, Guid organizationId, int maxRows, string flagFilter, CancellationToken ct)

@@ -181,6 +181,11 @@ never-less-strict, an older BFF's answer, and the parse/fold helpers. The defaul
   cap and fault contract), folds them with ONE batched `EffectiveRootFlags.ReadAncestryAsync`, and covers those that are
   secure through their filing; an undecidable ancestry is `covered-records-unreadable` on that record (nothing removed on a
   guess). The `MaxCoveredRecords` cap holds. Tests: the probe (share removed) and the fault case.
+- **F1 re-check (blank flags):** Dataverse's `ne` excludes nulls, so `sprk_issecure ne true` skipped a record with a BLANK
+  flag and left its share (fail open). The unflagged read now sends `(sprk_issecure ne true or sprk_issecure eq null)`
+  (`ExternalParticipationService.UnflaggedRootFilter`); the test double evaluates that very filter with Dataverse's null
+  semantics (`MatchesFlagFilter`), so a double cannot hide a filter that drops blanks. Test: a blank-flag child under a
+  secure matter that references the walled organization has its share removed (fails with the old filter).
 - **F2a:** the common real case — flagged secure by inheritance, Access Permission still Standard, filed under a secure,
   Restricted matter — at grant time (Restricted refusal) and at `/share-user` (422 for an external-flagged user).
 - **F2b:** two not-yet-flagged middle levels (WA -> P1 -> P2 -> secure M, wall on P2): read path, grant time, guard.

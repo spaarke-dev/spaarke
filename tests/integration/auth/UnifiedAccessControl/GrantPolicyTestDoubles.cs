@@ -223,7 +223,7 @@ internal static class GrantPolicyTestDoubles
             var ids = RecordOrganizations
                 .Where(kv => kv.Value.Contains(organizationId)
                              && (RecordTables.TryGetValue(kv.Key, out var t) ? t : "sprk_project") == entityType
-                             && (Flags.TryGetValue(kv.Key, out var f) ? f : _defaultFlags).IsSecure)
+                             && StoredSecureFlag(kv.Key) == true)
                 .Select(kv => kv.Key)
                 .ToList();
             return Task.FromResult<(IReadOnlyList<Guid>, bool)>(
@@ -243,12 +243,32 @@ internal static class GrantPolicyTestDoubles
             var ids = RecordOrganizations
                 .Where(kv => kv.Value.Contains(organizationId)
                              && (RecordTables.TryGetValue(kv.Key, out var t) ? t : "sprk_project") == entityType
-                             && !(Flags.TryGetValue(kv.Key, out var f) ? f : _defaultFlags).IsSecure)
+                             && MatchesFlagFilter(UnflaggedRootFilter, StoredSecureFlag(kv.Key)))
                 .Select(kv => kv.Key)
                 .ToList();
             return Task.FromResult<(IReadOnlyList<Guid>, bool)>(
                 ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false));
         }
+
+        /// <summary>Task 174: records whose STORED <c>sprk_issecure</c> is blank (null) — what the reverse reads filter on.</summary>
+        public ConcurrentDictionary<Guid, bool> BlankSecureFlags { get; } = new();
+
+        private bool? StoredSecureFlag(Guid id) =>
+            BlankSecureFlags.ContainsKey(id) ? null : (Flags.TryGetValue(id, out var f) ? f : _defaultFlags).IsSecure;
+
+        /// <summary>
+        /// Evaluates a <c>sprk_issecure</c> OData filter of the shape production sends (<c>eq true</c>, <c>ne true</c>,
+        /// <c>eq null</c>, joined by <c>or</c>) with Dataverse's null semantics: <c>ne</c> never matches a null. So a double
+        /// cannot hide a filter that drops blank flags.
+        /// </summary>
+        internal static bool MatchesFlagFilter(string filter, bool? value)
+            => filter.Trim('(', ')').Split(" or ").Any(clause => clause.Trim() switch
+            {
+                "sprk_issecure eq true" => value == true,
+                "sprk_issecure ne true" => value == false,
+                "sprk_issecure eq null" => value is null,
+                var other => throw new InvalidOperationException($"Unmodelled flag filter clause: {other}"),
+            });
 
         /// <summary>Task 143: an organization's active member contacts.</summary>
         public override Task<(IReadOnlyList<Guid> ContactIds, bool Truncated)> FindWallMemberContactsAsync(
