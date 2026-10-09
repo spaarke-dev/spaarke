@@ -53,7 +53,7 @@ Determine what code to validate:
 
 ### Step 2: Load ADR Context
 
-1. Use the ADR index as the source of truth: `docs/adr/README-ADRs.md`
+1. Use the ADR index as the source of truth: `.claude/adr/INDEX.md` (concise; full ADRs in `docs/adr/`)
 2. Use `references/adr-validation-rules.md` for grep/pattern-based checks (where available)
 
 Quick reference of key constraints:
@@ -73,7 +73,7 @@ Quick reference of key constraints:
 | ADR-028 | Spaarke Auth v2 client contract | Raw `fetch(... headers: { Authorization: \`Bearer ${...}\` })`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, `BridgeStrategy`/`XrmStrategy`/`MsalSilentStrategy` references, `accessToken: string` typed props, `PublicClientApplication` instantiated outside `@spaarke/auth`, `ClientSecretCredential` for app-only when MI available, MSAL authority `/common` or `/organizations` |
 | ADR-028 **A4** | Secret-free confidential credential | `.WithClientSecret(...)` on any BFF-identity client (use MI-FIC assertion or KV certificate); credentials constructed per call site instead of via the shared provider; `IConfidentialClientApplication` built per-request instead of singleton-cached. 🔴 **E-3 is CLOSED (2026-08-24, auth-v4 task 033) and its enumerated site list is EMPTY** — report every BFF-identity `.WithClientSecret(...)` as a **violation**; there is no longer any site for which citing E-3 is correct. (Previously this row read *"Cite exception E-3 (do not report as a violation) for the transitional sites it enumerates"* — that clause is spent.) The only remaining carve-out is **E-1** (per-customer SPE owning apps — *other* applications' identities), plus `PowerBi:ClientSecret` while task 042 stays deferred. `DefaultAzureCredential` is **not** a valid fix on OBO paths — it cannot perform the exchange. Also flag: a secret listed *beneath* MI-FIC in `Graph:Credentials:Order` (it silently re-arms fall-through), and `RequireSecretFreeIdentity` absent/false outside Development. |
 
-Note: This table is not exhaustive. Validate against the full ADR index in `docs/adr/README-ADRs.md`.
+Note: This table is not exhaustive. The index pass over `.claude/adr/INDEX.md` (Conventions) is what reaches the ADRs it omits.
 
 ### Step 2.5: Load BFF Hygiene Constraints (Conditional)
 
@@ -170,7 +170,7 @@ Binding for ≥ 6 months from 2026-06-29 (added by `spaarkeai-compose-r1`); revi
 
 ## Conventions
 
-- Always check all ADRs in the current ADR index (`docs/adr/README-ADRs.md`)
+- Check the ADRs mapped to the touched resource types (adr-aware Rule 1), the code-review Step 6 always-check set, **and** make one pass over `.claude/adr/INDEX.md` to add any ADR whose title or rule names a concept in the diff (the mapping table does not reach every ADR — this pass is the backstop). List the ADRs considered and why each is in or out. Done = each applicable ADR reported Compliant / Warning / Violation. Grep-checking every ADR's rules is for an explicit full scan and a project's 090 wrap-up
 - Report warnings for potential issues that need human judgment
 - Provide specific file paths and line numbers for violations
 - Reference ADR documents by full path: `/docs/adr/ADR-XXX-*.md`
@@ -363,7 +363,7 @@ gh workflow run adr-audit.yml
 
 ## Operator Notes
 
-- Be thorough: check all ADRs in the ADR index even when changes seem small
+- Be thorough: every ADR that applies to the change, found through the mapping AND the index pass, even when the change seems small
 - Be specific: always include file paths and line numbers
 - Be actionable: provide concrete fixes, not just problem descriptions
 - When in doubt, report as warning rather than skipping

@@ -164,6 +164,9 @@ public sealed class SecretFreeWorkerTestFactory : StartGatedWorkerTestFactory
         builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
         builder.UseSetting("SolutionImportOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
         builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");   // tasks 245b + 249
+        // T255: ReservedTenantsOptions is ValidateOnStart on both hosts (Spaarke's tenant + the CIAM tenant[s]).
+        builder.UseSetting("ReservedTenants:SpaarkeTenantId", "5a5a5a5a-0000-4000-8000-000000000001");
+        builder.UseSetting("ReservedTenants:CiamTenantIds:0", "c1a0c1a0-0000-4000-8000-000000000002");
         builder.UseEnvironment("Testing");
 
         builder.ConfigureServices(services =>

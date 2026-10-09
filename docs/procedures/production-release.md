@@ -489,6 +489,10 @@ Reference data scripts are idempotent (safe to re-run every release):
 
 ```powershell
 # Playbook definitions (7 notification playbooks with nodes and relationships)
+# Creates an absent playbook; SYNCS an existing one's nodes in place by node name (never delete-and-recreate),
+# then reads every node back and fails on any difference. -DryRun previews; -RecordPath <dir> saves before/after JSON.
+# Run only AFTER the BFF containing the ISS-018 fix (#1452) is deployed (Phase 2): the playbooks' FetchXML now needs the
+# fetchInGuids helper (corrected 2026-10-08, ISS-018 #1452).
 .\scripts\Deploy-NotificationPlaybooks.ps1 `
     -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
 
@@ -526,7 +530,6 @@ During development, individual web resources can be updated without re-exporting
 
 | Script | Purpose |
 |--------|---------|
-| `Deploy-CorporateWorkspace.ps1` | Upload sprk_corporateworkspace HTML |
 | `Deploy-WizardCodePages.ps1` | Upload 12 wizard/code page web resources |
 | `Deploy-EventsPage.ps1` | Upload sprk_eventspage HTML |
 | `Deploy-SpeAdminApp.ps1` | Upload sprk_speadmin HTML |
@@ -783,7 +786,7 @@ For critical production issues requiring immediate deployment. This is an **abbr
          -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged
 
    Web resource fix:
-     .\scripts\Deploy-CorporateWorkspace.ps1 `  # or whichever script
+     .\scripts\Deploy-EventsPage.ps1 `  # or whichever script
          -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
 
 5. Validate

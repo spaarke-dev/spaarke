@@ -31,7 +31,7 @@ public partial class RouteAuthorizationGuardTests
     /// <summary>Each production project under <c>src/server</c> (every <c>.csproj</c> except test projects) and its built
     /// assembly: in this test's output when referenced, otherwise the newest under the project's own <c>bin/</c> (the L2
     /// control-plane projects, built by this project's <c>BuildL2ForCosmosGuard</c> target). Fails closed when one is not built.</summary>
-    private static IReadOnlyList<(string Assembly, string Path)> ServerProductionAssemblies()
+    internal static IReadOnlyList<(string Assembly, string Path)> ServerProductionAssemblies()
     {
         var root = Path.Combine(SourceScan.RepoRoot, "src", "server");
         var result = new List<(string, string)>();

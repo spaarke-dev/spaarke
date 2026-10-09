@@ -24,6 +24,7 @@
  * asserts the field's correct pass-through semantics. See notes/023-*.md.
  */
 import { sendCommunication, SendCommunicationError, type SendCommunicationOptions } from '../communicationApi';
+import { apiErrorFor, authExhausted } from '../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Fake Response builder (no wire/transport mock — a plain Response-shaped
@@ -197,7 +198,51 @@ describe('sendCommunication — success path', () => {
 });
 
 describe('sendCommunication — error path', () => {
-  it('throws SendCommunicationError on a non-2xx response', async () => {
+  // `@spaarke/auth`'s authenticatedFetch — what every Dataverse host injects — THROWS for a non-2xx.
+  it('throws SendCommunicationError when authenticatedFetch THROWS ApiError (the production shape)', async () => {
+    const authenticatedFetch = jest.fn().mockRejectedValue(
+      apiErrorFor(422, {
+        title: 'Unprocessable',
+        status: 422,
+        errorCode: 'FROM_NOT_APPROVED',
+        detail: 'Sender not approved',
+        correlationId: 'corr-7',
+      })
+    );
+
+    const err = await sendCommunication(validOptions(), { authenticatedFetch }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SendCommunicationError);
+    expect(err).toMatchObject({ status: 422, code: 'FROM_NOT_APPROVED', detail: 'Sender not approved', correlationId: 'corr-7' });
+  });
+
+  it('maps a thrown ApiError without problem details to HTTP_<status> and the fetch message', async () => {
+    const authenticatedFetch = jest.fn().mockRejectedValue(apiErrorFor(502));
+
+    const err = await sendCommunication(validOptions(), { authenticatedFetch }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SendCommunicationError);
+    expect(err).toMatchObject({ status: 502, code: 'HTTP_502', detail: 'HTTP 502' });
+  });
+
+  it('maps a thrown AuthError (401 retries exhausted) to a 401 SendCommunicationError', async () => {
+    const authenticatedFetch = jest.fn().mockRejectedValue(authExhausted());
+
+    const err = await sendCommunication(validOptions(), { authenticatedFetch }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SendCommunicationError);
+    expect(err).toMatchObject({ status: 401, code: 'HTTP_401' });
+  });
+
+  it('rethrows a transport failure unchanged (not an HTTP outcome)', async () => {
+    const network = new TypeError('Failed to fetch');
+    const authenticatedFetch = jest.fn().mockRejectedValue(network);
+
+    await expect(sendCommunication(validOptions(), { authenticatedFetch })).rejects.toBe(network);
+  });
+
+  // The Outlook pane / external SPA inject a fetch that RETURNS the non-2xx response.
+  it('throws SendCommunicationError on a RETURNED non-2xx response (non-throwing fetch)', async () => {
     const authenticatedFetch = jest.fn().mockResolvedValue(
       fakeResponse({
         status: 422,

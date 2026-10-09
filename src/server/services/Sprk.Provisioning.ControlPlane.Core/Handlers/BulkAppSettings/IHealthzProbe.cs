@@ -1,9 +1,9 @@
 // -----------------------------------------------------------------------------
 // IHealthzProbe.cs
 //
-// Task 201 — seam over the HTTP /healthz backoff-poll H4b performs after the
-// generated Configure-AppServiceSettings.generated.ps1 script writes app
-// settings + Azure triggers ONE App Service restart cycle.
+// Task 201 — seam over the HTTP /healthz backoff-poll H4b performs after it
+// writes the app settings (one write per slot — task 253, ARM SDK) + Azure
+// triggers ONE App Service restart cycle.
 //
 // CONTRACT:
 //   ProbeWithBackoffAsync polls the target URL with an internal backoff

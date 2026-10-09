@@ -115,10 +115,18 @@
  *   its menu is the unchanged Standard / Limited / Restricted list, so the
  *   secure display never rewrites the stored value.
  * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
- *   on a form whose table has no such column (the retired
- *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ *   on a form whose table has no such column; unbound → no pill. (Corrected for
+ *   task 173, owner round 81: `sprk_communication.sprk_accesspermission` is NOT
+ *   retired - on a child table the column is a display copy of the parent's
+ *   value, written by the BFF and locked on the form while the record has a
+ *   parent; no TrackingFieldTrio is placed on Communication.)
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
+ *
+ * v1.0.43 (task 174, unified-access-control-r2 — owner round 84; task 067's amendment): no change in this file's logic;
+ *   the bundled `AccessGrantModal` gates its options, explains its banner ("It follows the {matter|project} it is filed
+ *   under: {name}.") and marks "No effect" from the record's EFFECTIVE access that task 064's read now reports — the
+ *   stricter of that and the stored values this host passes. Also carries task 123's auth change (#1453, declared 1.0.42).
  *
  * v1.0.41 (task 153, unified-access-control-r2 — owner round 83 item 11, O1 "BOTH"): an access-status indicator in the
  *   header row. The host reads task 064's per-record route (`GET /api/v1/records/{table}/{id}/no-access`, Read-gated,
@@ -260,9 +268,10 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environme
 // sprk_matter and sprk_workassignment carry the identical option set (verified
 // live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
 // same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
-// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
-// column is retired (task 138, owner Q6): a communication inherits its parent's
-// permission and has no value of its own.
+// shared `TrackingFieldTrio` core (FR-14). The same global choice backs the
+// column on To Do, Event, Communication and Document, where it is a display copy
+// of the parent's value that enforcement never reads (task 173, owner round 81;
+// it was to be retired by task 138). No TrackingFieldTrio is placed on Communication.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
@@ -460,7 +469,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const bffAppId =
         (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
       this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
-      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      const tenantId = (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl(), tenantId);
       // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
       // up the resolved value now that auth init has completed.
       this.renderControl();
@@ -913,7 +923,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * Maps the bound record's raw `sprk_accesspermission` value (a root's own; on a To Do or Event the display copy of
+   * its parent's, task 173) AND its `sprk_issecure` flag (task 043, spec
    * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
    * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
    * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules
@@ -1371,7 +1382,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.41 • Built 2026-10-08',
+      versionText: 'v1.0.43 • Built 2026-10-08',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

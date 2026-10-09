@@ -206,7 +206,10 @@ public static class GraphAppRoles
         new GraphAppRole(GroupReadAll, "Read all groups", IdGroupReadAll,
             "Core / Authorization", "Resolve group membership for access decisions + membership junction sync.", false),
 
-        // Email / Communication — module-conditional (also requires Exchange ApplicationAccessPolicy)
+        // Email / Communication — module-conditional. On control-plane-provisioned stamps the mailbox roles are NOT
+        // granted as Entra app roles: H14a grants them through Exchange RBAC for Applications, scoped to the customer's
+        // group (docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7.7, §7.9). Older environments may use a legacy
+        // Exchange ApplicationAccessPolicy instead.
         new GraphAppRole(MailRead, "Read mail in all mailboxes", IdMailRead,
             "Email / Communication", "App-only inbound mail read for email-to-document automation.", true),
         new GraphAppRole(MailReadWrite, "Read and write mail in all mailboxes", IdMailReadWrite,

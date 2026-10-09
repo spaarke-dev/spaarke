@@ -213,6 +213,45 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_WorkforceTenants_IsARequiredIndexedListFromIntake()
+    {
+        // T255 (INCOMING-141): H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots from intake
+        // customerWorkforceTenantIds; an empty list denies every customer employee, so the entry is required.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "WorkforceIdentity__CustomerTenantIds");
+
+        entry.Indexed.Should().BeTrue();
+        entry.Required.Should().BeTrue();
+        entry.ParameterKey.Should().Be("customer_workforce_tenant_ids");
+        PerEnvSourceCatalog.BySourceKey["customer_workforce_tenant_ids"].IsList.Should().BeTrue();
+        entries.Where(e => e.Key.StartsWith("WorkforceIdentity", StringComparison.OrdinalIgnoreCase))
+            .Should().ContainSingle("no scalar WorkforceIdentity__CustomerTenantIds__N entry may sit beside the list");
+        entries.Where(e => e.Indexed).Should().OnlyContain(e => PerEnvSourceCatalog.BySourceKey[e.ParameterKey!].IsList);
+    }
+
+    [Theory]
+    [InlineData("from-intake-parameter:tenant_id", "true", "true", "is not a list source")]                       // scalar source, indexed
+    [InlineData("from-intake-parameter:customer_workforce_tenant_ids", "false", "true", "is not `indexed: true`")]   // list source, not indexed
+    [InlineData("from-intake-parameter:customer_workforce_tenant_ids", "true", "false", "must be required")]        // indexed but optional
+    public void Parse_IndexedEntryMismatch_FailsTheRead(string perEnvSource, string indexed, string required, string expected)
+    {
+        var yaml = $$"""
+            per_env_settings:
+              - key: 'Some__List'
+                per_env_source: '{{perEnvSource}}'
+                indexed: {{indexed}}
+                iOptionsModule: 'SomeModule'
+                required: {{required}}
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Failure>()
+            .Which.Diagnostic.Should().Contain(expected);
+    }
+
+    [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_ServiceBusFqnsEntries_ShareOneFromHandlerOutputSource()
     {
         var manifest = NewManifest();
@@ -286,5 +325,66 @@ public sealed class FilePerEnvSettingsManifestTests
         var second = ((PerEnvSettingsManifestReadResult.Success)await manifest.ReadAsync(CancellationToken.None)).Entries;
 
         second.Count.Should().Be(first.Count, "Lazy-cached -- Singleton lifetime contract");
+    }
+
+    // ---------- task 253: the Key Vault references (secrets[].app_settings) H4b writes ----------
+
+    [Fact]
+    public void Parse_SecretsWithAppSettings_ServesEachAsAKeyVaultReference_SecretsInCanonicalOrder()
+    {
+        var yaml = """
+            secrets:
+              - canonical_name: 'TenantId'
+                app_settings:
+                  - 'AzureAd__TenantId'
+                  - 'TENANT_ID'
+              - canonical_name: 'BFF-API-ClientSecret'
+                app_settings: []
+              - canonical_name: 'AzureOpenAI-Endpoint'
+                app_settings:
+                  - 'AzureOpenAI__Endpoint'
+            per_env_settings:
+              - key: 'Customer__Id'
+                per_env_source: 'from-intake-parameter:customer_id'
+                iOptionsModule: 'CustomerModule'
+                required: true
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Success>()
+            .Which.KeyVaultReferences.Should().Equal(
+                new KeyVaultReferenceSetting("AzureOpenAI__Endpoint", "AzureOpenAI-Endpoint"),
+                new KeyVaultReferenceSetting("AzureAd__TenantId", "TenantId"),
+                new KeyVaultReferenceSetting("TENANT_ID", "TenantId"));
+    }
+
+    [Fact]
+    public void Parse_OneAppSettingUnderTwoSecrets_FailsTheRead()
+    {
+        var yaml = """
+            secrets:
+              - canonical_name: 'BFF-API-ClientId'
+                app_settings: ['AzureAd__ClientId']
+              - canonical_name: 'Other-ClientId'
+                app_settings: ['AzureAd__ClientId']
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Failure>()
+            .Which.Diagnostic.Should().Contain("AzureAd__ClientId").And.Contain("BFF-API-ClientId").And.Contain("Other-ClientId");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CredentialSecretsHaveNoKeyVaultReference()
+    {
+        // E-3 closure: the two BFF-identity credential secrets are rollback slots only — an app setting referencing
+        // either would point the BFF at a soft-deleted (or never-created) secret (provisioning.md "KV credential lifecycle").
+        var success = (PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+
+        success.KeyVaultReferences.Should().NotBeEmpty();
+        success.KeyVaultReferences.Select(r => r.SecretName)
+            .Should().NotContain(new[] { "BFF-API-ClientSecret", "Dataverse-ClientSecret" });
     }
 }

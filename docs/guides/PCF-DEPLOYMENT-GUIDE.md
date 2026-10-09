@@ -570,7 +570,7 @@ try {
 Write-Host "Created: $zipPath"
 ```
 
-See the [LegalWorkspace pack.ps1](../../src/client/pcf/LegalWorkspace/Solution/pack.ps1) for a working reference implementation.
+See the [MatterHeader pack.ps1](../../src/client/pcf/MatterHeader/Solution/pack.ps1) for a working reference implementation.
 
 ---
 
