@@ -34,6 +34,11 @@ jest.mock("@spaarke/auth", () => ({
   getAuthProvider: () => ({ getTenantId: jest.fn().mockResolvedValue("tenant-1") }),
   authenticatedFetch: jest.fn(),
 }));
+// The barrel pulls in the whole component library on every isolated import; the pages only need the theme helpers.
+jest.mock("@spaarke/ui-components", () => ({
+  resolveCodePageTheme: () => ({}),
+  setupCodePageThemeListener: () => () => undefined,
+}));
 jest.mock("@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter", () => ({
   createXrmNavigationService: () => ({ closeDialog: mockCloseDialog }),
 }));
