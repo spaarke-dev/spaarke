@@ -957,7 +957,7 @@ else {
         TenantId        = $TenantId
         UamiPrincipalId = $UamiPrincipalId
     }
-    $delegateArgs.GraphAppRolesPath = $GraphAppRolesPath
+    $delegateArgs.CatalogPath = $GraphAppRolesPath
     if ($DryRun) { $delegateArgs.DryRun = $true }
 
     try {

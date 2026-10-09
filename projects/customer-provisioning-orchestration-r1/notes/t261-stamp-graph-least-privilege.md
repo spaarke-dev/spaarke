@@ -16,7 +16,7 @@ The drop is safe for features because **no app-only call on a stamp needs a drop
 
 ## 2. Who calls Graph as the stamp identity
 
-- **App-only = the stamp managed identity.** `GraphClientFactory.ForApp()` uses `DefaultAzureCredential` pinned to `Graph:ManagedIdentity:ClientId` when `Graph:ManagedIdentity:Enabled=true` (`src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs:134-166`). H4b writes `Graph__ManagedIdentity__Enabled=true` and the stamp UAMI's client id on every stamp (`scripts/canonical-secret-catalog/manifest.yaml:697-710`). The app-only client is built on **Graph beta** (`GraphClientFactory.cs:204`); delegated clients use v1.0 — this is how live telemetry below separates app-only from OBO calls.
+- **App-only = the stamp managed identity.** `GraphClientFactory.ForApp()` uses `DefaultAzureCredential` pinned to `Graph:ManagedIdentity:ClientId` when `Graph:ManagedIdentity:Enabled=true` (`src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs`: `CreateAppOnlyClient` `:134`, managed-identity branch `:138`, client-id pin `:146`, tenant pin `:166`). H4b writes `Graph__ManagedIdentity__Enabled=true` and the stamp UAMI's client id on every stamp (`scripts/canonical-secret-catalog/manifest.yaml:697-710`). The app-only client is built on **Graph beta** (`GraphClientFactory.cs:204`); delegated clients use v1.0 — this is how live telemetry below separates app-only from OBO calls.
 - **Delegated (OBO)** calls run as the signed-in user through the per-customer BFF app registration (§5). They use the user's rights, not the stamp's app roles.
 - **CIAM** user creation (`CiamGraphClientFactory.cs:66-133`) uses a separate CIAM-tenant app registration with a Key Vault certificate — not the stamp identity, not in this catalog.
 - **L2 Worker as the stamp identity: none.** L2 cannot sign in as the stamp UAMI; it signs in as the customer BFF app registration (MI-FIC) only for Dataverse (H6/H7/H7b). H13's keyless proof calls the stamp BFF's `POST /api/platform/keyless-proof`, whose service list has no Graph entry (`src/server/shared/Contracts/KeylessProofContract.cs:59-70`). Every L2 Graph call runs as the L2 Worker (§4) or the SPE owning app (H0/H8/H13 T6).
@@ -45,7 +45,7 @@ Learn URL form: `https://learn.microsoft.com/en-us/graph/api/<slug>?view=graph-r
 | `/drives/{d}/items/{i}/createLink` | POST | `DriveItemOperations.cs:942`; `SpeAdminGraphService.cs:3211` | `POST /api/documents/{id}/share-link` | Files.ReadWrite.All (generic) / FSC.Selected (SPE note) — [driveitem-createlink](https://learn.microsoft.com/en-us/graph/api/driveitem-createlink?view=graph-rest-1.0) | keep FSC.Selected. Live: 1 call, 403 — also 403 delegated (2/2): sharing, not a Graph role (§8 F5) |
 | `/drives/{d}/items/root/delta` | GET | `Infrastructure/Graph/SpeFileStore.cs:461,463,497` | `POST /api/compose/webhooks/spe-doc-changed`, `…/check-changes` | Files.Read.All (no SPE note) — [driveitem-delta](https://learn.microsoft.com/en-us/graph/api/driveitem-delta?view=graph-rest-1.0) | keep FSC.Selected. Live: 15/16 OK app-only |
 | `/subscriptions` (resource `drives/{id}/root`) | POST / PATCH | `SpeFileStore.cs:415,432` | `GET /api/compose/documents/{id}` (EnsureSubscription); `SpeWebhookRenewalHostedService` | ODfB driveItem row: Files.Read.All (POST), Files.ReadWrite.All (PATCH) — [subscription-post-subscriptions](https://learn.microsoft.com/en-us/graph/api/subscription-post-subscriptions?view=graph-rest-1.0); SPE webhook page names none — [respond-to-changes-webhooks](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/build/respond-to-changes-webhooks) | keep FSC.Selected. Live: trace "Created SPE webhook subscription d87b6c61…" (2026-09-02) and renewals through 2026-10-09 (`PATCH /beta/subscriptions/98508b06…` 5×200 today) by an identity with no Files.*/Sites.* role |
-| `/search/query` (`entityTypes: driveItem`, `region`) | POST | `SpeAdminGraphService.cs:7432` | `POST /api/spe/search/items` | Files.Read.All — [search-query](https://learn.microsoft.com/en-us/graph/api/search-query?view=graph-rest-1.0); **SPE: "Search supports delegated permissions only"** — [search-containers-files](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/build/search-containers-files) | **no app role makes this work** for SPE content; Files.Read.All would instead let every stamp search ALL of Spaarke's SharePoint/OneDrive. Dropped. No call in 30 days of dev telemetry. Filed: §8 F2 |
+| `/search/query` (`entityTypes: driveItem`, `region`) | POST | `SpeAdminGraphService.cs:7432` | `POST /api/spe/search/items` | Files.Read.All — [search-query](https://learn.microsoft.com/en-us/graph/api/search-query?view=graph-rest-1.0); **SPE: "Search supports delegated permissions only"** — [search-containers-files](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/build/search-containers-files) | **drop; the route answers 501 `spe-search-requires-delegated`** (`SearchItemsEndpoints.NotSupportedForIdentity`, on Graph 401/403). Microsoft: SPE search is delegated-only. A prior live probe (sdap-SPE-admin-app-r2 `notes/search-root-cause.md`, probe G, 2026-08-21) got 200 hits from an app-only token that held `Files.ReadWrite.All`; whether those hits were SPE content is not stated, and a token with only `FileStorageContainer.Selected` was not tried. `Files.Read.All` on every stamp would let each customer's identity search ALL of Spaarke's SharePoint/OneDrive, so it is not kept. No call in 30 days of dev telemetry. Rewrite owner: sdap-SPE-admin-app-r2 (§8 F2) |
 
 ### 3.2 Mail — Exchange RBAC for Applications on stamps (H14a), never Entra (gate: always registered; data-gated by `sprk_communicationaccount` rows)
 
@@ -141,6 +141,36 @@ Mail.Read | 810c84a8-4a9e-49e6-bf7d-12d183f40d01
 
 Every GUID was re-read live 2026-10-09 from the Microsoft Graph service principal's `appRoles` (tenant `a221a95e-…`).
 
+### 7.2 Spaarke's own platform BFF identity (`PlatformBffGraphAppRoles.cs`)
+
+The identity that runs the features a stamp does not (demo registration, SPE Admin security pages) — `mi-bff-api-{dev,demo}`. Its own catalog so a platform/demo rebuild cannot silently lose a role it calls with, and so a stamp can never be given these. Each role's call site and Learn URL are the §3 rows named in the table.
+
+```t261-platform-set
+FileStorageContainer.Selected | 40dc41bc-0f7e-42ff-89bd-d9516947e474
+Mail.Read | 810c84a8-4a9e-49e6-bf7d-12d183f40d01
+Mail.ReadWrite | e2a3a72e-5f79-4c64-b1b1-878b674786c9
+Mail.Send | b633e1c5-b582-4048-a93e-9f11b44c7e96
+User.Create | 4240f680-4f73-4082-a766-aa916a2dc9b3
+User.Read.All | df021288-bdef-4463-88db-98f22de89214
+LicenseAssignment.ReadWrite.All | 5facf0c1-8979-4e95-abcf-ff3d079771c0
+User.EnableDisableAccount.All | 3011c876-62b7-4ada-afa2-506cbbecc68c
+GroupMember.ReadWrite.All | dbaae8cf-10b5-4b86-a4a1-f871c94c6695
+SecurityAlert.Read.All | 472e4a4d-bb4a-4026-98d1-0b0d74cb74a5
+SecurityEvents.Read.All | bf394140-e372-4bf9-a898-299cfc7564e5
+```
+
+What the live identities hold versus what the code needs (read-only, 2026-10-09; Learn pages fetched the same day):
+
+| Live role (`mi-bff-api-dev` unless noted) | Code that needs it | Verdict |
+|---|---|---|
+| `User.ReadWrite.All` | demo registration create / license / disable (§3.3) | broader than needed: Learn least = `User.Create` + `LicenseAssignment.ReadWrite.All` + `User.EnableDisableAccount.All` + `User.Read.All` (the catalog's set). Narrowing is an owner step. |
+| `Group.ReadWrite.All` | demo group membership (§3.3) | broader than needed: `GroupMember.ReadWrite.All` (the catalog). Owner step. |
+| `SecurityEvents.Read.All` only | alerts_v2 needs `SecurityAlert.Read.All`; secureScores needs `SecurityEvents.Read.All` ([security-list-alerts_v2](https://learn.microsoft.com/en-us/graph/api/security-list-alerts_v2?view=graph-rest-1.0), [security-list-securescores](https://learn.microsoft.com/en-us/graph/api/security-list-securescores?view=graph-rest-1.0)) | alerts_v2 403s today (7/8): the catalog adds `SecurityAlert.Read.All`. |
+| `FileStorageContainerTypeReg.Selected` | none found: every container-type registration call is delegated (`SpeAdminGraphService.cs:5143,5321,5484` via `ForUserAsync`; the app-only `…ForConfigAsync` wrappers have no production caller, §3.5) | not in the catalog; held live, no app-only caller — owner may remove. |
+| `Mail.Read`, `Mail.Send` (no `Mail.ReadWrite`) | §3.2 | catalog adds `Mail.ReadWrite`: the mark-as-read PATCH 403s today (F4). |
+
+`mi-bff-api-demo` additionally holds `FileStorageContainer.Selected`; the same comparison applies. Nothing here is changed live.
+
 ### 7.1 Verdict per role that left the stamp catalog
 
 | Role | Only callers | Verdict |
@@ -156,7 +186,7 @@ Every GUID was re-read live 2026-10-09 from the Microsoft Graph service principa
 ## 8. Findings (filed as ISS-018 sub-items unless fixed here)
 
 - **F1 (fixed here)** — every stamp BFF would fail at start: `DemoExpirationService` (hosted) resolves `IOptions<DemoProvisioningOptions>.Value` in its constructor, and no stamp channel writes the `[Required]` `DemoProvisioning:*` keys. Fixed by `RegistrationModule.IsDemoProvisioningEnabled`.
-- **F2** — `POST /api/spe/search/items` (app-only `/search/query`, `SpeAdminGraphService.cs:7432`) uses a path Microsoft documents as unsupported for SPE content (delegated only). With the old catalog its only effect could be searching all of Spaarke's SharePoint. Needs an OBO rewrite (or `$filter` enumeration). Owner: SPE admin / sdap-SPE-admin-app-r2.
+- **F2 (route behaviour fixed here; rewrite owed)** — `POST /api/spe/search/items` (app-only `/search/query`, `SpeAdminGraphService.cs:7432`). Microsoft documents SPE content search as delegated-only; sdap-SPE-admin-app-r2 probe G did get hits from an app-only token holding `Files.ReadWrite.All`, but not shown to be SPE content. Decision (needed → build, else remove; least privilege wins): `Files.Read.All` is not kept. Without it Graph refuses and the route now returns a defined `501` ProblemDetails `spe-search-requires-delegated` instead of a raw 403 or an empty list. The OBO rewrite (or `$filter` enumeration) belongs to **sdap-SPE-admin-app-r2** (ISS-018 F2, #1543).
 - **F3** — the L2 Worker identity lacks `AppRoleAssignment.ReadWrite.All` and `Application.ReadWrite.OwnedBy` live → H3 and H10 would 403 at T186. Operator action (owner OK): run `Grant-ControlPlaneIdentity.ps1` against `sprk-controlplane-dev-uami`; then remove the roles §4 lists as no longer needed.
 - **F4** — dev (`mi-bff-api-dev`) lacks `Mail.ReadWrite`: inbound mark-as-read `PATCH /users/{mbx}/messages/{id}` returned 403 (3/3, 2026-10-06). Dev security pages: `GET /security/alerts_v2` 7/8 × 403 (holds `SecurityEvents.Read.All`, Learn least for alerts_v2 is `SecurityAlert.Read.All`).
 - **F5** — `createLink` 403 app-only and delegated on dev: a sharing setting, not a Graph role. Not investigated further here.
@@ -192,6 +222,24 @@ So on the live tenant today **H10 removes nothing**: no stamp identity exists. T
 - `Grant-GraphAppRoles.ps1` refuses an `mi-spaarke-*` identity unless `-AllowStampPrincipal` (K2).
 - **K3 — the old L2 roles stay until ownership is proven.** Do NOT remove the Worker's old roles (`Directory.ReadWrite.All`, `User.ReadWrite.All`, …) until the live check "an app-only `POST /applications` under `Application.ReadWrite.OwnedBy` leaves the Worker as owner" (§11 step 4) has passed; removing first could leave H3 with no working path. Same rule in the POML.
 - **K4 — app-only SPE search.** `POST /api/spe/search/items` cannot work with any app role (Learn: delegated only); T261 does not hide that: it is filed as ISS-018 F2 / #1543 for the SPE admin owner (sdap-SPE-admin-app-r2). Dropping `Files.Read.All` removes only the ability to search all of Spaarke's SharePoint, not a working feature (no call in 30 days of dev telemetry).
+
+## 10.2 Review fixes (verifier pass B, 2026-10-09)
+
+- Search route: defined 501 (§3.1, §8 F2). Stale "14/15/11-role" and `MailboxSettings.Read` text fixed in code, tests and the deployment guide (H14a no longer grants `MailboxSettings.Read`; an Exchange admin app that still carries a delegating assignment for it is harmless).
+- `Grant-GraphAppRoles.ps1`: `-CatalogPath` is mandatory (no default); the stamp catalog is refused for a non-stamp principal, any other catalog for a stamp principal; platform roles in `PlatformBffGraphAppRoles.cs` (§7.2).
+- `EveryRole_HasALearnCitedEvidenceRow` now needs the row in §3 or §4 (not §7.1), a `File.cs:NNN` call site and a `learn.microsoft.com` URL in the same row; the platform set is checked too.
+- The `EntityLogicalName` workaround on `DataverseAppUserCreationRequest` is dropped: the work branch renamed the property to `SystemUserAzureActiveDirectoryObjectId`, which the contact guard recognises.
+
+## 10.3 Component justification (root CLAUDE.md §11) for the new surface
+
+| New surface | 1. Existing overlap | 2. Extend instead? | 3. Cost of doing nothing |
+|---|---|---|---|
+| `ControlPlaneGraphAppRoles.cs` (L2 catalog) | `GraphAppRoles.cs` (BFF stamp set) | No: it was the L2 Worker's list by accident; the two identities need different roles, and L2 cannot reference the BFF (ADR-010). | Shrinking the stamp set would strip H11's `User.Invite.All`; H3/H10 would still 403 for want of `AppRoleAssignment.ReadWrite.All` (F3). |
+| `PlatformBffGraphAppRoles.cs` | `GraphAppRoles.cs`, live grants | No: the platform BFF's roles (demo, security pages) must not be in the stamp set, and nothing recorded them. | A demo/platform rebuild loses `User.*`/`Group.*`/`Security*` grants silently (no record exists) and the pages 403. |
+| `GraphAppRoleRest.cs`, `RemoveUnexpectedRolesAsync`, `FindUnexpectedRolesAsync`, 3 H10 rejection codes | `GraphRestAppRoleGranter` / `…ParityVerifier` each had a private copy of the REST code | Extended: the two classes now share one file; the new methods live on the existing seams. | Without removal a stamp keeps the roles of an older catalog (G31 unfixed); without the independent re-read H13 T3 cannot prove it. |
+| `Remove-StampGraphExtraRoles.ps1` | H10's removal | Same logic as an operator script: the reconciler never re-dispatches H10 for a run already past it. | A stamp provisioned before T261 keeps tenant-wide roles with no remedy short of hand deletes. |
+| `RegistrationModule.IsDemoProvisioningEnabled` gate; `SearchItemsEndpoints.NotSupportedForIdentity` | `OnboardingModule.IsEnabled` pattern; `ex.ToProblemDetails` | Extended an existing module / endpoint file, no new route. | Directory-write services registered on every stamp; stamp BFF fails at start (F1); the search route returns a raw 403. |
+| `StampGraphAppRoleEvidenceTests` | `SpeAppOnlyContainerGuardTests` pattern | New test, same shape. | A role is added to the catalog (granted to every stamp) with no evidence. |
 
 ## 11. Live steps owed (each needs the owner's OK)
 

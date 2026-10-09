@@ -71,6 +71,13 @@
     <criterion testable="true">dotnet build Spaarke.sln 0 errors / 0 warnings; ControlPlane tests, relevant BFF tests and Spaarke.ArchTests pass.</criterion>
   </acceptance-criteria>
 
+  <component-justification>
+    New surface (root CLAUDE.md §11), one sentence per question each — full table: notes/t261-stamp-graph-least-privilege.md §10.3.
+    ControlPlaneGraphAppRoles.cs / PlatformBffGraphAppRoles.cs: overlap GraphAppRoles.cs; cannot be folded in because the three identities need different roles (and L2 cannot reference the BFF, ADR-010); without them shrinking the stamp set strips H11 and the platform loses roles unrecorded.
+    GraphAppRoleRest + Remove/FindUnexpected seams: extend the existing granter/verifier (shared REST code); without them a stamp keeps old roles.
+    Remove-StampGraphExtraRoles.ps1: the reconciler never re-dispatches H10 past its phase; without it pre-T261 stamps keep tenant-wide roles.
+    Demo-registration gate, search 501: extend RegistrationModule / SearchItemsEndpoints; without them stamps register directory writers and crash at start, and search returns a raw 403.
+  </component-justification>
   <notes>
     Completed 2026-10-09 (FULL rigor, no live action). Stamp set = FileStorageContainer.Selected (Entra) + Mail.Read/ReadWrite/Send
     (Exchange, H14a); H10 removes every other Graph role; L2 Worker catalog separate. Evidence: notes/t261-stamp-graph-least-privilege.md.

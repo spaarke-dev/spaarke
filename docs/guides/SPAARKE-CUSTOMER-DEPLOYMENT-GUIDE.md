@@ -495,8 +495,10 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
      `Get/New/Set/Remove-ServicePrincipal`, `Get/New/Set/Remove-ManagementScope`,
      `Get/New/Set/Remove-ManagementRoleAssignment`, `Get-ManagementRole`, `Test-ServicePrincipalAuthorization`.
    - Assign it to the app (`New-ManagementRoleAssignment -App <app id> -Role 'Spaarke App RBAC Admin'`), plus
-     `View-Only Recipients`, plus `-Delegating` assignments for exactly `Application Mail.Read`, `Application Mail.ReadWrite`,
-     `Application Mail.Send` and `Application MailboxSettings.Read`. The delegating assignments are what limit it: tested
+     `View-Only Recipients`, plus `-Delegating` assignments for exactly `Application Mail.Read`, `Application Mail.ReadWrite` and
+     `Application Mail.Send` (the three H14a grants; task 261 dropped `Application MailboxSettings.Read` — nothing reads
+     mailbox settings. An app that still carries a delegating assignment for it is harmless; remove it at the next
+     maintenance). The delegating assignments are what limit it: tested
      2026-10-04, it is refused when it tries to grant itself Exchange Full Access, Role Management or Mail Recipients.
 3. **Platform parameter** `exchangeAdminAppId` = the app's client id (`platform-controlplane-{env}.bicepparam`).
 4. **Graph read for the Worker**: the L2 Worker managed identity must be able to read `GET /organization` in the tenant
@@ -1764,7 +1766,7 @@ az webapp config show --name spaarke-bff-{customer}-{env} --resource-group rg-sp
 # T2 — UAMI registered as Dataverse App User
 pac admin application list --environment <dv-org-url>
 
-# T3 — Graph app-role parity: the 11 Entra-granted roles, and none of Mail.Read / Mail.ReadWrite / Mail.Send / MailboxSettings.Read
+# T3 — Graph app-role parity: exactly FileStorageContainer.Selected on Microsoft Graph, and nothing else (no Mail.* — those are Exchange-scoped)
 az rest --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<uami-principal-id>/appRoleAssignments"
 
 # T4 — the stamp identity's Exchange mailbox roles, all limited to the customer's group (Organization Management admin)

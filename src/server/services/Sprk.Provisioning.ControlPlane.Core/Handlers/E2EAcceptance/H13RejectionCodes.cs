@@ -138,7 +138,7 @@ public static class H13Rejections
     /// <summary>T2 SILENT-FAIL TRAP — expected Dataverse App Users are NOT present (Web API systemusers filter did not return the expected UAMI + BFF app-reg pair).</summary>
     public const string TrapT2Failed = "h13-trap-T2-dataverse-app-user";
 
-    /// <summary>T3 SILENT-FAIL TRAP — UAMI service principal's Graph appRoleAssignments do NOT match the full <c>GraphAppRoles.cs</c> catalog (14 roles).</summary>
+    /// <summary>T3 SILENT-FAIL TRAP — UAMI service principal's Graph appRoleAssignments do NOT match the stamp set in <c>GraphAppRoles.cs</c> exactly: a role missing, or any Graph role outside it (task 261).</summary>
     public const string TrapT3Failed = "h13-trap-T3-graph-app-role-parity";
 
     /// <summary>T4 SILENT-FAIL TRAP — the stamp identity is missing a group-scoped Exchange mailbox role, or holds one outside the customer's group (RBAC for Applications, task 251). Value kept for run-record compatibility.</summary>

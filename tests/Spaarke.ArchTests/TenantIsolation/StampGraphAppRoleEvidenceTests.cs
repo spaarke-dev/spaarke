@@ -74,24 +74,49 @@ public class StampGraphAppRoleEvidenceTests
         Assert.True(parsed.SetEquals(note), Diff("ControlPlaneGraphAppRoles.cs", parsed, "the note's t261-control-plane-set", note));
     }
 
+    [Fact(DisplayName = "T261: the platform BFF catalog equals the note's documented platform set")]
+    public void PlatformCatalog_EqualsTheNote()
+    {
+        var note = ReadBlock(File.ReadAllText(NotePath), "t261-platform-set")
+            .Select(r => $"{r[0]}|{r[1]}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var platform = PlatformBffGraphAppRoles.All.Select(r => $"{r.Value}|{r.AppRoleId}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(platform.SetEquals(note), Diff("PlatformBffGraphAppRoles.All", platform, "the note's t261-platform-set", note));
+        // the platform set is never the stamp set's superset by accident: every stamp role is also a platform role
+        Assert.True(GraphAppRoles.All.All(r => platform.Contains($"{r.Value}|{r.AppRoleId}")),
+            "The platform catalog must include every stamp role (the platform BFF runs the same SPE and mail code).");
+    }
+
     // ── rule 3 ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "T261: every documented role has an evidence row with a Microsoft Learn citation")]
-    public void EveryRole_HasALearnCitedEvidenceRow()
+    [Fact(DisplayName = "T261: every documented role has an evidence row (kept tables) with a call site and a Microsoft Learn URL in the same row")]
+    public void EveryRole_HasAnEvidenceRow_InTheKeptTables()
     {
         var text = File.ReadAllText(NotePath);
-        var rows = text.Split('\n').Where(l => l.TrimStart().StartsWith('|')).ToArray();
-        var roles = ReadBlock(text, "t261-stamp-set").Concat(ReadBlock(text, "t261-control-plane-set")).Select(r => r[0]).Distinct();
+        // Rows count only in the inventory (§3) and the control-plane table (§4), never in §7.1 (dropped roles) or prose.
+        var start = text.IndexOf("\n## 3.", StringComparison.Ordinal);
+        var end = text.IndexOf("\n## 5.", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "The note's '## 3.' … '## 5.' evidence sections were not found.");
+        var section = text[start..end];
 
-        var missing = roles.Where(role => !rows.Any(row =>
-                Regex.IsMatch(row, $@"(?<![\w.]){Regex.Escape(role)}(?![\w.])")
-                && row.Contains("learn.microsoft.com", StringComparison.Ordinal)))
-            .ToList();
+        var roles = ReadBlock(text, "t261-stamp-set")
+            .Concat(ReadBlock(text, "t261-control-plane-set"))
+            .Concat(ReadBlock(text, "t261-platform-set"))
+            .Select(r => r[0]).Distinct();
+
+        var missing = roles.Where(role => !HasEvidenceRow(section, role)).ToList();
 
         Assert.True(missing.Count == 0,
-            "Role(s) with no evidence row (a table row naming the role with a learn.microsoft.com citation) in " +
-            $"{NotePath}: {string.Join(", ", missing)}. Add the call site and the Learn least-privileged citation first.");
+            "Role(s) with no evidence row in §3/§4 of " + NotePath + " (a table row naming the role, a `File.cs:line` call site " +
+            $"and a learn.microsoft.com URL): {string.Join(", ", missing)}. Add the call site and the Learn citation first.");
     }
+
+    internal static bool HasEvidenceRow(string section, string role)
+        => section.Split('\n')
+            .Where(l => l.TrimStart().StartsWith('|'))
+            .Any(row => Regex.IsMatch(row, $@"(?<![\w.]){Regex.Escape(role)}(?![\w.])")
+                        && Regex.IsMatch(row, @"\w\.cs:\d+")
+                        && row.Contains("learn.microsoft.com", StringComparison.Ordinal));
 
     // ── rule 4 ─────────────────────────────────────────────────────────────────────────────
 
@@ -150,6 +175,11 @@ public class StampGraphAppRoleEvidenceTests
         var mirror = ParseL2Mirror("new GraphAppRoleEntry(\"B.Read\", \"33333333-3333-3333-3333-333333333333\"),");
         Assert.Equal(new[] { "B.Read|33333333-3333-3333-3333-333333333333" }, mirror);
 
+        const string sec = "| Role | calls |\n| `X.Read` | `Foo.cs:12` [u](https://learn.microsoft.com/x) |\n| `Y.Read` | no call site [u](https://learn.microsoft.com/y) |\n| `Z.Read` | `Bar.cs:3` no url |\n";
+        Assert.True(HasEvidenceRow(sec, "X.Read"));
+        Assert.False(HasEvidenceRow(sec, "Y.Read"), "no call site");
+        Assert.False(HasEvidenceRow(sec, "Z.Read"), "no Learn URL");
+        Assert.False(HasEvidenceRow(sec, "X.Read.All"), "a longer role name is not a match");
         Assert.Throws<InvalidOperationException>(() => ReadBlock("no block here", "t261-stamp-set"));
         Assert.Throws<InvalidOperationException>(() => ParseLikeTheGrantScript("new GraphAppRole(Missing, \"D\", IdMissing,"));
     }

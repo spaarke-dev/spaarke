@@ -219,7 +219,7 @@ public static class EntraAppRegGates
 {
     /// <summary>
     /// The gate H3 owns for tenant-admin consent of the BFF app-registration's
-    /// 14 Graph application-role assignments. Flipped from <c>Pending</c> to
+    /// delegated Graph permissions (EntraAppRegPermissionCatalog). Flipped from <c>Pending</c> to
     /// <c>Verified</c> when <see cref="IAdminConsentVerifier"/> confirms all
     /// grants are present. Design.md §6.2 gateStates naming (kebab-case).
     /// </summary>

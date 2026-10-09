@@ -63,10 +63,14 @@
       # If you use this shape, confirm --resource-group matches the intended UAMI's RG.
       az identity show --name <mi-name> --resource-group <rg> --query principalId -o tsv
 
-.PARAMETER GraphAppRolesPath
-    Optional explicit path to the catalog source file. Default resolves to
-    src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs relative
-    to this script (the stamp set — see DESCRIPTION before using it).
+.PARAMETER CatalogPath
+    MANDATORY (task 261: there is no default - a default made the customer stamp catalog the answer to "grant the BFF's
+    roles", which is wrong for every identity but a stamp). One of:
+      - src/server/api/Sprk.Bff.Api/Infrastructure/Auth/PlatformBffGraphAppRoles.cs     (Spaarke's platform/demo BFF)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs (the L2 Worker)
+      - src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs                (the stamp set - H10 owns it)
+    The script refuses the stamp catalog for any principal that is not a customer stamp identity (mi-spaarke-*), and
+    refuses any other catalog for a stamp identity. Alias: -GraphAppRolesPath.
 
 .PARAMETER DryRun
     Preview mode. Reads current UAMI SP appRoleAssignments and reports the
@@ -127,7 +131,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UamiPrincipalId,
 
-    [string]$GraphAppRolesPath,
+    [Parameter(Mandatory = $true)]
+    [Alias('GraphAppRolesPath')]
+    [string]$CatalogPath,
 
     [switch]$DryRun,
 
@@ -386,18 +392,14 @@ if ($account.tenantId -ne $TenantId) {
 }
 Write-Success "Authenticated as '$($account.user.name)' in tenant $TenantId"
 
-# Resolve GraphAppRoles.cs path.
-if (-not $GraphAppRolesPath) {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $default = Join-Path $scriptDir "..\src\server\api\Sprk.Bff.Api\Infrastructure\Auth\GraphAppRoles.cs"
-    $resolved = Resolve-Path -LiteralPath $default -ErrorAction SilentlyContinue
-    if ($resolved) { $GraphAppRolesPath = $resolved.Path }
-}
-if (-not $GraphAppRolesPath -or -not (Test-Path $GraphAppRolesPath)) {
-    Write-Fail "GraphAppRoles.cs not resolved (default relative path failed). Pass -GraphAppRolesPath explicitly."
+# Resolve the catalog path (mandatory; no default).
+if (-not (Test-Path -LiteralPath $CatalogPath)) {
+    Write-Fail "Catalog not found: $CatalogPath"
     exit 2
 }
-Write-Success "GraphAppRoles.cs source: $GraphAppRolesPath"
+$GraphAppRolesPath = (Resolve-Path -LiteralPath $CatalogPath).Path
+$isStampCatalog = $GraphAppRolesPath -match 'Sprk\.Bff\.Api[\\/]Infrastructure[\\/]Auth[\\/]GraphAppRoles\.cs$'
+Write-Success "Catalog source: $GraphAppRolesPath$(if ($isStampCatalog) { ' (customer STAMP set)' })"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1 — Parse the catalog (source of truth for the role IDs)
@@ -449,8 +451,17 @@ try {
 }
 Write-Success "UAMI SP: '$($uamiSp.displayName)' (type=$($uamiSp.servicePrincipalType), appId=$($uamiSp.appId))"
 
-if ($uamiSp.displayName -like 'mi-spaarke-*' -and -not $AllowStampPrincipal) {
-    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity. H10 owns it (grants FileStorageContainer.Selected, removes every other Graph role); this script would ADD roles, including mailbox roles that must stay Exchange-scoped (task 261). Re-run with -AllowStampPrincipal only if that is deliberate."
+$isStampPrincipal = $uamiSp.displayName -like 'mi-spaarke-*'
+if ($isStampCatalog -and -not $isStampPrincipal) {
+    Write-Fail "The stamp catalog (GraphAppRoles.cs) is for customer stamp identities only; '$($uamiSp.displayName)' is not one (mi-spaarke-*). Use PlatformBffGraphAppRoles.cs for the platform BFF or ControlPlaneGraphAppRoles.cs for the L2 Worker."
+    exit 6
+}
+if ($isStampPrincipal -and -not $isStampCatalog) {
+    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity: it holds exactly the stamp set. Another catalog must never be granted to it."
+    exit 6
+}
+if ($isStampPrincipal -and -not $AllowStampPrincipal) {
+    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity. H10 owns it (grants FileStorageContainer.Selected, removes every other Graph role); this script is add-only. Re-run with -AllowStampPrincipal only if that is deliberate."
     exit 6
 }
 

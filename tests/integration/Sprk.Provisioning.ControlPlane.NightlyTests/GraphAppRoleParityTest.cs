@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // GraphAppRoleParityTest.cs
 //
-// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the 15-role Microsoft
+// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the stamp-set Microsoft
 // Graph application (app-only) permission catalog owned by the BFF's
 // Infrastructure/Auth/GraphAppRoles.cs constant.
 //
