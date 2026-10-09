@@ -113,7 +113,7 @@ public class InsightsOrchestratorTests
                 new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
             NullLogger<AssistantToolCallHandler>.Instance);
 
-    private InsightsOrchestrator CreateSut()
+    private InsightsOrchestrator CreateSut(IRetrievalAccessTrim? accessTrim = null)
         => new(
             _httpContextAccessorMock.Object,
             _cacheMock.Object,
@@ -122,6 +122,7 @@ public class InsightsOrchestratorTests
             _ingestDocumentSourceMock.Object,
             _consumerRoutingMock.Object,
             _ragServiceMock.Object,
+            accessTrim ?? PermitAllRetrievalAccessTrim.Instance,
             BuildAssistantHandler(),
             _nodeServiceMock.Object,
             NullLogger<InsightsOrchestrator>.Instance);
@@ -1147,5 +1148,41 @@ public class InsightsOrchestratorTests
         public T CurrentValue => _value;
         public T Get(string? name) => _value;
         public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 176 (#1511): Insights search rows are trimmed to the caller's readable documents
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchAsync_DocumentTheCallerCannotRead_IsNotReturnedOrSummarized()
+    {
+        const string callerOid = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+        const string secret = "SECRET-1511-insights";
+        var unreadable = Guid.NewGuid();
+        var httpContext = TestHttpContexts.Authenticated(callerOid);
+        var trim = new RetrievalAccessTrim(
+            new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = httpContext },
+            new ReadableDocumentsUserClient(/* nothing readable */),
+            NullLogger<RetrievalAccessTrim>.Instance);
+        _ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RagSearchResponse
+            {
+                Query = "q",
+                Results = new[]
+                {
+                    new RagSearchResult { Id = "c1", DocumentId = unreadable.ToString(), DocumentName = "Restricted.docx", Content = secret, Score = 0.9 },
+                },
+                TotalCount = 1,
+            });
+
+        // Strict IOpenAiClient: a synthesis call over a leaked hit would throw here.
+        var result = await CreateSut(trim).SearchAsync(new InsightsSearchFacadeRequest(
+            Query: "q", ParentEntityType: "sprk_matter", ParentEntityId: Guid.NewGuid().ToString(), ArtifactType: null,
+            Predicate: null, TopK: 10, TenantId: "tenant-1", CallerPrincipal: httpContext.User));
+
+        result.Results.Should().BeEmpty();
+        JsonSerializer.Serialize(result).Should().NotContain(secret).And.NotContain("Restricted.docx");
     }
 }

@@ -25,7 +25,8 @@
                  show hide-only diffs and other prefixes; the import replaces the table's RibbonDiffXml, so it would be
                  lost - merge it into the checked-in RibbonDiff.xml first). Then packs the solution into a temp file to
                  prove it packs. Zero writes to Dataverse.
-      -Apply     The same checks, then pac solution pack + pac solution import --environment <url> --publish-changes,
+      -Apply     The same checks, then pac solution pack + pac solution import --environment <url> (not published tenant-wide), then a
+                 scoped PublishXml of exactly this solution's components (scripts/lib/Publish-SolutionComponents.ps1),
                  then the -Verify check with a bounded retry (the effective ribbon lags the publish; Set-AccessRibbon.ps1
                  measured up to about 75 s on spaarkedev1).
       -Verify    Read-only. Exit 0 when neither button is in the effective ribbon, exit 1 otherwise.
@@ -48,6 +49,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes (-Apply verifies itself).' }
 $BaseUrl = $EnvironmentUrl.TrimEnd('/')
 $Table = 'sprk_noaccessentry'
@@ -141,8 +143,8 @@ if (-not $Apply) {
     exit 0
 }
 
-& $pacExe solution import --environment $BaseUrl --path $zip --publish-changes
-if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
+$publishContext = @{ Api = $api; Headers = ($headers + @{ 'Content-Type' = 'application/json' }) }
+Invoke-ScopedSolutionImport -EnvironmentUrl $BaseUrl -ZipPath $zip -SolutionUniqueName 'NoAccessEntryRibbons' -PacExe $pacExe -Context $publishContext | Out-Null
 
 foreach ($delay in @(0, 15, 30, 45, 60, 30)) {
     if ($delay -gt 0) { Write-Host "The effective ribbon can lag the publish; re-checking in $delay s."; Start-Sleep -Seconds $delay }

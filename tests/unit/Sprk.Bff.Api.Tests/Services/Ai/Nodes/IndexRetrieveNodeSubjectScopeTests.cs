@@ -184,6 +184,7 @@ public sealed class IndexRetrieveNodeSubjectScopeTests
         var node = new IndexRetrieveNode(
             searchClient.Object,
             openAi.Object,
+            Moq.Mock.Of<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexRetrieveNode>.Instance);
 
         var context = InsightsNodeTestHelpers.CreateContext(

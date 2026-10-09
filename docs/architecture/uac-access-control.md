@@ -146,9 +146,60 @@ closed.
 - **Display.** Task 064's per-record read (`GET /api/v1/records/{table}/{id}/no-access`) reports the effective `secure`,
   `accessPermission` and `inheritedFrom`; Manage Access gates and marks "No effect" from the stricter of those and the
   record's stored values.
-- **Not routed (own values on purpose).** `/unshare-user`'s last-reader rule (S5) follows the stored ownership. Readers
-  outside the flag read (provisioning's creator rule, the secure-child share synchronizer's Restricted read, SPE container
-  membership, Office edit, the Restricted sweep) are task 175's: the stored cascade makes them right.
+- **Not routed (own values on purpose).** `/unshare-user`'s last-reader rule (S5) follows the stored ownership.
+- **Readers outside the flag read (#1478, task 175)** — provisioning's external-flagged creator / colleague rule, the
+  secure-child share synchronizer's Restricted read, SPE container membership, Office edit — consult
+  `EffectiveRootFlags.RestrictedThroughFilingAsync` beside the stored column, so they do not fail open while a stored value
+  catches up; the Assigned-To job's Restricted sweep also visits the work assignments and projects filed below a Restricted
+  matter or project.
+
+### The parent sets a floor; a child may be stricter (owner rounds 84 and 87, task 175)
+
+Round 84 REPLACES round 6 item 4 ("parent unsecured → children stay secure") and task 158's "no unsecure cascade"
+constraint. Round 87 refines round 84: the parent is a FLOOR, not an equality.
+
+- **The rule.** A work assignment or project filed under a matter or project stores max(own, floor):
+  - the floor: Secure if any ancestor is (the 174 walk, `MaxFilingDepth`); the most restrictive Access Permission arriving
+    through its DIRECT parents (each folded with what is above it);
+  - own: what was set on the record by hand (Make Secure; a stricter Access Permission on the form), or held while parentless.
+  An inherited value follows the parent both ways; an own value stays when the parent loosens. A re-file never loosens: what
+  the record held beyond the new floor becomes its own. A parentless record keeps and edits its own values.
+- **The access record.** `sprk_accessinheritance` (JSON, BFF-written; `docs/data-model/access-inheritance.md`) keeps the
+  floor last applied, the parents it came from, and the own values — so a user's edit, a parent's change and a re-file are
+  told apart. Existing rows: the backfill rule (equal to the floor = inherited; stricter = own), applied on first sight.
+  An empty record never loosens anything. The column is field-secured (only the BFF application users read or write it),
+  and every BFF writer refuses a caller-supplied write naming it (`sdap.access.access_record_server_only`): a forged
+  "inherited" would otherwise let a parent's un-secure take a hand-set Secure away without F3 (verifier F1-1). No record is
+  trusted while the column is not secured, and an EMPTY one is decided on only once the BFF's read of the column is proven.
+  The generic BFF writers refuse `sprk_issecure` on a work assignment or project (`sdap.access.secure_flag_transition_only`):
+  only Make Secure, Remove Secure and the cascade set it.
+- **One invariant owner:** `SecureRootInheritance.FollowParentsAsync` (`SecureRootInheritance.Cascade.cs`), called by the
+  parent's `/unsecure-project` (everything filed below it, top-down, bounded at 50, the rest left to the job), by the BFF
+  re-file writers (`SecureAfterWriteAsync`), right after a caller's Make Secure on a work assignment or project (records the
+  own secure at once), and by `SecureRootInheritanceJob` (every 5 minutes: every work assignment and project decided over
+  one batched walk; only differing values written; a project changed in the run sends what is filed under it round again;
+  25 un-secures and 500 other writes per run, the rest deferred with a cursor).
+- **Un-secure is the endpoint's own steps.** `UnsecureProjectEndpoint.UnsecureInheritedAsync` runs task 158's sequence with
+  no caller (no F3) and a TEAM owner — the business-unit team the ownership rule (`RecordOwnershipResolver`, record-first,
+  D-11) gives a record filed under its now-ordinary parents; never the Secure Record Owners team. It runs only for an
+  INHERITED Secure. Ownership is moved and read back first, related records leave isolation, the shares are revoked, the
+  flag is cleared LAST. Existing documents stay in the record's former container (as for `/unsecure-project` on a parent);
+  reads are broker-only either way.
+- **Fail closed.** Order inside one record: a STRICTER Access Permission first, then the un-secure, then a LOOSER Access
+  Permission, then the access record. A step that does not complete leaves the record at the more restrictive state (still
+  flagged secure, permission not loosened, the access record still saying "secure applied"), reports it, and the next call
+  or run completes it. An unreadable filing, parent, own flag or access record loosens nothing.
+- **The floor lock.** Tightening is never refused (Make Secure on a child is allowed). `POST /unsecure-project` on a work
+  assignment or project whose floor is secure answers **409 `sdap.access.access_follows_parent`** (extensions
+  `parentRecordType`, `parentRecordId`, `parentName`); one whose secure is its own is un-secured by its F3 holder as a
+  parentless record is. A BFF update of `sprk_accesspermission` below the floor, or of `sprk_issecure` to false under a secure
+  floor, is refused with the same code through `SecureRootFilingGate`; an unreadable filing refuses
+  (`record_owner_parent_undetermined`). `GET /can-manage-access` reports `followsParents`, `parentUnverifiable`,
+  `floorSecure` and `floorAccessPermission`. The ribbon (`access_ribbon.js` 1.8.0) hides Remove Secure when the floor is
+  secure (and both commands when the filing cannot be read). The form library (`sprk_accesspermission_inherited.js` 1.2.0)
+  puts back a looser pick and says "inherited from" / "set on this record". Manage Access shows the parent's floor beside the
+  Restricted / Secure banner and offers no Access Permission below the floor. Grants and shares on a child stay available.
+  `/user-shares` marks a share a secure parent passed on (`inheritedFrom`), shown read-only.
 
 ## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
 

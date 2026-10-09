@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -512,6 +513,7 @@ public static class RagEndpoints
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        DocumentIndexParentResolver parentResolver,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -590,7 +592,7 @@ public static class RagEndpoints
                     return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
                 }
 
-                var rowProblem = HoldIndexFileRequestToRow(request, document, out var rowParent);
+                var (rowProblem, rowParent) = await HoldIndexFileRequestToRowAsync(request, document, parentResolver, cancellationToken);
                 if (rowProblem is not null)
                 {
                     logger.LogWarning(
@@ -609,10 +611,9 @@ public static class RagEndpoints
                 {
                     DriveId = document.GraphDriveId!,
                     ItemId = document.GraphItemId!,
-                    // The row's parent when the row carries one; otherwise the body parent the filter
-                    // authorized (AppendTo) — e.g. a document filed under a work assignment or event,
-                    // which DocumentEntity cannot express.
-                    ParentEntity = rowParent ?? request.ParentEntity,
+                    // The record that governs the document (DocumentIndexParentResolver, task 177) when the row
+                    // names one; the body parent the filter authorized (AppendTo) only when the row names none.
+                    ParentEntity = rowParent,
                 };
             }
 
@@ -670,8 +671,8 @@ public static class RagEndpoints
     }
 
     /// <summary>
-    /// Holds an index-file request that names a document to that document's ROW. Returns <c>null</c> when it
-    /// matches (and the row's parent, if the row carries one), otherwise a reason code for the 409.
+    /// Holds an index-file request that names a document to that document's ROW. Returns the reason code for the 409, or
+    /// <c>null</c> and the parent the chunks carry.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
@@ -679,69 +680,50 @@ public static class RagEndpoints
     ///   request can legitimately be indexing for this row.</item>
     ///   <item>The body DriveId/ItemId must be the row's — otherwise the caller would have the app stamp
     ///   row A as indexed with the contents of file B.</item>
-    ///   <item>When the row carries a matter/project/invoice, the body ParentEntity (if any) must be one of
-    ///   them: type compared case-insensitively with the "sprk_" prefix ignored, ids compared as GUIDs.
-    ///   The chunks then carry the ROW's parent — the matched one, else the first of matter, project,
-    ///   invoice (SendToIndex Step 3's order).</item>
+    ///   <item>When the row names records (work assignment, project, matter, invoice, a related event), the body
+    ///   ParentEntity (if any) must be one of them: type compared case-insensitively with the "sprk_" prefix ignored,
+    ///   ids compared as GUIDs. The chunks then carry the record that GOVERNS the document
+    ///   (<see cref="DocumentIndexParentResolver"/>, task 177), whichever of them the body named — or none, when that
+    ///   decision fails closed.</item>
+    ///   <item>When the row names no record, the body parent the route filter authorized (AppendTo) is used. When the row
+    ///   could not be read, no parent is used, never the body's.</item>
     /// </list>
     /// </remarks>
-    internal static string? HoldIndexFileRequestToRow(
-        FileIndexRequest request, DocumentEntity document, out ParentEntityContext? rowParent)
+    internal static async Task<(string? Problem, ParentEntityContext? Parent)> HoldIndexFileRequestToRowAsync(
+        FileIndexRequest request, DocumentEntity document, DocumentIndexParentResolver parentResolver, CancellationToken ct)
     {
-        rowParent = null;
-
         if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
         {
-            return "INDEX_FILE_DOCUMENT_HAS_NO_FILE";
+            return ("INDEX_FILE_DOCUMENT_HAS_NO_FILE", null);
         }
 
         if (!string.Equals(request.DriveId, document.GraphDriveId, StringComparison.Ordinal)
             || !string.Equals(request.ItemId, document.GraphItemId, StringComparison.Ordinal))
         {
-            return "INDEX_FILE_ITEM_MISMATCH";
+            return ("INDEX_FILE_ITEM_MISMATCH", null);
         }
 
-        var rowParents = new List<ParentEntityContext>(3);
-        AddRowParent(rowParents, "matter", document.MatterId, document.MatterName ?? "Unknown Matter");
-        AddRowParent(rowParents, "project", document.ProjectId, document.ProjectName ?? "Unknown Project");
-        AddRowParent(rowParents, "invoice", document.InvoiceId, document.InvoiceName ?? "Unknown Invoice");
-
-        if (rowParents.Count == 0)
+        var decision = await parentResolver.DecideAsync(document, ct);
+        if (decision.Named.Count == 0)
         {
-            // The row cannot express this parent (e.g. a work assignment or event): the filter's AppendTo
-            // check on the body parent is the decision.
-            return null;
+            return (null, decision.Decided ? request.ParentEntity : null);
         }
 
-        if (request.ParentEntity is null)
+        if (request.ParentEntity is not null)
         {
-            rowParent = rowParents[0];
-            return null;
-        }
-
-        var bodyType = NormalizeParentType(request.ParentEntity.EntityType);
-        var matched = Guid.TryParse(request.ParentEntity.EntityId, out var bodyId)
-            ? rowParents.FirstOrDefault(p =>
-                string.Equals(p.EntityType, bodyType, StringComparison.OrdinalIgnoreCase)
-                && Guid.TryParse(p.EntityId, out var rowId)
-                && rowId == bodyId)
-            : null;
-
-        if (matched is null)
-        {
-            return "INDEX_FILE_PARENT_MISMATCH";
-        }
-
-        rowParent = matched;
-        return null;
-
-        static void AddRowParent(List<ParentEntityContext> parents, string type, string? id, string name)
-        {
-            if (!string.IsNullOrEmpty(id))
+            var bodyType = NormalizeParentType(request.ParentEntity.EntityType);
+            var matched = Guid.TryParse(request.ParentEntity.EntityId, out var bodyId)
+                && decision.Named.Any(p =>
+                    string.Equals(p.EntityType, bodyType, StringComparison.OrdinalIgnoreCase)
+                    && Guid.TryParse(p.EntityId, out var rowId)
+                    && rowId == bodyId);
+            if (!matched)
             {
-                parents.Add(new ParentEntityContext(EntityType: type, EntityId: id, EntityName: name));
+                return ("INDEX_FILE_PARENT_MISMATCH", null);
             }
         }
+
+        return (null, decision.Parent);
     }
 
     private static string NormalizeParentType(string? entityType)
@@ -1091,6 +1073,7 @@ public static class RagEndpoints
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        DocumentIndexParentResolver parentResolver,
         Spaarke.Core.Auth.AuthorizationService authorizationService,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
@@ -1258,32 +1241,13 @@ public static class RagEndpoints
                     continue;
                 }
 
-                // Step 3: Build parent entity context from document lookups
-                ParentEntityContext? parentEntity = null;
-                if (!string.IsNullOrEmpty(document.MatterId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "matter",
-                        EntityId: document.MatterId,
-                        EntityName: document.MatterName ?? "Unknown Matter"
-                    );
-                }
-                else if (!string.IsNullOrEmpty(document.ProjectId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "project",
-                        EntityId: document.ProjectId,
-                        EntityName: document.ProjectName ?? "Unknown Project"
-                    );
-                }
-                else if (!string.IsNullOrEmpty(document.InvoiceId))
-                {
-                    parentEntity = new ParentEntityContext(
-                        EntityType: "invoice",
-                        EntityId: document.InvoiceId,
-                        EntityName: document.InvoiceName ?? "Unknown Invoice"
-                    );
-                }
+                // Step 3: the parent the chunks are filed under is the record whose access GOVERNS the document — the
+                // ONE decision (DocumentIndexParentResolver, #1510 / task 177). Among the records the row names (work
+                // assignment, project, matter, invoice, typed or sprk_related*; else the core stamps of a related event
+                // or communication): the one secure record (effective), several of one secure family -> the most
+                // specific of them; none secure -> the most specific; two different secure roots or an unreadable
+                // secure state -> no parent (fail closed). A row naming one record keeps the parent it always had.
+                var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
 
                 // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE
                 // building the index request. Previously this handler called ONLY

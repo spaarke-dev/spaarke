@@ -1426,7 +1426,10 @@ public class InternalUserShareTests
     private Task<IResult> List(string? recordType = "matter") =>
         InternalShareEndpoints.ListAsync(
             new RecordUserSharesQuery(recordType, MatterId),
-            _shares, _users.Client, _flags, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _shares, _users.Client, _flags, InheritedLedger, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 175: the inherited-share provenance /user-shares reads (empty unless a test seeds it).</summary>
+    private AssignedAccessTestDoubles.FakeAssignedAccessStore InheritedLedger { get; } = new();
 
     private void AssertNothingReadOrWritten()
     {
