@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const mockFetch = jest.fn<Promise<Response>, [string, RequestInit?]>();
@@ -27,7 +27,7 @@ jest.mock('../../services/aiSearchIndexService', () => ({
 const idleSearch = {
   results: [],
   totalCount: null,
-  searchState: 'idle',
+  searchState: 'idle' as string,
   hasMore: false,
   errorMessage: null,
   searchTime: null,
@@ -94,6 +94,7 @@ function renderApp() {
 describe('App — document-action failures are shown', () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    idleSearch.searchState = 'idle';
     jest.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
@@ -146,5 +147,38 @@ describe('App — document-action failures are shown', () => {
     expect(
       await screen.findByText("Couldn't send 2 documents to the index: The document was not found.")
     ).toBeInTheDocument();
+  });
+
+  it('the error bar can be dismissed, and a new search hides it', async () => {
+    mockFetch.mockRejectedValue(new ApiError('HTTP 404', 404));
+    const { rerender } = renderApp();
+    const ui = (
+      <FluentProvider theme={webLightTheme}>
+        <App
+          initialQuery=""
+          initialDomain="documents"
+          initialScope="all"
+          initialEntityId=""
+          initialSavedSearchId=""
+          isDark={false}
+        />
+      </FluentProvider>
+    );
+
+    fireEvent.click(screen.getByText('stub-open'));
+    expect(await screen.findByTestId('document-action-error')).toBeInTheDocument();
+
+    // Dismiss
+    fireEvent.click(screen.getByTestId('document-action-error-dismiss'));
+    expect(screen.queryByTestId('document-action-error')).not.toBeInTheDocument();
+
+    // A new error shows the bar again
+    fireEvent.click(screen.getByText('stub-download'));
+    expect(await screen.findByTestId('document-action-error')).toBeInTheDocument();
+
+    // A new search starting (state -> loading) hides it
+    idleSearch.searchState = 'loading';
+    rerender(ui);
+    await waitFor(() => expect(screen.queryByTestId('document-action-error')).not.toBeInTheDocument());
   });
 });
