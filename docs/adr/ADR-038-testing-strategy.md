@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-26) — `ci-cd-unit-test-remediation-r1` Phase 1 Stream B
+Accepted (2026-06-26) — `ci-cd-unit-test-remediation-r1` Phase 1 Stream B. Amended: A1 (2026-08-24), A2 (2026-09-18), A3 (2026-10-07 — orphaned and detached tests).
 
 **This is a STANDALONE ADR.** It does NOT supersede ADR-022 (which is "PCF Platform Libraries — Field-Bound Controls Only", a frontend ADR with no testing scope). Earlier project drafts referenced ADR-022 as a testing source; that was a misattribution corrected in `.claude/constraints/testing.md` line 25 by the same project (task CICD-022).
 
@@ -49,7 +49,7 @@ The portfolio is heavy at the integration boundary, modest at the unit boundary,
 
 ### 2. Eight KEEP path categories as MUST rules
 
-Tests under these paths are KEEP-protected. Deletion requires a same-PR replacement covering the same scenario. Enforced at code-review (Step 9.5 of `task-execute`) by path check, NOT by CSV consultation at runtime.
+Tests under these paths are KEEP-protected. Deletion requires a same-PR replacement covering the same scenario — except an **orphaned** test whose subject was deleted, under the conditions of Amendment A3. Enforced at code-review (Step 9.5 of `task-execute`) by path check, NOT by CSV consultation at runtime.
 
 | Path | Category | Definition |
 |---|---|---|
@@ -85,7 +85,7 @@ The policy is enforced at three layers:
 
 1. **`task-execute` Step 9.5** (modified by task CICD-060) — runs `code-review` + `adr-check` UNCONDITIONALLY on test-modifying PRs, regardless of default rigor level. The override is binding per spec FR-B07.
 2. **`nightly-health.yml` Tier 3 coverage job** — observation only; surfaces drift in nightly issue.
-3. **Path-check deletion safety** — any deletion under the KEEP paths (eight; §2) requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
+3. **Path-check deletion safety** — any deletion under the KEEP paths (eight; §2) requires same-PR replacement, or the orphan evidence of Amendment A3 (Step 9.5 enforces by path inspection, not CSV).
 
 ### 7. Build-vs-Maintain Criteria (Scaffolding-Test Bans — added 2026-06-26 per spec FR-B08)
 
@@ -677,3 +677,52 @@ tools. One is a lock-pick; the other is a key the author cut on purpose.
 - **Does** mean `/test-diet` and `code-review` stop reporting the sanctioned pattern as a ban violation —
   a report that flags the repo's documented, better-than-reflection convention is a **classifier defect**,
   not a finding.
+
+---
+
+## Amendment A3 — orphaned and detached tests may be deleted, with evidence (2026-10-07)
+
+**Raised by**: `module-claude-md-cleanup-r1` / `procedure-calibration-r1` audits · **Ratified**: owner,
+2026-10-07 (*"we should remove orphan tests … and update ADR accordingly"*) · **Path**: CLAUDE.md §6.5 **B**
+
+### The contradiction this closes
+
+§2 says deleting a file under a KEEP path "requires a same-PR replacement covering the same scenario". When
+the production code a test exercises is **removed**, there is no scenario left to cover, so the rule can only
+be met by keeping a test of nothing — or broken by deleting it without a rule. Both happen; neither is
+reviewable. Separately, a test that **never calls production code** (it re-creates the pipeline inside the
+test file and asserts on its own copy) passes whatever production does, yet reads as coverage.
+`tests/unit/Sprk.Bff.Api.Tests/Integration/SseStreamingIntegrationTests.cs` was that shape: 19 tests of
+streaming latency, cancellation, error events, rate limiting and token caching, none of which touched the
+chat endpoint or its services.
+
+### The rule
+
+**1. Orphaned test** — a test whose subject was deleted. It may be deleted **without** a same-PR replacement
+when ALL of these hold, and the PR records the evidence:
+
+| # | Condition | Why |
+|---|---|---|
+| a | The production member, type, route or file it exercises is **deleted** — in this PR, or earlier (name the commit). **Moved, renamed, re-routed or re-implemented does not count**: then the test is updated to follow the behaviour, not deleted. | The most common false orphan is code that moved; deleting its test silently drops coverage of behaviour that still runs |
+| b | The behaviour does not continue elsewhere. The PR says where the behaviour went, or that it is gone. | A guard moved into a filter, or a write path re-homed into another service, is the same obligation in a new place |
+| c | For a removed **route, endpoint or security path**, the absence is protected: a retirement test (`tests/integration/regression/*RouteRetirementTests.cs` pattern — the route now returns 404/410) or an ArchTest replaces the deleted tests. | Removed surfaces get re-added by accident; the retirement test is what stops it |
+| d | For **auth, tenant and data-mutation** tests: an invariant the test asserts that still applies to remaining code (e.g. "cross-tenant read returns 404") is re-targeted at the remaining code, not deleted. | These invariants are rarely specific to one member |
+| e | No other test depends on it (shared fixtures, builders or helpers in the file). | Deleting a file can remove a helper another test compiles against |
+| f | Code-review verifies a and c in the diff (or the named commit) before approving. | A claim is not evidence |
+
+**2. Detached test** — a test that exercises no production code beyond constructing DTOs or calling the
+framework (it re-creates the logic under test inside the test file). It is SCAFFOLDING (the B10 family: it
+cannot fail when production changes). If the behaviour it names matters, **rewrite it against production
+code** at the right KEEP path; otherwise delete it. Under a KEEP path, deleting it still needs condition f
+plus a statement of which behaviours it claimed to cover and where (if anywhere) they are now tested.
+
+`/test-diet` classifies these as **ORPHAN** and **DETACHED**. It still never deletes on its own.
+
+### Scope and non-scope
+
+- **Does not** apply to `tests/Spaarke.ArchTests/**` (Amendment A1): a fitness function's subject is an
+  invariant, not a member, so it is orphaned only when the owner retires the invariant itself.
+- **Does not** apply to the retirement tests that condition c relies on: a test that asserts a removed
+  surface stays removed is never an orphan of that removal.
+- **Does not** relax any of B1–B17, or the same-PR-replacement rule for any test whose subject still exists.
+- **Does** make "the feature was removed" a reviewable deletion instead of an argument at review time.

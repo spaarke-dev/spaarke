@@ -72,8 +72,8 @@ public record ResolveEmailIdentityRequest(
     /// <summary>The RFC 5322 Message-ID — <c>Office.context.mailbox.item.internetMessageId</c>. Required.</summary>
     string? InternetMessageId,
     /// <summary>
-    /// Optional: the Exchange item id of the same message — <c>Office.context.mailbox.item.itemId</c>. The task pane's
-    /// save stores this value in <c>sprk_emailmessageid</c>, so without it a pane-saved email is never found.
+    /// Optional: the Exchange item id of the same message — <c>Office.context.mailbox.item.itemId</c>. A task-pane save
+    /// made before task 121 stored this value in <c>sprk_emailmessageid</c>, so without it such an email is never found.
     /// </summary>
     string? ExchangeItemId = null
 );

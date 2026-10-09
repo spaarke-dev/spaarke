@@ -77,6 +77,30 @@ and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationMo
 `projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
 
 ---
+###### 2026-10-07 — Procedure calibration: guardrails, not caps (procedure-calibration-r1)
+
+The owner's rule: *"we want guardrails but not such strong constraints that we cause problems. A hard limit like 'maximum 2 fixes' or 'maximum 20 KB' limits the judgement that there may be legitimate situations that require the added resources."* An independent review sorted every numeric limit and absolute in the instruction set into platform fact / owner hard stop / trigger-written-as-cap / unbounded / fine. This entry fixes the caps and the open loops; safety rules (secrets and Key Vault, endpoint auth, the no-client-secret guard, tenant isolation, fail-closed, no plugins, "never drop a real defect") stay absolute.
+
+**Caps that blocked legitimate work → signals or triggers:**
+- `code-review`: metric thresholds (> 500 lines, > 20 public methods, > 3 interfaces) were "Critical = must fix before merge", contradicting root §11.5. They are now look-closer signals reported without severity; Smell 5 is Suggestion/Warning, never Critical on a count; the size-only smells are cohesion prompts. Findings are classified F/K per task-execute Step 9.5, and every F-class finding is fixed.
+- `constraints/pcf.md`: "MUST achieve 90%+ coverage on shared components" removed (ADR-038 bans coverage targets).
+- "≤15 DI lines" is the readability target from ADR-010's rationale, not a hard count — in `constraints/api.md`, the ADR-010 and ADR-001 concise files, `.claude/adr/INDEX.md`, `adr-aware`, `adr-check`'s validation rules, `code-review`'s checklist and `mcp-tool-handler`. ADR-012 concise loses its 90% coverage MUST too.
+- Context-percentage stops (60/70/85%) in `task-execute`, `context-handoff`, `project-continue`, `project-pipeline` → event triggers (user/harness reports context high, compaction notice, after a deploy, before a large load). Claude cannot measure its own context (root §5).
+- `task-execute` Step 8.0: "MUST delegate 4+ files" → a judgment call for independent, substantial work, recorded in one line.
+- Verifier passes (root §8.5, task-execute Step 9.5): one by default (two for auth/security/tenant), more when a fix changes the approach, with a one-line reason. Never stops a fix.
+- `adr-check`: check the ADRs that apply to the change — adr-aware Rule 1, code-review's always-check set, and one pass over `.claude/adr/INDEX.md` as the backstop for ADRs the mapping does not reach — listing what was considered; grep-checking every ADR is for full scans and 090 wrap-up. Its index is now `.claude/adr/INDEX.md`.
+- `code-review` metrics: every file over a look-closer value gets a one-line cohesion verdict in the review, so a signal is never silently ignored.
+- `project-pipeline`: the 500-word spec minimum is a prompt to check substance, not a stop; `doc-drift-audit`'s "auto-fix ≥ 50%" target dropped; `task-create`'s /goal turn cap is a raisable default.
+
+**Open loops → stopping conditions:** failed wave tasks are retried only after the cause is named and addressed; an unexplained failure is escalated.
+
+**ADR-038 Amendment A3 (owner-ratified 2026-10-07): orphaned and detached tests.** An orphaned test (its subject was *deleted*, not moved) may be deleted without a same-PR replacement when the PR carries evidence: the deletion named; the behaviour not continuing elsewhere; a retirement test for a removed route or security path; invariants still in force re-targeted; no dependent tests; verified at code-review. A detached test (re-creates the logic in the test file, calls no production code) is rewritten against production code or deleted. Retirement tests and ArchTests are never orphans. Applied in ADR-038 §2/§6, `constraints/testing.md`, `tests/CLAUDE.md`, `task-execute` Step 9.5, `TEST-ARCHITECTURE.md` and `test-diet` (new ORPHAN / DETACHED classes and checks 13–14).
+
+**Hard stops given a reason or an escalation path:** HIGH CVE with no upstream fix (`.claude/rules/bff-hygiene.md` item 5: advisory ID, reachability, follow-up, owner sign-off — the finding stays open until the sign-off exists); Plan Mode in a non-interactive session (Steps 0–1.7 read-only, then stop with a report); the 6-agent cap (API-overload guard); ≥ 60 MB publish size (roll back, extract, or ADR-029 amendment); provisioning Step 0.5 failures (record, remediate, resume).
+
+**One rule, one place:** the publish-size rule was stated six ways across seven files with two stale baselines (49.63 / 44.96 MB) and an uncompressed `du -sh`; `task-execute`, `code-review`, `bff-extensions.md`, `provisioning.md`, `azure-deployment.md` now point to `bff-hygiene.md` item 4. Also fixed: `task-execute` Step 9.5 protected only four of the eight KEEP paths from deletion; `pac pcf push` / "4 version locations" in `task-create` and `task-execute`; Code Pages' location and React version in `constraints/pcf.md`; the skip rule (a reason in the `Skip` string plus `[Trait("status", "real-bug-pending-fix" | "flaky-quarantined")]`; the old `skip-reason` trait was used nowhere); the context-recovery procedure's percentage triggers; ADR-029's 49.63 MB baseline marked historical; remaining "4 locations" / `pac pcf push` release steps; `ThrowIfNull` guidance aligned with code-review; `project-setup`'s obsolete `MAX_THINKING_TOKENS`; `ai-procedure-maintenance` numbering and its "CLAUDE.md ADR table" step.
+
+---
 ###### 2026-10-07 — Module CLAUDE.md files corrected against the code: 89,166 → 45,733 bytes (−43,433) across 8 files (module-claude-md-cleanup-r1)
 
 A module `CLAUDE.md` loads whenever an agent reads a file in its folder, and agents treat it as ground truth. Checked line by line against the code, the older files were giving wrong instructions, not just long ones. Originals are archived verbatim at `.claude/archive/2026-10-07/modules/`. Each file now carries maintainer notes in a stripped HTML comment, with a **size target, not a cap**.

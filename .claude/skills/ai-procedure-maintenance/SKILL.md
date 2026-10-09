@@ -103,7 +103,8 @@ When creating a new Architecture Decision Record:
 
 □ 9. UPDATE .claude/adr/INDEX.md (NOT root CLAUDE.md — it has no ADR table)
    Add a root CLAUDE.md §17 trigger ONLY if agents must read the ADR before a specific
-   action they would not otherwise connect to it — one line, ≤ 200 chars (see Checklist F).
+   action they would not otherwise connect to it — one line, as short as it can be while keeping any 🔒 guard
+   (aim for ~200 chars; see Checklist F).
 
 □ 10. UPDATE CROSS-REFERENCE-MAP.md
    Location: /CROSS-REFERENCE-MAP.md
@@ -272,7 +273,7 @@ When modifying the main instruction file:
 □ 5. STATE the byte delta in the .claude/CHANGELOG.md entry, and run /doctor prompt-audit
    (Claude Code ≥ 2.1.283) after the change.
 
-□ 4. RUN consistency check
+□ 6. RUN consistency check
    Grep for old paths that might have been left behind
 ```
 
@@ -337,7 +338,7 @@ Step 8: Update skill mappings:
         - adr-aware: Add "Rate Limiting" → ADR-023 to Rule 1
         - task-execute: Add rate-limiting pattern to Step 4b
         - task-create: Add to Step 3.4 api row
-Step 9: Add to CLAUDE.md ADR table (if high-impact)
+Step 9: Add a root CLAUDE.md §17 trigger only if agents must read it before a specific action (Checklist A9) — root has no ADR table
 Step 10: Add to CROSS-REFERENCE-MAP.md
 Step 11: Grep verify: Search "ADR-023" appears consistently
 ```

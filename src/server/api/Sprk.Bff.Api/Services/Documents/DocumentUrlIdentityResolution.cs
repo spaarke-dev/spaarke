@@ -367,12 +367,13 @@ public static class DocumentUrlIdentityResolution
     /// (<c>identity_resolution_unavailable</c>) when Dataverse cannot answer — never "not saved".
     /// </summary>
     /// <remarks>
-    /// <para><b>Why two keys.</b> <c>sprk_emailmessageid</c> holds whatever the save sent as the email's
-    /// <c>internetMessageId</c>. The ribbon Quick Save sends the RFC Message-ID; the task pane sends the Exchange item id
+    /// <para><b>Why two keys.</b> <c>sprk_emailmessageid</c> holds the RFC Message-ID for every save since task 121
+    /// (<c>OfficeEmailEnricher.ResolveStoredMessageId</c>). Before it, the task pane sent the Exchange item id
     /// (<c>Office.context.mailbox.item.itemId</c> — measured live 2026-10-08: every recent pane save stores an
-    /// <c>AAMk…</c>/<c>AQMk…</c> value). Matching only the RFC id would answer "not saved" for every pane-saved email,
-    /// which is the report this route exists to fix. The Exchange item id is mailbox-specific, so it only ever matches
-    /// a save made from the caller's own mailbox; the RFC id matches across mailboxes.</para>
+    /// <c>AAMk…</c>/<c>AQMk…</c> value), and a request without a Message-ID (an older pane, a draft) still stores the
+    /// item id. Matching only the RFC id would answer "not saved" for those emails, which is the report this route
+    /// exists to fix. The Exchange item id is mailbox-specific, so it only ever matches a save made from the caller's
+    /// own mailbox; the RFC id matches across mailboxes.</para>
     /// <para><b>One candidate, one authorization.</b> Only the newest row is returned; the route then authorizes the
     /// caller on THAT row. When the caller may not read it, the answer is 403 — an older copy the caller could read is
     /// deliberately not searched for: trying rows until one authorizes would turn the route into an oracle over which

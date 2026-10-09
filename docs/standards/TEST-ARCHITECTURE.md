@@ -76,7 +76,7 @@ These eight categories are the **only** test categories Spaarke maintains. (The 
 
 ### Deletion safety (binding)
 
-Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these eight paths requires a **same-PR replacement** of equivalent coverage in the same category. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
+Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these eight paths requires a **same-PR replacement** of equivalent coverage in the same category — or, for an orphaned test whose subject was deleted, the evidence of ADR-038 Amendment A3. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
 
 ### What is NOT a KEEP category
 

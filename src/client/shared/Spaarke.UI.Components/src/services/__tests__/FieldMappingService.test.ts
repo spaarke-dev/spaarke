@@ -59,6 +59,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../EntityCreationService';
 import { _resetNavPropCacheForTests } from '../PolymorphicResolverService';
 import type { IFieldMappingRule } from '../../types/FieldMappingTypes';
+import { apiErrorFor } from '../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -137,16 +138,15 @@ function makeAuthenticatedFetchForPair(
 }
 
 /**
- * Mock authenticatedFetch simulating "no profile configured" — a plain 404,
- * exactly as `fetchProfile` treats it (graceful no-op, no warning recorded).
+ * Mock authenticatedFetch simulating "no profile configured" the way production
+ * delivers it: `@spaarke/auth`'s authenticatedFetch THROWS `ApiError(404)` — it
+ * never returns a non-2xx Response. `fetchProfile` must treat it as a graceful
+ * no-op with no warning recorded.
  */
 function makeAuthenticatedFetch404(): AuthenticatedFetchFn {
-  return jest.fn(async () => ({
-    ok: false,
-    status: 404,
-    json: jest.fn().mockResolvedValue(undefined),
-    text: jest.fn().mockResolvedValue(''),
-  })) as unknown as AuthenticatedFetchFn;
+  return jest.fn(async () => {
+    throw apiErrorFor(404, { title: 'Not Found', status: 404, detail: 'No field-mapping profile for this pair.' });
+  }) as unknown as AuthenticatedFetchFn;
 }
 
 /** Mock IDataService whose retrieveRecord returns a fixed record + records call count/args. */
@@ -761,6 +761,46 @@ describe('FieldMappingService — graceful degradation (task 015)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     // No source record was read — the engine never got past the profile fetch.
     expect(dataService._retrieveRecordCalls).toHaveLength(0);
+  });
+
+  it('a 404 RETURNED by a non-throwing fetch is the same silent no-op', async () => {
+    const fetchMock = jest.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: jest.fn().mockResolvedValue(undefined),
+      text: jest.fn().mockResolvedValue(''),
+    })) as unknown as AuthenticatedFetchFn;
+
+    const result = await applyFieldMappings({
+      sourceEntity: 'sprk_matter',
+      sourceId: SOURCE_ID,
+      targetEntity: 'sprk_invoice',
+      payload: {},
+      dataService: makeDataService({}),
+      authenticatedFetch: fetchMock,
+      bffBaseUrl: 'https://bff.example.com',
+    });
+
+    expect(result).toEqual({ profileFound: false, fieldsMapped: [], warnings: [] });
+  });
+
+  it('a thrown non-404 ApiError is still reported as a warning (a real failure, not "no profile")', async () => {
+    const fetchMock = jest.fn(async () => {
+      throw apiErrorFor(500, { title: 'Server error', status: 500, detail: 'Dataverse unavailable.' });
+    }) as unknown as AuthenticatedFetchFn;
+
+    const result = await applyFieldMappings({
+      sourceEntity: 'sprk_matter',
+      sourceId: SOURCE_ID,
+      targetEntity: 'sprk_invoice',
+      payload: {},
+      dataService: makeDataService({}),
+      authenticatedFetch: fetchMock,
+      bffBaseUrl: 'https://bff.example.com',
+    });
+
+    expect(result.profileFound).toBe(false);
+    expect(result.warnings).toEqual(['Field-mapping profile fetch failed (HTTP 500): Dataverse unavailable.']);
   });
 
   it('a Copy rule whose source field is absent from the parent record warns and skips (FR-09) — other rules still apply', async () => {
