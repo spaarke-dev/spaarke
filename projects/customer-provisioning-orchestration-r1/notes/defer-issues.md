@@ -152,6 +152,28 @@ redeploy; prove a second concurrent run for one customer is refused.
 
 ---
 
+### ISS-009 — External-contact bind-by-email (E11) binds contacts this stamp never invited
+
+| Field | Value |
+|---|---|
+| **Status** | Open — UAC-r2 code; before any stamp accepts CIAM tokens (T240d step 2) |
+| **Urgency** | before external contacts are enabled on a stamp |
+| **Filed** | 2026-10-09 (T240d design) |
+| **Source** | `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs` `// E11` (~line 659) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1485 |
+
+**Description**
+
+A CIAM sign-in whose verified email matches an unbound contact is bound to it whether or not this stamp invited the
+person. With one shared CIAM tenant, an account created for customer X can be bound to customer Y's same-email contact.
+
+**Suggested fix**
+
+Pending-invite marker written by this stamp's invitation; bind by email only when it exists; consume on bind. Also fixes
+"second customer invites a person who already has a CIAM account" (fails today). Design: `notes/t240d-ciam-external-contacts-design.md` §5–§6.
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
