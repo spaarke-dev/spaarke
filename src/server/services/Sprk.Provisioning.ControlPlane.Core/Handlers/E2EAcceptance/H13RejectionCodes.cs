@@ -91,6 +91,34 @@ public static class H13Rejections
     /// <summary>Task 230b: <c>InterStepState.bffAppRegId</c> (H3's output) is missing — the keyless proof's token audience.</summary>
     public const string MissingBffAppRegId = "h13-missing-bff-app-reg-id";
 
+    // ---- Secure-record isolation census (task 260, ISS-014) ----
+
+    /// <summary>
+    /// The stamp BFF's isolation census reported <c>findings</c>: a principal reaches the Secure Record unit (role depth,
+    /// a user in the unit, an owner-team member, the owner role held elsewhere) or the owner role misses a codified table.
+    /// QuarantineRequired — the findings are in the diagnostic.
+    /// </summary>
+    public const string SecureIsolationNotIsolated = "h13-secure-isolation-not-isolated";
+
+    /// <summary>
+    /// The census was <c>inert</c>: the BFF finds no Secure Record unit (by its <c>SecureRecord:BusinessUnitName</c>), so
+    /// it asserted nothing. H7b creates that unit before H13, so this is a broken stamp, not a fresh one —
+    /// QuarantineRequired.
+    /// </summary>
+    public const string SecureIsolationInert = "h13-secure-isolation-inert";
+
+    /// <summary>
+    /// The census call failed with a verdict: the BFF refused the L2 identity (401/403, a token without the role), answered
+    /// 500, or answered a shape or status this build does not know. QuarantineRequired (fail-closed, never a skip).
+    /// </summary>
+    public const string SecureIsolationCensusFailed = "h13-secure-isolation-census-failed";
+
+    /// <summary>
+    /// No verdict: the BFF could not read the census (<c>error</c>), or transport / timeout / throttling, or a BFF build
+    /// without the route (404). Resumable.
+    /// </summary>
+    public const string SecureIsolationInconclusive = "h13-secure-isolation-inconclusive";
+
     // ---- Keyless stamp (task 230b, owner D13) ----
 
     /// <summary>
@@ -189,6 +217,9 @@ public static class H13Gates
 
     /// <summary>Flips to Verified when ARM shows every keyed stamp resource keyless and no key setting on any slot (task 230b).</summary>
     public const string StampKeylessVerified = "h13-stamp-keyless";
+
+    /// <summary>Flips to Verified when the stamp BFF's secure-record isolation census answers <c>isolated</c> (task 260).</summary>
+    public const string SecureIsolationVerified = "h13-secure-isolation";
 
     /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";

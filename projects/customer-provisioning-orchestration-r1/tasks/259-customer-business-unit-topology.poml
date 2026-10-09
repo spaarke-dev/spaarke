@@ -3,7 +3,7 @@
   <metadata>
     <title>Customer business-unit topology: H10 creates the customer's unit (sibling of Secure Record) with the BFF app users in it; H11 puts guests in it; H13 requires the isolation census (ISS-010 / #1486)</title>
     <phase>Model 1 dedicated-stamp remediation — T186 blocker (ISS-010)</phase>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security topology of every customer environment; a wrong placement exposes every secure record (F1).</rigor-reason>
     <model-tier>opus</model-tier>
