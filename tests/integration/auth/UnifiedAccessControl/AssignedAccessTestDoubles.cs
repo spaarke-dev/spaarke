@@ -784,7 +784,9 @@ internal static class AssignedAccessTestDoubles
 
         public FakeAssignedAccessStore Store { get; }
         public GrantTable Grants { get; } = new();
-        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } = new(RootRecordFlags.None);
+        /// <summary>The flag reads. Settable (task 174) so a test can give it a filing world to walk; by default nothing is
+        /// filed under anything.</summary>
+        public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; set; } = new(RootRecordFlags.None);
         /// <summary>The deny list; replace it to model an entry being deactivated (the wall lifted).</summary>
         public GrantPolicyTestDoubles.SeamNoAccessListReader DenyList { get; set; } = new();
         public InMemoryContactIdentityStore Identities { get; } = new();
