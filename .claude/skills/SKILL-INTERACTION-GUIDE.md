@@ -528,7 +528,7 @@ task-execute loads task 010-deploy-pcf.poml
     ↓
     EXPLICIT CALL: dataverse-deploy
       ├─→ Detect PCF control type
-      ├─→ Run: pac pcf push
+      ├─→ Run: pcf-deploy (solution-ZIP import — never pac pcf push for a release)
       ├─→ Verify deployment
       └─→ Return: Success/Failure
   ↓

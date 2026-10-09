@@ -138,7 +138,7 @@ The Theme Menu adds a flyout submenu to the command bar allowing users to switch
 
 1. Package the ribbon folder contents as an unmanaged solution ZIP
 2. Import via **Settings > Solutions > Import**
-3. Publish all customizations
+3. Publish only the imported components (`scripts/Import-SolutionScoped.ps1` does this)
 
 ### Using ribbon-edit Skill
 

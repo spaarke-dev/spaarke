@@ -13,6 +13,7 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
+import { isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import { search as searchDocuments } from '../services/SemanticSearchApiService';
 import type {
   DocumentSearchRequest,
@@ -138,6 +139,22 @@ function buildSearchIndexNameFragment(searchIndexName: string | null | undefined
  * Extract a user-friendly error message from an API error or generic Error.
  */
 function extractErrorMessage(err: unknown): string {
+  // What authenticatedFetch THROWS before handleApiResponse ever sees a non-OK response: AuthError once
+  // its 401 retries are spent, ApiError(message, status, problemDetails) for anything else. The server's
+  // text is in problemDetails / message, not top-level detail/title.
+  if (isAuthFailure(err)) {
+    return 'You do not have permission to perform this search. Please sign in again.';
+  }
+  if (isApiError(err)) {
+    if (err.status === 429) {
+      return 'Too many requests. Please wait a moment and try again.';
+    }
+    if (err.status === 403) {
+      return 'You do not have permission to perform this search. Please sign in again.';
+    }
+    const problem = problemOf(err);
+    return problem?.detail || problem?.title || 'An unexpected error occurred.';
+  }
   // ApiError (thrown by handleApiResponse)
   if (typeof err === 'object' && err !== null && 'status' in err) {
     const apiError = err as ApiError;

@@ -112,7 +112,7 @@ For each user referenced, read `usersettingscollection(<systemuserid>)?$select=t
   1. `GET EntityDefinitions(LogicalName='sprk_event')/Attributes(LogicalName='<col>')/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata`
   2. Set `CanChangeDateTimeBehavior.Value = true` and `PUT` the whole body back to `EntityDefinitions(LogicalName='sprk_event')/Attributes(<MetadataId>)` with `MSCRM.MergeLabels: true`.
   3. Repeat with `DateTimeBehavior = {"Value":"DateOnly"}`. Format must already be `DateOnly`; otherwise the update throws.
-  4. Then `POST PublishXml` with `{"ParameterXml":"<importexportxml><entities><entity>sprk_event</entity></entities></importexportxml>"}`. Publish **this entity only, never `PublishAllXml`**.
+  4. Then `POST PublishXml` with `{"ParameterXml":"<importexportxml><entities><entity>sprk_event</entity></entities></importexportxml>"}`. Publish **this entity only, never a tenant-wide publish**.
 
 ### Step 4: Verify the metadata
 

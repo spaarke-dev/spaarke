@@ -556,6 +556,9 @@ Run `Setup-EntraInfrastructure.ps1` to add permissions and grant consent, or che
 **Cause**: The Exchange Application Access Policy does not grant the BFF app registration send-as permission for the `demo@demo.spaarke.com` shared mailbox.
 
 **Fix**: Create or update the Exchange Application Access Policy:
+
+> **Legacy mechanism — check before use.** Environments provisioned by the control plane get mailbox access through Exchange *RBAC for Applications*, granted by handler H14a to the stamp's managed identity only ([`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §4.2.1, §7.9). Microsoft calls Application Access Policies legacy. Under RBAC for Applications the mailbox roles must not also be granted as Entra app roles (§7.7): Exchange adds the two together, so an Entra grant reaches every mailbox. The steps below apply only to an environment set up before 2026-10-04 that still uses a policy.
+
 ```powershell
 New-ApplicationAccessPolicy -AppId "{bff-app-id}" -PolicyScopeGroupId "{mail-enabled-security-group}" -AccessRight RestrictAccess
 ```

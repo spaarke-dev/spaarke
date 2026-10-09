@@ -430,8 +430,13 @@ function StageIcon({ status }: { status: StageStatus['status'] }): React.ReactEl
 export interface SaveFlowProps {
   /** Host type (outlook or word) */
   hostType: HostType;
-  /** Current item ID */
+  /** Current item ID (an email's Exchange item id; a Word document's URL) */
   itemId?: string;
+  /**
+   * Task 121: the email's RFC 5322 Message-ID (Outlook read mode). What the save sends as `email.internetMessageId`
+   * and the key the "Related to" suggestions are looked up by — never {@link itemId}.
+   */
+  internetMessageId?: string;
   /** Display name of the current item */
   itemName?: string;
   /** Available attachments (Outlook only) */
@@ -608,6 +613,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const {
     hostType,
     itemId,
+    internetMessageId,
     itemName,
     attachments = [],
     senderEmail,
@@ -1123,6 +1129,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       attachments,
       ...(activeTarget ? { saveTarget: activeTarget } : {}),
       ...(itemId !== undefined ? { itemId } : {}),
+      ...(internetMessageId !== undefined ? { internetMessageId } : {}),
       ...(itemName !== undefined ? { itemName } : {}),
       ...(documentName ? { documentName } : {}),
       ...(senderEmail !== undefined ? { senderEmail } : {}),
@@ -1141,6 +1148,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [
       hostType,
       itemId,
+      internetMessageId,
       itemName,
       documentName,
       attachments,
@@ -1361,13 +1369,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // needing to know which host is running. Best-effort: a 404 (email not captured) / failure → no
   // cards (the user searches instead — never an auto-filed guess). The browser test harness seeds
   // demo candidates so the card UX is iterable.
+  // Task 121: looked up by the RFC Message-ID — the route matches `sprk_communication.sprk_internetmessageid`, which an
+  // inbound capture and Quick Save both write. It used to pass the Exchange item id, which no captured communication
+  // carries, so the cards never appeared for an email captured from a mailbox. No Message-ID (a compose item) → no cards.
   useEffect(() => {
-    if (!canSuggestRelatedRecords || !itemId) return;
+    if (!canSuggestRelatedRecords || !internetMessageId) return;
     let cancelled = false;
     setCandidatesLoading(true);
     (async () => {
       try {
-        let candidates = await fetchRelatedCandidates(itemId);
+        let candidates = await fetchRelatedCandidates(internetMessageId);
         if (candidates.length === 0 && isBrowserTestMode()) {
           candidates = DEMO_RELATED_CANDIDATES;
         }
@@ -1381,7 +1392,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [canSuggestRelatedRecords, itemId]);
+  }, [canSuggestRelatedRecords, internetMessageId]);
 
   // §C — when a save completes, hand the selected "Related to" record to the host once so it can
   // seed the Create To Do tab's regarding. Reset on a fresh save (idle/selecting) so a second save

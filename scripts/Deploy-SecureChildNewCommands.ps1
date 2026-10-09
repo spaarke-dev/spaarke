@@ -91,6 +91,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib' 'Publish-SolutionComponents.ps1')
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
 if ($Apply -and -not $ExportDir) { throw '-Apply needs -ExportDir: the unpacked fresh export of the ribbon solution.' }
@@ -261,9 +262,11 @@ if ($Apply) {
     # The import names its target explicitly (task 147 r1c-v1, verifier item 5): without --environment pac imports into its
     # ACTIVE auth profile's environment, which need not be -EnvironmentUrl - the web resource above and the import would
     # then land in two different environments.
-    pac solution import --environment $EnvironmentUrl --path $zip --publish-changes
-    if ($LASTEXITCODE -ne 0) { throw 'pac solution import failed.' }
-    Invoke-RestMethod -Method Post -Headers $writeHeaders -Uri "$Api/PublishAllXml" -Body '{}' | Out-Null
+    # Task 130 (D-83): import WITHOUT a tenant-wide publish, then publish only this solution's components plus the
+    # web resource written above (it may sit outside the solution).
+    $scriptId = (Get-WebResource $ScriptName).webresourceid
+    Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $zip -SolutionUniqueName $SolutionUniqueName `
+        -ImportArgs @() -Context @{ Api = $Api; Headers = $writeHeaders } -ExtraWebResources @($scriptId) | Out-Null
     Ok 'imported and published - now run -Verify, then check the forms by hand (below)'
     Write-Host @'
   Manual check on each root main form, and on one child form (an event of a secure record: its To Do subgrid):

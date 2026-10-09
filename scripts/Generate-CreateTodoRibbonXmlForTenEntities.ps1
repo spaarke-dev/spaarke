@@ -85,9 +85,7 @@ function New-CreateTodoRibbonDiffXml {
    2. Export the solution.
    3. Merge the <RibbonDiffXml> below into the solution's customizations.xml
       <RibbonDiffXml> for entity '$Entity'.
-   4. Re-pack and import via 'pac solution import' with its publish-changes switch.
-      (Not written with the switch's two leading hyphens: a double hyphen is not
-      allowed inside an XML comment, and the fragment must stay well-formed.)
+   4. Re-pack and import with scripts/Import-SolutionScoped.ps1 (imports, then publishes only this solution's components).
 
   Prerequisite (already met):
     sprk_wizard_commands.js web resource is deployed and exposes

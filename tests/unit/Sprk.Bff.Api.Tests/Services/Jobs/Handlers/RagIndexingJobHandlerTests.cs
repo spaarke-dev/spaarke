@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -74,6 +75,7 @@ public class RagIndexingJobHandlerTests
             _idempotencyServiceMock.Object,
             _dataverseServiceMock.Object,
             _searchIndexNameResolverMock.Object,
+            TestDocumentIndexParentResolver.Over(_dataverseServiceMock.Object),
             telemetry,
             _loggerMock.Object);
     }
@@ -719,6 +721,80 @@ public class RagIndexingJobHandlerTests
         // Assert — indexing succeeded; Dataverse update failure is non-fatal
         result.Status.Should().Be(JobStatus.Completed,
             "Dataverse tracking write is non-critical — indexing succeeded so the job outcome is Completed");
+    }
+
+    #endregion
+
+    #region Parent recovery (#1510, unified-access-control-r2 task 177)
+
+    private static readonly Guid FiledDocument = Guid.Parse("4d000000-0000-4000-8000-0000000017b1");
+    private static readonly Guid FiledProject = Guid.Parse("4d000000-0000-4000-8000-0000000017b2");
+
+    private static JobContract ParentlessJobFor(Guid documentId)
+    {
+        var payload = new RagIndexingJobPayload
+        {
+            TenantId = TestTenantId,
+            DriveId = TestDriveId,
+            ItemId = TestItemId,
+            FileName = TestFileName,
+            DocumentId = documentId.ToString("D"),
+            Source = "DocumentRelocation",
+        };
+        return new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = RagIndexingJobHandler.JobTypeName,
+            SubjectId = documentId.ToString("D"),
+            Attempt = 1,
+            MaxAttempts = 3,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
+        };
+    }
+
+    private Func<FileIndexRequest?> CaptureIndexRequest()
+    {
+        FileIndexRequest? captured = null;
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 2, duration: TimeSpan.FromSeconds(1)));
+        return () => captured;
+    }
+
+    /// <summary>#1510 probe: a payload with no parent but a document id is indexed under the document row's parent.</summary>
+    [Fact]
+    public async Task Issue1510_APayloadWithNoParent_IsIndexedUnderTheParentTheDocumentRowNames()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        _dataverseServiceMock
+            .Setup(x => x.RetrieveAsync("sprk_document", FiledDocument, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", FiledDocument)
+            {
+                ["sprk_project"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_project", FiledProject) { Name = "Harbor Expansion" },
+            });
+
+        var result = await _handler.ProcessAsync(ParentlessJobFor(FiledDocument), CancellationToken.None);
+
+        result.Status.Should().Be(JobStatus.Completed);
+        indexed()!.ParentEntity.Should().Be(new ParentEntityContext("project", FiledProject.ToString(), "Harbor Expansion"));
+    }
+
+    /// <summary>The row cannot be read: the file is still indexed, without a parent, and the job succeeds.</summary>
+    [Fact]
+    public async Task Issue1510_AnUnreadableDocumentRow_IndexesWithoutAParent_AndTheJobSucceeds()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        _dataverseServiceMock
+            .Setup(x => x.RetrieveAsync("sprk_document", FiledDocument, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var result = await _handler.ProcessAsync(ParentlessJobFor(FiledDocument), CancellationToken.None);
+
+        result.Status.Should().Be(JobStatus.Completed);
+        indexed()!.ParentEntity.Should().BeNull();
     }
 
     #endregion

@@ -681,7 +681,8 @@ export class OutlookAdapter implements IHostAdapter {
       // task 040 / FR-19: triage/auto-match suggestions (spec.md Assumptions Outlook-only list) —
       // unconditionally true here, matching the pre-existing `hostType !== 'outlook'` guard this
       // formalizes (`SaveFlow.tsx`'s related-candidates fetch). The fetch is itself best-effort and
-      // already no-ops without an `itemId`, so this capability need not additionally restrict by mode.
+      // already no-ops without an `internetMessageId` (task 121; a compose item has none), so this capability need
+      // not additionally restrict by mode.
       canSuggestRelatedRecords: true,
       // task 020 / FR-06: unconditionally FALSE — not because Outlook cannot supply a name
       // (`getSubject()` returns the email subject), but because the Save tab's Document Name box
@@ -873,8 +874,9 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * Task 120 (UAT round 12 O6): the open email's identity keys for `POST /api/documents/resolve-email-identity` —
-   * the RFC Message-ID and the Exchange item id, each exactly as Office reports it. Both are sent because the two save
-   * paths store different ones on the saved `.eml` (Quick Save the Message-ID, the task pane the item id).
+   * the RFC Message-ID and the Exchange item id, each exactly as Office reports it. Both are sent because a task-pane
+   * save made before task 121 stored the item id on the saved `.eml` (every save now stores the Message-ID). The Save
+   * tab reads the Message-ID from here too, for the save request (task 121).
    *
    * @returns `null` when the item has no Message-ID.
    * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` outside read mode (see `canResolveEmailIdentity`).

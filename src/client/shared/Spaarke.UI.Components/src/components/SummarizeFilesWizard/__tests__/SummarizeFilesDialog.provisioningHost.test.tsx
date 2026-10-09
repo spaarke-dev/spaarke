@@ -18,6 +18,7 @@ import type { IFollowOnGridProps } from '../../WizardFollowOns';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { SummarizeFilesDialog } from '../SummarizeFilesDialog';
 import { classifyProvisioningFailure, provisionSecureProject } from '../../CreateProjectWizard/provisioningService';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // Provisioning runs for real; the one test of the dialog's never-expected THROW (F6 row 5) overrides it once.
 jest.mock('../../CreateProjectWizard/provisioningService', () => {
@@ -93,12 +94,9 @@ jest.mock('../../CreateProjectWizard/projectService', () => ({
 const BFF = 'https://bff.example.test';
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 
+// The production shape: `@spaarke/auth`'s authenticatedFetch THROWS ApiError(500) with the parsed ProblemDetails.
 const problem = (reasonCode: string) =>
-  ({
-    ok: false,
-    status: 500,
-    json: async () => ({ reasonCode, detail: 'operator text' }),
-  }) as unknown as Response;
+  apiErrorFor(500, { title: 'Provisioning failed', status: 500, reasonCode, detail: 'operator text' });
 
 const ok = {
   ok: true,
@@ -159,7 +157,7 @@ describe('SummarizeFilesDialog — routes a provisioning failure to the right de
   it('renders "Try securing again" for a retryable failure, adds no warning, and the action secures the SAME project', async () => {
     const authFetch = jest
       .fn()
-      .mockResolvedValueOnce(problem('sdap.provision.container_creation_failed'))
+      .mockRejectedValueOnce(problem('sdap.provision.container_creation_failed'))
       .mockResolvedValue(ok);
 
     const success = await finishWithProvisioningFailure(authFetch);
@@ -176,7 +174,7 @@ describe('SummarizeFilesDialog — routes a provisioning failure to the right de
   });
 
   it('shows a non-retryable failure as its warning, with no action and no retry advice', async () => {
-    const authFetch = jest.fn().mockResolvedValue(problem('sdap.provision.resume_creator_unavailable'));
+    const authFetch = jest.fn().mockRejectedValue(problem('sdap.provision.resume_creator_unavailable'));
 
     const success = await finishWithProvisioningFailure(authFetch);
 

@@ -2,8 +2,7 @@ using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
-using NSubstitute;
-using NSubstitute.Core;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -2113,7 +2112,7 @@ public partial class ChildRecordContainerResolutionTests
     {
         private readonly HashSet<string> _securable;
         private readonly Dictionary<(string Entity, Guid Id), Func<Entity>> _rows = new();
-        private readonly IGenericEntityService _service = Substitute.For<IGenericEntityService>();
+        private readonly Mock<IGenericEntityService> _service = new();
 
         private readonly HashSet<string> _known = new(StringComparer.Ordinal)
         {
@@ -2134,12 +2133,12 @@ public partial class ChildRecordContainerResolutionTests
             _known.ExceptWith(unknown ?? []);
 
             _service
-                .RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
+                .Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, Guid id, string[] columns, CancellationToken _) =>
                 {
-                    var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
+                    var key = (entity, id);
                     return _rows.TryGetValue(key, out var row)
-                        ? Task.FromResult(OnlyRequestedColumns(row(), call.ArgAt<string[]>(2)))
+                        ? Task.FromResult(OnlyRequestedColumns(row(), columns))
                         : throw new InvalidOperationException($"Unmodelled read: {key.Item1} {key.Item2}");
                 });
         }
@@ -2423,7 +2422,7 @@ public partial class ChildRecordContainerResolutionTests
         public RecordingRestampQueue Queue { get; } = new();
 
         public RecordContainerResolver Resolver() =>
-            new(Registry(), _service, NullLogger<RecordContainerResolver>.Instance, Queue);
+            new(Registry(), _service.Object, NullLogger<RecordContainerResolver>.Instance, Queue);
 
         /// <summary>The REAL communication adapter over the REAL record resolver — only Dataverse rows are doubled.</summary>
         public CommunicationContainerResolver CommunicationResolver() =>
@@ -2431,31 +2430,31 @@ public partial class ChildRecordContainerResolutionTests
 
         private ISecurableEntityRegistry Registry()
         {
-            var registry = Substitute.For<ISecurableEntityRegistry>();
-            registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(call => Task.FromResult(
-                    _classificationOverrides.TryGetValue(call.Arg<string>(), out var overridden)
+            var registry = new Mock<ISecurableEntityRegistry>();
+            registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, CancellationToken _) => Task.FromResult(
+                    _classificationOverrides.TryGetValue(entity, out var overridden)
                         ? overridden
-                        : TestEntityCatalog.Classify(call.Arg<string>(), _securable, _known)));
-            registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+                        : TestEntityCatalog.Classify(entity, _securable, _known)));
+            registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult<IReadOnlySet<string>>(_securable));
-            return registry;
+            return registry.Object;
         }
 
-        private IEnumerable<ICall> ReadCalls() =>
-            _service.ReceivedCalls().Where(c => c.GetMethodInfo().Name == nameof(IGenericEntityService.RetrieveAsync));
+        private IEnumerable<IInvocation> ReadCalls() =>
+            _service.Invocations.Where(c => c.Method.Name == nameof(IGenericEntityService.RetrieveAsync));
 
-        public int Reads(string entity) => ReadCalls().Count(c => (string)c.GetArguments()[0]! == entity);
+        public int Reads(string entity) => ReadCalls().Count(c => (string)c.Arguments[0]! == entity);
 
         public int TotalReads() => ReadCalls().Count();
 
         /// <summary>Reads of a project / matter / work assignment / service request OTHER than the record being resolved.</summary>
         public int RootReads() => ReadCalls().Count(c =>
-            CoreAncestorResolver.IsCoreRecordEntity((string)c.GetArguments()[0]!)
-            && (Guid)c.GetArguments()[1]! != ChildId);
+            CoreAncestorResolver.IsCoreRecordEntity((string)c.Arguments[0]!)
+            && (Guid)c.Arguments[1]! != ChildId);
 
         public IEnumerable<string> ColumnsRead(string entity) => ReadCalls()
-            .Where(c => (string)c.GetArguments()[0]! == entity)
-            .SelectMany(c => (string[])c.GetArguments()[2]!);
+            .Where(c => (string)c.Arguments[0]! == entity)
+            .SelectMany(c => (string[])c.Arguments[2]!);
     }
 }
