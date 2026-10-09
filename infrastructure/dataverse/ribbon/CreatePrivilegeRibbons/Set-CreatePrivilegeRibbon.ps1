@@ -21,7 +21,8 @@
         export's RibbonDiff lacks a command, rule, custom action, hide action or label the environment holds for that
         table (../Test-RibbonExportCurrent.ps1: a stale or partial export would delete it) or when a live create
         command's table is in none of the exports; merges the rule into every exported
-        RibbonDiff; then packs and imports each solution with publish, and verifies (with the same bounded retry as
+        RibbonDiff; then packs and imports each solution with scripts/Import-SolutionScoped.ps1 (publishes only that
+        solution's components, D-83), and verifies (with the same bounded retry as
         Set-AccessRibbon.ps1 - the effective ribbon lags the publish).
 
       -Verify (read-only): for every host table, every command in the effective ribbon that calls a launcher carries
@@ -386,13 +387,17 @@ foreach ($solution in $unpackedBySolution.Keys) {
     foreach ($r in $rows) { Write-Host "  $solution  $($r.Status.PadRight(7)) $($r.Command) -> $($r.Table)" }
 }
 
-# 4. Pack and import each solution, with publish.
+# 4. Pack and import each solution, publishing only its own components (D-83: never a tenant-wide publish).
+$scopedImport = Join-Path ((& git -C $PSScriptRoot rev-parse --show-toplevel).Trim()) 'scripts/Import-SolutionScoped.ps1'
 foreach ($solution in $unpackedBySolution.Keys) {
     $packed = Join-Path $WorkDir "$solution.merged.zip"
     & $pacExe solution pack --zipfile $packed --folder $unpackedBySolution[$solution] --packagetype Unmanaged
     if ($LASTEXITCODE -ne 0) { throw "pac solution pack $solution failed ($LASTEXITCODE)." }
-    & $pacExe solution import --environment $EnvironmentUrl --path $packed --publish-changes
-    if ($LASTEXITCODE -ne 0) { throw "pac solution import $solution failed ($LASTEXITCODE). Solutions before it in -Solutions were imported; re-run -Apply (idempotent)." }
+    try {
+        & $scopedImport -EnvironmentUrl $EnvironmentUrl -ZipPath $packed -SolutionUniqueName $solution
+    } catch {
+        throw "Scoped import of $solution failed: $($_.Exception.Message) Solutions before it in -Solutions were imported; re-run -Apply (idempotent)."
+    }
 }
 
 # 4b. The owner-decided appaction hides: PATCH hidden = true where it is not yet, then ALWAYS publish the app(s) of the
