@@ -283,3 +283,21 @@ Task 174: enforcement uses the parent-derived access. PR #1481 merged as `e78c47
 **Not covered live:** a real CIAM sign-in, because no CIAM token is available to the agent. The CIAM half is the same composition and veto code (`ComposeContactPlaneAsync`). Offline it is pinned by `EffectiveAccessFollowsParentTests` (CIAM contact plane) and by the seeding proofs in `task-174-effective-access-follows-parent.md`.
 
 **174 can be marked done** once the owner accepts the testuser1 stand-in for the CIAM contact.
+
+## Task 175 live gate (PR #1503, merged `61b0aa77a`), 2026-10-09 22:12:51–22:21:38Z: PASS
+
+Run as the admin through the deployed BFF (master `a27d46e47`), with testuser1 for the field-security refusal. Script, log and results: session scratchpad `gate175/` (`RESULT.md`, `gate175.py`, `run1.out`, `results.json`).
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 1 | Secure the matter; the work assignment follows | PASS | 22:12:58Z: Make Secure on M1 → 200, W1 `secured`. W1 is then secure, owned by Secure Record Owners (`6eabc7f9…`), with its own container. The marker shows it as inherited (`floorSecure` true, `ownSecure` false). `can-manage-access` reports `floorAccessPermission` "limited". |
+| 2a | Unsecure the work assignment under a secure matter | PASS | 22:13:32Z → 409 `sdap.access.access_follows_parent`, naming M1. |
+| 2b | Access Permission below the matter's | PASS | Set to Standard directly in Dataverse (no BFF route writes it). The job restored Limited 101 s later. |
+| 2c | Caller-supplied `sprk_issecure` / `sprk_accessinheritance` | PASS for the Dataverse half | testuser1 is refused with 403 `0x8004f507` (field-secured) on both columns. The BFF filing-gate codes are reachable only through the AI tools, field-mapping push and Office create, and are covered by unit tests. |
+| 3 | Unsecure the matter; the work assignment follows back | PASS | 22:15:15Z → 200, W1 `unsecured`. Flag false, owner the business unit's default team, marker cleared. The container stays recorded, as designed. |
+| 4 | Owner's example: the child's own Secure survives the parent's secure and unsecure | PASS | Make Secure on W2 → 200 (`ownSecure` true). Securing then unsecuring M2 → 200. W2 is still secure at 22:21:25Z, after a job run. |
+| 5 | Ribbon and form hiding | Owner item | Checklist §9. |
+| 6 | Clean-up | PASS | All 4 records deleted and read back 404. testuser1's share revoked. 4 empty containers added to `Remove-TestContainers.ps1`. |
+
+No defects found.
+

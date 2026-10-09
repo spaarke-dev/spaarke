@@ -125,3 +125,11 @@ Hard-refresh first (Ctrl+Shift+R); the control footer should read 1.0.41. Projec
 1. **Your UAT (G-1):** in Word for the web, on a document under PAT-176903, create a To Do through the add-in, then open it. **PASS:** Access Permission shows Restricted, locked, with "Access permission is inherited from …".
 2. **Forms (G-4):** check the To Do, Event, Communication (Message) and Document main forms. **PASS:** on a filed record the field is locked with the "inherited from" note; on a record with no parent it is editable. No console errors, and readable in dark mode.
 
+## 9. A child follows its parent's Secure and Access Permission (task 175, on dev since 2026-10-09)
+
+The server side passed its live gate (2026-10-09). These are the browser checks only you can do. Use a throwaway matter with a work assignment filed under it.
+1. **Secure the matter.** Open the work assignment. **PASS:** Remove Secure is not offered. Access Permission is read-only with a note naming the matter. Manage Access offers no permission below the matter's.
+2. **Unsecure the matter.** Reopen the work assignment. **PASS:** it is no longer secure, and Make Secure is offered again.
+3. **Your example.** Under an ordinary matter, Make Secure on the work assignment itself, then secure and unsecure the matter. **PASS:** the work assignment stays secure.
+4. **PASS for all three:** no console errors, and the form is readable in dark mode.
+

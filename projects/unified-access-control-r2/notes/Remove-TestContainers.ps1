@@ -31,7 +31,11 @@ $ids = @(
   'b!R6QrqcsZ_02U89YmOYM8qBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate 163b secure matter (deleted)
   'b!juvuYNOcskGRJ96iMUBTeRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate 166d secure project (deleted)
   'b!CtWYdqDTo0GSJGqApjHauRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate #1410 secure parent M (deleted)
-  'b!HMt6g1HOGEe9Jp1UZUDQrxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN'   # 2026-10-08 gate #1410 secure work assignment W1 (deleted)
+  'b!HMt6g1HOGEe9Jp1UZUDQrxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN',  # 2026-10-08 gate #1410 secure work assignment W1 (deleted)
+  'b!PaSNODdgaEW3pPVHDVGxhdNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 secure matter M1 (deleted)
+  'b!F8KRjqAyKUy1ACgRIMyoK9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 work assignment W1 (deleted)
+  'b!Ks5hYobUT0GGBI7Le2DZKtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 work assignment W2 (deleted)
+  'b!rw3hvr0xjk-rqIcAr0_NJ9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-09 gate 175 secure matter M2 (deleted)
 )
 foreach ($id in $ids) {
   try {
