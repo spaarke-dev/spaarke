@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-009 (#1399): G5 AppendTo for business-owned lookup targets (systemuser, team, businessunit) per the rule uac-r2 picks — own PR, uac-r2 review</title>
     <phase>8 Remaining cleanup and repairs</phase>
-    <gate>#1391 merged AND uac-r2 has named the rule on #1355</gate>
+    <gate>#1391 merged AND task 048 merged (rule named, D-113)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization check on the shared Dataverse write core; a wrong depth over-grants.</rigor-reason>
@@ -37,6 +37,7 @@ uac-r2 state re-read when this task was created (2026-10-08, origin/master 6cd5d
     <constraint source="project">Scope: only the business-owned branch of the AppendTo check, plus the harness modelling it. Server-set lookups (serverSetLookupColumns) and re-file ownership-parent checks stay as they are. If uac-r2 picks the clear-400 option, the response shape and code come from them.</constraint>
     <constraint source="project">Seeding proof required for the new allow/deny guard (break it, confirm the deny test fails, restore). Two adversarial verifier passes (auth, security tags). Live proof on spaarkedev1 with a real low-privilege user in a child BU: allowed and denied cases through the real route (POST /api/v1/child-records/{table} or the chat tool) with zz-126- rows, deleted afterwards.</constraint>
     <constraint source="project">NEW worktree off origin/master after #1391 merges (git worktree add C:\wts-126 -b fix/appendto-business-owned-126 origin/master); if task 048 has moved the file, work on the moved file. Own PR reviewed by uac-r2 (request on #1355); do not merge. BFF hygiene (publish size vs fresh master from short paths, CVE); /conflict-check. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+    <constraint source="uac-r2">D-113 THE RULE (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 6). Business-owned targets (systemuser, team, businessunit) are refused by RetrievePrincipalAccess; mirror what a create run as the user checks, beside #1391's organization-owned branch, failing closed: the caller holds the table's AppendTo privilege (RetrieveUserSetOfPrivilegesByNames returns the depth) and the depth covers the TARGET ROW'S business unit: Global = any BU; Deep = the caller's BU or one under it (EqOrUnder on businessunitid, read as the caller); Local = the same BU; Basic = only a systemuser target that is the caller. The row must also be readable as the caller. Anything unanswered is denied with the uniform 404. Tests: one positive and one negative per depth, plus a cross-business-unit refusal. Goes in after the 048 move; our PR, uac-r2 review.</constraint>
   </constraints>
 
   <steps mode="directional">

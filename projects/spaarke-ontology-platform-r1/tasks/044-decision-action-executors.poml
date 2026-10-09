@@ -4,7 +4,7 @@
     <title>Action executors: Revise budget, Approve variance (record-only), Do actions, Next-step creators</title>
     <phase>4b Commit and actions</phase>
     <gate>036, 008, 047 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Server-side writes to budgets, events, To Dos and communications on behalf of a decision.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,6 +101,8 @@
     <criterion testable="true">Given revise-budget, when executed, then the revision is created by the writer and the budget amount is updated by the signed-in user (audit shows them) (D-55).</criterion>
     <criterion testable="true">Given record-the-response with an outcome, when executed by an authorized user, then the D-54 response columns are written on the work assignment as that user.</criterion>
   </acceptance-criteria>
+
+  <completion>COMPLETED 2026-10-09: PR #1515 merged into docs/ontology-platform-design (9d1a8d475) after independent review (4 rounds) and uac-r2 confirmation of the two entries in their files (#1355 comment 6089838200 (uac-r2, 2026-10-09): SecureChildLineage sprk_budgetrevision -> sprk_budget, sprk_matter; config Read at Basic, kind child). IDecisionActionExecutor with PreflightAsync and Written/PossiblyWritten; role grants D-108/D-109.</completion>
 
   <notes>spec.md FR-52, FR-61; D-18, D-19, D-27, D-29. D-54 (response columns, task 047), D-55 (amount as the signed-in user).</notes>
 

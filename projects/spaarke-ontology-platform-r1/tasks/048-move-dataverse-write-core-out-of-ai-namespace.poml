@@ -3,7 +3,7 @@
   <metadata>
     <title>D-66: move the shared Dataverse write core (OwnedChildWrite + helpers) out of Services/Ai to Services/Dataverse, own PR reviewed by uac-r2</title>
     <phase>3 Decision Record + commit route</phase>
-    <gate>startable after uac-r2 replies on #1355 (no objection / timing)</gate>
+    <gate>#1391 merged (uac-r2 agreed, D-113)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves BFF code owned by another project (uac-r2); namespaces, DI, ArchTests.</rigor-reason>
@@ -28,6 +28,7 @@
   <constraints>
     <constraint source="owner">D-66: own PR to master, reviewed by uac-r2 before merge. Do not start until uac-r2 has replied on #1355 with no objection (or the owner says go). Coordinate per project CLAUDE.md section 4 (re-read their code on master, check their open PRs incl. #1391 which edits OwnedChildWrite.cs — sequence after it or rebase).</constraint>
     <constraint source="project">Mechanical move only: no behaviour change, no renames beyond namespace/folder, keep public type names; update DI registrations, usings, tests, ArchTests (uac-r2 census tests that reference type names or paths), and the route ledger only if paths are cited there. Add one ArchTest pinning the direction. BFF hygiene per .claude/rules/bff-hygiene.md (publish size vs fresh master from short paths, CVE). Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+    <constraint source="uac-r2">D-113 (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 5): agreed. Mechanical move of OwnedChildWrite, DataverseWriteItemMapper and their helpers to Services/Dataverse/, with one ArchTest pinning the direction; our PR, uac-r2 review. Timing: after #1391 merges and BEFORE 046 builds on it. uac-r2 asked for after #1501 too, but #1501 (task 136) is deferred under D-106, so it does not wait: #1501 rebases onto the moved file later (uac-r2 told 2026-10-09). uac-r2 has no open work on these files.</constraint>
   </constraints>
 
   <steps mode="directional">
