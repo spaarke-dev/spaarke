@@ -4,7 +4,7 @@
     <title>The one row component: MatterCard + IssueLine</title>
     <phase>5 The worklist surface</phase>
     <gate>057, 012, 007 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New UI surface carrying the row contract; a second row component would be a design failure.</rigor-reason>
     <model-tier>sonnet</model-tier>

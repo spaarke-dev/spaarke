@@ -4,7 +4,7 @@
     <title>uac-r2 follow-through: MembershipResolverService credits a role whenever its column is populated (PB-07); the AiAnalysis executor is labelled read-only but can call write tools (AI-EX7)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>blocked: uac-r2 answer on #1355 (comment 6074035905)</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Access-model code owned by unified-access-control-r2; security classification of an executor.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -40,6 +40,8 @@ Both were posted to uac-r2 on #1355 (comment 6074035905). PB-28 (records in noti
   </acceptance-criteria>
 
   <notes>Created 2026-10-09 by the main session from the playbook-engine sweep (no-parking rule), after D-100 narrowed the playbook work.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

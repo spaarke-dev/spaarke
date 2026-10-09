@@ -4,7 +4,7 @@
     <title>D-81: ship and verify task 106's LegalWorkspace date-filter fixes on dev with no tenant-wide publish; settle the LegalWorkspace deploy path and a scoped solution-import procedure</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable (fact-finding); any import needs owner approval</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment to a shared environment plus a deploy-script change; the premise of the original hand-off is unverified.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,6 +88,8 @@ Facts found while creating this task (2026-10-08, origin/master 6cd5d9a47) — V
   </escalation>
 
   <notes>Created 2026-10-08 by the no-parking sweep (D-81). Task 114 depends on this task for the deploy path; task 129 reuses the scoped-import procedure for the VisualHost PCF.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

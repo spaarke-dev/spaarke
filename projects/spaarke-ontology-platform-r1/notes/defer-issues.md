@@ -513,3 +513,42 @@ Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetc
 | [#1388](https://github.com/spaarke-dev/spaarke/issues/1388) | WorkspaceLayoutWizard: 14 jest tests fail on master (stale test ids) | [128](../tasks/128-client-test-harness-repairs-own-pr.poml) |
 | [#1392](https://github.com/spaarke-dev/spaarke/issues/1392) | SemanticSearchControl PCF: jest red (9 of 11 suites) | [128](../tasks/128-client-test-harness-repairs-own-pr.poml) |
 | [#1428](https://github.com/spaarke-dev/spaarke/issues/1428) | External SPA hand-off (056 wizard + 106 To Do changes undeployed) | [122](../tasks/122-external-spa-dev-deploy.poml) — replaces the hand-off (D-81) |
+
+---
+
+## D-106 — Ontology critical path only (owner, 2026-10-09): issues documented for post-project review
+
+> **Rule (supersedes the 2026-10-08 no-parking rule):** fix an issue in this project **only if ontology functionality
+> (spec + goals) needs it**. Everything else is documented here, with a GitHub link, and reviewed with the owner
+> **after the project completes**. Nothing here is fixed or deployed in the meantime. Open PRs stay open (not merged,
+> not closed) so their review history is kept.
+
+### Deferred tasks (open work, not ontology functionality)
+
+| Task | What | State at deferral | GitHub |
+|---|---|---|---|
+| 121 | LegalWorkspace 106 date filters live on dev; LW deploy path | Not started; owner checklist r6 open | [#1428](https://github.com/spaarke-dev/spaarke/issues/1428) (context) |
+| 122 | External SPA dev deploy (056/098/106/111 changes) | Not started | [#1428](https://github.com/spaarke-dev/spaarke/issues/1428) |
+| 125 | ISS-001 drifted AI action mirrors, `Create_Task_From_Email` 400s | Not started | [#1048](https://github.com/spaarke-dev/spaarke/issues/1048) |
+| 129 | D-63 completion: chart/view/grid definitions off `sprk_finalduedate`; VisualHost 1.4.39 (`customcontrols.version` still 1.4.38) | Not started; owner checklist r8 open | task POML |
+| 131 | Retire notification playbooks: repo deletions + docs | [#1493](https://github.com/spaarke-dev/spaarke/pull/1493) round 2 done (`afd2ced88`), needs re-check plus `.claude` edits (dataverse-create-schema SKILL.md:671 points at the deleted script; ADR-034:23/94 "(retired, D-100)"). [#1507](https://github.com/spaarke-dev/spaarke/pull/1507) code deletion (-20 KB), unreviewed; the ADR-036:21 edit belongs with #1507. **Dev is already retired** (7 playbooks inactive, alert deleted) | #1493, #1507 |
+| 132 | Invalid appnotification option values in non-playbook writers (held-email alert; last-day grant reminder never delivered) | [#1494](https://github.com/spaarke-dev/spaarke/pull/1494) approvable (`c86ff04dd`); must merge **after #1493** (4 expected Issue1452 failures until then) | #1494 |
+| 133 | System playbooks read-only in the Designer | [#1497](https://github.com/spaarke-dev/spaarke/pull/1497) round 2 pushed (`b2d1d776b`), not re-checked | #1497 |
+| 134 | uac-r2: PB-07 membership role credit; AI-EX7 AiAnalysis write tools | Waiting on uac-r2 | [#1355 comment](https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6074035905) |
+| 136 | Create Analysis hub 404: the task's own changes (route tests, refusal log, retry-upload fix) | [#1501](https://github.com/spaarke-dev/spaarke/pull/1501), review requested changes (F-1..F-3 below). **The root-cause fix (#1391) stays on the ontology critical path (D-68)** | #1501 |
+
+### Findings documented, not fixed
+
+| # | Finding | Where found | GitHub |
+|---|---|---|---|
+| F-1 | A missing AppendTo privilege on an org-owned lookup table returns 404 "filed under … not found" instead of a 403 naming the privilege (uac-r2's `OwnedChildWrite.cs:501-545`, `ChildRecordEndpoints.cs:215`) | #1501 review F1-a | [#1501](https://github.com/spaarke-dev/spaarke/pull/1501); asked on [#1355](https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6080141491) |
+| F-2 | A failed Create Analysis Finish orphans the uploaded `sprk_document` (no compensating delete). Dev orphan `2cf67ed0-207b-4c58-a43d-11d8a7c9a424` (`nda_sample.pdf`) | #1501 review F1-c | #1501 |
+| F-3 | #1501 tests send status 100000001, not the wizard's real value (1); the changed-file retry case is untested | #1501 review F2-a/b | #1501 |
+| F-4 | Demo runs the 2026-05-19 canvas PlaybookBuilder, which saves canvas JSON and deletes unmarked nodes from the browser (bypasses any server guard). Legacy `PlaybookBuilderHost` PCF still in dev (on no form) | #1497 review F2 (cancelled task 138) | [#1497](https://github.com/spaarke-dev/spaarke/pull/1497) |
+| F-5 | Per-node create/update/delete endpoints can change system playbook nodes; they also write configs without `__canvasNodeId`, which 133's rule would treat as protected | #1497 author + review K3 (cancelled task 137) | [#1498](https://github.com/spaarke-dev/spaarke/issues/1498) |
+| F-6 | Matter Health: the Insights card is mounted nowhere in production; its form glue reads `artifact.body` / `decline.message`, which the API doesn't return; master's `matter-health-single.playbook.json` differs from dev's synced nodes; engine PB-02 skip propagation, AgentService prompt-from-Action and GroundingVerify fixes are unmerged | Task 135 (cancelled, D-105) | [#1496](https://github.com/spaarke-dev/spaarke/pull/1496) (closed; full findings in its body) |
+| F-7 | Finance Invoice Processing playbook `1e657651-9308-f111-8407-7c1e520aa4df` left active (production invoice extraction resolves it by GUID). Recorded, no action | Task 135 | #1496 |
+| F-8 | Scoped-publish wrappers (`Deploy-NoAccessEntryRibbon.ps1`, `Deploy-SecureChildNewCommands.ps1`, `Set-AccessRibbon.ps1`, `Deploy-FieldMappingAdminSolution.ps1`) can't pass `-AllowPendingCollateral`, and their printed re-run skips their own verification. The pre-flight misses derived entities (K1); an in-solution app's out-of-solution settings are unchecked (K2); the per-entity check is slow on SpaarkeMaster (K3, about 25 min vs about 1 min in bulk) | #1467 round-8 review F3, K1-K3 | [#1467](https://github.com/spaarke-dev/spaarke/pull/1467) |
+| F-9 | Insights Layer-2 gate-fail skip is double-counted; universal-ingest `emitObservations` is skipped on the sufficient path | #1496 review #3/#4 | #1496 |
+| F-10 | About 205 pre-existing broken Markdown links repo-wide (Tier 2 advisory validator) | #1467 author, 2026-10-09 | CI on #1467 |
+| F-11 | The dev BFF restarted on its own between 04:15Z and 04:45Z on 2026-10-09 (same build `e9f08b764`) | Task 120 author | deploy-log "D-100 retire" |

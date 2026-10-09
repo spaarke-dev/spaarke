@@ -4,7 +4,7 @@
     <title>D-81: deploy the external SPA to dev (Static Web App) carrying tasks 056, 098/106 and 111, verify it live, close hand-off #1428</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable (ship-list review); the dispatch needs owner approval</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment of a shared external-user surface that also ships other projects' changes.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,6 +89,8 @@ What to check live: issue #1428 body (056: Escape and backdrop no longer close D
   </escalation>
 
   <notes>Created 2026-10-08 by the no-parking sweep (D-81). Replaces the hand-off #1428 from task 111 and the external To Do browser checks left open by D-75 (deploy-log.md).</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

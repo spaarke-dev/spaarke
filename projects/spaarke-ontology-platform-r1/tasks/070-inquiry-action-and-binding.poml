@@ -4,7 +4,7 @@
     <title>The Inquiry: one Action row, one Binding, an executor the decision commit route calls (SLA deferred)</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>001, 036 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is the task that makes something happen in the world; it sends outward-facing mail through a gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
