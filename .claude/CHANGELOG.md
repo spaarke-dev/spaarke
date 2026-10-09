@@ -7,6 +7,12 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
+
+- **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
+- **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
+
+---
 ###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
 
 `customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
