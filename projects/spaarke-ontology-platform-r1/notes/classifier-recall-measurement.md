@@ -389,3 +389,54 @@ Recommendation: **option 1** first (data-only, cheap, targets the measured mecha
 re-measure (~184 calls). Run 2's D-49 values stand until then.
 
 **Model calls, all of task 074:** run 1 185 (incl. aborted attempt 0) + run 2 184 = **369**. Render checks: 0.
+
+## 9. 2026-10-10: D-117 part (a). TRIAGE-EMAIL decides category from the email text (data only)
+
+**Owner decision D-117** (`notes/decisions.md`): both classification steps read the one editable taxonomy
+(`sprk_triagecategory` name + guidance). (a) TRIAGE-EMAIL decides from the email text against the category
+definitions, with rung 5's category as a hint only; this section, data only. (b) Rung 5 reads the same taxonomy;
+lane-rung5, BFF code, separate PR to master. Run 3 happens only with both live.
+
+### 9.1 What changed: category-only carve-outs, 8 strings
+
+The literal brief named constraint 1 and the category description. The anchoring also sat in the role, the task,
+constraint 6 ("do NOT re-run independent classification ... you are STRUCTURING ..."), both `input` descriptions, and
+the structured-output schema's own `category` description, which the model also receives. Changing only the first two
+would have left the prompt contradicting itself, and run 3 would have measured that contradiction. Each string below is
+limited to the **category** decision. Rung 5 stays the primary signal for priority, obligations and review outcome.
+FR-05 holds: one model call, no second classification call. No fee/scope words are added beyond the live guidance.
+
+| Location | Change in substance |
+|---|---|
+| `sprk_systemprompt` `instruction.role` | "Your job is NOT to re-classify ... reconcile it" → "For the CATEGORY, you decide from the email text itself, judged against the firm's category definitions ...; the upstream freeform category is a hint only." |
+| `instruction.task` | category = "the ONE entry ... whose definition best fits the email text ... apply the category definitions, including their tie-breakers; use the classification's freeform category only as a hint" |
+| `instruction.constraints[0]` (constraint 1) | "Map ... onto the CLOSEST matching entry" → "Choose category by reading the email text ... against the definition of each entry ..., including the tie-breakers ... The classification's freeform category ... is a HINT only: when it conflicts ..., the email text and the definitions decide." |
+| `instruction.constraints[5]` | Prefixed "Apart from category ..."; the STRUCTURING rule now applies to priority, obligations and reviewOutcome |
+| `input.classification.description` | REUSE for urgency/obligations/actions/rationale; the category is a hint |
+| `input.message.description` | "the primary evidence for the category decision" (was "ONLY as supporting grounding ... never ... re-classify") |
+| `output.fields[category].description` | "the ONE entry ... whose definition best fits the email text. The classification's freeform category is a hint only." |
+| `sprk_outputschemajson` `properties.category.description` (row only; not version-controlled) | same text as the field description above |
+
+### 9.2 Mirror and row (evidence)
+
+- **Mirror:** PR **#1602** (to master), commit `38cd9977b` on `fix/triage-email-example-inputs-string`. **7+/7-**
+  lines; exactly the 7 intended leaves changed and the other 91 are untouched (checked in code). The 29 triage tests pass.
+  Commented on the PR; the coordinator's title is kept.
+- **Row backup** (current at 15:12:08Z, ETag `W/"27409778"`, identical to the §8.1 read-back): scratchpad
+  `triage-fix-074/row-backup-before-d117.{systemprompt,outputschema}.json` (SHA-256 `51D9A572CBD6...`,
+  `BA10900FF379...`).
+- **Write:** one `PATCH` of both columns with `If-Match: W/"27409778"`, HTTP **204**, `modifiedon` **2026-10-10T15:47:57Z**,
+  operator identity (az CLI).
+- **Read-back:** byte-identical to the intended values (prompt SHA `B6601F7789AD...`, schema `8986E76AFF66...`).
+- **Only-change proof:** leaf diff against the backup is 7 of 83 prompt leaves and 1 of 25 schema leaves, exactly the
+  intended ones. **Reversing the edits on the read-back reproduces both backups byte-for-byte.** The new prompt equals
+  the PR #1602 mirror minus `$comment*` and the 6 deploy scalars.
+
+### 9.3 Render check (same path as §8.2, OpenAI mocked, 0 model calls)
+JPS path with no fallback; `## Allowed values for 'category'` with both tie-breaker lines; the new role and constraint 1
+text present; the old "onto the CLOSEST matching entry", "NOT to re-classify" and "you are STRUCTURING" (constraint 6)
+phrasing absent. The schema actually sent to the model carries the new category description, without the old one,
+plus the live `$choices` enum.
+
+**Not re-measured yet** (dispatch): run 3 waits for lane-rung5's rung-5 change, applied to this harness worktree only
+for the run.
