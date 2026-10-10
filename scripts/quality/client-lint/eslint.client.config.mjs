@@ -165,6 +165,67 @@ const NUC = {
 };
 
 /**
+ * Catch policy (P5): a `catch` must handle the error, surface it, or rethrow. Flagged: an empty / comment-only
+ * catch, and a catch whose ONLY statement is a console call or a bare telemetry/log call (log-only still swallows
+ * the failure from the user). Deliberate swallows are allowed with a REASONED disable:
+ *   // eslint-disable-next-line no-restricted-syntax -- <why swallowing is correct here>
+ * (a disable without ` -- reason` fails `spaarke-client/catch-disable-needs-reason`; the generic
+ * `eslint-comments/require-description` was measured at 282 new suppressions, so a local rule scoped to this rule is used).
+ * Telemetry helpers that exist in the covered packages (verified): `logTelemetryError` (SpaarkeAi),
+ * `reportClientError` (UI.Components), `trackException` (LegalWorkspace), and `logger.*` / `this.logger.*`
+ * (`logError`, `logWarn`, `error`, `warn`).
+ */
+const CATCH_MESSAGE =
+  "Do not swallow errors in catch: handle it, surface it to the user, or rethrow. " +
+  "If swallowing is deliberate, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.";
+const ONLY_STMT = "CatchClause > BlockStatement[body.length=1] > ExpressionStatement > CallExpression";
+const TELEMETRY_FNS = "/^(logTelemetryError|reportClientError|trackException)$/";
+const LOGGER_METHODS = "/^(logError|logWarn|error|warn)$/";
+/** Reports `eslint-disable*` directives that name `no-restricted-syntax` without ` -- <non-empty reason>`. */
+const SPAARKE_CLIENT = {
+  rules: {
+    "catch-disable-needs-reason": {
+      meta: { type: "problem", schema: [], messages: { noReason: "Disabling `no-restricted-syntax` needs a reason: `// eslint-disable-next-line no-restricted-syntax -- <why>`." } },
+      create(context) {
+        const DIRECTIVE = /^\s*eslint-disable(?:-next-line|-line)?(?=\s|$)([\s\S]*)$/;
+        return {
+          Program() {
+            for (const c of context.sourceCode.getAllComments()) {
+              const m = DIRECTIVE.exec(c.value);
+              if (!m) continue;
+              const sep = m[1].search(/\s--(?:\s|$)/);
+              const names = (sep >= 0 ? m[1].slice(0, sep) : m[1]).split(",").map((n) => n.trim());
+              if (!names.includes("no-restricted-syntax")) continue;
+              const reason = sep >= 0 ? m[1].slice(sep).replace(/^\s--/, "").trim() : "";
+              if (!reason) context.report({ loc: c.loc, messageId: "noReason" });
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
+const CATCH = {
+  "spaarke-client/catch-disable-needs-reason": "error",
+  "no-restricted-syntax": [
+    "error",
+    { selector: "CatchClause > BlockStatement[body.length=0]", message: `Empty catch. ${CATCH_MESSAGE}` },
+    { selector: `${ONLY_STMT}[callee.object.name="console"]`, message: `Console-only catch. ${CATCH_MESSAGE}` },
+    { selector: `${ONLY_STMT}[callee.name=${TELEMETRY_FNS}]`, message: `Telemetry-only catch. ${CATCH_MESSAGE}` },
+    {
+      selector: `${ONLY_STMT}[callee.object.name="logger"][callee.property.name=${LOGGER_METHODS}]`,
+      message: `Logger-only catch. ${CATCH_MESSAGE}`,
+    },
+    {
+      selector: `${ONLY_STMT}[callee.object.property.name="logger"][callee.property.name=${LOGGER_METHODS}]`,
+      message: `Logger-only catch. ${CATCH_MESSAGE}`,
+    },
+  ],
+};
+const RULES = { ...NUC, ...CATCH };
+
+/**
  * Existing source carries `// eslint-disable-next-line react-hooks/exhaustive-deps`-style directives for rules this
  * toolchain deliberately does not run. ESLint 9 reports a directive naming an unknown rule as an error, so each
  * such namespace is registered with a no-op rule set (every rule name resolves, none ever reports).
@@ -174,6 +235,7 @@ const noopPlugin = { rules: new Proxy({}, { get: () => noopRule, has: () => true
 const DIRECTIVE_NAMESPACES = ["react-hooks", "react", "jsx-a11y", "import", "react-refresh", "jest", "testing-library"];
 const PLUGINS = {
   "@typescript-eslint": tseslint.plugin,
+  "spaarke-client": SPAARKE_CLIENT,
   ...Object.fromEntries(DIRECTIVE_NAMESPACES.map((n) => [n, noopPlugin])),
 };
 
@@ -187,7 +249,7 @@ function packageBlock(pkg) {
     },
     plugins: PLUGINS,
     linterOptions: { reportUnusedDisableDirectives: "off" },
-    rules: NUC,
+    rules: RULES,
   };
 }
 
@@ -229,7 +291,7 @@ export function controlsConfig() {
       },
       plugins: PLUGINS,
       linterOptions: { reportUnusedDisableDirectives: "off" },
-      rules: NUC,
+      rules: RULES,
     },
   ];
 }
