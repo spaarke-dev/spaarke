@@ -484,7 +484,9 @@ class AccessGrantModalApiError extends Error {
   static fromThrown(err: unknown): AccessGrantModalApiError | null {
     if (isApiError(err)) {
       const problem = problemOf(err);
-      return problem ? AccessGrantModalApiError.fromBody(err.status, problem) : new AccessGrantModalApiError(err.status, err.message);
+      return problem
+        ? AccessGrantModalApiError.fromBody(err.status, problem)
+        : new AccessGrantModalApiError(err.status, err.message);
     }
     if (isAuthFailure(err)) {
       return new AccessGrantModalApiError(401, err instanceof Error && err.message ? err.message : 'HTTP 401');
@@ -509,7 +511,9 @@ class AccessGrantModalApiError extends Error {
     const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
     const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
     const speContainerOutcome =
-      typeof body?.speContainerOutcome === 'string' ? (body.speContainerOutcome as SpeContainerRevokeOutcome) : undefined;
+      typeof body?.speContainerOutcome === 'string'
+        ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
+        : undefined;
     const problemDetail = typeof body?.detail === 'string' && body.detail.trim() ? body.detail : undefined;
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
@@ -800,7 +804,7 @@ interface IGrantBatchOutcome {
  * priority (a denial or a failure dominates a related-records-pending,
  * narrowed or notify-pending success). Denial and failure are reported separately because they call for
  * different next actions: a failure invites retry; a denial does not (retrying
- * without Write and Share on the record fails the same way). */
+ * without Write on the record fails the same way). */
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
   const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
@@ -2112,9 +2116,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 {accessDenyState && (
                   <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
-                      <MessageBarTitle>
-                        {accessDenyState.title}
-                      </MessageBarTitle>
+                      <MessageBarTitle>{accessDenyState.title}</MessageBarTitle>
                       {accessDenyState.message}
                     </MessageBarBody>
                   </MessageBar>
