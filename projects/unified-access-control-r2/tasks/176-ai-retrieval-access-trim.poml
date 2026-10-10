@@ -3,7 +3,7 @@
   <metadata>
     <title>AI chat and playbook document retrieval returns only documents the caller can read: one shared access trim after every retrieval, caller identity carried in, never widened to the whole tenant (closes #1511, security)</title>
     <phase>Session 28 — UAC defect remediation (owner decision 2026-10-09: "fix now in uac-r2")</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: closes a confirmed leak of secure/Restricted/No Access document content through AI chat; touches auth checks and Services/Ai.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -301,3 +301,19 @@ Run as the admin through the deployed BFF (master `a27d46e47`), with testuser1 f
 
 No defects found.
 
+## Task 176 live smoke (PR #1520, merged `a27d46e47`), 2026-10-10 ~00:45Z: PASS
+
+Run against the deployed BFF (master `ebacd2e15`) as the admin and testuser1, GETs and searches only. Files: session scratchpad `smoke176/` (`RESULT.md`, `smoke176.log`, `results.json`).
+
+**The F1 case, from existing data:** document `766ad390…`, 6 chunks in `spaarke-files-index`, under matter `ec408889…`. testuser1 gets 403 on the document and 200 on the matter, because the document is owned in another business unit. On dev, 91 of the 163 re-indexed documents have this shape for testuser1.
+
+| Step | Result | Evidence |
+|---|---|---|
+| Admin, `/api/ai/search` (`scope=all`, `scope=entity`, filename, `documentIds`) | PASS | The document is present in every call. |
+| testuser1, the same calls | PASS | The document and 4 other unreadable siblings are absent. `totalResults` / `returnedResults` equal testuser1's own rows. |
+| `/api/ai/rag/search`, matter-scoped and tenant-wide | PASS | Admin gets 17 / 20 rows with the document. testuser1 gets 7 / 1 rows without it. |
+| Control and sweep | PASS | The 7 readable siblings are returned to testuser1. All 25 distinct documents returned to testuser1 in 14 calls are readable by it in Dataverse. |
+| `/api/ai/search/count` | Known limit #1533 | Both callers see 17. |
+
+**Observed, by design (task 176 note §6, §8.4):** the trim runs after ranking, so a restricted caller gets shorter pages. This costs recall, not access.
+
