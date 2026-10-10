@@ -565,6 +565,8 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return MapClientError(tool, failure, startedAt);
         if (owned.Denied is { } denied)
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
+        if (owned.Invalid is { } invalid)
+            return Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt);
         if (owned.SecureFilingRefused is { } secureRefusal)
             return Error(tool, secureRefusal, ToolErrorCodes.ValidationFailed, startedAt);
         if (owned.OwnerRefusal is not null || owned.CreatedId is not { } createdId)
@@ -646,19 +648,48 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// For a row this handler cannot re-own (a table outside the ownership set, or a root) that names a project, matter
     /// or work assignment: AppendTo on each named record AS THE CALLER, then the one resolver's answer — refused when it
     /// is the Secure team (or a refusal), so the row never sits in the caller's ordinary business unit under a secure
-    /// record (task 146 r2). <c>null</c> = proceed as a run-as-user create.
+    /// record (task 146 r2). A row that sets the ADR-024 regarding pair also needs AppendTo on the record the pair names
+    /// (<see cref="OwnedChildWrite.PairTargetAsync"/>), as the owned path asks it. <c>null</c> = proceed as a run-as-user create.
     /// </summary>
     private async Task<ToolResult?> RefuseSecureFilingAsync(
         AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context,
         DateTimeOffset startedAt, CancellationToken ct)
     {
         var parents = OwnedChildWrite.ParentsOf(item);
-        if (parents.Count == 0)
+        var pair = OwnedChildWrite.PairOf(item);
+        if (parents.Count == 0 && !pair.SetsId)
             return null;
 
         var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
             return MapClientError(tool, failure, startedAt);
+
+        // The record the ADR-024 pair names costs AppendTo as a lookup's does (Dataverse checks only the create's lookups;
+        // the pair is text): missing, unreadable and unappendable answer alike, secure or not.
+        if (pair.SetsId)
+        {
+            if (pair.InvalidId)
+            {
+                return Error(tool, $"'{Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn}' must hold the id of " +
+                                   "the record this row is filed under.", ToolErrorCodes.ValidationFailed, startedAt);
+            }
+
+            var target = await OwnedChildWrite.PairTargetAsync(
+                _dataverse, tablename, pair.IdText, pair.TypeId, pair.TypeEntitySet, item.Lookups, ct).ConfigureAwait(false);
+            var pairOutcome = target.Refusal
+                ?? (target.Lookup is { } named
+                    ? await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)
+                    : OwnedChildWrite.Outcome.Allowed);
+            if (pairOutcome.ClientFailure is { } pairFailure)
+                return MapClientError(tool, pairFailure, startedAt);
+            if (pairOutcome.Invalid is { } invalid)
+                return Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt);
+            if (pairOutcome.Denied is { } pairDenied)
+                return Error(tool, pairDenied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
+        }
+
+        if (parents.Count == 0)
+            return null;
 
         var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(
             _dataverse, me.SystemUserId,
