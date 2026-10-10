@@ -18,9 +18,15 @@
  * Read-only (NFR-01): no `onCreateNew` / write-path override is wired — the framework's default
  * command-bar `+ New` action opens `Xrm.Navigation.openForm`, which no-ops on this Xrm-free host
  * (there is no `window.Xrm`); each grid config also sets `commandBar.showDefaultCommands` behavior
- * via its `sprk_configjson` where relevant. Row-open likewise defaults to `Xrm.Navigation.navigateTo`,
- * which console-warns and no-ops without `Xrm` present — a graceful degrade (no crash, no write),
- * consistent with "widgets are READ-ONLY (broker)". See notes/task-016-deviations.md.
+ * via its `sprk_configjson` where relevant. See notes/task-016-deviations.md.
+ *
+ * ROW-OPEN (R3 task 050, FR-01). The grid's default row-open is `Xrm.Navigation.navigateTo`, which no-ops without
+ * `Xrm` (R2 UAT 3E: "row click does nothing"). This wrapper passes `onRecordOpen` so the primary-name link opens the
+ * in-app read-only `RecordDetailModal` (SprkModal, ADR-050) with the grid's loaded row ids for "1 of N" browsing, and
+ * `onRecordsLoaded` to keep those ids. The handler lives here and not in `<ExternalDataGrid>` because that wrapper's
+ * text is pinned by ExternalSpaGridViewSelectorGuardTests (a security guard); it already forwards both props.
+ * Browse order is the grid's loaded order (the server's query order, accumulated page by page); a column the user
+ * sorts in the grid's own header is not reflected in it.
  *
  * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). That is a SECURITY setting, not a
  * cosmetic one. The shared grid enforces it itself inside this SPA (DataGridExternalHost: the provider at the
@@ -40,6 +46,8 @@ import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-component
 import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components/utils/themeStorage';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { ExternalDataGrid } from './ExternalDataGrid';
+import { RecordDetailModal } from '../components/detail/RecordDetailModal';
+import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
 import type { WidgetBodyComponent, WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
 
 const useStyles = makeStyles({
@@ -52,6 +60,19 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
 });
+
+/**
+ * The grid's row-open callback type, read off the wrapper's props (`typeof` is the one non-JSX use of the wrapper
+ * the grid guard allows) so this file never imports the shared grid's module.
+ */
+type RecordOpenHandler = NonNullable<React.ComponentProps<typeof ExternalDataGrid>['onRecordOpen']>;
+
+/** The record the detail modal is showing, and the row set it pages through. */
+interface DetailTarget {
+  entityName: string;
+  ids: readonly string[];
+  index: number;
+}
 
 /** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
 function useAmbientTheme(): Theme {
@@ -70,9 +91,49 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
   const GridWidgetBody: React.FC<WidgetBodyProps> = () => {
     const s = useStyles();
     const theme = useAmbientTheme();
+    // The grid's loaded rows, in grid order. A ref, not state: the grid re-fires `onRecordsLoaded` whenever its
+    // handler identity changes, and nothing renders from the rows until a row is opened.
+    const rowsRef = React.useRef<ReadonlyArray<Record<string, unknown>>>([]);
+    const [detail, setDetail] = React.useState<DetailTarget | null>(null);
+
+    const handleRecordsLoaded = React.useCallback((records: ReadonlyArray<Record<string, unknown>>) => {
+      rowsRef.current = records;
+    }, []);
+
+    const handleRecordOpen = React.useCallback<RecordOpenHandler>((recordId, _record, ctx) => {
+      const cfg = getRecordDetailEntity(ctx.entityName);
+      if (!cfg || !recordId) return; // an entity with no detail view: row-open stays a no-op (as before)
+      const wanted = recordId.toLowerCase();
+      const ids = rowsRef.current.map(r => String(r[cfg.idAttribute] ?? '')).filter(id => id.length > 0);
+      const at = ids.findIndex(id => id.toLowerCase() === wanted);
+      // The opened row is always in the set; if the grid has not reported it, browse just that one record.
+      setDetail(
+        at >= 0 ? { entityName: cfg.entity, ids, index: at } : { entityName: cfg.entity, ids: [recordId], index: 0 }
+      );
+    }, []);
+
+    const handleIndexChange = React.useCallback((index: number) => setDetail(d => (d ? { ...d, index } : d)), []);
+    const handleClose = React.useCallback(() => setDetail(null), []);
+
     return (
       <div className={s.root}>
-        <ExternalDataGrid configId={configId} dataverseClient={gridDataverseClient} theme={theme} />
+        <ExternalDataGrid
+          configId={configId}
+          dataverseClient={gridDataverseClient}
+          theme={theme}
+          onRecordsLoaded={handleRecordsLoaded}
+          onRecordOpen={handleRecordOpen}
+        />
+        {detail && (
+          <RecordDetailModal
+            open
+            onClose={handleClose}
+            entityName={detail.entityName}
+            recordIds={detail.ids}
+            index={detail.index}
+            onIndexChange={handleIndexChange}
+          />
+        )}
       </div>
     );
   };

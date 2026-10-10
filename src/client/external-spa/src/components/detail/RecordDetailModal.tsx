@@ -1,0 +1,516 @@
+/**
+ * RecordDetailModal — the read-only detail view a grid row opens in the external SPA and the Teams tab
+ * (R3 task 050, FR-01 / FR-02 / FR-03; R2 UAT 3E: "row click does nothing").
+ *
+ * ENVELOPE (ADR-050). A thin config of the canonical `SprkModal` (`@spaarke/ui-components`): its OWN header carries the
+ * "‹ N of M ›" browse group, the title, the window controls and ×, and its footer carries Close. This is the in-app
+ * launch the ADR requires — it needs no `Xrm`, so it behaves identically in the browser host and in the Teams host.
+ * `RecordNavigationModalShell` is deliberately NOT nested: ADR-050 (amended 2026-10-07) keeps it as the dirty-check
+ * protocol library behind `nav.onBeforeNavigate` and forbids nesting its envelope (it would double the chrome — two
+ * counters, two titles). That protocol exists for an iframe form with unsaved edits; this view is read-only and has no
+ * iframe, so there is nothing to guard and `onBeforeNavigate` is not wired.
+ *
+ * DATA (no new server read). Every call goes through the external plane via `bffApiCall` (token from the active
+ * acquirer; the URL is this build's `BFF_API_URL` — never a link or query string):
+ *   - fields:   the id-filtered module fetch (POST …/fetch, `<idAttribute> = {id}`) for ALL six entities — one read path,
+ *               which also carries `@formattedValues` (option-set labels); see RecordDetailFields.tsx for why.
+ *   - rollup:   POST /api/v1/external/api/dataverse/fetch on sprk_document / sprk_invoice filtered by this record's
+ *               lookup. That is the SAME Tier-2-scoped module read the Documents and Invoices tabs run, so a row shows
+ *               here exactly when the tab shows it for this record (FR-02).
+ *   - events/tasks: the existing `EventsCalendar` / `SmartTodo` (read-only: `AccessLevel.ViewOnly` hides create and
+ *               toggle) for a Project. Matter and Work Assignment have no external event read yet (task 039 adds
+ *               /matters/{id}/events and /workassignments/{id}/events), so their section shows an empty state.
+ *               Document, Invoice and Service Request show no events section (notes/decisions.md).
+ *
+ * DENIED (FR-01). An id that returns no row from the fetch seam (or a 403) shows "You don't have access to this record"
+ * and renders NO section and NO field, so nothing of the record is on screen.
+ *
+ * ADR-021: Fluent UI v9 semantic tokens only; the modal inherits the host FluentProvider (light/dark/Teams theme).
+ */
+import * as React from 'react';
+import { makeStyles, tokens, Button, MessageBar, MessageBarBody, Spinner, Text } from '@fluentui/react-components';
+import { LockClosedRegular } from '@fluentui/react-icons';
+import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
+import { bffApiCall } from '../../auth/bff-client';
+import { ApiError, AccessLevel } from '../../types';
+import { EventsCalendar } from '../EventsCalendar';
+import { SmartTodo } from '../SmartTodo';
+import { TruncatedListNotice } from '../TruncatedListNotice';
+import {
+  EMPTY_VALUE,
+  RecordDetailFields,
+  formatDetailValue,
+  getRecordDetailEntity,
+  recordDetailTitle,
+  type DetailRecord,
+  type RecordDetailEntity,
+} from './RecordDetailFields';
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+/** The module read seam, mounted under the external group (`ExternalModuleDataEndpoints`). */
+const EXTERNAL_DATA_PATH = '/api/v1/external/api/dataverse';
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The module fetch response (`FetchResponseDto`). */
+interface FetchResult {
+  entities?: DetailRecord[];
+  moreRecords?: boolean;
+}
+
+function xmlAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Single-entity, join-free FetchXML over allow-listed columns only — the only shape the seam's guard admits.
+ * Every interpolated value is a GUID checked by the caller or a constant from this file, and is escaped anyway.
+ */
+function buildFetchXml(
+  entity: string,
+  attributes: readonly string[],
+  where: { attribute: string; value: string },
+  orderBy?: { attribute: string; descending: boolean }
+): string {
+  const attrs = attributes.map(a => `<attribute name="${xmlAttr(a)}"/>`).join('');
+  const order = orderBy
+    ? `<order attribute="${xmlAttr(orderBy.attribute)}" descending="${orderBy.descending ? 'true' : 'false'}"/>`
+    : '';
+  return (
+    `<fetch><entity name="${xmlAttr(entity)}">${attrs}` +
+    `<filter type="and"><condition attribute="${xmlAttr(where.attribute)}" operator="eq" value="${xmlAttr(where.value)}"/></filter>` +
+    `${order}</entity></fetch>`
+  );
+}
+
+function postFetch(entity: string, fetchXml: string): Promise<FetchResult> {
+  return bffApiCall<FetchResult>(`${EXTERNAL_DATA_PATH}/fetch`, {
+    method: 'POST',
+    body: JSON.stringify({ entityName: entity, fetchXml }),
+  });
+}
+
+/** A thrown read that means "the caller may not see this record". */
+class DeniedError extends Error {}
+
+/** Reads one record's fields through the id-filtered module fetch. Throws DeniedError / ApiError. */
+async function readRecord(cfg: RecordDetailEntity, id: string): Promise<DetailRecord> {
+  const columns = Array.from(new Set(cfg.fields.map(f => f.attribute)));
+  const result = await postFetch(
+    cfg.entity,
+    buildFetchXml(cfg.entity, [cfg.idAttribute, ...columns], { attribute: cfg.idAttribute, value: id })
+  );
+  const row = result.entities?.[0];
+  // The fetch seam returns only rows inside the caller's Tier-2 set, so no row means "not yours" (or not there).
+  if (!row) throw new DeniedError('record not in the caller set');
+  return row;
+}
+
+type RecordState =
+  | { status: 'loading' }
+  | { status: 'ready'; record: DetailRecord }
+  | { status: 'denied' }
+  | { status: 'notfound' }
+  | { status: 'error'; message: string; retryable: boolean };
+
+/** Loads the record for `id`; a state is only ever shown for the id it was read for (no flash of the previous record). */
+function useRecord(cfg: RecordDetailEntity | undefined, id: string | undefined, attempt: number): RecordState {
+  const [loaded, setLoaded] = React.useState<{ key: string; state: RecordState } | null>(null);
+  const key = `${cfg?.entity ?? ''}:${id ?? ''}:${attempt}`;
+
+  React.useEffect(() => {
+    if (!cfg || !id) return;
+    let cancelled = false;
+    const done = (state: RecordState): void => {
+      if (!cancelled) setLoaded({ key, state });
+    };
+    if (!GUID.test(id)) {
+      // A malformed id is never sent anywhere, and retrying cannot make it valid.
+      done({ status: 'error', message: 'This record could not be opened.', retryable: false });
+      return () => {
+        cancelled = true;
+      };
+    }
+    readRecord(cfg, id).then(
+      record => done({ status: 'ready', record }),
+      (err: unknown) => {
+        if (err instanceof DeniedError || (err instanceof ApiError && err.statusCode === 403)) {
+          done({ status: 'denied' });
+        } else if (err instanceof ApiError && err.statusCode === 404) {
+          done({ status: 'notfound' });
+        } else {
+          done({ status: 'error', message: 'This record could not be loaded just now.', retryable: true });
+        }
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg, id, key]);
+
+  if (!cfg || !id) return { status: 'notfound' };
+  return loaded && loaded.key === key ? loaded.state : { status: 'loading' };
+}
+
+type ListState =
+  { status: 'loading' } | { status: 'ready'; rows: DetailRecord[]; truncated: boolean } | { status: 'error' };
+
+/** The Tier-2-scoped module read the matching tab runs, narrowed to the rows tied to this record. */
+function useRelatedRows(
+  childEntity: 'sprk_document' | 'sprk_invoice',
+  attributes: readonly string[],
+  parentAttribute: string | undefined,
+  parentId: string,
+  orderBy: { attribute: string; descending: boolean }
+): ListState {
+  const [loaded, setLoaded] = React.useState<{ key: string; state: ListState } | null>(null);
+  const key = `${childEntity}:${parentAttribute ?? ''}:${parentId}`;
+  const attrsKey = attributes.join(',');
+
+  React.useEffect(() => {
+    if (!parentAttribute) return;
+    let cancelled = false;
+    const done = (state: ListState): void => {
+      if (!cancelled) setLoaded({ key, state });
+    };
+    postFetch(
+      childEntity,
+      buildFetchXml(childEntity, attrsKey.split(','), { attribute: parentAttribute, value: parentId }, orderBy)
+    ).then(
+      result => done({ status: 'ready', rows: result.entities ?? [], truncated: result.moreRecords === true }),
+      () => done({ status: 'error' })
+    );
+    return () => {
+      cancelled = true;
+    };
+    // orderBy is a module constant at every call site.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childEntity, parentAttribute, parentId, attrsKey, key]);
+
+  return loaded && loaded.key === key ? loaded.state : { status: 'loading' };
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+const useStyles = makeStyles({
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXL,
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  heading: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+  },
+  center: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '160px',
+    gap: tokens.spacingHorizontalM,
+  },
+  denied: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '200px',
+    gap: tokens.spacingVerticalM,
+    color: tokens.colorNeutralForeground2,
+    textAlign: 'center',
+  },
+  deniedIcon: {
+    fontSize: '40px',
+    color: tokens.colorNeutralForeground3,
+  },
+  empty: {
+    color: tokens.colorNeutralForeground3,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+  },
+  list: {
+    listStyleType: 'none',
+    margin: 0,
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  item: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalS,
+    borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+  },
+  itemPrimary: {
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
+    overflowWrap: 'anywhere',
+  },
+  itemMeta: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+
+interface RelatedListProps {
+  testId: string;
+  idAttribute: string;
+  heading: string;
+  noun: string;
+  emptyText: string;
+  state: ListState;
+  primary: (row: DetailRecord) => string;
+  meta: (row: DetailRecord) => string;
+}
+
+const RelatedList: React.FC<RelatedListProps> = ({
+  testId,
+  idAttribute,
+  heading,
+  noun,
+  emptyText,
+  state,
+  primary,
+  meta,
+}) => {
+  const styles = useStyles();
+  return (
+    <section className={styles.section} aria-label={heading} data-testid={testId}>
+      <h3 className={styles.heading}>{heading}</h3>
+      {state.status === 'loading' && <Spinner size="small" label={`Loading ${noun}...`} />}
+      {state.status === 'error' && (
+        <MessageBar intent="error">
+          <MessageBarBody>The {noun} could not be loaded just now.</MessageBarBody>
+        </MessageBar>
+      )}
+      {state.status === 'ready' && (
+        <>
+          <TruncatedListNotice truncated={state.truncated} shown={state.rows.length} noun={noun} />
+          {state.rows.length === 0 && !state.truncated && (
+            <div className={styles.empty} role="status">
+              {emptyText}
+            </div>
+          )}
+          {state.rows.length > 0 && (
+            <ul className={styles.list}>
+              {state.rows.map((row, i) => (
+                <li key={String(row[idAttribute] ?? i)} className={styles.item}>
+                  <span className={styles.itemPrimary}>{primary(row)}</span>
+                  <span className={styles.itemMeta}>{meta(row)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
+  );
+};
+
+const DOCUMENT_COLUMNS = ['sprk_documentid', 'sprk_documentname', 'sprk_documenttype', 'createdon'] as const;
+const INVOICE_COLUMNS = [
+  'sprk_invoiceid',
+  'sprk_name',
+  'sprk_invoicenumber',
+  'sprk_invoicedate',
+  'sprk_invoicestatus',
+  'sprk_totalamount',
+] as const;
+const DOCUMENT_ORDER = { attribute: 'createdon', descending: true };
+const INVOICE_ORDER = { attribute: 'sprk_invoicedate', descending: true };
+
+const DocumentsSection: React.FC<{ parentAttribute: string; parentId: string }> = ({ parentAttribute, parentId }) => {
+  const state = useRelatedRows('sprk_document', DOCUMENT_COLUMNS, parentAttribute, parentId, DOCUMENT_ORDER);
+  return (
+    <RelatedList
+      testId="record-detail-documents"
+      idAttribute="sprk_documentid"
+      heading="Documents"
+      noun="documents"
+      emptyText="No documents for this record."
+      state={state}
+      primary={row => formatDetailValue(row, { attribute: 'sprk_documentname' })}
+      meta={row =>
+        [
+          formatDetailValue(row, { attribute: 'sprk_documenttype' }),
+          formatDetailValue(row, { attribute: 'createdon', kind: 'date' }),
+        ].join(' · ')
+      }
+    />
+  );
+};
+
+const InvoicesSection: React.FC<{ parentAttribute: string; parentId: string }> = ({ parentAttribute, parentId }) => {
+  const state = useRelatedRows('sprk_invoice', INVOICE_COLUMNS, parentAttribute, parentId, INVOICE_ORDER);
+  return (
+    <RelatedList
+      testId="record-detail-invoices"
+      idAttribute="sprk_invoiceid"
+      heading="Invoices"
+      noun="invoices"
+      emptyText="No invoices for this record."
+      state={state}
+      primary={row => {
+        const number = formatDetailValue(row, { attribute: 'sprk_invoicenumber' });
+        return number !== EMPTY_VALUE ? number : formatDetailValue(row, { attribute: 'sprk_name' });
+      }}
+      meta={row =>
+        [
+          formatDetailValue(row, { attribute: 'sprk_invoicestatus' }),
+          formatDetailValue(row, { attribute: 'sprk_totalamount', kind: 'money' }),
+        ].join(' · ')
+      }
+    />
+  );
+};
+
+/**
+ * Events and tasks. A Project reads through the existing components, read-only. Matter and Work Assignment have no
+ * external event read until task 039, so they show the empty state rather than a section that cannot load.
+ */
+const EventsAndTasksSection: React.FC<{ entity: string; id: string }> = ({ entity, id }) => {
+  const styles = useStyles();
+  return (
+    <section className={styles.section} aria-label="Events and tasks" data-testid="record-detail-events">
+      <h3 className={styles.heading}>Events and tasks</h3>
+      {entity === 'sprk_project' ? (
+        <>
+          <EventsCalendar projectId={id} accessLevel={AccessLevel.ViewOnly} />
+          <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />
+        </>
+      ) : (
+        <div className={styles.empty} role="status" data-testid="record-detail-events-unavailable">
+          No events or tasks to show for this record yet.
+        </div>
+      )}
+    </section>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Modal
+// ---------------------------------------------------------------------------
+
+export interface RecordDetailModalProps {
+  open: boolean;
+  onClose: () => void;
+  /** Logical name of the opened entity (a key of `RECORD_DETAIL_ENTITIES`). */
+  entityName: string;
+  /** The grid's row ids, in grid order — the "1 of N" set. */
+  recordIds: readonly string[];
+  /** 0-based position of the shown record in `recordIds`. */
+  index: number;
+  /** Called with the new position when the user pages to the previous / next row. */
+  onIndexChange: (index: number) => void;
+}
+
+export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
+  open,
+  onClose,
+  entityName,
+  recordIds,
+  index,
+  onIndexChange,
+}) => {
+  const styles = useStyles();
+  const cfg = getRecordDetailEntity(entityName);
+  const [attempt, setAttempt] = React.useState(0);
+  const id = recordIds[index];
+
+  const state = useRecord(cfg, open ? id : undefined, attempt);
+  // `cfg` is undefined only for an entity with no detail view, which the opener never offers; render nothing then.
+  if (!cfg) return null;
+
+  const title = recordDetailTitle(cfg, state.status === 'ready' ? state.record : null);
+
+  const handleNavigate = (dir: 'prev' | 'next'): void => {
+    const next = dir === 'prev' ? index - 1 : index + 1;
+    if (next >= 0 && next < recordIds.length) onIndexChange(next);
+  };
+
+  return (
+    <SprkModal
+      open={open}
+      onClose={onClose}
+      title={title}
+      size="lg"
+      nav={{ index, total: recordIds.length, onNavigate: handleNavigate }}
+      footer={
+        <Button appearance="primary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <div className={styles.body} data-testid="record-detail-body">
+        {state.status === 'loading' && (
+          <div className={styles.center}>
+            <Spinner size="medium" label="Loading record..." />
+          </div>
+        )}
+
+        {state.status === 'denied' && (
+          <div className={styles.denied} role="alert" data-testid="record-detail-denied">
+            <LockClosedRegular className={styles.deniedIcon} aria-hidden />
+            <Text size={400} weight="semibold">
+              You don't have access to this record
+            </Text>
+          </div>
+        )}
+
+        {state.status === 'notfound' && (
+          <div className={styles.denied} role="status" data-testid="record-detail-notfound">
+            <Text size={400} weight="semibold">
+              This record is no longer available
+            </Text>
+          </div>
+        )}
+
+        {state.status === 'error' && (
+          <div className={styles.denied} role="alert" data-testid="record-detail-error">
+            <Text size={300}>{state.message}</Text>
+            {state.retryable && (
+              <Button appearance="secondary" onClick={() => setAttempt(n => n + 1)}>
+                Try again
+              </Button>
+            )}
+          </div>
+        )}
+
+        {state.status === 'ready' && id && (
+          // Keyed by record so every section's state resets when the user pages to another row.
+          <React.Fragment key={`${cfg.entity}:${id}`}>
+            <RecordDetailFields cfg={cfg} record={state.record} />
+            {cfg.documentsBy && <DocumentsSection parentAttribute={cfg.documentsBy} parentId={id} />}
+            {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
+            {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} />}
+          </React.Fragment>
+        )}
+      </div>
+    </SprkModal>
+  );
+};
+
+export default RecordDetailModal;

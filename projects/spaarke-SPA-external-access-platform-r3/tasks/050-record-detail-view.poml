@@ -4,7 +4,7 @@
     <title>Record detail view: fields, documents/invoices, events/tasks (FR-01–FR-03)</title>
     <phase>5 SPA features</phase>
     <gate>startable (events for Matter/WA need 039)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New frontend surface (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>
