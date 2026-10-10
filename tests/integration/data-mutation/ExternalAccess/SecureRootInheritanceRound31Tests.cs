@@ -256,6 +256,37 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
+    /// Task 179 (owner round 91; round 90 F1's safe path): a share passed on BEFORE round 91 (Collaborate without Share, 23)
+    /// and its ledger row (GrantedLevel 23) are raised together by the next scheduled pass, to the root's mask, Share
+    /// included. The ledger then still matches the share, so the matter's unshare removes it, rather than keeping it as
+    /// "changed since". This is why the legacy share-mask script skips ledger-tracked shares and leaves them to the
+    /// reconcile.
+    /// </summary>
+    [Fact]
+    public async Task APreRound91InheritedShare_IsRaisedWithItsLedgerByTheNextPass_AndTheMattersUnshareStillRemovesIt()
+    {
+        const int LegacyMirror = 23;
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.SeedShare(matter, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.RightsCsvForMask(LegacyMirror));
+        _fixture.InheritedLedger.SeedInheritedRow(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_matter", matter,
+            DataversePrincipalRef.User(Colleague), new AssignedAccessLedgerWrite(AssignedAccessState.Shared, null, GrantedLevel: LegacyMirror));
+
+        await _job.RunAsync();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "raised to the matter's rights, Share included");
+        Mirror.Should().Be(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights), "round 91: the mirror carries Share");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).GrantedLevel.Should().Be(Mirror,
+            "the ledger records the raised mask, so 'unmodified' still holds");
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the unmodified inherited share goes with the matter's");
+    }
+
+    /// <summary>
     /// The parent's unshare (<c>/unshare-user</c> on the matter) removes the share the matter's sharing gave the user on the
     /// filed work assignment — in the same call — because it is still the unmodified inherited one; its row is Revoked.
     /// </summary>

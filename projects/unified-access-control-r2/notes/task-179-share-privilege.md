@@ -138,7 +138,13 @@ Deep). `sprk_noaccessentry` has no Share privilege to show.
   than role depth (a secure record, a user in a sibling business unit, SECURE-PROJECT-ENVIRONMENT-SETUP §6), Dataverse
   reports ShareAccess only if the share carries it. Two groups lose Manage Access on those records:
   1. holders of a **legacy Collaborate or Full Access share** written before 2026-09-30 (mask 23 / 65559, no Share):
-     `scripts/Upgrade-LegacyRecordShareMasks.ps1` (operator-run, dry-run by default) upgrades them;
+     `scripts/Upgrade-LegacyRecordShareMasks.ps1` (operator-run, dry-run by default) upgrades them. **Run it only
+     after the post-deploy reconcile pass.** Since round 90 F1 it skips every share the BFF tracks in the
+     `sprk_assignedaccess` ledger (state Shared, inherited or Assigned-To) and reports it as skipped. Before that fix
+     it upgraded those shares too, leaving the ledger's GrantedLevel at 23, so a later parent unshare kept them
+     (KeptModified). Dev check, read-only, 2026-10-10: the dry run finds 36 current shares and 0 legacy ones, and all
+     53 live Shared ledger rows are Assigned-To at 262167. No inherited rows and no legacy levels, so dev has no
+     exposure;
   2. sharees of a secure root on its **filed children**, whose mirrored shares never carried Share (round 11 item 4).
      Owner round 91 (2026-10-10) fixed this: the mirror now carries Share where the root share holds it, and the
      reconcile upgrades existing child shares on its next pass.
