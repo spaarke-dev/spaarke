@@ -484,7 +484,9 @@ class AccessGrantModalApiError extends Error {
   static fromThrown(err: unknown): AccessGrantModalApiError | null {
     if (isApiError(err)) {
       const problem = problemOf(err);
-      return problem ? AccessGrantModalApiError.fromBody(err.status, problem) : new AccessGrantModalApiError(err.status, err.message);
+      return problem
+        ? AccessGrantModalApiError.fromBody(err.status, problem)
+        : new AccessGrantModalApiError(err.status, err.message);
     }
     if (isAuthFailure(err)) {
       return new AccessGrantModalApiError(401, err instanceof Error && err.message ? err.message : 'HTTP 401');
@@ -509,7 +511,9 @@ class AccessGrantModalApiError extends Error {
     const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
     const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
     const speContainerOutcome =
-      typeof body?.speContainerOutcome === 'string' ? (body.speContainerOutcome as SpeContainerRevokeOutcome) : undefined;
+      typeof body?.speContainerOutcome === 'string'
+        ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
+        : undefined;
     const problemDetail = typeof body?.detail === 'string' && body.detail.trim() ? body.detail : undefined;
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
@@ -527,10 +531,13 @@ class AccessGrantModalApiError extends Error {
  *
  * `'delegation'` covers EVERY `sdap.access.deny.delegation_*` reason code
  * `DelegationRuleFilter` can return (no caller token, unresolvable target, the
- * Write check itself failing, or the ordinary Write-required deny) — all four
- * mean the same thing to this UI: "you cannot manage access on this record
- * right now," which is the one designed banner state the project constraint
- * requires (not a raw error, not a retry loop).
+ * rights check itself failing, or the ordinary Write-required / Share-required
+ * deny) — all mean the same thing to this UI: "you cannot manage access on
+ * this record right now," which is the one designed banner state the project
+ * constraint requires (not a raw error, not a retry loop). Only the WORDING
+ * differs (task 179): the two rights refusals name the rule (Write and the
+ * Share privilege); the others say the check could not be made, so an outage
+ * never tells an entitled user to change their security role.
  *
  * `'followsParent'` (task 175, owner round 87) is the 409 `sdap.access.access_follows_parent`: THIS change would
  * make the record looser than the floor its parent sets. It is NOT a deny state: it refuses that one action only,
@@ -540,15 +547,26 @@ class AccessGrantModalApiError extends Error {
 /** The two designed deny states, which block every write until the modal is reopened. */
 interface IAccessDeny {
   kind: 'delegation' | 'unauthenticated';
+  title: string;
   message: string;
 }
+
+/** Task 179: the two `DelegationRuleFilter` refusals that are about the caller's rights (the rest are "could not check"). */
+const DELEGATION_RIGHTS_REASON_CODES: ReadonlySet<string> = new Set([
+  'sdap.access.deny.delegation_write_required',
+  'sdap.access.deny.delegation_share_required',
+]);
 
 type IAccessFailure = IAccessDeny | { kind: 'followsParent'; message: string };
 
 function classifyAccessFailure(err: unknown): IAccessFailure | null {
   if (!(err instanceof AccessGrantModalApiError)) return null;
   if (err.status === 401) {
-    return { kind: 'unauthenticated', message: 'Your sign-in has expired. Refresh the page and try again.' };
+    return {
+      kind: 'unauthenticated',
+      title: 'Sign-in expired',
+      message: 'Your sign-in has expired. Refresh the page and try again.',
+    };
   }
   if (err.status === 409 && err.reasonCode === ACCESS_FOLLOWS_PARENT_REASON_CODE) {
     return {
@@ -557,9 +575,20 @@ function classifyAccessFailure(err: unknown): IAccessFailure | null {
     };
   }
   if (err.status === 403 && err.reasonCode?.startsWith('sdap.access.deny.delegation_')) {
+    if (!DELEGATION_RIGHTS_REASON_CODES.has(err.reasonCode)) {
+      return {
+        kind: 'delegation',
+        title: 'Access could not be checked',
+        message:
+          'Whether you can change who has access to this record could not be checked. Close Manage Access and open it again to retry.',
+      };
+    }
     return {
       kind: 'delegation',
-      message: 'You need Write access on this record to change who else can access it.',
+      title: 'Write and Share required',
+      // Task 179 (owner round 89): the same sentence as the server's DelegationRuleFilter refusal (Write and Share).
+      message:
+        'To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).',
     };
   }
   return null;
@@ -787,7 +816,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   if (denied) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.${relatedSuffix}`,
+      text: `Granted access to ${granted} of ${selectedCount} before access was denied; the message above says why.${relatedSuffix}`,
     };
   }
   if (policyRefusals.length > 0) {
@@ -2087,9 +2116,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 {accessDenyState && (
                   <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
-                      <MessageBarTitle>
-                        {accessDenyState.kind === 'delegation' ? 'Write access required' : 'Sign-in expired'}
-                      </MessageBarTitle>
+                      <MessageBarTitle>{accessDenyState.title}</MessageBarTitle>
                       {accessDenyState.message}
                     </MessageBarBody>
                   </MessageBar>

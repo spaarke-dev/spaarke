@@ -35,7 +35,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <c>sprk_grantedby</c> set to the caller — so the contact can neither re-lengthen (own re-grant) nor revoke the
 /// operator's deliberate time bound. Every other share gets the expiry and nothing else.</para>
 ///
-/// <para><b>Authorization</b> is the group-level <see cref="DelegationRuleFilter"/>: Write on THIS record,
+/// <para><b>Authorization</b> is the group-level <see cref="DelegationRuleFilter"/>: Write and Share on THIS record,
 /// evaluated as the caller (OBO), before the handler runs. The filter and the handler resolve the target
 /// through the same <see cref="ResolveRoot"/>, and this request has no legacy <c>projectId</c>, so the
 /// record that was authorized and the rows that are written cannot diverge. The write itself runs app-only
@@ -96,7 +96,7 @@ public static class SetRecordShareExpiryEndpoint
             .WithDescription(
                 "Writes the expiry to every active sprk_externalrecordaccess row of the record (contact and " +
                 "organization shares) in one all-or-nothing transaction, then invalidates the affected " +
-                "contacts' participation cache. Requires Write on the record.")
+                "contacts' participation cache. Requires Write and Share on the record.")
             .Produces<SetRecordShareExpiryResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

@@ -228,7 +228,9 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         SecuredWorkAssignment(workAssignment, matter);
         SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
-        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CreatorAccessRights);
+        // Changed to Full Access: since owner round 91 the inherited share already carries Collaborate's Share, so a change
+        // must differ from what the matter's share passes on.
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.FullAccessRights);
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 

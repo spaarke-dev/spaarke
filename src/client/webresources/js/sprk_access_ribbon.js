@@ -47,7 +47,7 @@
  *
  * A record filed under a parent (task 175, owner round 87: "the parent sets a FLOOR"): a work assignment or project filed
  * under a matter or project inherits Secure from it and may never be looser, but may be made stricter by hand. The same
- * can-manage-access answer that gives the Write verdict says whether the record's floor is secure (`floorSecure`) and
+ * can-manage-access answer that gives the delegation verdict says whether the record's floor is secure (`floorSecure`) and
  * whether what it is filed under could be read (`parentUnverifiable`). Make Secure follows its normal rules on such a
  * record (making a child stricter is allowed); Remove Secure is HIDDEN when floorSecure === true (the record's Secure
  * comes from the parent; removing it would breach the floor - the server refuses it 409
@@ -63,7 +63,7 @@
  * (a preceding JavaScriptFunction with FunctionName="isNaN" per library - the established ribbon idiom).
  *
  * Who sees the command: a cached async enable rule asks the SERVER - GET /api/v1/external-access/can-manage-access,
- * the delegation filter's own verdict (Write on the record). Anything other than 200 + canManageAccess === true is
+ * the delegation filter's own verdict (Write and Share on the record, task 179). Anything other than 200 + canManageAccess === true is
  * "no". It never guesses from a table privilege, and it is a convenience only: the sync route is gated by the same
  * DelegationRuleFilter whatever the ribbon shows.
  *
@@ -100,7 +100,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * How long the secure-command rules trust a cached gate answer's floor facts (task 175): a record filed or un-filed
-     * since is seen within this time. Update Access keeps the cached Write verdict for the session, as before.
+     * since is seen within this time. Update Access keeps the cached verdict for the session, as before.
      */
     var GATE_FRESH_MS = 30000;
 
@@ -132,7 +132,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         return !!body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
     }
 
-    /** "No" for the caller: no Write verdict (the floor facts are moot then; fail closed). */
+    /** "No" for the caller: no delegation verdict (the floor facts are moot then; fail closed). */
     var NO_VERDICT = Object.freeze({ can: false, unverifiable: true, floorSecure: true });
 
     /**
@@ -237,7 +237,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     }
 
     /**
-     * EnableRule for "Update Access": true only when the server says the caller holds Write on this record. Cache HIT
+     * EnableRule for "Update Access": true only when the server says the caller may manage access (Write and Share on this record). Cache HIT
      * answers synchronously; a MISS returns the pending promise (the ribbon treats it as false until it resolves and
      * re-evaluates) - the `sprk_fieldmapping_push.js` hasSourceProfile pattern.
      * @param {object} primaryControl - the form context
@@ -269,7 +269,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     /**
      * EnableRule for the "Access" flyout itself: visible only when at least one menu item is available, so the caller
      * never opens an empty menu. Make Secure and Remove Secure (task 150) are each available only to a caller for whom
-     * Update Access is - both require the same Write verdict - so "any item available" is exactly Update Access's rule,
+     * Update Access is - both require the same verdict - so "any item available" is exactly Update Access's rule,
      * and no secure-state read is spent on the flyout itself.
      */
     ns.isAccessMenuVisible = function (primaryControl) {
@@ -634,8 +634,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     };
 
     /**
-     * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
-     * the record, the same rule as Update Access) AND what the record is filed under could be read (task 175:
+     * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write and
+     * Share on the record, the same rule as Update Access) AND what the record is filed under could be read (task 175:
      * parentUnverifiable is not true - fail closed) AND `floorAllows(verdict)` holds (the same answer, at most
      * GATE_FRESH_MS old) AND `wanted(state)` holds for the record's secure state. An unknown flag satisfies neither rule,
      * so a failed or masked read hides both commands.

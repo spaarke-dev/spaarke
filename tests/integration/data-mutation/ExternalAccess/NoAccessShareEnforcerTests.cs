@@ -558,7 +558,7 @@ public class NoAccessShareEnforcerTests
 
     // ── Task 149 merged after this task (AC6): the secure record's children follow a removal at once ──────────────
 
-    private const int CollaborateOnChild = 23; // Collaborate without Share — task 149's child mirror
+    private const int CollaborateOnChild = 262167; // Collaborate, Share included — task 149's child mirror since owner round 91
     private static readonly Guid ChildDocument = Guid.Parse("14314314-3143-1431-4314-3143143143e1");
     private static readonly Guid ChildEvent = Guid.Parse("14314314-3143-1431-4314-3143143143e2");
 

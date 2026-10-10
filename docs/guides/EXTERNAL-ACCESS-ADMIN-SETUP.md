@@ -375,22 +375,27 @@ External SPE access is entirely BFF-brokered app-only. There is **no per-externa
 > **Added 2026-09-08** (task 026, review finding M5): these four codes were previously undocumented outside
 > code (`Api/ExternalAccess/DelegationRuleFilter.cs`). They apply to the **internal, workforce-authenticated**
 > management group (`/grant`, `/invite`, `/invite-and-grant`, `/revoke`, `/close-project`, `/provision-project`,
-> `/unsecure-project`) — the rule (owner decision B-14, task 008): *a caller may change who can reach a
-> record only if they hold **Write** on that record, evaluated as the caller.* Every denial is HTTP **403**
+> `/unsecure-project`, and since then the share, expiry, No Access and Assigned-To routes and `/can-manage-access`) —
+> the rule (owner decision B-14, task 008; tightened by owner round 89, task 179): *a caller may change who can reach a
+> record only if they hold **Write** on that record AND the **Share** privilege on its table, evaluated as the caller.*
+> Two exceptions: `/no-access/enforce` asks the No Access table's Write privilege (an organization-owned table has no
+> Share privilege), and `/assigned-access/sync` asks Write alone. Every denial is HTTP **403**
 > with a `reasonCode` extension in the ProblemDetails body; look for `[DELEGATION] DENIED` in the BFF logs
 > (Section 7.2) for the specific route and target.
 
 | `reasonCode` | What it means | What the operator should do |
 |---|---|---|
-| `sdap.access.deny.delegation_no_caller_token` | The request carried no caller bearer token, so the Write check could not be evaluated as the calling user (the filter refuses to fall back to an app-only check). | Confirm the caller's session token is being forwarded to the BFF on this call. This is a client/session bug, not a permissions problem — a signed-in core user should never hit this in normal use. |
+| `sdap.access.deny.delegation_no_caller_token` | The request carried no caller bearer token, so the Write and Share check could not be evaluated as the calling user (the filter refuses to fall back to an app-only check). | Confirm the caller's session token is being forwarded to the BFF on this call. This is a client/session bug, not a permissions problem — a signed-in core user should never hit this in normal use. |
 | `sdap.access.deny.delegation_target_unresolved` | No target record could be identified from the request body (e.g. an empty/invalid `ProjectId`, or — for `/revoke` — an `AccessRecordId` that doesn't resolve to a row with a derivable root). | Verify the request body names a real, existing record (project/matter/work assignment id, or a valid access-record id for `/revoke`). A malformed or already-deleted id produces this code rather than a 404, deliberately — see the class remarks on enumeration in `DelegationRuleFilter.cs`. |
 | `sdap.access.deny.delegation_write_required` | The caller was correctly identified and the target record correctly resolved, but the caller does **not** hold Write on that record (Read-only, or no access at all, is not enough — B-14 requires Write specifically). | This is very often correct behavior, not a bug — check whether the caller SHOULD have Write on the target record via a share, role, or ownership before assuming it's an error. If they should, grant them Write on the underlying record (not on the external-access surface) and retry. |
-| `sdap.access.deny.delegation_check_failed` | The Write-rights check itself threw — either resolving the target record or evaluating `CallerRecordAccessProbe.GetCallerRightsAsync` failed (transport error, OBO exchange failure, or a Dataverse outage). Logged as `DELEGATION-RPA-UNAVAILABLE` in some call paths. | Transient — retry. If it persists, check BFF connectivity to Dataverse and whether OBO token exchange is healthy (see `src/server/api/Sprk.Bff.Api/CLAUDE.md` Auth section); this fails CLOSED by design, so a systemic outage here denies these six mutation endpoints entirely rather than silently widening access. |
+| `sdap.access.deny.delegation_share_required` | Task 179 (owner round 89): the caller holds Write on the record, but Dataverse reports no Share on it: none of their security roles (direct or through a team) grants the table's Share privilege at a depth that reaches the record. | Usually correct: managing access is set per security role. If this person should manage access, give one of their roles `prvShare` on that table (project, matter or work assignment) at the same depth as their Write, then re-probe a few times (the privilege cache lags). **Also check the record's share level** when the person reaches the record through a share rather than role depth (a secure record, a user in a sibling business unit): that share must carry Share itself. Collaborate and Full Access do since 2026-09-30; an older share (mask 23 / 65559) does not until `scripts/Upgrade-LegacyRecordShareMasks.ps1` upgrades it (run it only AFTER the post-deploy reconcile pass: it skips the inherited and Assigned-To shares the BFF tracks, see §7.1b), and View Only never does. A filed child of a secure record carries its root share's Share since owner round 91. A share cannot give a right the person's roles do not allow, so the role privilege is needed either way. |
+| `sdap.access.deny.delegation_check_failed` | The rights check itself threw — either resolving the target record or evaluating `CallerRecordAccessProbe.GetCallerRightsAsync` failed (transport error, OBO exchange failure, or a Dataverse outage). Logged as `DELEGATION-RPA-UNAVAILABLE` in some call paths. | Transient — retry. If it persists, check BFF connectivity to Dataverse and whether OBO token exchange is healthy (see `src/server/api/Sprk.Bff.Api/CLAUDE.md` Auth section); this fails CLOSED by design, so a systemic outage here denies these six mutation endpoints entirely rather than silently widening access. |
 
 ### 7.1b Who May Grant, and Up To What — the grantor ceiling (task 139, owner decision 2026-09-30)
 
-> **Rule.** A person with **Write** on a record may share it (the model-driven app's own **Share** command) and use
-> **Manage Access** to grant users, contacts and organizations. A **View Only** holder may not pass access on.
+> **Rule.** A person with **Write** on a record whose security role grants the table's **Share** privilege may share it
+> (the model-driven app's own **Share** command) and use **Manage Access** to grant users, contacts and organizations
+> (Share required since owner round 89, task 179; a role with Write and no Share sees no Manage Access). A **View Only** holder may not pass access on.
 > **Every manual grant is capped at the grantor's own level.** This supersedes the 2026-09-15 rule that no share
 > level carried the right to re-share.
 
@@ -414,6 +419,10 @@ report), then with `-Apply`. It upgrades only **system-user** shares at exactly 
 work assignment, reads every change back, and LISTS (never modifies) team shares at those masks and any share whose
 mask is not a level — those need an owner decision.
 
+**Order: after a BFF deploy, let the secure-child and secure-root reconcile run first (one 5-minute pass), then run the script.** The script skips any share the BFF wrote and still tracks in its `sprk_assignedaccess` ledger (inherited from a secure parent, or Assigned-To) and reports it as skipped (task 179, round 90 F1): upgrading those would leave the ledger's recorded level at 23 and the share would then survive the parent's unshare. An inherited share is upgraded by the reconcile itself (it writes the root's current mask and records it in the
+ledger). An Assigned-To share stays as the Assigned-To rule wrote it. A ledger read that fails stops the script before
+any write (exit 1). Pester coverage: `tests/scripts/Upgrade-LegacyRecordShareMasks.Tests.ps1`.
+
 **The ceiling on the grant routes.** `/grant`, `/invite-and-grant` (and organization-wide grants) and `/share-user`
 re-probe the caller's own rights on the record and cap the request: Full Access needs Read + Write + Delete,
 Collaborate needs Read + Write, View Only needs Read.
@@ -427,6 +436,27 @@ Collaborate needs Read + Write, View Only needs Read.
 | Caller cannot grant | **403** `sdap.access.grant.caller_cannot_grant` (`/share-user`: `sdap.access.user_share.caller_cannot_grant`) | The caller's own access allows granting nothing — or could not be confirmed (the probe answers "none" on any OBO/transport failure). | Retry; if it persists, the caller lacks access to the record. |
 | Caller's rights unreadable | **500** `sdap.access.grant.caller_rights_unreadable` (`/share-user`: `sdap.access.user_share.read_failed`) | Establishing the caller's own rights threw. Nothing was written or onboarded. | Transient — retry. |
 | Last person on a secure record | **409** `sdap.access.user_share.last_reader_on_secure_record` (`/unshare-user`) | A secure record must always keep someone who can open it (owner S5). | Share it with someone else first, then remove this share. |
+
+### 7.1c No Access entries — who may add and remove them (owner round 93, 2026-10-10)
+
+> **Assignment rule (binding).** Removing a No Access entry (Deactivate or Delete) loosens access, so its remover must
+> also be able to manage access on the records it walls: Write **and Share** on them (owner round 89). The BFF cannot
+> check that per record. Entries are deactivated and deleted natively in the model-driven app, gated only by
+> Dataverse's privileges on the organization-owned `sprk_noaccessentry` table, and Spaarke uses no plugins. So the rule
+> is held by **role assignment** (owner round 93; per-record enforcement is tracked as #1601):
+>
+> - Assign **Spaarke Access Administrator** only TOGETHER WITH a role that holds Share on the records it walls:
+>   `prvSharesprk_Project`, `prvSharesprk_Matter` and `prvSharesprk_WorkAssignment`, at a depth that reaches them
+>   (for example **Spaarke Core User**, Share at Deep).
+> - Never give a user without that Share any role holding **Write or Delete on `sprk_noaccessentry`**. On dev
+>   (2026-10-10) those are Spaarke Access Administrator (Write at Global, no Delete), System Administrator and System
+>   Customizer. Spaarke Access Administrator itself holds no Share on project, matter or work assignment, so it must
+>   never be the user's only role. Check direct roles and team roles alike: Dataverse unions them.
+> - Adding an entry stays Write (on the entry table). Its enforcement, which removes the shares the entry walls off, is
+>   still bounded by the entry author's Write on each covered record (owner N5).
+>
+> Re-check this whenever a role's privileges change. The role inventory (`projects/unified-access-control-r2/notes/
+> task-179-share-privilege.md`) shows how to read it.
 
 ### 7.2 Checking BFF Logs
 
@@ -521,7 +551,7 @@ Unified-access-control-r2 task 138 made the record-level **Access Permission** c
   "+ Organization" and the role candidates (keeping "+ User" and Revoke); on Limited/Secure,
   "+ Organization". One message bar explains the state (Restricted Access / Secure – Restricted / Secure /
   Limited Access). The Manage Access *gate* (`can-manage-access`) deliberately ignores the flags: it
-  answers "may you change who has access" (Write), not "which grant types apply".
+  answers "may you change who has access" (Write and Share), not "which grant types apply".
 - **To Do, Event, Communication and Document** take their access from the parent (owner Q6, round 81). Their
   `sprk_accesspermission` is a DISPLAY copy of the parent's value (the most restrictive across their parents),
   written by the BFF and kept in step every two minutes by `SecureChildReconciliationJob`; it is locked on the form

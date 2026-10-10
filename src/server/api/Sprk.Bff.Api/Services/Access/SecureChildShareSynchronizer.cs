@@ -226,8 +226,8 @@ public sealed record SecureRootsAbove(
 /// of non-secure roots are never touched. Roots are never mirrored: a root's own shares are provisioning's and the share
 /// endpoints'.</para>
 /// <para><b>The mirror.</b> For each principal (system user or team) with a direct share on the root: the root's rights
-/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete; never
-/// Share, never Assign (owner round 11 item 4: "ShareAccess is NOT mirrored onto children"). A child under SEVERAL secure
+/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete and Share,
+/// each only where the root share holds it; never Assign (Share since owner round 91, replacing round 11 item 4). A child under SEVERAL secure
 /// roots gets the INTERSECTION: a principal must be shared on every one of them, at the lowest rights (owner round 11
 /// item 4, fail closed). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
 /// missing one is granted. Inherited-only POA rows (mask 0) are neither read as shares nor touched.</para>
@@ -436,7 +436,7 @@ public sealed class SecureChildShareSynchronizer
     /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): mirrors ONE child — the row a browser writer just
     /// created or re-filed through the BFF — inline, so the people the secure record is shared with see it at once rather
     /// than at the next two-minute reconcile (owner round 11 item 2 remains the backstop). The same mirror the scheduled
-    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Share or Assign, a No Access
+    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Assign (Share only where the roots hold it, round 91), a No Access
     /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
     /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
     /// </summary>
@@ -707,7 +707,7 @@ public sealed class SecureChildShareSynchronizer
     /// unified-access-control-r2 task 158 (owner round 6: "The parent's sharees can see it") — gives a secure work
     /// assignment or project that is FILED UNDER secure matters / projects (<paramref name="secureParents"/>) the internal
     /// sharees of those parents, by this class's mirror rule: each parent sharee's rights restricted to
-    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (never Share, never Assign), the INTERSECTION when there are two
+    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (Share only where the root holds it, round 91; never Assign), the INTERSECTION when there are two
     /// parents (owner round 11 item 4), a user the No Access list walls off the record or any parent dropped, an unverifiable
     /// wall held. Then the record's own children are brought into line with its shares (<see cref="SyncRootAsync"/>).
     /// </summary>

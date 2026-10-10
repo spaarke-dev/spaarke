@@ -235,7 +235,7 @@ describe('AccessGrantModal — a record with a parent (task 175, owner round 87)
     await loaded();
 
     expectEveryGrantAffordance();
-    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
   });
 
   it('names the parent in an info bar whose link opens it, WITH the Access Permission bar', async () => {
@@ -353,7 +353,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
     await revokeCarla();
 
     expect(await screen.findByText(SERVER_SENTENCE)).toBeInTheDocument();
-    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
     expect(parentBar()).toBeNull();
     // Not a modal-wide state: every affordance stays, enabled.
     expectEveryGrantAffordance();
@@ -383,7 +383,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
     fireEvent.click(screen.getByRole('button', { name: 'Add (1)' }));
 
     expect(await screen.findByText(`Granted access to 0 of 1. Cody Candidate: ${SERVER_SENTENCE}`)).toBeInTheDocument();
-    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
   });
 
@@ -396,7 +396,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Dismiss Pat Paralegal' })).toBeEnabled());
     expect(screen.getByText(SERVER_SENTENCE)).toBeInTheDocument();
-    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
   });
 
   it('a 409 with another reason code is an ordinary failure', async () => {

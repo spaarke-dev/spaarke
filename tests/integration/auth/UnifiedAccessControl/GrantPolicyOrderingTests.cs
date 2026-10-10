@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 public class GrantPolicyOrderingTests : IClassFixture<DelegationRuleTestFixture>
 {
     private const string ReadOnly = "ReadAccess";
-    private const string ReadWrite = "ReadAccess,WriteAccess";
+    // Write and Share: what the delegation gate requires since task 179 (owner round 89).
+    private const string Delegator = "ReadAccess,WriteAccess,ShareAccess";
 
     private readonly DelegationRuleTestFixture _fixture;
 
@@ -88,7 +89,7 @@ public class GrantPolicyOrderingTests : IClassFixture<DelegationRuleTestFixture>
     public async Task OnARestrictedRecord_ACallerWithWrite_GetsThePolicy422_ReadByTheRootsLogicalName(string route)
     {
         var matterId = RestrictedMatter();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         var (path, body) = RequestFor(route, matterId);
 
         var response = await client.PostAsJsonAsync(path, body);
