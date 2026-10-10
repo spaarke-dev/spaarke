@@ -1360,6 +1360,10 @@ The owner, after the task count kept rising (74 tasks added 2026-09-28..10-09): 
 - 137: the testuser1 linked-contact stand-in is accepted, as for 174. The CIAM sign-in step stays on checklist §4.
 - 166 (f): the unit tests are accepted as proof (no dev identity lacks the Create privilege), as for gate 19.
 
+## Round 93 (2026-10-10): OWNER: No Access entry removal is enforced through roles
+
+No BFF path removes or deactivates an entry: users do it in the model-driven app, and only `sprk_noaccessentry` table privileges govern that. The owner chose roles only, for wrap-up: only roles that also hold Share may hold Write or Delete on the entry table. On dev the only human role with Write is Spaarke Access Administrator (Write at Global, no Delete, no Share on matter, project or work assignment). So it is assigned only together with a role that holds Share, for example Core User, and the setup guides say so. Per-record enforcement (a BFF remove route) is filed as #1601 for after the project.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
