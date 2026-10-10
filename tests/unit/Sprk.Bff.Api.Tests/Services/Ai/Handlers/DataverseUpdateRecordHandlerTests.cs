@@ -178,6 +178,22 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
                   "_sprk_regardingmatter_value": "{{MatterA:D}}"
                 }
                 """)));
+
+        // The record the untyped pair is moved onto (the invoice lookup the row keeps) costs AppendTo AS THE CALLER, asked
+        // before anything is read about it app-only.
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_invoice')?$select=EntitySetName")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_invoices" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "UserId": "{{Guid.NewGuid():D}}" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.Contains("RetrievePrincipalAccess") && p.Contains("sprk_invoices") && p.Contains(Invoice.ToString("D"))),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "AccessRights": "ReadAccess, AppendToAccess" }""")));
     }
 
     private static string MoveThePairToTheInvoice() => $$$"""

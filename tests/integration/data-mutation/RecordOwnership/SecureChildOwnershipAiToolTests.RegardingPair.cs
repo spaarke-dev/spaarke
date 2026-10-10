@@ -8,6 +8,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -388,5 +389,200 @@ public sealed partial class SecureChildOwnershipAiToolTests
         secure.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
         (secure.ErrorCode, secure.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
         _user.Patches.Should().BeEmpty();
+    }
+
+    // ── Verifier round on #1612 (F1/F2): a lookup with the SAME id in another table says nothing about the pair's record ──
+
+    /// <summary>
+    /// A contact whose id the caller chose equal to <paramref name="matter"/>'s (a client may pick a new row's id), assigned
+    /// on the row, and the pair naming that matter by its type. Before the fix the pair's check was skipped because its id
+    /// equalled a lookup's — any lookup, in any table — so the row was filed under the matter with no AppendTo on it.
+    /// </summary>
+    private static Dictionary<string, object?> AssignedToAContactWithTheMattersId(Guid matter, bool typed = true)
+    {
+        var item = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Hearing",
+            ["sprk_AssignedTo@odata.bind"] = $"/contacts({matter:D})",
+            ["sprk_regardingrecordid"] = matter.ToString("D"),
+        };
+        if (typed)
+            item["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})";
+        return item;
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnEventAssignedToAContactWithASecureMattersId_AndThePairNamingThatMatter_IsTheUniform404_LikeAMissingMatter()
+    {
+        CatalogKnowsTheMatterType();
+        _user.NoAppendToIn.Add(("sprk_matters", SecureMatter)); // the caller may append to the CONTACT, not to the matter
+        _user.MissingIn.Add(("sprk_matters", AbsentMatter));     // a contact with this id exists; no matter does
+
+        var secure = await WireOf(await CreateChild("sprk_event", AssignedToAContactWithTheMattersId(SecureMatter)));
+        var missing = await WireOf(await CreateChild("sprk_event", AssignedToAContactWithTheMattersId(AbsentMatter)));
+
+        secure.Status.Should().Be(StatusCodes.Status404NotFound, secure.Body);
+        secure.Should().Be(missing, "the matter's existence and security are not told by a contact sharing its id");
+        secure.Body.Should().Contain(ChildRecordEndpoints.NotFoundCode).And.NotContain(SecureMatter.ToString("D"));
+        _appCreates.Should().BeEmpty("no event is filed under the matter, so no upload to it can be routed to its container");
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnEventAssignedToAContact_WithThePairNamingAnAppendableMatterOfTheSameId_IsCreated()
+    {
+        // The control: the matter's own AppendTo is what decides, not the contact's.
+        CatalogKnowsTheMatterType();
+
+        var result = await CreateChild("sprk_event", AssignedToAContactWithTheMattersId(OrdinaryMatter));
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _appCreates.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ChildCreate_AnUntypedPairIdEqualToOnlyAContactTheEventIsAssignedTo_Is400_AndNothingIsCreated()
+    {
+        // The event's assignee is not a column the pair's readers match the pair against, so an untyped pair repeating it
+        // names nothing they can tell (the container resolver would refuse the row): refused before anything is written.
+        var result = await CreateChild("sprk_event", AssignedToAContactWithTheMattersId(SecureMatter, typed: false));
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_ATypedRegardingLookupAndTheSamePair_IsStillCreated_UnderASecureMatter()
+    {
+        // The regarding builders' legitimate shape on the event: the typed lookup and the pair name the same matter.
+        CatalogKnowsTheMatterType();
+
+        var result = await CreateChild("sprk_event", new()
+        {
+            ["sprk_name"] = "Hearing",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+            ["sprk_regardingrecordid"] = SecureMatter.ToString("D"),
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task CreateRecord_AToDoAssignedToAContactWithASecureMattersId_AndThePairNamingThatMatter_IsDenied_LikeAMissingMatter()
+    {
+        CatalogKnowsTheMatterType();
+        _user.NoAppendToIn.Add(("sprk_matters", SecureMatter));
+        _user.MissingIn.Add(("sprk_matters", AbsentMatter));
+
+        Task<ToolResult> Create(Guid matter) => CreateRecord("sprk_todo",
+            ("sprk_name", JsonSerializer.SerializeToElement("Call back")),
+            Lookup("sprk_assignedto", "contact", matter),
+            ("sprk_regardingrecordid", JsonSerializer.SerializeToElement(matter.ToString("D"))),
+            Lookup("sprk_regardingrecordtype", "sprk_recordtype_ref", RecordTypeMatter));
+
+        var secure = await Create(SecureMatter);
+        var missing = await Create(AbsentMatter);
+
+        secure.Success.Should().BeFalse();
+        secure.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        (secure.ErrorCode, secure.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecord_AssigningAContactWithASecureMattersId_AndMovingThePairOntoThatMatter_IsDenied_LikeAMissingMatter()
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        CatalogKnowsTheMatterType();
+        _user.NoAppendToIn.Add(("sprk_matters", SecureMatter));
+        _user.MissingIn.Add(("sprk_matters", AbsentMatter));
+
+        Task<ToolResult> Move(Guid matter) => UpdateRecord("sprk_todo", Todo,
+            Lookup("sprk_assignedto", "contact", matter),
+            ("sprk_regardingrecordid", JsonSerializer.SerializeToElement(matter.ToString("D"))),
+            Lookup("sprk_regardingrecordtype", "sprk_recordtype_ref", RecordTypeMatter));
+
+        var secure = await Move(SecureMatter);
+        var missing = await Move(AbsentMatter);
+
+        secure.Success.Should().BeFalse();
+        secure.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        (secure.ErrorCode, secure.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        _user.Patches.Should().BeEmpty("the caller's PATCH is never sent");
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    // ── Verifier round on #1612 (F3): email.draft asks AppendTo on its regarding BEFORE deriving its ancestry app-only ──
+
+    [Fact]
+    public async Task EmailDraft_RegardingAMissingAnUnreadableOrAnUnappendableInvoice_AnswersIdentically_BeforeAnyAppOnlyRead()
+    {
+        var absent = Guid.Parse("a2470000-0000-4000-8000-0000000000e1");
+        var unreadable = Guid.Parse("a2470000-0000-4000-8000-0000000000e2");
+        var unappendable = Guid.Parse("a2470000-0000-4000-8000-0000000000e3");
+        _user.Missing.Add(absent);
+        _user.NoAppendTo.Add(unreadable);
+        _user.UnreadableRows.Add(unreadable);
+        _user.NoAppendTo.Add(unappendable);
+        var appOnlyReads = new Moq.Mock<IGenericEntityService>(Moq.MockBehavior.Strict); // any app-only read fails the test
+        var handler = new EmailDraftToolHandler(
+            _user, Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(),
+            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+                appOnlyReads.Object,
+                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.ProbeReturning(
+                    Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.AllRootColumns),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
+            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object);
+
+        Task<ToolResult> Draft(Guid invoice) => handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                subject = "Invoice query",
+                body = "Draft.",
+                to = new[] { "a@b.example" },
+                regarding = new { table = "sprk_invoice", recordId = invoice },
+            })) with { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(EmailDraftToolHandler)), CancellationToken.None);
+
+        var missing = await Draft(absent);
+        var cannotSee = await Draft(unreadable);
+        var cannotAppend = await Draft(unappendable);
+
+        missing.Success.Should().BeFalse();
+        missing.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "a missing invoice is the same denial as one the caller may not file under — never 'ancestry could not be resolved'");
+        (cannotSee.ErrorCode, cannotSee.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        (cannotAppend.ErrorCode, cannotAppend.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        appOnlyReads.Invocations.Should().BeEmpty("the regarding record is never read app-only before the caller's AppendTo");
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EmailDraft_RegardingAnAppendableInvoice_DerivesItsAncestry_AndIsCreated()
+    {
+        // The control: the caller may append to the invoice — its ancestry is derived (here: none) and the draft is created.
+        var invoice = Guid.Parse("a2470000-0000-4000-8000-0000000000e4");
+        _world.WithRecord("sprk_invoice", invoice, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var handler = new EmailDraftToolHandler(
+            _user, Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object);
+
+        var result = await handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                subject = "Invoice query",
+                body = "Draft.",
+                to = new[] { "a@b.example" },
+                regarding = new { table = "sprk_invoice", recordId = invoice },
+            })) with { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(EmailDraftToolHandler)), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
     }
 }

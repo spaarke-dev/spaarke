@@ -675,7 +675,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             }
 
             var target = await OwnedChildWrite.PairTargetAsync(
-                _dataverse, pair.IdText, pair.TypeId, pair.TypeEntitySet, item.Lookups, ct).ConfigureAwait(false);
+                _dataverse, tablename, pair.IdText, pair.TypeId, pair.TypeEntitySet, item.Lookups, ct).ConfigureAwait(false);
             var pairOutcome = target.Refusal
                 ?? (target.Lookup is { } named
                     ? await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)

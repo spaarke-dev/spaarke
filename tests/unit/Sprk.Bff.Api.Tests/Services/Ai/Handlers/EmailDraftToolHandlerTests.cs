@@ -285,6 +285,15 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
                 It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_organization')?$select=EntitySetName")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_organizations" }""")));
+        // AppendTo on the regarding organization, AS THE CALLER, before its ancestry is derived (app-only).
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "UserId": "{{Guid.NewGuid():D}}" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.Contains("RetrievePrincipalAccess") && p.Contains("sprk_organizations") && p.Contains(organizationId.ToString("D"))),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "AccessRights": "ReadAccess, AppendToAccess" }""")));
 
         string? postedBody = null;
         _dataverse
