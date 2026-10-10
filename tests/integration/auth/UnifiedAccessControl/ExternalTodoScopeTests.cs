@@ -1145,7 +1145,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId,
-            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CancellationToken ct = default)
+            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
             CreateCallCount++;
             LastCreateArgs = (rootKind, rootId);

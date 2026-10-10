@@ -297,7 +297,7 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             TodoRootKind rootKind, Guid rootId, CreateExternalTodoRequest request, Guid owningTeamId,
-            Guid? callerContactId, CancellationToken ct = default)
+            Guid? callerContactId, CallerPrincipal creator, CancellationToken ct = default)
         {
             TodoOwners.Add(BoundOwner(
                 BuildTodoCreatePayload(
@@ -306,14 +306,16 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
         }
 
         public override Task<ExternalEventDto> CreateEventAsync(
-            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
+            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
             EventOwners.Add(BoundOwner(BuildEventCreatePayload(projectId, request, owningTeamId)));
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
         public override Task<ExternalDocumentDto> CreateDocumentAsync(
-            Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
+            Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
             DocumentOwners.Add(BoundOwner(BuildDocumentCreatePayload(projectId, pointers, owningTeamId)));
             return Task.FromResult(new ExternalDocumentDto { SprkDocumentid = Guid.NewGuid().ToString(), SprkName = pointers.FileName });

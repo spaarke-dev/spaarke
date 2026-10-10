@@ -478,12 +478,14 @@ public static class ExternalProjectDataEndpoints
 
         // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
         // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        // Task 030 (FR-25): the resolved principal is also the creator stamp — never anything from the request body.
         var created = await dataService.CreateTodoAsync(
             rootKind,
             rootId,
             request,
             owningTeamId,
             callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            callerContext,
             ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
@@ -748,6 +750,7 @@ public static class ExternalProjectDataEndpoints
                 FileSizeBytes: uploaded.Size,
                 WebUrl: uploaded.WebUrl),
             owningTeamId,
+            callerContext, // task 030 (FR-25): the creator stamp comes from the resolved principal
             ct);
 
         logger.LogInformation(
@@ -925,7 +928,8 @@ public static class ExternalProjectDataEndpoints
         if (ownerRefusal is not null)
             return ownerRefusal;
 
-        var created = await dataService.CreateEventAsync(id, request, owningTeamId, ct);
+        // Task 030 (FR-25): the creator stamp comes from the resolved principal.
+        var created = await dataService.CreateEventAsync(id, request, owningTeamId, callerContext, ct);
         return Results.Created($"/api/v1/external/projects/{id}/events/{created.SprkEventid}", created);
     }
 
