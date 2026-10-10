@@ -433,6 +433,27 @@ Collaborate needs Read + Write, View Only needs Read.
 | Caller's rights unreadable | **500** `sdap.access.grant.caller_rights_unreadable` (`/share-user`: `sdap.access.user_share.read_failed`) | Establishing the caller's own rights threw. Nothing was written or onboarded. | Transient — retry. |
 | Last person on a secure record | **409** `sdap.access.user_share.last_reader_on_secure_record` (`/unshare-user`) | A secure record must always keep someone who can open it (owner S5). | Share it with someone else first, then remove this share. |
 
+### 7.1c No Access entries — who may add and remove them (owner round 93, 2026-10-10)
+
+> **Assignment rule (binding).** Removing a No Access entry (Deactivate or Delete) loosens access, so its remover must
+> also be able to manage access on the records it walls: Write **and Share** on them (owner round 89). The BFF cannot
+> check that per record. Entries are deactivated and deleted natively in the model-driven app, gated only by
+> Dataverse's privileges on the organization-owned `sprk_noaccessentry` table, and Spaarke uses no plugins. So the rule
+> is held by **role assignment** (owner round 93; per-record enforcement is tracked as #1601):
+>
+> - Assign **Spaarke Access Administrator** only TOGETHER WITH a role that holds Share on the records it walls:
+>   `prvSharesprk_Project`, `prvSharesprk_Matter` and `prvSharesprk_WorkAssignment`, at a depth that reaches them
+>   (for example **Spaarke Core User**, Share at Deep).
+> - Never give a user without that Share any role holding **Write or Delete on `sprk_noaccessentry`**. On dev
+>   (2026-10-10) those are Spaarke Access Administrator (Write at Global, no Delete), System Administrator and System
+>   Customizer. Spaarke Access Administrator itself holds no Share on project, matter or work assignment, so it must
+>   never be the user's only role. Check direct roles and team roles alike: Dataverse unions them.
+> - Adding an entry stays Write (on the entry table). Its enforcement, which removes the shares the entry walls off, is
+>   still bounded by the entry author's Write on each covered record (owner N5).
+>
+> Re-check this whenever a role's privileges change. The role inventory (`projects/unified-access-control-r2/notes/
+> task-179-share-privilege.md`) shows how to read it.
+
 ### 7.2 Checking BFF Logs
 
 ```bash

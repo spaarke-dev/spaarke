@@ -70,27 +70,24 @@ Dataverse's Share privilege on its table, at a depth that reaches the record, ev
     longer share).
   - Accepted trade-off (round 11's reason for "never Share"): a child sharee can share that ONE child with someone the
     root is not shared with, and the reconcile then removes that share. Share a secure family at the root.
-- **Removing a No Access entry needs Share: NOT implemented. Main session / owner decision needed.** The owner's rule is
-  that removing (deactivating or deleting) an entry loosens access, so the remover must hold Write AND Share on each
-  covered record; adding an entry stays Write. **The BFF has no path that removes or deactivates an entry.** Entries
-  are deactivated or deleted natively in the model-driven app. That is gated only by Dataverse's privileges on the
-  organization-owned `sprk_noaccessentry` table (Spaarke Access Administrator holds Write at Global and no Delete, read 2026-10-10; System
-  Administrator and System Customizer hold both). Deactivating is a Write. The entry form script deliberately lets Deactivate through
-  (`sprk_noaccessentry_postsave.js`, `SaveModeDeactivate`). `NoAccessShareEnforcer` only ENFORCES an active entry (it
-  removes the shares the entry walls off): that is the "adding" side, which stays Write. With no plugins allowed
-  (ADR-002), the BFF cannot see a native deactivation before it happens. The options:
-  1. **Route removal through the BFF.** Add a new `POST /api/v1/external-access/no-access/remove` on the group. It
-     checks `MayManageAccess` on every covered record as the caller, then deactivates app-only. Replace the form's
-     Deactivate/Delete commands (ribbon) and remove `prvWrite`/`prvDelete` on `sprk_noaccessentry` from the
-     human roles, which is an owner role change. *Recommended:* it is the only option that enforces the rule. But it
-     adds a route and a ribbon change, and it removes in-place edits of an entry (edits would go through the BFF too,
-     or Write stays for edits and only the state change and Delete move).
-  2. **Compensate in the reconciliation job.** Re-activate an entry deactivated by someone who lacks Write and Share on
-     a covered record. This leaves a window of up to 5 minutes, and a fight with a legitimate-looking user action.
-     Not recommended.
-  3. **Role-level control only.** Give the entry table's Write/Delete only to roles that also hold Share on project,
-     matter and work assignment. This needs no code. It is coarser than "on each covered record" (a role covers every
-     record its depth reaches), and the agent cannot change roles.
+- **Removing a No Access entry needs Share: decided by ROLE ASSIGNMENT (owner round 93, 2026-10-10).** The owner's
+  rule (round 91) is that removing (deactivating or deleting) an entry loosens access, so the remover must hold Write
+  AND Share on each covered record; adding stays Write. The BFF has no path that removes or deactivates an entry.
+  Entries are deactivated or deleted natively in the model-driven app, gated only by Dataverse's privileges on the
+  organization-owned `sprk_noaccessentry` table, and the form script lets Deactivate through. With no plugins (ADR-002)
+  the BFF cannot intercept it. Of the three options (a BFF removal route, a compensating job, roles only), **the owner
+  chose roles only**. No new route. **Per-record enforcement is filed as #1601.**
+  - **The assignment rule** (documented in `EXTERNAL-ACCESS-ADMIN-SETUP.md` §7.1c and `uac-access-control.md`):
+    assign Spaarke Access Administrator only together with a role holding Share on project, matter and work
+    assignment at a depth that reaches the walled records (for example Spaarke Core User, Share at Deep). Never give a
+    user without that Share any role holding Write or Delete on `sprk_noaccessentry`.
+  - **Dev today** (read by the main session, 2026-10-10): human Write on `sprk_noaccessentry` is held only by Spaarke
+    Access Administrator (role `1ac67fb7…`, 18 privileges, Write at Global, no Delete), System Administrator and System
+    Customizer. Spaarke Access Administrator holds NO Share on matter, project or work assignment, so it must never be
+    a user's only role. Its one direct holder on dev (Ralph Schroeder) also holds Office Add In User (Share at Deep), so
+    dev meets the rule today. That changes if the owner removes Share from Office Add In User without giving him
+    another role with Share (for example Core User).
+  - Coarser than the rule: a role grants Share across its whole depth, not per covered record. #1601 tracks the gap.
 - **Assigned-To is delegation in effect: filed as #1595** (main session). A Write-holder without Share who names an
   internal user in an "Assigned *" column gives that user a Collaborate share, Share included. Callers:
   `/assigned-access/sync`, the field-mapping push, the AI create/update record handlers and the 5-minute job. Not fixed
