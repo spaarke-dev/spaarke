@@ -17,6 +17,7 @@ import {
   type ScopeLookupResult,
 } from "./ReferenceResolver";
 import type { Reference } from "./CommandRouter";
+import { httpError } from "../../__tests__/helpers/httpError";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -450,7 +451,22 @@ describe("createScopeFetch adapter", () => {
     expect(auth).toHaveBeenCalledTimes(5); // 5 catalogs
   });
 
-  it("skips a catalog that 5xxs and tries the next (non-blocking)", async () => {
+  it("skips a catalog whose fetch THROWS a 5xx ApiError and tries the next (non-blocking)", async () => {
+    // Production shape: `@spaarke/auth`'s authenticatedFetch throws for a non-2xx; it never returns one.
+    const auth = jest.fn(async (url: string) => {
+      if (url.includes("/skills?")) throw httpError(500);
+      if (url.includes("/actions?")) {
+        return mockRes(200, { items: [{ id: "act-2", displayName: "Action Two" }] });
+      }
+      return mockRes(200, { items: [] });
+    });
+    const scopeFetch = createScopeFetch("https://bff", auth);
+    const result = await scopeFetch("x");
+    expect(result?.id).toBe("act-2");
+    expect(auth).toHaveBeenCalledTimes(2);
+  });
+
+  it("control: skips a catalog that RETURNS a 5xx response and tries the next", async () => {
     const auth = jest.fn(async (url: string) => {
       if (url.includes("/skills?")) return mockRes(500, null);
       if (url.includes("/actions?")) {

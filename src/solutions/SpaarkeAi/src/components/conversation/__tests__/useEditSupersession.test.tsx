@@ -38,6 +38,7 @@ import { useComposeWorkspaceReceivers } from '@spaarke/compose-components/widget
 import { buildComposeApplyEvent } from '../composeApplyLeg';
 import { useEditSupersession, EditSupersessionBar } from '../useEditSupersession';
 import type { ComposeActionRequest } from '../useSerialActionQueue';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Stub ledger + authenticatedFetch mock (the ONLY mocked boundary — HTTP).
@@ -56,13 +57,13 @@ interface LedgerRow {
 
 function makeAuthFetch(stub: { current: LedgerRow[] }): jest.Mock {
   return jest.fn(async (url: string, init?: RequestInit): Promise<Response> => {
-    const jsonResponse = (status: number, data: unknown): Response =>
-      ({ ok: status >= 200 && status < 300, status, json: async () => data } as Response);
+    // Only 2xx answers are RETURNED: `@spaarke/auth`'s authenticatedFetch THROWS for any other status.
+    const jsonResponse = (status: number, data: unknown): Response => ({ ok: true, status, json: async () => data } as Response);
 
     if (url.includes('/compose-outputs/supersede') && init?.method === 'POST') {
       const ref: string = JSON.parse(String(init.body)).supersedesRef;
       const prior = stub.current.find((r) => r.key === ref && r.disposition === 'compose');
-      if (!prior) return jsonResponse(404, { error: 'not found' });
+      if (!prior) throw httpError(404, { title: 'Not Found', status: 404 });
 
       const head = stub.current
         .filter((r) => r.disposition === 'compose' && r.bindingId === prior.bindingId)
