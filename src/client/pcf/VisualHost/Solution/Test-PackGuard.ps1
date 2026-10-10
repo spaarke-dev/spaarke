@@ -5,12 +5,15 @@ $pack = Join-Path $PSScriptRoot 'pack.ps1'
 $bullet = [char]0x2022
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("packguard-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
+# The version under test is pack.ps1's own, so a version bump does not break this check.
+$v = [regex]::Match((Get-Content -LiteralPath $pack -Raw), '\$version = "([^"]+)"').Groups[1].Value
+if (-not $v) { throw 'Could not read $version from pack.ps1' }
 $cases = @(
-    @{ Name = 'fresh bundle (badge string literal)'; Content = "x{className:D.versionBadge},`"v1.4.39 $bullet 2026-10-08`"),y"; ExpectPass = $true },
+    @{ Name = 'fresh bundle (badge string literal)'; Content = "x{className:D.versionBadge},`"v$v $bullet 2026-10-08`"),y"; ExpectPass = $true },
     @{ Name = 'stale 1.4.38 bundle'; Content = "x`"v1.4.38 $bullet 2026-08-02`"y"; ExpectPass = $false },
-    @{ Name = 'stale bundle + version in a comment (the K1 trick)'; Content = "x`"v1.4.38 $bullet 2026-08-02`"y/* 11.4.39 */"; ExpectPass = $false },
-    @{ Name = 'stale bundle + bare 1.4.39 comment'; Content = "x`"v1.4.38 $bullet 2026-08-02`"y/* 1.4.39 */"; ExpectPass = $false },
-    @{ Name = 'longer number v11.4.39'; Content = "x`"v11.4.39 $bullet 2026-10-08`"y"; ExpectPass = $false }
+    @{ Name = 'stale bundle + version in a comment (the K1 trick)'; Content = "x`"v1.4.38 $bullet 2026-08-02`"y/* 1$v */"; ExpectPass = $false },
+    @{ Name = "stale bundle + bare $v comment"; Content = "x`"v1.4.38 $bullet 2026-08-02`"y/* $v */"; ExpectPass = $false },
+    @{ Name = "longer number v1$v"; Content = "x`"v1$v $bullet 2026-10-08`"y"; ExpectPass = $false }
 )
 $bad = 0
 try {
@@ -25,3 +28,4 @@ try {
     }
 } finally { Remove-Item -Recurse -Force $tmp }
 if ($bad) { exit 1 }
+exit 0  # all cases matched; without this the script returns the last child's exit code (the expected-fail case)

@@ -6,7 +6,7 @@
 # 1.4.39 that carried 1.4.38 code. Packing now fails unless the Solution manifest, solution.xml and
 # bundle.js all carry $version. `-VerifyOnly` runs the guard without creating a zip.
 param([switch]$VerifyOnly, [string]$BundlePath)
-$version = "1.4.39"
+$version = "1.4.40"
 $solutionName = "VisualHostSolution"
 $controlName = "sprk_Spaarke.Visuals.VisualHost"
 
