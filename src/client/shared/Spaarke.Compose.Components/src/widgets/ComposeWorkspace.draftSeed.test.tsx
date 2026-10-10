@@ -29,6 +29,9 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // The REAL error class (pure, no MSAL): ComposeWorkspace branches on `err instanceof ApiError`, so the
+  // thrown failures in this suite must be instances of the class the component imports.
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -85,6 +88,7 @@ jest.mock('./ComposeEditor', () => {
 
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
+import { httpError } from '../__tests__/helpers/httpError';
 
 function renderWorkspace(props: Partial<React.ComponentProps<typeof ComposeWorkspace>> = {}) {
   return render(
@@ -98,7 +102,7 @@ const DRAFT_BODY = '<h1>Re: Acme NDA</h1><p>Dear Client, the confidentiality ter
 
 beforeEach(() => {
   authenticatedFetchMock.mockReset();
-  authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [] });
+  authenticatedFetchMock.mockRejectedValue(httpError(404));
   editorProps.docxBytes = undefined;
   editorProps.initialHtml = undefined;
   mockDispatchPaneEvent.mockClear();

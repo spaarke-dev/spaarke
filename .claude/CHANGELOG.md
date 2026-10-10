@@ -7,6 +7,48 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
+
+Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.
+
+- **`scripts/quality/client-lint/`** (new): one shared ESLint 9 toolchain, a type-aware `@typescript-eslint/no-unnecessary-condition` over 10 client packages, an ESLint bulk-suppressions baseline (1,059 existing findings), must-fire/must-not-fire controls and the `install|check|prune|baseline|controls` runner. `npm run lint:client`.
+- **`.github/workflows/client-lint.yml`** (new, standalone): kept out of the router/tier files while the CI shadow window is open. It is not yet a required check.
+- **ADR-028 MUST line and `spaarke-sso-binding.md`:** both now name the lint as the mechanism for `!res.ok`. `docs/procedures/testing-and-code-quality.md` has the how-to.
+
+---
+###### 2026-10-09 — ADR-027 management groups implemented (T262)
+
+`customer-provisioning-orchestration-r1` T262 (G36).
+
+- **ADR-027 concise**: implementation note on "MUST use Azure Management Groups" (`spaarke-environments` →
+  `spaarke-customers`, Audit/DoNotEnforce built-in policy, PRQ-S-06).
+- **`/provision-environment`** Step 0.5b: new `{customerManagementGroupId}` token (must resolve); Step 1e-ter notes
+  PRQ-S-06's read on the management group.
+
+###### 2026-10-09 — provisioning: H3 keeps an L2 Worker FIC on each customer BFF registration (ISS-015)
+
+`customer-provisioning-orchestration-r1` ISS-015 (#1524).
+
+- **`.claude/constraints/provisioning.md`** §Stamp BFF clients: H3 keeps two FICs — `spaarke-uami-trust` (stamp BFF UAMI)
+  and `spaarke-l2-worker` (L2 Worker UAMI principalId) — so H6/H7/H7b sign in as the registration secret-free; adoption
+  accepts exactly those two names.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** FIC cap note: two FICs per Spaarke-tenant customer BFF
+  registration, not one. No secret created, changed or deleted.
+
+###### 2026-10-09 — provisioning: control plane secret-free by default (T252)
+
+`customer-provisioning-orchestration-r1` T252.
+
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle rule 1: the L2 control plane defaults to the
+  secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
+  `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
+
+###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
+
+- **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
+- **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
+
+---
 ###### 2026-10-09 — Model choice is deliberate: every agent states its model; no blanket default (model-selection-r1)
 
 Owner direction 2026-10-09: no arbitrary model, and spend what improves the code, nothing more. A session picks the model and effort per piece of work and never asks the user. This replaces the `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default added earlier the same day (#1538).

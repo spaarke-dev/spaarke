@@ -46,6 +46,7 @@
       </EnableRules>
       <DisplayRules>
         <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule" />
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule" />
       </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke_NewAnalysisFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
@@ -59,6 +60,9 @@
     <DisplayRules>
       <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule">
         <CrmClientTypeRule Type="Web" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_analysis" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

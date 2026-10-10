@@ -10,11 +10,12 @@
  *
  * so a suite's existing payload assertions on the mock data service keep describing exactly what reaches the server,
  * while the suite also proves the write left through the BFF (`fetch` was called; see {@link childWriteCalls}). A
- * rejection of the data service becomes a 500 ProblemDetails carrying its message — the shape the BFF answers with.
+ * rejection of the data service becomes a THROWN `ApiError(message, 500, ProblemDetails)` — what `authenticatedFetch` throws for the BFF's 500.
  * Any other URL goes to `inner` (the suite's own fetch stub for field mapping, uploads, …) or answers 404.
  */
 
 import type { IDataService } from '../types/serviceInterfaces';
+import { throwingAuthenticatedFetch } from '../__tests__/helpers/authenticatedFetchDouble';
 
 /** The minimal Response surface the writers read. */
 export function fakeResponse(status: number, body?: unknown): Response {
@@ -45,12 +46,14 @@ export function bffChildWriteFetch(
   dataService: IFakeChildWriteTarget | Pick<IDataService, 'createRecord' | 'updateRecord'>,
   inner?: Fetch
 ): jest.Mock<Promise<Response>, [string, RequestInit?]> {
-  return jest.fn(async (url: string, init?: RequestInit) => {
+  // `authenticatedFetch` THROWS ApiError for a non-2xx (it never returns one), so the fake does too: the 404 / 500 /
+  // refusal answers below become the thrown failure the writers see in production.
+  return throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
     // Only the child-record routes carry JSON; any other request (an SPE upload's file body, …) goes to `inner` as is.
     const isChildRoute = [CREATE, REFILE, EVENT_FILING, COMMUNICATION_FILING].some(r => r.test(url));
     if (!isChildRoute) {
-      return inner ? inner(url, init) : fakeResponse(404, { detail: `No fake route for ${method} ${url}` });
+      return inner ? inner(url, init) : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
     }
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
     try {
@@ -76,10 +79,16 @@ export function bffChildWriteFetch(
         return fakeResponse(204);
       }
     } catch (err) {
-      return fakeResponse(500, { detail: err instanceof Error ? err.message : String(err) });
+      // RFC 7807 with `title` + `status`, as the BFF answers: `authenticatedFetch` only keeps a body as the ApiError's
+      // ProblemDetails (and its `detail` as the message) when it carries one of them.
+      return fakeResponse(500, {
+        title: 'Internal Server Error',
+        status: 500,
+        detail: err instanceof Error ? err.message : String(err),
+      });
     }
-    return inner ? inner(url, init) : fakeResponse(404, { detail: `No fake route for ${method} ${url}` });
-  });
+    return inner ? inner(url, init) : fakeResponse(404, { title: 'Not Found', status: 404, detail: `No fake route for ${method} ${url}` });
+  }) as unknown as jest.Mock<Promise<Response>, [string, RequestInit?]>;
 }
 
 /** The child-record write calls a {@link bffChildWriteFetch} received, as `[method, path]`. */

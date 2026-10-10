@@ -4,23 +4,22 @@
 // Production IGraphAppRoleGranter — raw Microsoft Graph REST calls (NOT the
 // Microsoft.Graph SDK; see H10DataverseAppUserGraphParityHandler.cs file
 // header "NFR-09 IMPLEMENTATION NOTE" for the Path-C rationale) via
-// HttpClient + DefaultAzureCredential. Endpoint shapes mirror
-// scripts/Grant-GraphAppRoles.ps1 (task 015) exactly:
-//   GET  /v1.0/servicePrincipals?$filter=appId eq '{graphResourceAppId}'
-//   GET  /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments
-//   POST /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments
-//        { principalId, resourceId, appRoleId }
+// HttpClient + DefaultAzureCredential. The calls live in GraphAppRoleRest:
+//   GET    /v1.0/servicePrincipals?$filter=appId eq '{graphResourceAppId}'
+//   GET    /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments
+//   POST   /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments
+//          { principalId, resourceId, appRoleId }
+//   DELETE /v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments/{id}   (task 261)
 //
 // Auth: DefaultAzureCredential with explicit TenantId (§4D I5 — never a
 // default-tenant credential); scope "https://graph.microsoft.com/.default".
+// The caller is the L2 Worker identity, which needs AppRoleAssignment.ReadWrite.All
+// + Directory.Read.All (ControlPlaneGraphAppRoles).
 //
-// NOT under test in the CI unit suite (real Graph REST calls). Handler unit
-// tests substitute a fake IGraphAppRoleGranter.
+// HTTP-testable through the internal constructor (credential factory); handler
+// unit tests substitute a fake IGraphAppRoleGranter.
 // -----------------------------------------------------------------------------
 
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Options;
@@ -30,10 +29,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 /// <inheritdoc cref="IGraphAppRoleGranter"/>
 public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
 {
-    private static readonly string[] GraphScope = { "https://graph.microsoft.com/.default" };
-
     private readonly HttpClient _httpClient;
     private readonly IGraphAppRolesRegistry _registry;
+    private readonly Func<string, TokenCredential> _credentialFactory;
     private readonly ILogger<GraphRestAppRoleGranter> _logger;
 
     public GraphRestAppRoleGranter(
@@ -41,14 +39,28 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
         IGraphAppRolesRegistry registry,
         IOptions<H10DataverseAppUserGraphParityOptions> options,
         ILogger<GraphRestAppRoleGranter> logger)
+        : this(httpClient, registry, options, logger,
+              tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>Test seam: a credential factory instead of DefaultAzureCredential.</summary>
+    internal GraphRestAppRoleGranter(
+        HttpClient httpClient,
+        IGraphAppRolesRegistry registry,
+        IOptions<H10DataverseAppUserGraphParityOptions> options,
+        ILogger<GraphRestAppRoleGranter> logger,
+        Func<string, TokenCredential> credentialFactory)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _registry = registry;
         _logger = logger;
+        _credentialFactory = credentialFactory;
         _httpClient.Timeout = options.Value.GraphRequestTimeout;
     }
 
@@ -63,12 +75,10 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(expectedRoles);
 
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
         AccessToken token;
         try
         {
-            token = await credential.GetTokenAsync(
-                new TokenRequestContext(GraphScope), cancellationToken).ConfigureAwait(false);
+            token = await AcquireTokenAsync(tenantId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -77,10 +87,11 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
                 FailedRoleValues: Array.Empty<string>());
         }
 
-        string graphSpId;
+        GraphResourcePrincipal graph;
         try
         {
-            graphSpId = await ResolveGraphResourceSpIdAsync(token, cancellationToken).ConfigureAwait(false);
+            graph = await GraphAppRoleRest.ResolveGraphResourceAsync(
+                _httpClient, token, _registry.GraphResourceAppId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -92,8 +103,9 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
         HashSet<string> currentAppRoleIds;
         try
         {
-            currentAppRoleIds = await ReadCurrentAppRoleIdsAsync(
-                token, uamiServicePrincipalObjectId, graphSpId, cancellationToken).ConfigureAwait(false);
+            var assignments = await GraphAppRoleRest.ReadAssignmentsAsync(
+                _httpClient, token, uamiServicePrincipalObjectId, graph.Id, cancellationToken).ConfigureAwait(false);
+            currentAppRoleIds = assignments.Select(a => a.AppRoleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -124,9 +136,13 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
 
             try
             {
-                await PostGrantAsync(token, uamiServicePrincipalObjectId, graphSpId, role.AppRoleId, cancellationToken)
+                await GraphAppRoleRest.PostGrantAsync(
+                    _httpClient, token, uamiServicePrincipalObjectId, graph.Id, role.AppRoleId, cancellationToken)
                     .ConfigureAwait(false);
                 grantedCount++;
+                _logger.LogInformation(
+                    "H10 granted Graph app role {RoleValue} ({AppRoleId}) to stamp identity SP {UamiSpId}",
+                    role.Value, role.AppRoleId, uamiServicePrincipalObjectId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -150,83 +166,104 @@ public sealed class GraphRestAppRoleGranter : IGraphAppRoleGranter
         return new GraphAppRoleGrantOutcome.Success(grantedCount);
     }
 
-    private async Task<string> ResolveGraphResourceSpIdAsync(AccessToken token, CancellationToken ct)
+    /// <inheritdoc/>
+    public async Task<GraphAppRoleRemovalOutcome> RemoveUnexpectedRolesAsync(
+        string uamiServicePrincipalObjectId,
+        string uamiClientId,
+        string tenantId,
+        IReadOnlyList<GraphAppRoleEntry> allowedRoles,
+        CancellationToken cancellationToken)
     {
-        var filter = Uri.EscapeDataString($"appId eq '{_registry.GraphResourceAppId}'");
-        var uri = new Uri($"https://graph.microsoft.com/v1.0/servicePrincipals?$filter={filter}&$select=id,displayName");
-        using var doc = await GetJsonAsync(uri, token, ct).ConfigureAwait(false);
-        var values = doc.RootElement.GetProperty("value");
-        if (values.GetArrayLength() == 0)
+        ArgumentException.ThrowIfNullOrWhiteSpace(uamiServicePrincipalObjectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(uamiClientId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(allowedRoles);
+
+        var none = Array.Empty<string>();
+        if (allowedRoles.Count == 0 || allowedRoles.Any(r => string.IsNullOrWhiteSpace(r.AppRoleId)))
         {
-            throw new InvalidOperationException(
-                $"Microsoft Graph resource service principal (appId={_registry.GraphResourceAppId}) not found in tenant.");
+            // Fail closed: with an empty or partly-null allowed set every assignment would look "unexpected".
+            return new GraphAppRoleRemovalOutcome.Failure(
+                "Refusing to remove Graph app roles: the allowed set is empty or has a null AppRoleId. Nothing was removed.",
+                none, none);
         }
-        return values[0].GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Graph resource SP lookup returned a null id.");
+        var allowedIds = allowedRoles.Select(r => r.AppRoleId!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        AccessToken token;
+        GraphResourcePrincipal graph;
+        IReadOnlyList<GraphAppRoleAssignment> assignments;
+        try
+        {
+            token = await AcquireTokenAsync(tenantId, cancellationToken).ConfigureAwait(false);
+
+            // The target must BE the stamp's managed identity — removal is destructive, and an object id that drifted
+            // to another principal would otherwise lose that principal's roles.
+            var (appId, type) = await GraphAppRoleRest.ReadPrincipalAsync(
+                _httpClient, token, uamiServicePrincipalObjectId, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(appId, uamiClientId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(type, "ManagedIdentity", StringComparison.OrdinalIgnoreCase))
+            {
+                return new GraphAppRoleRemovalOutcome.Failure(
+                    $"Refusing to remove Graph app roles from SP {uamiServicePrincipalObjectId}: its appId is '{appId ?? "(none)"}' " +
+                    $"and type '{type ?? "(none)"}', expected the stamp managed identity (appId '{uamiClientId}', type " +
+                    "'ManagedIdentity'). InterStepState.miObjectId and miClientId disagree. Nothing was removed.",
+                    none, none);
+            }
+
+            graph = await GraphAppRoleRest.ResolveGraphResourceAsync(
+                _httpClient, token, _registry.GraphResourceAppId, cancellationToken).ConfigureAwait(false);
+            assignments = await GraphAppRoleRest.ReadAssignmentsAsync(
+                _httpClient, token, uamiServicePrincipalObjectId, graph.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new GraphAppRoleRemovalOutcome.Failure(
+                $"Could not read the stamp identity's Graph app-role assignments: {ex.GetType().Name}: {ex.Message}. Nothing was removed.",
+                none, none);
+        }
+
+        var removed = new List<string>();
+        var failed = new List<string>();
+        foreach (var extra in assignments.Where(a => !allowedIds.Contains(a.AppRoleId)))
+        {
+            var name = graph.NameOf(extra.AppRoleId);
+            if (string.IsNullOrWhiteSpace(extra.AssignmentId))
+            {
+                failed.Add(name);
+                continue;
+            }
+            try
+            {
+                await GraphAppRoleRest.DeleteAssignmentAsync(
+                    _httpClient, token, uamiServicePrincipalObjectId, extra.AssignmentId, cancellationToken).ConfigureAwait(false);
+                removed.Add(name);
+                // Drift record (provisioning.md: drift-detection handlers audit-log the drift they repair).
+                _logger.LogWarning(
+                    "H10 REMOVED Graph app role {RoleValue} ({AppRoleId}, assignment {AssignmentId}) from stamp identity SP {UamiSpId} — " +
+                    "not in the stamp's evidence-backed role set (task 261)",
+                    name, extra.AppRoleId, extra.AssignmentId, uamiServicePrincipalObjectId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Removal FAILED for Graph app role {RoleValue} ({AppRoleId}, assignment {AssignmentId}) on stamp identity SP {UamiSpId}",
+                    name, extra.AppRoleId, extra.AssignmentId, uamiServicePrincipalObjectId);
+                failed.Add(name);
+            }
+        }
+
+        if (failed.Count > 0)
+        {
+            return new GraphAppRoleRemovalOutcome.Failure(
+                $"{failed.Count} Graph app role(s) outside the stamp set could not be removed: {string.Join(", ", failed)}." +
+                (removed.Count > 0 ? $" Removed: {string.Join(", ", removed)}." : string.Empty),
+                removed, failed);
+        }
+
+        return new GraphAppRoleRemovalOutcome.Success(removed);
     }
 
-    private async Task<HashSet<string>> ReadCurrentAppRoleIdsAsync(
-        AccessToken token, string uamiSpId, string graphSpId, CancellationToken ct)
-    {
-        var uri = new Uri($"https://graph.microsoft.com/v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments");
-        using var doc = await GetJsonAsync(uri, token, ct).ConfigureAwait(false);
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!doc.RootElement.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
-        {
-            return result;
-        }
-        foreach (var entry in values.EnumerateArray())
-        {
-            var resourceId = entry.TryGetProperty("resourceId", out var r) ? r.GetString() : null;
-            if (!string.Equals(resourceId, graphSpId, StringComparison.OrdinalIgnoreCase)) continue;
-            var appRoleId = entry.TryGetProperty("appRoleId", out var a) ? a.GetString() : null;
-            if (!string.IsNullOrWhiteSpace(appRoleId)) result.Add(appRoleId);
-        }
-        return result;
-    }
-
-    private async Task PostGrantAsync(AccessToken token, string uamiSpId, string graphSpId, string appRoleId, CancellationToken ct)
-    {
-        var uri = new Uri($"https://graph.microsoft.com/v1.0/servicePrincipals/{uamiSpId}/appRoleAssignments");
-        var payload = new Dictionary<string, object?>
-        {
-            ["principalId"] = uamiSpId,
-            ["resourceId"] = graphSpId,
-            ["appRoleId"] = appRoleId,
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = JsonContent.Create(payload) };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            // Graph SDK v6 / Kiota 2.0 callers catch ODataError with an int
-            // ResponseStatusCode + dict ResponseHeaders (NFR-09). This raw-HTTP
-            // path surfaces the functional equivalent — status code + body —
-            // in the exception message so the failure classification + operator
-            // diagnostic carry the same information without the SDK dependency
-            // (see file-header Path-C note).
-            throw new InvalidOperationException(
-                $"POST appRoleAssignments failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 300)}");
-        }
-    }
-
-    private async Task<JsonDocument> GetJsonAsync(Uri uri, AccessToken token, CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"GET {uri} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 300)}");
-        }
-        return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
-    }
-
-    private static string Truncate(string s, int max)
-        => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
+    private async Task<AccessToken> AcquireTokenAsync(string tenantId, CancellationToken ct)
+        => await _credentialFactory(tenantId)
+            .GetTokenAsync(new TokenRequestContext(GraphAppRoleRest.GraphScope), ct).ConfigureAwait(false);
 }

@@ -11,6 +11,7 @@ import * as React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAccessGrantModalProps, IContactSearchResult } from '../types';
 
 const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
@@ -33,7 +34,7 @@ function makeProps(
   noAccess: () => Promise<Response>,
   overrides?: Partial<IAccessGrantModalProps>
 ): IAccessGrantModalProps {
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/no-access')) return noAccess();
     if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
     if (url.includes('/assigned-access')) return jsonResponse({ entries: [] });

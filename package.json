@@ -9,7 +9,8 @@
     "test:e2e:debug": "playwright test --debug --config=tests/e2e/config/playwright.config.ts",
     "test:e2e:report": "playwright show-report",
     "test:e2e:codegen": "playwright codegen",
-    "prepare": "husky"
+    "prepare": "husky",
+    "lint:client": "node scripts/quality/client-lint/client-lint.mjs check"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

@@ -78,8 +78,8 @@ public sealed class KeylessProofAuthorizationFilter : IEndpointFilter
         if (!IsAdmitted(user, configuration?["AzureAd:TenantId"], configuration?["AzureAd:ClientId"]))
         {
             _logger?.LogWarning(
-                "Keyless proof denied: caller appid={AppId} is not an application of this tenant holding the {Role} role for this API.",
-                user.FindFirst("appid")?.Value ?? user.FindFirst("azp")?.Value, KeylessProofContract.AppRoleValue);
+                "Keyless-proof role denied on {Path}: caller appid={AppId} is not an application of this tenant holding the {Role} role for this API.",
+                httpContext.Request.Path.Value, user.FindFirst("appid")?.Value ?? user.FindFirst("azp")?.Value, KeylessProofContract.AppRoleValue);
 
             return ProblemDetailsHelper.Forbidden(
                 DenyCode,
@@ -88,7 +88,8 @@ public sealed class KeylessProofAuthorizationFilter : IEndpointFilter
         }
 
         _logger?.LogInformation(
-            "Keyless proof admitted: caller appid={AppId} oid={ObjectId}.",
+            "Keyless-proof role admitted on {Path}: caller appid={AppId} oid={ObjectId}.",
+            httpContext.Request.Path.Value,
             user.FindFirst("appid")?.Value ?? user.FindFirst("azp")?.Value,
             CallerResolution.ResolveObjectId(user));
         return await next(context);

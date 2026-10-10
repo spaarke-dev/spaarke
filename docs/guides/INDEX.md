@@ -43,6 +43,7 @@ This directory contains practical guides for deploying, configuring, administeri
 |----------|-------------|--------------|---------------|--------|
 | [CUSTOMER-ONBOARDING-RUNBOOK.md](CUSTOMER-ONBOARDING-RUNBOOK.md) | End-to-end customer onboarding runbook | 2026-03-20 | — | — |
 | [CUSTOMER-QUICK-START-CHECKLIST.md](CUSTOMER-QUICK-START-CHECKLIST.md) | Quick start checklist for new customers | 2026-03-20 | — | — |
+| [COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md](COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md) | Note for the customer's IT: install the per-customer Spaarke AI Copilot agent in their own tenant (T257) | 2026-10-09 | 2026-10-09 | New |
 
 ### AI — Deployment & Configuration
 
@@ -173,6 +174,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | Creating AI playbook scopes | `SCOPE-CONFIGURATION-GUIDE.md`, `JPS-AUTHORING-GUIDE.md` |
 | Configuring RAG | `RAG-CONFIGURATION.md`, `RAG-TROUBLESHOOTING.md` |
 | M365 Copilot integration | `M365-COPILOT-ADMIN-GUIDE.md`, `COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md` |
+| Per-customer Copilot agent (customer stamps) | `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.12, `COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md` |
 | Communication admin | `COMMUNICATION-ADMIN-GUIDE.md`, `COMMUNICATION-DEPLOYMENT-GUIDE.md` |
 | Workspace entity creation | `WORKSPACE-ENTITY-CREATION-GUIDE.md`, `WORKSPACE-AI-PREFILL-GUIDE.md` |
 | Customer onboarding | `CUSTOMER-ONBOARDING-RUNBOOK.md`, `CUSTOMER-QUICK-START-CHECKLIST.md` |

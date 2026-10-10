@@ -122,7 +122,7 @@ const authenticatedFetchMock = jest.fn(
       recordedPatches.push({ session: sessionOf(url), ...body });
       return { ok: true, status: 204, json: async () => ({}) } as Partial<Response> as Response;
     }
-    return { ok: false, status: 404, json: async () => ({}) } as Partial<Response> as Response;
+    throw httpError(404);
   },
 );
 
@@ -203,6 +203,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks.
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderPane(theme: any = webLightTheme): { rerender: () => void; bus: PaneEventBus } {

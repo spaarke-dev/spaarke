@@ -1,11 +1,11 @@
 // -----------------------------------------------------------------------------
 // IKvSecretReader.cs
 //
-// Read-only counterpart to KvSecretsPopulation/IKvSecretsWriter — H14b + H14c
-// both need to READ BACK the `Communication-Webhook-SigningKey` HMAC secret
-// H4 (task 047) provisioned per §7.9 canonical naming, so they can pass it as
-// the Graph subscription `clientState` / Dataverse serviceendpoint signing
-// material. IKvSecretsWriter is write-only (WriteAsync a manifest) — no read
+// Read-only counterpart to KvSecretsPopulation/IKvSecretsWriter. Its remaining
+// consumer is ExchangePolicySidecarClient, which reads the per-boot sidecar
+// shared secret from the platform Key Vault (H14b/H14c, which read the
+// Communication-Webhook-SigningKey back through it, were removed under ISS-019).
+// IKvSecretsWriter is write-only (WriteAsync a manifest) -- no read
 // capability exists on that seam.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md §11):
@@ -17,12 +17,9 @@
 //      H4's writer contract (secrets-population write path) with an
 //      unrelated read concern H4 itself never needs; H14 is the ONLY current
 //      consumer of a read-back. A narrow, purpose-built seam is cleaner.
-//   3. Cost of doing nothing — H14b/H14c cannot obtain the HMAC signing key
-//      without a reader seam; Graph webhook subscriptions + Dataverse
-//      service-endpoint webhooks would either ship with NO signing key
-//      (defeating the whole point of an HMAC-verified webhook) or duplicate
-//      ad-hoc `az keyvault secret show` shell-out logic inside two separate
-//      sub-handlers.
+//   3. Cost of doing nothing -- the sidecar client cannot obtain the shared
+//      secret it must send as X-Sidecar-Auth, so H14a (and the H13 T4 probe)
+//      could not call the Exchange sidecar.
 //
 // SEAM JUSTIFICATION (ADR-010): ≥2 implementations exist from day 1 —
 // production AzCliKvSecretReader (shells to `az keyvault secret show`) +

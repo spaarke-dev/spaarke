@@ -173,10 +173,10 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
                     ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\",\"email\":\"load@contoso.example\",\"companyName\":\"Contoso\"}]",
                     ["environmentSecurityGroupId"] = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
                     ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
-                    ["communicationGraphResource"] = "users/load@contoso.example/messages",
                     ["communicationDefaultMailbox"] = "load@contoso.example",
                     // T255: the customer's workforce tenant(s) — required for every model.
                     ["customerWorkforceTenantIds"] = "[\"d0e0c0a0-0000-4000-8000-000000000003\"]",
+                    ["displayName"] = "Load Test Customer", // T259 (ISS-010) — required at POST /api/runs
                     // T228: the customer's container type and the Dataverse environment the operator created
                     // (named for the customer); T229: the cost tier + estimate H0 compares (every model).
                     ["containerTypeId"] = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",

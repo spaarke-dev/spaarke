@@ -2,12 +2,15 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.4.39"
+           version="1.4.40"
            display-name-key="Visual Host"
-           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.39)"
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.40)"
            control-type="virtual">
 
-    <external-service-usage enabled="false" />
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
 
     <!-- Chart Definition - lookup to sprk_chartdefinition entity (optional in v1.1.0) -->
     <property name="chartDefinition"
@@ -133,10 +136,11 @@
               required="false"
               default-value="true" />
 
-    <!-- Optional: Application Insights instrumentation key for client telemetry (FR-TEL-01) -->
+    <!-- DEPRECATED (v1.4.40, #1537) and IGNORED: telemetry now takes the environment's App Insights connection
+         string from the BFF at runtime. Kept optional so forms that still bind a value stay valid. -->
     <property name="appInsightsKey"
-              display-name-key="App Insights Key"
-              description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)"
+              display-name-key="App Insights Key (ignored)"
+              description-key="Deprecated and ignored: browser telemetry uses the App Insights connection string of this environment, from the BFF, at runtime. Leave empty."
               of-type="SingleLine.Text"
               usage="input"
               required="false" />

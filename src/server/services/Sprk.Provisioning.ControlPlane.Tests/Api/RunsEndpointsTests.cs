@@ -1001,11 +1001,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\",\"companyName\":\"Contoso\"}]",
             ["environmentSecurityGroupId"] = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
             ["exchangePolicyScopeGroupId"] = "spaarke-mail-scope@contoso.com",
-            ["communicationGraphResource"] = "users/comms@contoso.com/messages",
-            ["emailGraphResource"] = null!,   // Step 4.0 always sends the key; null when the intake omits it
             ["communicationDefaultMailbox"] = "comms@contoso.com",
             // T255: Step 4.0 sends the intake array as a JSON string (as usersJson).
             ["customerWorkforceTenantIds"] = $"[\"{TestWorkforceTenantId}\"]",
+            // T259: the intake file's displayName, sent under the same key (H10's customer business unit).
+            ["displayName"] = "Test Customer Inc.",
         };
 
         var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
@@ -1037,6 +1037,12 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
     [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]
     [InlineData("communicationDefaultMailbox", "Contoso Communications", "intake-communication-default-mailbox-invalid")]
+    [InlineData("displayName", null, "h10-customer-display-name-required")]                  // T259 (ISS-010)
+    [InlineData("displayName", " ", "h10-customer-display-name-required")]
+    [InlineData("displayName", "Secure Record", "h10-customer-display-name-invalid")]      // never the secure unit
+    [InlineData("displayName", "SECURE RECORD", "h10-customer-display-name-invalid")]      // Dataverse compares names without case
+    [InlineData("displayName", "Acme ", "h10-customer-display-name-invalid")]             // trailing whitespace
+    [InlineData("displayName", "Acme\tCorp", "h10-customer-display-name-invalid")]        // a control character
     public async Task PostRuns_OperatorIntakeBreaksAHandlerRule_Returns400_BeforeGuardRegistryCosmosOrEnqueue(
         string key, string? value, string expectedErrorCode)
     {
@@ -1060,28 +1066,16 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         detail.Should().Contain("entry 2").And.NotContain("Grace", "diagnostics identify an entry by position, not by personal data");
     }
 
-    [Fact]
-    public async Task PostRuns_NoGraphResource_Returns400_WithH14bCode()
-    {
-        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
-        nonSecret.Remove("communicationGraphResource");
-        nonSecret["emailGraphResource"] = " ";
-
-        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, "h14b-no-webhook-targets-configured");
-    }
-
     [Theory]
-    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email and group optional for NativeAccount (Model 2 only — T232)
-    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"team@contoso.com\"},{\"firstName\":\"Grace\",\"lastName\":\"Hopper\",\"email\":\"team@contoso.com\"}]", "communicationGraphResource")]   // a shared contact email is fine — nothing is invited for NativeAccount
-    [InlineData("Model1", "B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]")]   // email and group optional for NativeAccount (Model 2 only — T232)
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"team@contoso.com\"},{\"firstName\":\"Grace\",\"lastName\":\"Hopper\",\"email\":\"team@contoso.com\"}]")]   // a shared contact email is fine — nothing is invited for NativeAccount
+    [InlineData("Model1", "B2BGuest", "[{\"email\":\"ada@contoso.com\"}]")]   // a guest needs only an email
     public async Task PostRuns_CompleteOperatorIntake_Returns202_AndStoresTheValues(
-        string tenancyModel, string identityPreset, string usersJson, string graphResourceKey)
+        string tenancyModel, string identityPreset, string usersJson)
     {
         using var factory = new L2WebApplicationFactory();
         var client = factory.CreateClient();
         var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
-        nonSecret.Remove("communicationGraphResource");
-        nonSecret[graphResourceKey] = "users/comms@contoso.com/messages";
         nonSecret["identityPreset"] = identityPreset;
         nonSecret["usersJson"] = usersJson;
         if (identityPreset == "NativeAccount")
@@ -1096,7 +1090,6 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         {
             ["identityPreset"] = identityPreset,
             ["usersJson"] = usersJson,
-            [graphResourceKey] = "users/comms@contoso.com/messages",
             ["exchangePolicyScopeGroupId"] = nonSecret["exchangePolicyScopeGroupId"],
             ["communicationDefaultMailbox"] = nonSecret["communicationDefaultMailbox"],
         });
@@ -1166,7 +1159,6 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\"}]");
         nonSecret.TryAdd("environmentSecurityGroupId", "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b");
         nonSecret.TryAdd("exchangePolicyScopeGroupId", "spaarke-mail-scope@contoso.com");
-        nonSecret.TryAdd("communicationGraphResource", "users/comms@contoso.com/messages");
         nonSecret.TryAdd("communicationDefaultMailbox", "comms@contoso.com");
         // T228: required for every model — the customer's own subscription, the model's container type (G19) and the
         // Dataverse environment the operator created (named for TestCustomerId).
@@ -1178,6 +1170,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret.TryAdd("estimatedMonthlyUsd", "450");
         // T255: the customer's workforce tenant list, required for every model.
         nonSecret.TryAdd("customerWorkforceTenantIds", $"[\"{TestWorkforceTenantId}\"]");
+        // T259 (ISS-010): the customer's display name — H10 names the customer's business unit with it.
+        nonSecret.TryAdd("displayName", "Test Customer Inc.");
         return nonSecret;
     }
 

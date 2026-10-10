@@ -3,9 +3,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
-using Sprk.Bff.Api.Services.Dataverse;
 
-namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// How a chat tool writes a row FILED under a project, matter or work assignment (unified-access-control-r2 task 146 r2,
@@ -38,7 +37,13 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// <para><b>What "as the user" covers</b> — everything a run-as-user create would have had Dataverse check, so the
 /// app-only create grants nothing the caller lacks: (1) the table's Create privilege, and Append when the row sets a
 /// lookup, by the privilege names the table's own metadata declares (activity tables share <c>prvCreateActivity</c>);
-/// (2) AppendTo on every record a lookup names (<c>RetrievePrincipalAccess</c>); (3) no column under field-level security
+/// (2) AppendTo on every record a lookup names (<see cref="CheckCallerMayAppendToAsync"/>): <c>RetrievePrincipalAccess</c> for a
+/// user- or team-owned target; for an ORGANIZATION-OWNED target (the ADR-024 record-type catalog <c>sprk_recordtype_ref</c>,
+/// the matter-type and practice-area reference tables), which that message refuses (400 0x80040800), the table's AppendTo
+/// PRIVILEGE plus a read of the row as the caller (<see cref="CallerMayAppendToOrganizationOwnedAsync"/>) — what a
+/// run-as-user create checks there. A target neither path can answer (a BUSINESS-OWNED table such as <c>systemuser</c> or
+/// <c>team</c>, which RetrievePrincipalAccess also refuses) is denied, and a missing row answers like an unappendable one
+/// (the uniform not-found); (3) no column under field-level security
 /// (refused: an app-only write would pass the caller's column security); (4) no owner or audit column (the server sets
 /// the owner). Every question is asked through <see cref="IDataverseUserClient"/> under the caller's own token, so the
 /// identity is the credential, not data. Any failure denies.</para>
@@ -487,7 +492,13 @@ internal static class OwnedChildWrite
         {
             var rights = await RightsOnAsync(user, me, lookup.RelatedEntitySet, lookup.RecordId, ct).ConfigureAwait(false);
 
-            if (!rights.HasFlag(AccessRights.AppendTo))
+            // An ORGANIZATION-OWNED target (the ADR-024 record-type catalog sprk_recordtype_ref, the matter-type and
+            // practice-area reference tables) has no record-level access: RetrievePrincipalAccess refuses the table (live,
+            // spaarkedev1 2026-10-07: 400 0x80040800 "The 'RetrievePrincipalAccess' method does not support entities of type
+            // 'sprk_recordtype_ref'"), so RightsOnAsync reads None and every ADR-024 resolver payload was refused as
+            // "not found". What a run-as-user create checks there is the table's AppendTo PRIVILEGE, and the row must exist.
+            if (!rights.HasFlag(AccessRights.AppendTo)
+                && !await CallerMayAppendToOrganizationOwnedAsync(user, me, lookup, ct).ConfigureAwait(false))
             {
                 return new Outcome
                 {
@@ -498,6 +509,43 @@ internal static class OwnedChildWrite
         }
 
         return Outcome.Allowed;
+    }
+
+    /// <summary>
+    /// AS THE CALLER, for a lookup target RetrievePrincipalAccess cannot answer: <c>true</c> only when the target table is
+    /// ORGANIZATION-OWNED (its own metadata says so), the caller holds that table's AppendTo privilege, and the row exists
+    /// for them (read under their token). Anything else — a user/team-owned table, a privilege not held, a row that is
+    /// missing or unreadable, a question Dataverse does not answer — is <c>false</c> (fail closed; the caller keeps the
+    /// uniform not-found, so a missing row and an unappendable one still look alike).
+    /// </summary>
+    private static async Task<bool> CallerMayAppendToOrganizationOwnedAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, CancellationToken ct)
+    {
+        var metadata = await user.GetAsync(
+                $"EntityDefinitions(LogicalName='{lookup.RelatedTable}')?$select=LogicalName,OwnershipType,PrimaryIdAttribute,Privileges", ct)
+            .ConfigureAwait(false);
+        if (!metadata.IsSuccess
+            || metadata.Body is not { } body
+            || !body.TryGetProperty("OwnershipType", out var ownership)
+            || ownership.ValueKind != JsonValueKind.String
+            || !string.Equals(ownership.GetString(), "OrganizationOwned", StringComparison.Ordinal)
+            || PrivilegeNamed(body, "AppendTo", 8) is not { } appendTo)
+        {
+            return false;
+        }
+
+        var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { appendTo }));
+        var held = await user.GetAsync(
+                $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}", ct)
+            .ConfigureAwait(false);
+        if (!held.IsSuccess || !CallerRecordAccessProbe.ResponseGrantsPrivilege(held.Body?.GetRawText(), appendTo))
+            return false;
+
+        var primaryId = body.TryGetProperty("PrimaryIdAttribute", out var pk) && pk.ValueKind == JsonValueKind.String
+            ? pk.GetString()
+            : $"{lookup.RelatedTable}id";
+        var row = await user.GetAsync($"{lookup.RelatedEntitySet}({lookup.RecordId:D})?$select={primaryId}", ct).ConfigureAwait(false);
+        return row.IsSuccess;
     }
 
     /// <summary>

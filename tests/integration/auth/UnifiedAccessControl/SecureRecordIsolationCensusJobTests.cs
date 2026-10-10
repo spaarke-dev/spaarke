@@ -271,9 +271,46 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().NotContain(e => e.Message.Contains("heartbeat status=isolated"));
     }
 
+    /// <summary>
+    /// Task 260 (ISS-014): the provisioning acceptance route runs <see cref="SecureRecordIsolationCensus"/> directly; the
+    /// job runs it through its schedule. Same directory, same status and findings — one census, two runners.
+    /// </summary>
+    [Theory]
+    [InlineData("isolated")]
+    [InlineData("findings")]
+    [InlineData("inert")]
+    public async Task TheJobAndTheAcceptanceRoutesCensus_AgreeOnStatusAndFindings(string shape)
+    {
+        if (shape == "findings")
+            _directory.User(Guid.NewGuid(), "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
+        if (shape == "inert")
+            _directory.RemoveBusinessUnit(SecureBu);
+
+        var jobResult = await RunAsync();
+        var direct = SecureRecordIsolationCensus.ToResult(
+            await SecureRecordIsolationCensus.EvaluateAsync(Entities(), new ConfigurationBuilder().Build(), CancellationToken.None));
+
+        using var json = System.Text.Json.JsonDocument.Parse(jobResult.ResultJson!);
+        direct.Status.Should().Be(shape);
+        json.RootElement.GetProperty("status").GetString().Should().Be(direct.Status);
+        json.RootElement.GetProperty("verdict").GetString().Should().Be(direct.Verdict);
+        json.RootElement.GetProperty("findings").EnumerateArray()
+            .Select(f => (f.GetProperty("verdict").GetString(), f.GetProperty("message").GetString()))
+            .Should().Equal(direct.Findings.Select(f => ((string?)f.Verdict, (string?)f.Message)));
+    }
+
     // =====================================================================================================
     // Harness
     // =====================================================================================================
+
+    private IGenericEntityService Entities()
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression query, CancellationToken _) => _directory.Answer(query));
+        return entities.Object;
+    }
 
     private Task<JobRunResult> RunAsync()
     {

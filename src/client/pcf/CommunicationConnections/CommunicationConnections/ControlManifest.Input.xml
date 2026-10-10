@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationConnections" version="1.7.0" display-name-key="Communication Connections" description-key="Virtual PCF that reviews communication association matches grouped by the action needed: needs your decision, filed automatically, and suggested. Reads the association provenance and status, and files the chosen regarding records. Bind to the association provenance column and place it in the form accessories area." control-type="virtual">
-    <external-service-usage enabled="false">
+  <control namespace="Spaarke.Controls" constructor="CommunicationConnections" version="1.7.1" display-name-key="Communication Connections" description-key="Virtual PCF that reviews communication association matches grouped by the action needed: needs your decision, filed automatically, and suggested. Reads the association provenance and status, and files the chosen regarding records. Bind to the association provenance column and place it in the form accessories area." control-type="virtual">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
     </external-service-usage>
     <!-- PRIMARY bound property: the task-015 association provenance JSON (multiline, up to 10000 chars). -->
     <property name="associationProvenance" display-name-key="Association Provenance" description-key="Bound to sprk_associationprovenance (the task-015 Association Engine decision trail JSON). Read-only from the PCF; drives the connection slots." of-type="Multiple" usage="bound" required="true" />

@@ -7,6 +7,9 @@
 //     (task 245b — never the stamp's BFF UAMI);
 //   - H2a (BicepInfraDeploy): sent as customer.bicep's controlPlaneUamiPrincipalId → Website
 //     Contributor on the stamp BFF (H4b Kudu log fetch + H9 zip-deploy), Model 1 stamps only.
+// H3 also names it on the customer's BFF app registration (Spaarke-tenant profiles): the keyless-proof app role (task
+// 230b) and, ISS-015, the subject of the federated credential `spaarke-l2-worker` that lets H6/H7/H7b sign in as that
+// registration secret-free (D-13). Its principalId — never the UAMI's clientId (AADSTS700213).
 // It replaces KvSecretsPopulationOptions.ControlPlanePrincipalObjectId (task 245b) and the short-lived
 // BicepInfraDeployOptions.ControlPlaneUamiPrincipalId, so one value cannot drift between two settings
 // and neither handler depends on the other's options. An L2-owned value, so a validated Worker option
@@ -55,8 +58,9 @@ public sealed class ControlPlaneIdentityOptions
         {
             throw new InvalidOperationException(
                 $"{SectionName}:PrincipalObjectId must be the object id (GUID) of the L2 control plane's own " +
-                "identity — H4 grants it Key Vault Secrets Officer on each customer vault and H2a sends it as " +
-                $"customer.bicep's controlPlaneUamiPrincipalId (got '{PrincipalObjectId}'). Set by " +
+                "identity — H4 grants it Key Vault Secrets Officer on each customer vault, H2a sends it as " +
+                "customer.bicep's controlPlaneUamiPrincipalId and H3 makes it the subject of the customer BFF " +
+                $"registration's L2 Worker federated credential (got '{PrincipalObjectId}'). Set by " +
                 "controlplane-worker-app-service.bicep (controlPlanePrincipalId).");
         }
     }

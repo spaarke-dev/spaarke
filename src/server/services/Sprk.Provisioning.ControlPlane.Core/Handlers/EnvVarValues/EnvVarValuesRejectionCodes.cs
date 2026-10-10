@@ -77,6 +77,18 @@ public static class EnvVarValuesRejectionCodes
     public const string RootBusinessUnitContainerConflict = "root-business-unit-container-conflict";
 
     /// <summary>
+    /// T259 (ISS-010): the customer's business unit H10 recorded does not exist, so H7 cannot link it to H8's container.
+    /// Classified Resumable; nothing was written.
+    /// </summary>
+    public const string CustomerBusinessUnitUnresolved = "customer-business-unit-unresolved";
+
+    /// <summary>
+    /// T259 (ISS-010): the customer's business unit's <c>sprk_containerid</c> names a container other than H8's.
+    /// Classified Resumable and NOTHING is written (the diagnostic names both) — as for the root unit.
+    /// </summary>
+    public const string CustomerBusinessUnitContainerConflict = "customer-business-unit-container-conflict";
+
+    /// <summary>
     /// Dataverse Web API returned 401/403 while writing an environment
     /// variable value. Classified Resumable — operator verifies the BFF
     /// app-reg still has sufficient privilege on the target env + resumes.

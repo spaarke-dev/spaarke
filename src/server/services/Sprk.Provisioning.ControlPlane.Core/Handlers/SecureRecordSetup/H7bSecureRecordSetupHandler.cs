@@ -22,6 +22,10 @@
 //   class owns what every handler owns: the run row, its upstream guards, Level-3 idempotency, the dry run, the
 //   §4C mapping and the Cosmos state write.
 //
+// CUSTOMER UNIT (T259, ISS-010 / owner 2026-10-09): H7b also checks INCOMING-145 §6 T1 (the customer's unit, H10's
+//   InterStepState.CustomerBusinessUnitId, is a direct child of the root) and T3 (both BFF application users are in it),
+//   refusing QuarantineRequired otherwise; S2 already refuses any user in the Secure Record unit.
+//
 // DAG: [H7b] = { H6 } (it reads the package's tables' metadata). H9 waits for it, so no BFF is deployed to an
 // environment without sprk_noaccessentry or with NULL secure flags; H13 waits for it (INCOMING-145 §2).
 //
@@ -70,8 +74,12 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// Version of the procedure, part of the idempotency hash: a run that completed an older procedure does not
     /// short-circuit past a step added since.
     /// </summary>
-    /// <remarks>2 = T255: S15–S18, the contact identity-binding profiles' memberships (INCOMING-141).</remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=2";
+    /// <remarks>
+    /// 2 = T255: S15–S18, the contact identity-binding profiles' memberships (INCOMING-141).
+    /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
+    /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
+    /// </remarks>
+    internal const string ProcedureVersion = "secure-setup-procedure=4";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;
@@ -168,6 +176,12 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
                 "InterStepState.bffAppRegSystemUserId and systemUserId (H10's two Dataverse application users) must both be GUIDs: " +
                 "they are the only members of the BFF writer field-security profile (S12).", cancellationToken).ConfigureAwait(false);
         }
+        if (!Guid.TryParse(state.CustomerBusinessUnitId, out var customerUnitId) || customerUnitId == Guid.Empty)
+        {
+            return await FailMissingAsync(run, etag, "customerBusinessUnitId",
+                "InterStepState.customerBusinessUnitId (H10's customer business unit) must be a GUID: H7b checks it is a direct " +
+                "child of the root and holds both BFF application users (INCOMING-145 §6 T1/T3).", cancellationToken).ConfigureAwait(false);
+        }
         if (!SecureRecordSetupIntake.TryReadDryRun(parameters, out var dryRun))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, SecureRecordSetupRejectionCodes.DryRunInvalid,
@@ -210,6 +224,7 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             new SecureRecordSetupTarget(state.DataverseEnvUrl!, tenantId, state.BffAppRegId!),
             roleSet,
             [bffAppUser, miAppUser],
+            customerUnitId,
             dryRun);
         SecureRecordSetupOutcome outcome;
         try
@@ -263,6 +278,7 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
                 {
                     setHash,
                     businessUnitId = applied.State.BusinessUnitId,
+                    customerBusinessUnitId = customerUnitId,
                     ownerTeamId = applied.State.OwnerTeamId,
                     roleId = applied.State.RoleId,
                     privilegeCount = applied.State.PrivilegeCount,
