@@ -4,7 +4,7 @@
     <title>The Decision Record writer with record class and mandatory fact snapshot</title>
     <phase>4 The Decision Record</phase>
     <gate>001, 030, 007, 036, 008, 039 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes the append-only artifact the whole defensibility story rests on; it cannot be edited after the fact.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -123,6 +123,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-18 (amended, D-17), FR-19, FR-20, FR-22, FR-50, FR-51. design.md BR-1 as reversed, and notes/schema-draft.md section 6 for the full rationale. Amended 2026-10-07: one record per review (reconciliation B.2 row 040); the record class of reassign and extend-response-date is open (C-3, O-3) and handled by task 036.</notes>
+
+  <completion>COMPLETED 2026-10-10: PR #1600 (head f5e347eb4) merged into docs/ontology-platform-design as eae698458 after independent review, fix round and re-check. Review findings fixed: a create failure is a refusal (F4); live seam pairing (F3); oversize memo after emails (F2); log and metric asserted (F3). uac-r2 reviewed the RecordOwnerAssignmentCensusTests PerUser entry.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

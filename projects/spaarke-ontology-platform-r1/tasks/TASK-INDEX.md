@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (66 ✅ · 1 🔄 · 36 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-09)
+> (spec §9) · **116 tasks** across 14 phases (68 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-10)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -188,14 +188,14 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 035 | [**Deploy** BFF](035-deploy-bff-evaluator.poml) | FULL | sonnet/high | 034 | — | Merge master first; hash-verify |
 | ✅ [done] 079 | [uac-r2 coordination: two recorded live refusals + review of the secure-child entries](079-issue-secure-record-mirror-for-signals.poml) | STANDARD | sonnet/medium | — | — | **D-33** (was the D-15 "later mirror" issue). Refusals must be recorded **before** 008's Secure Record Owner edit; the review gates 039. **Start now** · **[uac]** |
 | ✅ [done] 039 | [**Secure children: register Signal + Decision Record; writer owner from the resolver**](039-secure-signals-and-decision-records.poml) | FULL | **opus**/high | 007, 008, 079 | — | 🔴 **D-33** (replaces D-15's skip): two entries each in `SecureChildLineage.cs` and `config/secure-record-owner-role.json` (uac-r2 review via 079); task-146-shaped writer change; 2-minute secure-sync load measured; live gate on a provisioned Secure matter. ~3 dev-days. **Before 031** · **[uac]** |
-| 🔲 [open] 037 | [Signal writer accepts Do-lane subjects (event, To Do, WA)](037-signal-writer-do-lane-subjects.poml) | FULL | sonnet/high | 007, 008, 024, 039 | — | **D-16** matter via `sprk_regardingmatter`; `sprk_duedate` (D-27) refreshed while open. Decides + flags project-filed tasks (D-16); **D-31** matterless To Do owned by the To Do owner's BU; **D-33** resolver parents + narrow skip. **Before 031** · **[uac]** |
+| ✅ [done] 037 | [Signal writer accepts Do-lane subjects (event, To Do, WA)](037-signal-writer-do-lane-subjects.poml) | FULL | sonnet/high | 007, 008, 024, 039 | — | **D-16** matter via `sprk_regardingmatter`; `sprk_duedate` (D-27) refreshed while open. Decides + flags project-filed tasks (D-16); **D-31** matterless To Do owned by the To Do owner's BU; **D-33** resolver parents + narrow skip. **Before 031** · **[uac]** |
 | 🔲 [open] 038 | [BFF Signal read route: matter-access filter, Do-lane reader scope, order](038-signal-read-route-and-do-lane-scoping.poml) | FULL | **opus**/high | 050, 031, 037 | — | **D-15** (stands under D-33). #1312 census. Event "mine" = 097 decision B; WA in **both** assigner's and assignee's Do lane (**D-44**); rank **D-42**; no-core rows owner-only (D-35) · **[uac]** |
 
 ### Phase 4 — The Decision Record
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 040 | [Decision Record writer + record class](040-decision-record-writer.poml) | FULL | sonnet/high | 001, 030, 007, 036, 008, 039 | — | BR-1 **as reversed**. **Amended**: ONE record per review with `sprk_steps` / `sprk_followons` / `sprk_gatetier`, class from the 036 catalog, called last by 043 (**D-17**); **secure child, still append-only** (owner from the resolver, Assign only) (**D-33**) · **[uac]** |
+| ✅ [done] 040 | [Decision Record writer + record class](040-decision-record-writer.poml) | FULL | sonnet/high | 001, 030, 007, 036, 008, 039 | — | BR-1 **as reversed**. **Amended**: ONE record per review with `sprk_steps` / `sprk_followons` / `sprk_gatetier`, class from the 036 catalog, called last by 043 (**D-17**); **secure child, still append-only** (owner from the resolver, Assign only) (**D-33**) · **[uac]** |
 | 🔲 [open] 041 | [Append-only + relationship direction](041-append-only-and-relationship-direction.poml) | FULL | sonnet/high | 040 | **D** | Test as a real non-admin; 1 → N, FK on the Signal |
 | 🔲 [open] 042 | [Wire writer into the consumer](042-wire-writer-into-rulegated-consumer.poml) | FULL | sonnet/high | 040 | D | One line before the branch. **Do not touch the gate**. **Amended**: one-step review shape (D-17); O-20 dissolved by D-33 · **[uac]** |
 
