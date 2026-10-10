@@ -380,6 +380,18 @@ caller on a stamp; none is a boot failure.
 
 ---
 
+### ISS-023 — The skill's customer pass stops a NativeAccount run on PRQ-C-10
+
+| Field | Value |
+|---|---|
+| **Status** | Open — low; Model 2 only (out of scope for r1) |
+| **Filed** | 2026-10-09 (PRQ-C-14 work) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1590 |
+
+`$mustResolveTokens` (Step 1e-ter) includes `environmentSecurityGroupId`, which only B2BGuest fills; a NativeAccount run stops
+with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
+PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
