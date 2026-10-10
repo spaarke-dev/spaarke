@@ -169,3 +169,11 @@ Spaarke Ontology Service (root copy `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`): 46 
 ## 2026-10-09 - D-109: Read on budget revision (spaarkedev1, main session)
 
 Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). Secure Record Owner +`prvReadsprk_BudgetRevision` Basic via `Set-SecureRecordOwnerRolePrivileges.ps1` (-Apply 28 -> 33, SharePoint four stripped -> 29, -Verify PASS), negative control 403 before, positive control 201 x2 after (probes deleted). Details: notes/security-roles.md.
+
+## 2026-10-10 - Repair the triage-email Action prompt (spaarkedev1, main session; owner approved)
+
+- **Why:** task 074's recall run failed at 21.8%. The `sprk_analysisaction` row `triage-email` (`c1fa96bf-2697-f111-b8dc-7ced8ddc4a05`, last modified 2026-09-29T18:07:46Z) had 33 values replaced by PowerShell `ConvertTo-Json` artefacts (`{"Length": N}` / `{"Count": N}`): all 9 `instruction.constraints`, the 5 `metadata.tags`, and fields in the examples. `PromptSchemaRenderer` fell back to flat text, so the task-072 tie-breaker guidance never reached the model (#1584).
+- **What:** PATCH `sprk_systemprompt` = the repo mirror `infra/dataverse/actions/triage-email.action.json` minus the six deploy-row scalars and every `$comment*` key (the original deploy shape). Before writing, every non-corrupt value in the live row was verified byte-identical to the mirror, and every damaged string's `Length` matched the mirror text.
+- **Read-back:** 2026-10-10T13:33:08Z, identical to the repaired document; 9 string constraints; 0 Length/Count objects. A scan of all 79 `sprk_analysisaction` rows found no other row with the artefact.
+- **Backup** of the corrupt row: session scratchpad `triage-fix/live-row-backup.json`.
+- **Owner of the row:** the email project (email-communication-intelligence); told on #1584.

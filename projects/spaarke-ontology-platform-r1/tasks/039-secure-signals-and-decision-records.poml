@@ -4,7 +4,7 @@
     <title>Register sprk_signal and sprk_decisionrecord as secure children; Signal writer takes its owner from the resolver</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>007, 008, 079 complete; uac-r2 batch 4 deployed in dev. CODE MERGED to master 2026-10-09 (#1390, c45cb4719, uac-r2 approved, owner said merge when green); remaining: D-67 deploy master BFF to dev, then the live gate (expect the recent-changes reconcile to re-own existing Signals/Decision Records under Secure roots within ~2 min, D-113)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: changes who owns and who can read Signals and Decision Records on Secure matters, edits two files another project owns, and adds an ownership path to the writer.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -133,6 +133,8 @@
   <notes>spec.md FR-14 (amended, D-31, D-33), FR-14a (amended, D-33), NFR-11; D-33. notes/secure-signals-scoping.md is the evidence and file list. The Decision Record writer's resolver path is task 040 (built after this, deps 039); the Do-lane subjects' resolver parents are task 037 (deps 039). On the critical path to 031: 031 drops the D-15 skip, so its first write must already carry the secure ownership.
 
 EXECUTION 2026-10-07/08 (record: notes/039-secure-signals-progress.md). Split: lineage + role config to master as PR #1390 (branch feat/secure-child-signals-039, uac-r2 review requested on #1355); SignalWriter resolver path on stream/039-signal-writer (merged with the ontology branch, pushed, not yet merged into docs/ontology-platform-design). Done: live describe; both entries; Set-SecureRecordOwnerRolePrivileges -Verify PASS 28/28 in dev; writer secure/not-secure/refused with unit tests; live writer gate (Signal created owned by Secure Record Owners, as the writer principal, real resolver); all probes deleted; publish delta 0.00 MB; uac-r2 and arch suites green. BLOCKED on an owner decision: the share / 2-minute / unsecure-release half of the live gate and the Secure matter and work-assignment cases need spaarke-bff-dev to run a build carrying the #1390 lineage (a dev deploy, owner approval). Deviations: sprk_signal lists no sprk_project (D-36 removed that column; condition A); writer-side project and work-assignment grouping comes with task 037; load measured as dev baseline plus analysis because D-61 removed the stamp-every-Signal pass. Refusal EventId is 50304 (50302 and 50303 were taken by 036 and 026).</notes>
+
+  <completion>COMPLETED 2026-10-10: master half #1390 (c45cb4719, uac-r2 approved, D-115) + writer half #1554 (4cff41a7e) into docs/ontology-platform-design after independent review + re-check. Live gate PASS on dev BFF ebacd2e15 (uac-r2 deploy = D-67): writer Signals on a Secure matter and under a Secure work assignment owned by Secure Record Owners in the create; out-of-product rows re-owned in 57 s; /share-user sharee reads in 1 s, share-job path 44 s, non-sharee 403 throughout; unshare 1 s; unsecure releases to the BU default team; all probes deleted (0 zz-039 rows); load p50 calls/tick 16 to 18. Signal-ownership invariant renumbered I-18. Scheduler tick drop filed #1575 (F-52, uac-r2 fixing). Evidence: notes/039-secure-signals-progress.md sections 5-8.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
