@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
