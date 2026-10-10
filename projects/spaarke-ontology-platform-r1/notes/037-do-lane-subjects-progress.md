@@ -41,9 +41,25 @@ No open PR touches `SignalWriter.cs`, the census or the telemetry file. The plan
 3. **Communication subjects now group under a project too** (D-34): a communication with only a project used to be refused as `matter_lookup_empty`; it now groups under the project. A Decide-lane subject with no core record is still refused.
 4. **Direct filed-under (D-37)** is implemented as "the subject's regarding pair names one of the stamps", which is the `DirectRootLink` case of `ClassifyStampSource` without its carrier handling; a pair naming an intermediate is not direct, so matter-over-project applies.
 5. **Acceptance criterion 15 (fake fifth core type)** is not testable without mutating `CoreAncestorResolver`'s static taxonomy. Evidence instead: the writer has no per-type branch for work assignment or service request (both proven generic by tests: core = itself, core = service request); the only type names in the grouping code are the two D-37 rules (matter over project) and the `sprk_matter` column write the POML mandates.
-6. **uac-r2-owned file changed**: `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs` gets one `PerUser` entry for `SignalWriter.BuildEntity` (the D-35 owner write copies the item's owner; there is no parent for the resolver to ask). This needs uac-r2's review (POML coordination constraint 3); linked from the PR.
+6. **Reconcile refuses a changed subject (review F1).** On a re-evaluation, if the existing Signal's `sprk_corerecordid` differs from the core derived now (or, for a no-core Signal, its `ownerid` differs from the item's owner), the reconcile is SKIPPED: Warning `WriteSkippedCoreRecordChanged` (50305), metric `core_record_changed`, `IsSkipped` with that code, nothing updated. Re-grouping and owner drift are task 031's. Signals written before 037 carry no `sprk_corerecordid` and would hit this once; dev has none.
+7. **uac-r2-owned file changed**: `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs` gets one `PerUser` entry for `SignalWriter.BuildEntity` (the D-35 owner write copies the item's owner; there is no parent for the resolver to ask). This needs uac-r2's review (POML coordination constraint 3); linked from the PR.
 
 ## 5. Evidence
 
 - Unit: `SignalWriterTests` (see PR for counts). Seam: 8 live tests in `SignalWriterSeamTests` against spaarkedev1 as the writer principal, all pass; probe rows `zz-037-*` deleted, confirmed by query (todo, event, work assignment, `ONTOLOGY-DEV-TEST%` signals all 0).
 - ArchTests: 958 of 958 after the census entry (958 passed, the census was the only failure before it).
+
+## 6. Review follow-ups
+
+- `ResolveCoreAsync` maps `NoAncestor` explicitly; any other status (Unclassified, a later one) refuses `core_record_unresolved`.
+- Census entry reworded; uac-r2 approved it on #1355 (reason keeps "CoreAncestorResolver no-core status (Error escalates)"). The earlier claim that no parent exists was wrong: `sprk_todo` and `sprk_event` are in `OwnershipParentEntities`.
+- **Secure window on the no-core path:** the ownership resolver (and its look-through of a parent filed under a Secure record) is not called for a no-core item. Safety relies on the stamp reconciliation job and the secure-child sync, not on this write.
+- **Publish-size delta:** +14 KB raw bytes (192 files both sides, 128,219,704 vs 128,233,708 B; fresh build of the project branch, short paths).
+- Tests added: cleared subject date on reconcile, both F1 scenarios plus re-file between matters and reassigned owner; seam test pins the `sprk_signalstatus` option labels (Open 100000000, Acknowledged 100000001, Resolved 100000002).
+
+## 7. Document only
+
+- `sprk_duedate` is DateOnly in dev; a UserLocal/TimeZoneIndependent date-time column in another environment would shift `.Date` across midnight UTC.
+- Communications now group under non-matter cores, so task 038's reader must handle `sprk_matter` = null (it reads the core pair, not `sprk_matter`).
+- The seam tests return immediately when `SIGNALS_LIVE_DATAVERSE_URL` is unset, so a plain run reports them as passed without exercising Dataverse (vacuous by design, the shared convention).
+- Four subject reads per write (resolver root columns, regarding pair for ties, due date, owner or BU), all on the shared client; acceptable at nightly volume, worth caching if 031 writes per-item at scale.

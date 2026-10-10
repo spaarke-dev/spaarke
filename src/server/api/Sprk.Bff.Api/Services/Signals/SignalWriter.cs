@@ -463,7 +463,7 @@ public sealed partial class SignalWriter
                     // reconcile (only on the original create). A Signal's BU can drift after its first create
                     // (e.g. the matter itself was reassigned to a different business unit).
                     existing = await _writerClient
-                        .RetrieveByAlternateKeyAsync("sprk_signal", keyAttributes, new[] { "sprk_signalid", "owningbusinessunit", "owningteam", "ownerid", "sprk_signalstatus", "sprk_duedate" }, ct)
+                        .RetrieveByAlternateKeyAsync("sprk_signal", keyAttributes, new[] { "sprk_signalid", "owningbusinessunit", "owningteam", "ownerid", "sprk_signalstatus", "sprk_duedate", "sprk_corerecordid" }, ct)
                         .ConfigureAwait(false);
                 }
                 catch (Exception readEx)
@@ -475,6 +475,25 @@ public sealed partial class SignalWriter
                 }
 
                 signalId = existing.Id;
+
+                // Task 037 (review F1): the subject moved between no-core and a core, was re-filed, or (no-core) was
+                // reassigned since this Signal was written. Re-grouping is task 031's; here the reconcile is refused,
+                // loudly, never passed silently and never left to fail as an unrelated business-unit mismatch.
+                if (CoreRecordChanged(existing, core))
+                {
+                    _logger.LogWarning(OntologyWriterEvents.WriteSkippedCoreRecordChanged,
+                        "Signal reconcile SKIPPED for policy {PolicyCode}, subject {SubjectEntity} {SubjectId}, signal {SignalId}: " +
+                        "its core record or no-core owner changed since it was written (reason={Reason}). Nothing was updated.",
+                        request.PolicyCode, subjectEntity, cleanSubjectId, signalId, OntologyWriterFailureReason.CoreRecordChanged);
+                    OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.CoreRecordChanged);
+                    return new SignalWriteResult(signalId, false, matterId, Guid.Empty)
+                    {
+                        SkippedRefusalCode = OntologyWriterFailureReason.CoreRecordChanged,
+                        CoreRecordEntity = core.Entity,
+                        CoreRecordId = core.Id,
+                    };
+                }
+
                 EnsureOwnershipMatches(existing, secureTeamId, owningBusinessUnitId, core.NoCoreOwner, signalId);
 
                 var reconcileFields = new Dictionary<string, object> { ["sprk_lastevaluated"] = nowUtc.UtcDateTime };
@@ -648,9 +667,35 @@ public sealed partial class SignalWriter
                     $"Cannot derive the core record of {subjectEntity} {subjectId:D}: {result.Error}",
                     OntologyWriterFailureReason.CoreRecordUnresolved);
 
-            default:
+            case CoreAncestorStatus.NoAncestor:
                 return await NoCorePlanAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+
+            default:
+                // Unclassified (or a status added later): the resolver does not know this subject, which is not the same
+                // as "filed under nothing". Never fall into the owner-only path on a status this code did not decide on.
+                throw new SignalWriterEscalationException(
+                    $"The core-record derivation for {subjectEntity} {subjectId:D} returned status '{result.Status}', which " +
+                    "this writer does not map to a core record. Refusing to write.",
+                    OntologyWriterFailureReason.CoreRecordUnresolved);
         }
+    }
+
+    /// <summary>True when the existing Signal's core record (or, for a no-core Signal, its owner) is not the one planned now.</summary>
+    private static bool CoreRecordChanged(Entity existing, CorePlan core)
+    {
+        var existingCoreId = existing.GetAttributeValue<string>("sprk_corerecordid");
+        if (core.Entity is not null)
+        {
+            return !string.Equals(existingCoreId?.Trim(), core.Id.ToString("D").ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingCoreId))
+        {
+            return true;
+        }
+
+        var owner = existing.GetAttributeValue<EntityReference>("ownerid");
+        return owner is null || owner.Id != core.NoCoreOwner!.Id || owner.LogicalName != core.NoCoreOwner.LogicalName;
     }
 
     /// <summary>D-37: more than one stamp. The record the subject is DIRECTLY filed under (its regarding pair names one of

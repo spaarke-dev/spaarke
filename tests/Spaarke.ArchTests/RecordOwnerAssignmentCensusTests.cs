@@ -474,10 +474,10 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
             "A Direct (two-party) thread — per-participant by design (E2)."),
         new OwnerWriteEntry("SignalWriter.cs", "BuildEntity", 1, OwnerWriteKind.PerUser,
-            "Ontology task 037 (D-35): a Do-lane Signal whose item has NO core record (no matter, project, work assignment or " +
-            "service request) is owner-only: it is owned by the item's own owner, copied from the item and read back. It is " +
-            "filed under nothing, so there is no parent for IRecordOwnershipResolver to ask; every Signal that has a core " +
-            "record takes the resolver's answer (ApplyTo) or the FR-14 business unit. Needs uac-r2 review (PR linked on #1355)."),
+            "Ontology task 037 (D-35): a Do-lane Signal whose item has NO core record is owner-only: it is owned by the item's " +
+            "own owner, copied from the item and read back. Reached only on CoreAncestorResolver no-core status (Error " +
+            "escalates); every Signal that has a core record takes the resolver's answer (ApplyTo) or the FR-14 business unit. " +
+            "uac-r2 approved on #1355."),
         new OwnerWriteEntry("PlaybookService.cs", "BuildCreatePayload", 1, OwnerWriteKind.PerUser,
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),

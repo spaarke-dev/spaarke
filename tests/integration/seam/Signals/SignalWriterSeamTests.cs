@@ -233,6 +233,29 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
     }
 
     [Fact]
+    public async Task SignalStatusOptionSet_Pins_OpenAcknowledgedResolved_ValuesTheWriterHardCodes()
+    {
+        if (!_dv.IsLive) return;
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveAttributeResponse)await _dv.OperatorClient.ExecuteAsync(
+            new Microsoft.Xrm.Sdk.Messages.RetrieveAttributeRequest
+            {
+                EntityLogicalName = "sprk_signal",
+                LogicalName = "sprk_signalstatus",
+                RetrieveAsIfPublished = true,
+            });
+        var options = ((Microsoft.Xrm.Sdk.Metadata.PicklistAttributeMetadata)response.AttributeMetadata).OptionSet.Options;
+        var labels = options.ToDictionary(o => o.Value!.Value, o => o.Label.UserLocalizedLabel.Label);
+
+        // SignalWriter hard-codes Open 100000000, Acknowledged 100000001 (refresh rule) and the freeze on Resolved 100000002.
+        labels.Should().Equal(new Dictionary<int, string>
+        {
+            [100000000] = "Open", [100000001] = "Acknowledged", [100000002] = "Resolved",
+        });
+
+    }
+
+    [Fact]
     public async Task WriteAsync_WorkAssignmentSubject_IsItsOwnCoreRecord_AndCarriesResponseDueDate()
     {
         if (!_dv.IsLive) return;

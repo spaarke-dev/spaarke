@@ -187,6 +187,12 @@ public static class OntologyWriterFailureReason
     /// metadata fault, or a subject naming two different records of one core type). The write is refused.</summary>
     public const string CoreRecordUnresolved = "core_record_unresolved";
 
+    /// <summary>Task 037: on a re-evaluation the existing Signal's core record (or, for a no-core Signal, its owner) differs
+    /// from the one derived from the subject now. The reconcile is skipped, loudly (Warning
+    /// <see cref="Sprk.Bff.Api.Services.Signals.OntologyWriterEvents.WriteSkippedCoreRecordChanged"/> + this metric);
+    /// re-grouping is task 031's.</summary>
+    public const string CoreRecordChanged = "core_record_changed";
+
     /// <summary>Task 037 (D-37): the subject names more than one core record and neither its direct filed-under record
     /// nor matter-over-project decides between them. The write is refused.</summary>
     public const string CoreRecordAmbiguous = "core_record_ambiguous";

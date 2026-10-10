@@ -75,6 +75,7 @@ public class SignalWriterTests
             request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
         });
@@ -97,6 +98,7 @@ public class SignalWriterTests
             request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
         });
@@ -121,6 +123,7 @@ public class SignalWriterTests
             request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(resolved),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
         });
@@ -204,6 +207,7 @@ public class SignalWriterTests
         // row with no BU at all would (correctly) escalate under the test right below this one.
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
@@ -227,6 +231,7 @@ public class SignalWriterTests
         var wrongBusinessUnitId = Guid.NewGuid();
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["owningbusinessunit"] = new EntityReference("businessunit", wrongBusinessUnitId),
         });
         writerOrg.ThrowDuplicateOnNextCreate = true;
@@ -533,6 +538,7 @@ public class SignalWriterTests
         var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["owningteam"] = new EntityReference("team", SecureTeamId),
             ["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId),
@@ -558,6 +564,7 @@ public class SignalWriterTests
         var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["owningteam"] = new EntityReference("team", DefaultTeamId),
             ["owningbusinessunit"] = new EntityReference("businessunit", SecureBusinessUnitId),
@@ -876,6 +883,7 @@ public class SignalWriterTests
         var request = DoRequest("sprk_todo", TodoId);
         var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(status),
             ["sprk_duedate"] = new DateTime(2026, 10, 10),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
@@ -902,6 +910,7 @@ public class SignalWriterTests
         var request = DoRequest("sprk_todo", TodoId);
         writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
         {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_duedate"] = new DateTime(2026, 10, 10),
             ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
@@ -1108,6 +1117,141 @@ public class SignalWriterTests
         (await act.Should().ThrowAsync<SignalWriterEscalationException>()).Which.Reason
             .Should().Be(OntologyWriterFailureReason.MatterDerivationUnverified);
         writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    // ── Review F1: a subject that moved between no-core and a core is refused on reconcile, loudly ───────
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_NoCoreSignalWhoseTodoIsNowFiledUnderAMatter_IsRefusedLoudly_NothingUpdated()
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var logger = new CapturingLogger<SignalWriter>();
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun), logger).WriteAsync(request);
+
+        result.IsSkipped.Should().BeTrue();
+        result.SkippedRefusalCode.Should().Be(OntologyWriterFailureReason.CoreRecordChanged);
+        writerOrg.UpdateCalls.Should().BeEmpty("a changed subject is never passed silently, and never half-updated");
+        reasons().Should().Equal(OntologyWriterFailureReason.CoreRecordChanged);
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.EventId.Id.Should().Be(OntologyWriterEvents.WriteSkippedCoreRecordChanged.Id);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_SignalGroupedUnderAMatterWhoseTodoIsNowUnfiled_IsRefusedLoudly()
+    {
+        var sysadmin = new FakeSysadminClient()
+            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["sprk_corerecordid"] = Lower(MatterId),
+            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        result.SkippedRefusalCode.Should().Be(OntologyWriterFailureReason.CoreRecordChanged);
+        writerOrg.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_TodoRefiledFromOneMatterToAnother_IsRefusedLoudly()
+    {
+        var otherMatter = Guid.NewGuid();
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(otherMatter, BusinessUnitId)
+            .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", otherMatter) });
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["sprk_corerecordid"] = Lower(MatterId),
+            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        result.SkippedRefusalCode.Should().Be(OntologyWriterFailureReason.CoreRecordChanged);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_NoCoreSignalWhoseTodoWasReassigned_IsRefusedLoudly()
+    {
+        var sysadmin = new FakeSysadminClient()
+            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()) });
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        result.SkippedRefusalCode.Should().Be(OntologyWriterFailureReason.CoreRecordChanged);
+        writerOrg.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_NoCoreSignalUnchanged_RefreshesLastEvaluated()
+    {
+        var sysadmin = new FakeSysadminClient()
+            .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        result.IsSkipped.Should().BeFalse();
+        writerOrg.UpdateCalls.Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo(new[] { "sprk_lastevaluated" });
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReEvaluation_SubjectDateCleared_ClearsTheOpenSignalsDate()
+    {
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }); // no sprk_duedate
+        var writerOrg = new FakeOrganizationService();
+        var request = DoRequest("sprk_todo", TodoId);
+        var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(100000000),
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
+            ["sprk_duedate"] = new DateTime(2026, 10, 10),
+            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+        });
+        writerOrg.ThrowDuplicateOnNextCreate = true;
+
+        await Build(writerOrg, sysadmin, new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        writerOrg.UpdateCalls.Should().ContainSingle().Which.Fields.Should().ContainKey("sprk_duedate");
+        writerOrg.Rows[existingId].GetAttributeValue<DateTime?>("sprk_duedate").Should().BeNull();
     }
 
     // ── D-37: a subject with more than one core record ───────────────────────────────────

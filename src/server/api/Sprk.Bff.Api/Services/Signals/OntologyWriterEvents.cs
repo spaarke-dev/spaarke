@@ -60,4 +60,14 @@ public static class OntologyWriterEvents
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/>'s codes) — never fact values or the sentence.
     /// </summary>
     public static readonly EventId WriteSkippedOwnerRefused = new(50304, nameof(WriteSkippedOwnerRefused));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per skipped reconcile, by <see cref="SignalWriter"/> when an existing Signal's
+    /// core record or no-core owner no longer matches the one derived from its subject now (task 037: the item was filed,
+    /// un-filed, re-filed or reassigned since the Signal was written). Nothing is updated, not even
+    /// <c>sprk_lastevaluated</c>; re-grouping and owner drift belong to task 031. Metered as
+    /// <see cref="Telemetry.OntologyWriterFailureReason.CoreRecordChanged"/>. Structured properties: <c>policyCode</c>,
+    /// <c>subjectEntity</c>, <c>subjectId</c>, <c>signalId</c>, <c>reason</c> ONLY.
+    /// </summary>
+    public static readonly EventId WriteSkippedCoreRecordChanged = new(50305, nameof(WriteSkippedCoreRecordChanged));
 }
