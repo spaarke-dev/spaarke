@@ -331,6 +331,7 @@ $constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
 
 # --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
 $graphAppId       = $constants.microsoft_constants.graphAppId
+$customerManagementGroupId = $constants.management_groups.customers.id   # T262 (PRQ-S-06) — tenant-wide, not per env
 $subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; the customer pass (Step 1e-ter) uses {stampSubscriptionId} (T228)
 $openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
 
@@ -381,12 +382,12 @@ $env:MSYS_NO_PATHCONV = '1'   # Git Bash rewrites a leading /subscriptions/... a
 $prereqTokens = [ordered]@{
   env = $env; openAiRegion = $openAiRegionResolved; region = $openAiRegionResolved; subId = $subId; sub = $subId
   l2UamiPrincipalId = $l2UamiPrincipalId; l2UamiClientId = $l2UamiClientId; l2UamiSpId = $l2UamiSpId
-  graphAppId = $graphAppId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
+  graphAppId = $graphAppId; customerManagementGroupId = $customerManagementGroupId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
   kvResourceId = $kvResourceId; containerTypeId = $containerTypeId; adminDvUrl = $adminDvUrl
 }
 # Tokens that must not be empty when a recipe uses them. artifactsStorageId / acrId / kvResourceId are exempt:
 # E-01..E-04 and E-10 report "not found" themselves.
-$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId',
+$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId','customerManagementGroupId',
                        'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId',
                        'customerWorkforceTenantIds')
 
@@ -451,7 +452,7 @@ $results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
 - **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension; `{bffAppServiceId}` + `{bffAppId}` removed by T227a — there is no shared BFF):
   - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{kvResourceId}`
   - Interpolated from name_templates: `{sbNamespace}`
-  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
+  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template), `{customerManagementGroupId}` (management_groups.customers.id — tenant-wide, T262)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
   - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
@@ -774,17 +775,25 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 - If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
-#### 1a-bis. `displayName` (optional — the customer's full name)
+#### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
 
 - The customer's full name, e.g. `Northwind Traders`. Written to `sprk_dataverseenvironment.sprk_name` next to
   `sprk_customerid` by the Step 1f placeholder create, so the id ↔ name decision is **recorded once on the
   registry row** (T237 / INCOMING-CUSTOMERID-STANDARD §3.3). Defaults to `customerId`.
+- **T259 (ISS-010, owner 2026-10-09):** also sent to `POST /api/runs` (Step 4.0), where it is REQUIRED — H10 creates the
+  customer's own business unit with this name directly under the Dataverse root (a sibling of `Secure Record`) and puts
+  the BFF's application users and every guest in it. Rule (same at `POST /api/runs`, `CustomerBusinessUnitIntake`):
+  1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` in any case.
 - Batch mode: `intake.displayName` (pre-filled above). Interactive mode:
 
   ```powershell
   if (-not $script:SkipInteractiveIntake) {
     $displayName = Read-Host "displayName (customer's full name) [$customerId]"
     if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
+    while ($displayName.Length -gt 160 -or $displayName -ne $displayName.Trim() -or $displayName -match '\p{Cc}' -or $displayName -ieq 'Secure Record') {
+      $displayName = Read-Host "displayName must be 1-160 characters, no leading/trailing space or control character, not 'Secure Record' [$customerId]"
+      if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
+    }
   }
   ```
 
@@ -980,6 +989,7 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+| `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
 
 **Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
@@ -1185,7 +1195,8 @@ if (-not $SkipStep0_5) {
 ```
 
 Recipes that need the customer's subscription (PRQ-S-*, PRQ-E-05, PRQ-C-03, PRQ-C-11) run with the operator's az
-sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-E-15's Exchange half and PRQ-C-10's
+sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
+`spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
 "group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
 
 #### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
@@ -1235,12 +1246,13 @@ Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
 ```powershell
 # --attributes is a ';'/'='-delimited string: a display name containing either character would corrupt it.
 # Fall back to the id for sprk_name and say so; the full name can be set on the row afterwards.
+$registryName = $displayName
 if ($displayName -match '[;=]') {
   Write-Warning "displayName '$displayName' contains ';' or '=' — the pac fallback writes sprk_name=$customerId instead. Set the full name on the registry row afterwards."
-  $displayName = $customerId
+  $registryName = $customerId   # $displayName itself is kept: Step 4.0 sends it as the customer business unit's name (T259)
 }
 $environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_name=$displayName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
+  --attributes "sprk_name=$registryName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
@@ -1632,6 +1644,7 @@ $runRequest = @{
     emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
     communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
     customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
+    displayName                 = $displayName            # T259 (ISS-010) — REQUIRED: H10 names the customer's business unit with it (directly under the root, sibling of Secure Record); h10-customer-display-name-required / -invalid. The full name, never the pac fallback's substitute (Step 1f)
     # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
     # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
     # Any other key — a typo, `notes`, a value some handler produces — is a 400 with
@@ -2061,6 +2074,7 @@ $completedAtIso     = ([datetimeoffset]$run.completedOn).ToString('o')
 $rgName             = $isv.resourceGroupName           # H2a output
 $appServiceName     = $isv.appServiceName              # H2a output
 $kvName             = $isv.keyVaultName                # H2a output (the CUSTOMER vault)
+$bffAppRegId        = $isv.bffAppRegId                 # H3 output — the customer BFF app registration (T257: registry sprk_bffappid)
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
@@ -2137,6 +2151,7 @@ if (-not $script:RegistryStale) {
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName
     sprk_keyvaultname             = $kvName
+    sprk_bffappid                 = $bffAppRegId         # run.interStepState.bffAppRegId (H3) — T257
     sprk_containertypeid          = $containerTypeId
     sprk_ClientCacheBustToken     = $cacheBustToken
     # sprk_currentrunid release is routed via ICustomerRunGuard.ReleaseAsync
@@ -2175,7 +2190,7 @@ if (-not $script:RegistryStale) {
       }
       # MED#10 SESSION-19: also honor the include-sprk_setupstatus decision in
       # the Web API fallback body (same rule as Step 2b MCP path above).
-      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
+      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_bffappid = $bffAppRegId; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
       if ($observedSetupStatus -ne 'Ready') { $bodyHash.sprk_setupstatus = 'Ready' }
       $body = $bodyHash | ConvertTo-Json
       Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
@@ -2305,7 +2320,7 @@ The provisioning run reached RunStatus.Completed successfully, but the operator-
 Step 6a Dataverse registry PATCH FAILED. The customer's `sprk_dataverseenvironment`
 row is missing the promoted Ready-state columns (sprk_provisionedon, sprk_bffversion,
 sprk_solutionversion, sprk_azuresubscriptionid, sprk_resourcegroupname,
-sprk_appservicename, sprk_keyvaultname, sprk_containertypeid, sprk_ClientCacheBustToken).
+sprk_appservicename, sprk_keyvaultname, sprk_bffappid, sprk_containertypeid, sprk_ClientCacheBustToken).
 
 The customer's Azure resources are provisioned correctly and the L2 control-plane
 has released the I5 concurrency guard (`sprk_currentrunid` via ICustomerRunGuard.
@@ -2333,6 +2348,7 @@ pac data update `
       "sprk_resourcegroupname":   "$rgName",
       "sprk_appservicename":      "$appServiceName",
       "sprk_keyvaultname":        "$kvName",
+      "sprk_bffappid":            "$bffAppRegId",
       "sprk_containertypeid":     "$containerTypeId",
       "sprk_ClientCacheBustToken":"$cacheBustToken"
     }'
@@ -2392,6 +2408,7 @@ If manual recovery fails repeatedly, file a GitHub Issue with:
     [ ] Verify first user can sign in and load workspace
     [ ] Confirm cost drift alerts configured in Azure
     [ ] Update project #2 (portfolio board) with the new customer entry
+    [ ] Copilot agent gate (6f): auth config recorded, package rendered and sent to customer IT
 ```
 
 **Bucket B HIGH#10 SESSION 18**: When `$script:RegistryStale = $true`, replace the final summary above with the WARNING variant:
@@ -2422,16 +2439,62 @@ if ($script:RegistryStale) {
 
 ---
 
-#### 6d. Secure-record environment setup (MANDATORY before the customer is told the environment is ready — task 227g)
+#### 6e. Secure-record environment verification (MANDATORY before the customer is told the environment is ready — H7b, T256)
 
-No handler configures unified-access-control-r2's secure records: the `Secure Record` business unit (no users, **no
-container**), the named `Secure Record Owners` team, the `Secure Record Owner` role + privileges, role depth, and
-`sprk_issecure` field security. Run [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md)
-against THIS environment (it is the one source — do not copy its steps here) and gate on its **§7 verification checklist**:
+H7b creates unified-access-control-r2's secure-record configuration on every run, between H6 and H9:
+- the `Secure Record` business unit, with no users and **no container**;
+- the named `Secure Record Owners` team;
+- the `Secure Record Owner` role inside that unit;
+- the BFF-managed field-security memberships and the identity-link memberships.
+
+The operator verifies the result. Run the **§7 verification checklist** of
+[`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) against THIS
+environment. It is the one source; do not copy its steps here.
 record each item's result in `runs/{runId}.md`. Any item not passing → report the environment as NOT secure-record ready
 (the BFF fails closed — nothing leaks — but no record can be made secure). Containers are not part of this step: the BFF
 creates each secure record's container when the record is made secure, and H7 has already linked the root business unit
 to H8's container.
+
+#### 6f. Per-customer Copilot agent (MANUAL GATE after Ready — T257; one delegated step per customer)
+
+Each customer gets its own Microsoft Copilot agent. The customer's IT installs it in THEIR tenant; never install it in
+Spaarke's catalog. The full procedure, with the one-time platform setup, is
+[`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12; do not copy
+it here. This gate is the exception to the no-human-interaction end state that the owner accepted on 2026-10-09
+(design note t257 Q3). Microsoft has no API for creating an auth config. Re-check Graph and `wiqd` at each refresh.
+
+Interactive mode only. In batch mode, write `runs/{runId}-copilot-gate.md` with the values below, mark it PENDING in the
+handoff, and continue.
+
+1. **Pre-check (read-only).** If either check fails, STOP the gate, not the run, and report it:
+   - `az ad app show --id <run.interStepState.bffAppRegId> --query "api.preAuthorizedApplications[].appId" -o tsv`
+     lists the Spaarke Copilot Agent client id (`copilotAgentClientAppId` in the control-plane bicepparam). If it does
+     not, the control plane was deployed without the client; fix that first (guide §7.12 step 3).
+   - The registry row has `sprk_bffappid` (H13 promoted it, or Step 6a did).
+2. **Show the operator the auth-config values** and ask them to create it in the Teams developer portal (Tools → OAuth
+   client registration → New):
+   - name `spaarke-copilot-{customerId}`. Reuse it if it exists; never create a duplicate;
+   - base URL `<run.interStepState.bffApiUrl>`;
+   - restrict usage by org: Any Microsoft 365 organization;
+   - restrict usage by app: Any Teams app;
+   - client id = the Spaarke Copilot Agent client, **no client secret**;
+   - authorize `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/authorize`;
+   - token and refresh `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/token`;
+   - scope `api://<bffAppRegId>/user_impersonation offline_access`;
+   - PKCE on.
+3. **Ask for the OAuth client registration ID.** Refuse a value that does not match `^[A-Za-z0-9+/=_.-]{8,512}$`.
+4. **Write it to the registry** with the operator's identity. This is a live write; confirm before sending it.
+   `PATCH sprk_dataverseenvironments(<environmentId>)` `{ "sprk_copilotauthconfigid": "<id>" }`, through the Dataverse MCP
+   or the F1 Web API fallback, as in Step 6a. If `sprk_bffappid` is empty, set it in the same PATCH from
+   `run.interStepState.bffAppRegId`.
+5. **Render the package** (local file only):
+   `scripts/copilot-agent/Render-CopilotAgentPackage.ps1 -TemplatePath <template zip> -TemplateManifestPath <copilot-agent-template-latest.json> -OutputFolder runs/<runId>-copilot -CustomerId <customerId> -AdminEnvironmentUrl <registry env URL>`.
+   - Download the template and manifest read-only from `provisioning-artifacts`.
+   - Record the package path, version, manifest id and SHA-256 in `runs/{runId}.md` § Copilot agent.
+6. **Hand-off text for the operator:** "Send `spaarke-copilot-<customerId>-<version>.zip` and
+   docs/guides/COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md to the customer's IT. They upload it in their Microsoft 365 admin
+   center (Agents → Upload custom agent) and assign it to the staff invited as guests. When one user has signed in,
+   check the BFF log: `tid` = Spaarke, `acct` = 1, `azp` = the Spaarke Copilot Agent client, `aud` = this BFF."
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 

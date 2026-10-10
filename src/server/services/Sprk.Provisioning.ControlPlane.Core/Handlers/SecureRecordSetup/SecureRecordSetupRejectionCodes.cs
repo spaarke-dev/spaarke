@@ -9,8 +9,9 @@
 //
 // §4C CLASS (INCOMING-145 §2.3): every failure is Resumable except where an owner decision is needed before anything
 // can change — users in the business unit, members of the owner team, a business unit under the wrong parent, a root
-// default team that reaches the secure unit by depth, and a field-security writer nobody named (on sprk_issecure or on
-// an identity-binding column). Those are
+// default team that reaches the secure unit by depth, a field-security writer nobody named (on sprk_issecure or on
+// an identity-binding column), and (T259, §6 T1/T3) a customer business unit that is missing or not under the root, or a
+// BFF application user outside it. Those are
 // QuarantineRequired: a retry cannot fix them, and the handler never moves a user, a team member or a business unit.
 // -----------------------------------------------------------------------------
 
@@ -73,6 +74,25 @@ public static class SecureRecordSetupRejectionCodes
     /// so every root-unit user reads every secure record by depth (QuarantineRequired).
     /// </summary>
     public const string RootDefaultTeamReachesSecureUnit = "secure_setup.root_default_team_reaches_secure_bu";
+
+    /// <summary>
+    /// T259 (§6 T1, ISS-010): the customer's business unit H10 recorded (InterStepState.CustomerBusinessUnitId) does not
+    /// exist. H10 created it and the BFF's application users in it; something removed it since — an operator must find out
+    /// what before anything is configured (QuarantineRequired).
+    /// </summary>
+    public const string CustomerBusinessUnitMissing = "secure_setup.customer_bu_missing";
+
+    /// <summary>
+    /// T259 (§6 T1, ISS-010): the customer's business unit is not a DIRECT child of the root (or is the root). Only as a
+    /// sibling of the Secure Record unit does Deep depth there stop short of every secure record (QuarantineRequired).
+    /// </summary>
+    public const string CustomerBusinessUnitWrongParent = "secure_setup.customer_bu_wrong_parent";
+
+    /// <summary>
+    /// T259 (§6 T3, ISS-010): one of H10's two BFF application users is not in the customer's business unit (or does not
+    /// exist). Moving it strips its roles — an owner decision (QuarantineRequired).
+    /// </summary>
+    public const string AppUserOutsideCustomerBusinessUnit = "secure_setup.app_user_outside_customer_bu";
 
     /// <summary>
     /// S10/S15: a field-security profile H7b maintains memberships of (the two BFF-managed profiles, the two identity-link

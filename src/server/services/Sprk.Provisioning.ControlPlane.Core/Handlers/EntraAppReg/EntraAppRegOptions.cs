@@ -41,7 +41,7 @@ public sealed class EntraAppRegOptions
     /// <see cref="IAdminConsentVerifier"/> checks for (per
     /// <see cref="EntraAppRegPermissionCatalog.All"/> — 5 as of task 130).
     /// Renamed from the Wave-C4 scaffold's <c>ExpectedAppRoleCount</c> (which
-    /// conflated this with H10's 14-role app-only catalog — see
+    /// conflated this with H10's app-only catalog — see
     /// EntraAppRegPermissionCatalog.cs file header for the scope correction).
     /// </summary>
     public int ExpectedDelegatedScopeCount { get; set; } = EntraAppRegPermissionCatalog.All.Count;
@@ -72,6 +72,14 @@ public sealed class EntraAppRegOptions
 
     /// <summary>Deterministic FIC display name on the app-reg (idempotent re-run finds this by name).</summary>
     public string FicName { get; set; } = "spaarke-uami-trust";
+
+    /// <summary>
+    /// ISS-015: name of the SECOND federated identity credential H3 keeps on every Spaarke-tenant BFF registration — the
+    /// one trusting the L2 Worker UAMI (subject = <see cref="ControlPlaneIdentityOptions.PrincipalObjectId"/>), so H6, H7
+    /// and H7b can sign in as the registration secret-free (D-13; <c>WorkerDataverseCredentialFactory</c>). Must differ
+    /// from <see cref="FicName"/>. Kept for the registration's lifetime: every re-run and upgrade signs in through it.
+    /// </summary>
+    public string WorkerFicName { get; set; } = "spaarke-l2-worker";
 
     /// <summary>
     /// Spaarke's own Entra tenant id — used to compute the FIC <c>issuer</c>

@@ -1006,6 +1006,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["communicationDefaultMailbox"] = "comms@contoso.com",
             // T255: Step 4.0 sends the intake array as a JSON string (as usersJson).
             ["customerWorkforceTenantIds"] = $"[\"{TestWorkforceTenantId}\"]",
+            // T259: the intake file's displayName, sent under the same key (H10's customer business unit).
+            ["displayName"] = "Test Customer Inc.",
         };
 
         var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
@@ -1037,6 +1039,12 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
     [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]
     [InlineData("communicationDefaultMailbox", "Contoso Communications", "intake-communication-default-mailbox-invalid")]
+    [InlineData("displayName", null, "h10-customer-display-name-required")]                  // T259 (ISS-010)
+    [InlineData("displayName", " ", "h10-customer-display-name-required")]
+    [InlineData("displayName", "Secure Record", "h10-customer-display-name-invalid")]      // never the secure unit
+    [InlineData("displayName", "SECURE RECORD", "h10-customer-display-name-invalid")]      // Dataverse compares names without case
+    [InlineData("displayName", "Acme ", "h10-customer-display-name-invalid")]             // trailing whitespace
+    [InlineData("displayName", "Acme\tCorp", "h10-customer-display-name-invalid")]        // a control character
     public async Task PostRuns_OperatorIntakeBreaksAHandlerRule_Returns400_BeforeGuardRegistryCosmosOrEnqueue(
         string key, string? value, string expectedErrorCode)
     {
@@ -1178,6 +1186,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret.TryAdd("estimatedMonthlyUsd", "450");
         // T255: the customer's workforce tenant list, required for every model.
         nonSecret.TryAdd("customerWorkforceTenantIds", $"[\"{TestWorkforceTenantId}\"]");
+        // T259 (ISS-010): the customer's display name — H10 names the customer's business unit with it.
+        nonSecret.TryAdd("displayName", "Test Customer Inc.");
         return nonSecret;
     }
 

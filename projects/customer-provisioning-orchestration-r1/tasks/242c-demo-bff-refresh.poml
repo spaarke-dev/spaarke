@@ -4,7 +4,7 @@
     <title>Demo BFF refresh — .NET 10 runtime, settings parity, start and /healthz 200 (found by T242b)</title>
     <phase>Model 1 dedicated-stamp remediation — follow-on of plan §7 T242 (filed 2026-10-04, owner: "file a demo-refresh task")</phase>
     <gate>T242b merged to master (a master build is T242+); every live step needs owner confirmation</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live configuration of an App Service in its own subscription; the setting values decide which resources the demo BFF talks to.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -98,4 +98,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>FULL rigor; prescriptive steps; owner confirmation before every live step.</protocol>
   </execution>
+  <notes>
+    <note date="2026-10-09">Step 1 done (read-only; master BFF booted locally as Production against demo's 157 settings).
+    Demo app: Stopped, DOTNETCORE|8.0, B1, no slots; all 38 KV references Resolved. Startup blockers: runtime 10.0;
+    APPLICATIONINSIGHTS_CONNECTION_STRING (demo has only the retired ApplicationInsights__ConnectionString);
+    AiSafety__ContentSafety__Endpoint — NO Content Safety account exists in the demo subscription (new resource);
+    PublicConfig__BffUrl / MsalClientId (da03fe1a…) / TenantId. Degraded even after: no AI Search (spaarke-search-demo
+    missing), no FIC on the demo app reg, no membership topic, no Compose/Email webhook secrets, ~40 settings master no
+    longer reads (incl. plaintext BuilderAdmin__ApiKey, Email__WebhookSecret, Rag__ApiKey, PowerBi__ClientSecret).
+    Recommendation (D27): rebuild demo as a provisioned stamp rather than hand-refresh; the hand-refresh needs a new
+    Content Safety resource (POML escalation). Open: the fate of the unmanaged spaarke-demo Dataverse environment.
+    Exact hand-refresh commands kept in the session report should the owner choose it. Owner decision pending.</note>
+  </notes>
 </task>

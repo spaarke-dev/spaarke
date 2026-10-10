@@ -6,20 +6,28 @@
 // Administrator application user of the environment, PRQ-C-09).
 //
 //   ReadGuestAccessAsync: GET organizations?$select=restrictguestuseraccess
-//   ResolveRolesAsync:    root business unit (H8's IDataverseRootBusinessUnitReader,
-//                         reused), then per name GET roles?$filter=name eq '{n}' and
-//                         _businessunitid_value eq {bu} — exactly ONE match, else
-//                         RoleNotFound / ambiguous Failure.
-//   EnsureGuestUserAsync: GET systemusers(azureactivedirectoryobjectid={oid})?$select=systemuserid
+//   ResolveRolesAsync:    per name GET roles?$filter=name eq '{n}' and
+//                         _businessunitid_value eq {customer unit} (T259: the unit's
+//                         inherited copy) — exactly ONE match, else RoleNotFound /
+//                         ambiguous Failure.
+//   EnsureGuestUserAsync: GET systemusers(azureactivedirectoryobjectid={oid})?$select=systemuserid,_businessunitid_value
 //                         — Microsoft's documented app-callable path: a member of the
 //                         environment security group who is not yet a Dataverse user is
 //                         ADDED by this request (root business unit). Not a plain POST
 //                         systemusers: domainname is system-required and Microsoft
 //                         documents no guest behaviour for it (research note:
 //                         .claude/agent-memory/researcher/payg-b2b-guest-dataverse-user-
-//                         provisioning-2026-10-07.md). Then per role id:
-//                         GET systemusers({id})/systemuserroles_association?$filter=roleid eq {r}
-//                         → POST .../systemuserroles_association/$ref only when not held.
+//                         provisioning-2026-10-07.md). T259: a user in the ROOT unit (where
+//                         that read adds it) is moved to the customer unit — PATCH
+//                         systemusers({id}) businessunitid@odata.bind, If-Match: * — and
+//                         read back BEFORE any role (a unit change strips roles); a user in
+//                         any other unit is InForeignBusinessUnit, nothing written (root id:
+//                         H8's IDataverseRootBusinessUnitReader, reused). Then ONE read of
+//                         every held role with its unit — GET systemusers({id})/
+//                         systemuserroles_association?$select=roleid,_businessunitid_value —
+//                         a role of any other unit is HoldsRoleOutsideBusinessUnit (nothing
+//                         written or removed); otherwise POST .../systemuserroles_association/$ref
+//                         for each requested role not held.
 //
 // Every id read from Dataverse is canonicalized (ADR-044) before it is placed in a
 // filter or a reference URL. An HTTP timeout is a Failure, not an escaped exception.
@@ -106,23 +114,22 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
 
     /// <inheritdoc/>
     public async Task<GuestRoleResolution> ResolveRolesAsync(
-        string environmentUrl, string tenantId, IReadOnlyList<string> roleNames, CancellationToken cancellationToken)
+        string environmentUrl, string tenantId, Guid businessUnitId, IReadOnlyList<string> roleNames,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
         if (!Uri.TryCreate(environmentUrl, UriKind.Absolute, out var envUri))
         {
             return new GuestRoleResolution.Failure($"Environment URL '{environmentUrl}' is not an absolute URI.");
         }
+        if (businessUnitId == Guid.Empty)
+        {
+            return new GuestRoleResolution.Failure("The customer's business unit id is empty (H10 output).");
+        }
 
         try
         {
-            var rootBuId = await _rootBusinessUnitReader.ReadRootBusinessUnitIdAsync(environmentUrl, tenantId, cancellationToken)
-                .ConfigureAwait(false);
-            if (rootBuId is not { } bu)
-            {
-                return new GuestRoleResolution.Failure("The environment's root business unit was not found.");
-            }
-
+            var bu = businessUnitId;
             var token = await AcquireTokenAsync(envUri, tenantId, cancellationToken).ConfigureAwait(false);
             var roleIds = new List<Guid>(roleNames.Count);
             foreach (var roleName in roleNames)
@@ -138,7 +145,7 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
                         return new GuestRoleResolution.RoleNotFound(roleName);
                     case > 1:
                         return new GuestRoleResolution.Failure(
-                            $"More than one role named '{roleName}' in the root business unit — refusing to guess.");
+                            $"More than one role named '{roleName}' in business unit {bu:D} — refusing to guess.");
                 }
                 roleIds.Add(ids[0]);
             }
@@ -168,20 +175,57 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             return new DataverseGuestUserOutcome.Failure(
                 $"Entra object id '{request.EntraObjectId}' is not a GUID — refusing to build an alternate key from it.");
         }
+        if (request.BusinessUnitId == Guid.Empty)
+        {
+            return new DataverseGuestUserOutcome.Failure("The customer's business unit id is empty (H10 output).");
+        }
 
         try
         {
             var token = await AcquireTokenAsync(envUri, request.TenantId, cancellationToken).ConfigureAwait(false);
-            var systemUserId = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
-            foreach (var roleId in request.RoleIds)
+            var (systemUserId, unitId) = await ReadOrAddSystemUserAsync(envUri, token, objectId, cancellationToken).ConfigureAwait(false);
+
+            // T259: the guest belongs in the customer's unit. Dataverse adds it to the ROOT on the read above; move it from
+            // there (before any role — a unit change strips roles) and read it back. Never move it out of any other unit.
+            if (unitId != request.BusinessUnitId)
             {
-                using var held = await GetJsonAsync(envUri, token,
-                    $"systemusers({systemUserId:D})/systemuserroles_association?$filter=roleid eq {roleId:D}&$select=roleid",
-                    cancellationToken).ConfigureAwait(false);
-                if (ReadIds(held, "roleid").Count == 0)
+                var rootId = await _rootBusinessUnitReader.ReadRootBusinessUnitIdAsync(
+                    request.EnvironmentUrl, request.TenantId, cancellationToken).ConfigureAwait(false);
+                if (rootId is null)
                 {
-                    await AssociateRoleAsync(envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
+                    return new DataverseGuestUserOutcome.Failure("The environment's root business unit was not found.");
                 }
+                if (unitId != rootId)
+                {
+                    return new DataverseGuestUserOutcome.InForeignBusinessUnit(systemUserId.ToString("D"), unitId ?? Guid.Empty);
+                }
+
+                await MoveToBusinessUnitAsync(envUri, token, systemUserId, request.BusinessUnitId, cancellationToken).ConfigureAwait(false);
+                var movedTo = await ReadBusinessUnitAsync(envUri, token, systemUserId, cancellationToken).ConfigureAwait(false);
+                if (movedTo != request.BusinessUnitId)
+                {
+                    return new DataverseGuestUserOutcome.Failure(
+                        $"Moving systemuser {systemUserId:D} to business unit {request.BusinessUnitId:D} did not land: it reads " +
+                        $"{movedTo?.ToString("D") ?? "(no unit)"}. No role was associated; re-run H11.");
+                }
+            }
+
+            // T259: every role the guest holds must belong to the customer's unit. A unit change normally strips roles, but an
+            // organisation that keeps roles on a unit change (or a hand-made grant) could leave a ROOT role — Deep read there
+            // reaches the Secure Record unit. Refused, never removed here.
+            using var heldDoc = await GetJsonAsync(envUri, token,
+                $"systemusers({systemUserId:D})/systemuserroles_association?$select=roleid,_businessunitid_value",
+                cancellationToken).ConfigureAwait(false);
+            var held = HeldRoles(heldDoc);
+            var foreign = held.Where(r => r.BusinessUnitId != request.BusinessUnitId).ToList();
+            if (foreign.Count > 0)
+            {
+                return new DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit(
+                    systemUserId.ToString("D"), foreign[0].RoleId, foreign[0].BusinessUnitId ?? Guid.Empty);
+            }
+            foreach (var roleId in request.RoleIds.Where(r => held.All(h => h.RoleId != r)))
+            {
+                await AssociateRoleAsync(envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
             }
             return new DataverseGuestUserOutcome.Success(systemUserId.ToString("D"));
         }
@@ -230,11 +274,12 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
             .ToList();
     }
 
-    private async Task<Guid> ReadOrAddSystemUserAsync(Uri envUri, AccessToken token, Guid objectId, CancellationToken ct)
+    private async Task<(Guid SystemUserId, Guid? BusinessUnitId)> ReadOrAddSystemUserAsync(
+        Uri envUri, AccessToken token, Guid objectId, CancellationToken ct)
     {
         // Alternate key: Dataverse adds a security-group member who is not yet a user (Microsoft, group-team article).
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid"));
+            new Uri(envUri, $"/api/data/v9.2/systemusers(azureactivedirectoryobjectid={objectId:D})?$select=systemuserid,_businessunitid_value"));
         ApplyHeaders(request, token);
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
         var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -251,10 +296,60 @@ public sealed class DataverseWebApiGuestUserWriter : IDataverseGuestUserWriter
         }
 
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
-        return doc.RootElement.TryGetProperty("systemuserid", out var id) && Guid.TryParse(id.GetString(), out var userId)
-            ? userId
+        var userId = doc.RootElement.TryGetProperty("systemuserid", out var id) && Guid.TryParse(id.GetString(), out var parsed)
+            ? parsed
             : throw new InvalidOperationException(
                 $"GET systemusers(azureactivedirectoryobjectid={objectId:D}) returned no systemuserid.");
+        return (userId, UnitOf(doc.RootElement));
+    }
+
+    private async Task<Guid?> ReadBusinessUnitAsync(Uri envUri, AccessToken token, Guid systemUserId, CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync(envUri, token, $"systemusers({systemUserId:D})?$select=_businessunitid_value", ct)
+            .ConfigureAwait(false);
+        return UnitOf(doc.RootElement);
+    }
+
+    private static List<(Guid RoleId, Guid? BusinessUnitId)> HeldRoles(JsonDocument doc)
+    {
+        if (!doc.RootElement.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("The Dataverse response has no 'value' array.");
+        }
+        return values.EnumerateArray()
+            .Select(v => (
+                v.TryGetProperty("roleid", out var id) && Guid.TryParse(id.GetString(), out var roleId) && roleId != Guid.Empty
+                    ? roleId
+                    : throw new InvalidOperationException("A Dataverse row has no usable 'roleid'."),
+                UnitOf(v)))
+            .ToList();
+    }
+
+    private static Guid? UnitOf(JsonElement user)
+        => user.TryGetProperty("_businessunitid_value", out var unit) && Guid.TryParse(unit.GetString(), out var unitId)
+            && unitId != Guid.Empty
+            ? unitId
+            : null;
+
+    /// <summary>T259: PATCH the user's business unit (If-Match: * — an update, never an upsert).</summary>
+    private async Task MoveToBusinessUnitAsync(Uri envUri, AccessToken token, Guid systemUserId, Guid businessUnitId, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, new Uri(envUri, $"/api/data/v9.2/systemusers({systemUserId:D})"))
+        {
+            Content = JsonContent.Create(new Dictionary<string, object?>
+            {
+                ["businessunitid@odata.bind"] = $"/businessunits({businessUnitId:D})",
+            }),
+        };
+        ApplyHeaders(request, token);
+        request.Headers.TryAddWithoutValidation("If-Match", "*");
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"PATCH systemusers({systemUserId:D}) businessunitid failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
+        }
     }
 
     private async Task AssociateRoleAsync(Uri envUri, AccessToken token, Guid systemUserId, Guid roleId, CancellationToken ct)

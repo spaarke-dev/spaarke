@@ -183,6 +183,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.OpenAiEndpoint), required: false),
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
+                // T259 (ISS-010): the customer's unit (H10) is linked to H8's container beside the root — its users own records there.
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H7b] =
             [
@@ -195,6 +197,9 @@ public static class HandlerRunInputs
                 // S12: the BFF's two Dataverse application users (H10) — the only members of the BFF writer profile.
                 RunInput.Output(nameof(InterStepState.BffAppRegSystemUserId)),
                 RunInput.Output(nameof(InterStepState.SystemUserId)),
+                // T259 (ISS-010): the customer's business unit H10 created — H7b checks it is a direct child of the root
+                // and that both application users are in it (INCOMING-145 §6 T1/T3).
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H8] =
             [
@@ -222,6 +227,9 @@ public static class HandlerRunInputs
             [HandlerIds.H10] =
             [
                 Tenant,
+                // T259 (ISS-010): the customer business unit's name (T237 displayName), validated at POST /api/runs by
+                // CustomerBusinessUnitIntake — H10's own rule.
+                RunInput.Intake(IntakeParameterCatalog.DisplayName),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
@@ -237,6 +245,8 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentSecurityGroupId, required: false),
                 // T232: each guest becomes a Dataverse user of the environment H5 adopted (H5 → H10 → H11).
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                // T259 (ISS-010): every guest is placed in the customer's business unit (H10), never the root.
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
             [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],

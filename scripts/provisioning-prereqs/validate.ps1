@@ -268,7 +268,12 @@ if ($m -and $m.prereqs) {
       }
     }
 
-    # e. GNU grep 3.0 as shipped in Git for Windows aborts (exit 134) on -i combined with -F\n    if ($cli -match '\bgrep\s+-[a-zA-Z]*(i[a-zA-Z]*F|F[a-zA-Z]*i)') {\n      $fail += "${id}: recipe uses 'grep' with both -i and -F - the grep in Git for Windows aborts (exit 134) on that combination. Use a regex (-i without -F) or drop -i."\n    }\n\n    # d. Windows az.cmd breaks on a parenthesis inside an argument
+    # e. GNU grep 3.0 as shipped in Git for Windows aborts (exit 134) on -i combined with -F
+    if ($cli -match '\bgrep\s+-[a-zA-Z]*(i[a-zA-Z]*F|F[a-zA-Z]*i)') {
+      $fail += "${id}: recipe uses 'grep' with both -i and -F - the grep in Git for Windows aborts (exit 134) on that combination. Use a regex (-i without -F) or drop -i."
+    }
+
+    # d. Windows az.cmd breaks on a parenthesis inside an argument
     foreach ($line in ($cli -split "`n")) {
       if ($line -notmatch '(^|[\s(`])az\s') { continue }
       foreach ($q in [regex]::Matches($line, '--[a-z][a-z-]*\s+"([^"]*)"')) {

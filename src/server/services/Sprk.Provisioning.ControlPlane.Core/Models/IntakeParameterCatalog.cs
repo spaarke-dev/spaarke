@@ -105,6 +105,15 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string CustomerWorkforceTenantIds = "customerWorkforceTenantIds";
 
+    /// <summary>
+    /// The customer's full name (T237: the intake file's <c>displayName</c>, recorded once on the registry row as
+    /// <c>sprk_name</c>; the skill defaults it to the customerId). T259 (ISS-010, owner 2026-10-09) carries it into the run:
+    /// REQUIRED at POST /api/runs, rule <c>CustomerBusinessUnitIntake</c> (POST /api/runs and H10). H10 names the customer's
+    /// own business unit with it (created directly under the Dataverse root, a sibling of the Secure Record unit) and creates
+    /// the BFF's application users in that unit; H11 puts every guest there.
+    /// </summary>
+    public const string DisplayName = "displayName";
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -176,6 +185,7 @@ public static class IntakeParameterCatalog
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
         new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(CustomerWorkforceTenantIds, "T255 (INCOMING-141): JSON array of the CUSTOMER's Entra tenant id(s) whose employees use the stamp — Model 1: the customer's home tenant, never Spaarke's or the run's tenantId; Model 2: the customer's tenant. Required for every model; 1-10 distinct non-zero GUIDs, never a CIAM tenant (CustomerWorkforceTenantsRule, validated at POST /api/runs and stored canonical). H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots; H13 T7 checks them."),
+        new(DisplayName, "The customer's full name (T237 displayName; also the registry row's sprk_name). T259 (ISS-010): required for every run; 1-160 characters, no control characters, no leading or trailing whitespace, never the Secure Record unit's name (CustomerBusinessUnitIntake, validated at POST /api/runs). H10 creates the customer's business unit with this name directly under the Dataverse root and creates the BFF's application users in it; H11 puts every guest in it."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6); a Model1 run takes only B2BGuest (owner D2, T232). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),

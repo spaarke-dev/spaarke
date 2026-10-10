@@ -7,6 +7,33 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — ADR-027 management groups implemented (T262)
+
+`customer-provisioning-orchestration-r1` T262 (G36).
+
+- **ADR-027 concise**: implementation note on "MUST use Azure Management Groups" (`spaarke-environments` →
+  `spaarke-customers`, Audit/DoNotEnforce built-in policy, PRQ-S-06).
+- **`/provision-environment`** Step 0.5b: new `{customerManagementGroupId}` token (must resolve); Step 1e-ter notes
+  PRQ-S-06's read on the management group.
+
+###### 2026-10-09 — provisioning: H3 keeps an L2 Worker FIC on each customer BFF registration (ISS-015)
+
+`customer-provisioning-orchestration-r1` ISS-015 (#1524).
+
+- **`.claude/constraints/provisioning.md`** §Stamp BFF clients: H3 keeps two FICs — `spaarke-uami-trust` (stamp BFF UAMI)
+  and `spaarke-l2-worker` (L2 Worker UAMI principalId) — so H6/H7/H7b sign in as the registration secret-free; adoption
+  accepts exactly those two names.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** FIC cap note: two FICs per Spaarke-tenant customer BFF
+  registration, not one. No secret created, changed or deleted.
+
+###### 2026-10-09 — provisioning: control plane secret-free by default (T252)
+
+`customer-provisioning-orchestration-r1` T252.
+
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle rule 1: the L2 control plane defaults to the
+  secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
+  `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
+
 ###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
 
 - **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.

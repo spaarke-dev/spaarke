@@ -70,6 +70,12 @@
       "shape": "Fixed Microsoft Graph appId (invariant across envs)",
       "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId"
     },
+    "customerManagementGroupId": {
+      "availability": "always",
+      "source": "constants",
+      "shape": "Management-group id (name): spaarke-customers (tenant-wide, invariant across envs)",
+      "populatedBy": "spaarke-constants.yaml management_groups.customers.id"
+    },
     "sbNamespace": {
       "availability": "env",
       "source": "constants-template",

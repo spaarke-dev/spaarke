@@ -417,6 +417,42 @@ public sealed class IntakeSchemaProfileParityTests
         }
     }
 
+    /// <summary>
+    /// T259 (ISS-010): displayName — the customer business unit's name H10 creates — is sent to POST /api/runs under the
+    /// same key and refused there by CustomerBusinessUnitIntake. The schema keeps it optional (the skill defaults it to the
+    /// customerId, which always passes), and is never looser than the endpoint: the same length limit, no leading/trailing
+    /// whitespace or control character, and never the Secure Record unit's name in any case.
+    /// </summary>
+    [Fact]
+    public void T259_DisplayName_SchemaBoundsAreTheEndpointRule()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties").GetProperty(IntakeParameterCatalog.DisplayName);
+
+        property.GetProperty("maxLength").GetInt32()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.MaxLength);
+        var pattern = new System.Text.RegularExpressions.Regex(property.GetProperty("pattern").GetString()!);
+        var secureName = new System.Text.RegularExpressions.Regex(property.GetProperty("not").GetProperty("pattern").GetString()!);
+        var secureUnit = Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordOwnerRoleSet.Embedded.BusinessUnitName;
+
+        foreach (var refused in new[] { " Acme", "Acme ", "Acme\tCorp", "Acme\u0007" })
+        {
+            pattern.IsMatch(System.Text.RegularExpressions.Regex.Unescape(refused)).Should().BeFalse(refused);
+        }
+        pattern.IsMatch("Acme Corporation").Should().BeTrue();
+        pattern.IsMatch("a").Should().BeTrue();
+        secureName.IsMatch(secureUnit).Should().BeTrue();
+        secureName.IsMatch(secureUnit.ToUpperInvariant()).Should().BeTrue();
+        secureName.IsMatch("Secure Records Ltd").Should().BeFalse();
+
+        foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
+        {
+            Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.Validate(
+                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! }, secureUnit)
+                .Should().BeOfType<Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntakeOutcome.Valid>();
+        }
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [
@@ -429,6 +465,7 @@ public sealed class IntakeSchemaProfileParityTests
         ("communicationDefaultMailbox", "communicationDefaultMailbox"),
         ("tier", "tier"),                                   // T229
         ("estimatedMonthlyUsd", "estimatedMonthlyUsd"),
+        ("displayName", "displayName"),                     // T259 (the skill defaults it to customerId when absent)
     ];
 
     private static Dictionary<string, string> ToOperatorNonSecret(JsonElement example)
