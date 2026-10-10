@@ -4,7 +4,7 @@
     <title>AI analysis routes: implement the AnalysisAccess check (GitHub #233 item 1) and make each of the six /api/ai/analysis routes authorize, as the caller, the exact records it reads or writes (GET, export, save, fork, promote, execute), failing closed, with writes checked by the G5 pattern</title>
     <phase>Route authorization sweep (owner round 9, 2026-10-03); authored 2026-10-02, adversarially reviewed 2026-10-02</phase>
     <gate>startable (no task dependency; see the rebase rules in parallel-reason and the dependencies block)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live BFF routes (tags bff-api, auth, security), plus a Spaarke.Core/Auth policy key. Closes 2 critical, 1 high and 3 medium sweep findings: any signed-in caller reads, exports or writes any analysis, and creates analyses against records it cannot see.</rigor-reason>
     <model-tier>opus</model-tier>

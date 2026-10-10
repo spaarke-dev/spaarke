@@ -4,7 +4,7 @@
     <title>Mirror task 156's IntermediateRootColumns in the TypeScript stamp derivation (PolymorphicResolverService.deriveCoreAncestorStamps): a child picked in the RegardingResolver PCF under an invoice, document, budget or report card is stamped with that record's root at save time, two different roots of one type refuse, and C# lock-step tests keep the TypeScript tables equal to the server's</title>
     <phase>Session 27 — UAC defect remediation (task 156 follow-up, item 13a; owner round 8)</phase>
     <gate>startable after task 156 is merged into work/unified-access-control-r2 (at authoring it is NOT merged: branch task/uac-r2-156-r1-r2b @ a827ea0dc)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the FR-26 access stamp the client writes on a child record. That stamp is the access edge: it decides which root's principals inherit the child and, through tasks 155/156, where its file bytes go. Modifies .ts and .cs files and tests (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

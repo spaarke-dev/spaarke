@@ -35,7 +35,8 @@ $ids = @(
   'b!PaSNODdgaEW3pPVHDVGxhdNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 secure matter M1 (deleted)
   'b!F8KRjqAyKUy1ACgRIMyoK9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 work assignment W1 (deleted)
   'b!Ks5hYobUT0GGBI7Le2DZKtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 work assignment W2 (deleted)
-  'b!rw3hvr0xjk-rqIcAr0_NJ9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-09 gate 175 secure matter M2 (deleted)
+  'b!rw3hvr0xjk-rqIcAr0_NJ9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 secure matter M2 (deleted)
+  'b!WIEh0AfQbkSHzeuucOCsydNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-10 batch-4 sweep secure project (deleted)
 )
 foreach ($id in $ids) {
   try {

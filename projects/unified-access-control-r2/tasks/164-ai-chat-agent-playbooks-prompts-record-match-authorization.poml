@@ -4,7 +4,7 @@
     <title>Route authorization sweep, AI surface (14 findings, 19 route keys): chat session create / context / messages / dispatch, agent message / run-playbook / status, playbook execute / by-id / by-name / node reorder, prompt library CRUD and list, record-match and associate-record. Each route decides on the caller's own rights on the exact records it reads or writes, before any app-only read or write, and fails closed with one answer for unknown and denied ids.</title>
     <phase>Session 27, owner round 9 (2026-10-03): route authorization sweep of 2026-10-02, surface task "AI chat / agent / playbooks / prompts / record-match"</phase>
     <gate>startable (no task dependency). Run /conflict-check first: ChatEndpoints.cs, SprkChatAgentFactory.cs and AgentEndpoints.cs are hot files for chatendpoints-decomposition-r1 and spaarkeai-assistant-enhancements-r4.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes on live, mostly unconditionally mapped BFF routes (tags bff-api, auth, security). Closes app-only disclosures of record memory, pinned context, document summaries and record names (secure records included) and app-only writes (document re-parent, node order, prompt templates). Modifies tests/** (the TEST-MODIFYING override also applies).</rigor-reason>
     <model-tier>opus</model-tier>

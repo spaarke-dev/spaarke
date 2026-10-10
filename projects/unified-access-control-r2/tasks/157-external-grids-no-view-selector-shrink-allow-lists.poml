@@ -4,7 +4,7 @@
     <title>External SPA grids stop offering the internal MDA views (showViewSelector=false), and each external module's column allow-list shrinks to what its grid actually shows (owner round 4 item 7, task 134 open item D1)</title>
     <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
     <gate>startable now (134 merged)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Narrows the columns an external (CIAM/contact) caller may read through /fetch and /record. That is an authorization surface (defect C6), plus a client change to the external SPA.</rigor-reason>
     <model-tier>opus</model-tier>

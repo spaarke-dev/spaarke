@@ -1347,6 +1347,19 @@ The owner, after the task count kept rising (74 tasks added 2026-09-28..10-09): 
 4. **Batch-4 sweep (accepted recommendation C):** one pass runs the batch-4 live checks that need nothing from the owner and closes those that pass. Tasks that need owner inputs (CIAM identities for 140, users for 171, the 165 role grant) are labelled as waiting on the owner.
 5. Unchanged: no round cap on fixing an in-scope defect; one full verifier pass (two for auth/security); escalate on non-convergence.
 
+## Round 91 (2026-10-10): BINDING. OWNER decisions on task 179 (PR #1586)
+
+1. **Roles:** remove `prvShare` on matter, project and work assignment from "Spaarke Office Add In User" (the add-in needs Read). Core User keeps Share and is the "can manage access" role. The main session applies this on dev with a read-back when 179 deploys.
+2. **No Access removal needs Share:** removing or deactivating an entry loosens access, so the remover needs Write and Share on each covered record. Adding an entry stays Write.
+3. **Assigned-To shares:** keep the current policy (ADR-034 A4); filed as #1595 for after the project.
+4. **Filed secure children:** inherited (mirrored) shares carry Share when the root share holds it. A root sharee who can manage access on the root can manage it on its filed children. This supersedes round 11's "no Share on mirrored children" for the Share bit only.
+5. **The main session accepted three executor deviations:** `/no-access/enforce` keeps the table Write (the org-owned table has no Share privilege); `/assigned-access/sync` keeps Write; Make Secure, Remove Secure, Close and Invite need Share.
+
+## Round 92 (2026-10-10): OWNER: batch-4 proof
+
+- 137: the testuser1 linked-contact stand-in is accepted, as for 174. The CIAM sign-in step stays on checklist §4.
+- 166 (f): the unit tests are accepted as proof (no dev identity lacks the Create privilege), as for gate 19.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.

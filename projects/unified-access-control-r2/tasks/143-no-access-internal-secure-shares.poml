@@ -4,7 +4,7 @@
     <title>No Access List for INTERNAL users on secure records: refuse Dataverse shares to a walled systemuser, remove shares that already exist, and veto on the SPA plane — so MDA and Teams/SPA agree</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C9 owner round 2, item 5(a) + Q4)</phase>
     <gate>blocked — requires 141 (user↔contact link), 133 (C11 provisioning order; shared file) and 139 (grant model; shared files) merged; escalation triggers (a), (b), (c), (d), (e), (g) and (h) need owner answers before their branches are implemented</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Ethical-wall enforcement on the authorization write path (POA share refusal + removal); Dataverse schema change on the deny store; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>

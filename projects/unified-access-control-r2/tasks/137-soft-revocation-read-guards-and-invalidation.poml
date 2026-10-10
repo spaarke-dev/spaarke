@@ -4,7 +4,7 @@
     <title>C5 — revocation that actually revokes: inactive contact and inactive root confer nothing, grant-cache invalidation reaches the CIAM entry and every member of an organization, and the reconciliation job's enable/write posture is decided and recorded</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C5)</phase>
     <gate>after-136-109-141</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization read path and cache invalidation on every grant-write endpoint (.cs); tags bff-api/auth/security; removes access that deactivated contacts and records keep today.</rigor-reason>
     <model-tier>opus</model-tier>

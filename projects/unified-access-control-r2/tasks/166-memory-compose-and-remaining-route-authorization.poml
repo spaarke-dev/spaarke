@@ -4,7 +4,7 @@
     <title>Route authorization sweep, group 166: Memory, Compose and the remaining surfaces (17 findings). Every route decides on the caller's OWN rights over the exact record, session or catalog row it acts on, fails closed with one answer for unknown and denied, and dead surface is deleted rather than gated</title>
     <phase>Session 27: route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes on 17 live, unconditionally mapped BFF routes (tags bff-api, auth, security). Several findings are app-only writes on caller-chosen records: pin injection into other users' AI context, child-record mass write, container permission deletion, record creation without privilege. The task also modifies tests/**, so the TEST-MODIFYING override row applies.</rigor-reason>
     <model-tier>opus</model-tier>

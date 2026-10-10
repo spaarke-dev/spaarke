@@ -4,7 +4,7 @@
     <title>C10 part 2 (client) — children created or re-parented in the browser through Xrm.WebApi (wizards, Notepad memos, To Do widgets, document upload, regarding resolvers) end up secure when their parent is: inventory every client writer, decide per writer (route through the BFF per WP-3, or create-then-server-fix-up per WP-5), and turn on the scheduled reconciliation as the safety net for every write outside the product</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "client-created children")</phase>
     <gate>after 144, 145, 146, 148 and 149 are merged. Coordinate with field-mapping-server-write-path-r1 (W3/W4/W5) before building any BFF create endpoint.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-boundary change spanning client (.ts/.tsx) and BFF (.cs) write paths; tags bff-api, auth, security, frontend; enables a scheduled job that writes ownership.</rigor-reason>
     <model-tier>opus</model-tier>

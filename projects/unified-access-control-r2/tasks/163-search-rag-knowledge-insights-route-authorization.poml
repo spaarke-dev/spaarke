@@ -4,7 +4,7 @@
     <title>Route sweep, Search / RAG / knowledge / Insights surface: close all 15 findings (17 routes) so no route reads, writes, indexes or deletes as the BFF identity on a record, document, chunk or partition the caller chose without a caller-rights decision or an admin policy</title>
     <phase>Session 27, owner round 9: the route authorization sweep (notes/route-authorization-sweep-2026-10-02.md)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes on 17 live BFF routes (tags bff-api, auth, security, testing). Seven of the 15 findings are critical: secure-record content disclosure, cross-tenant index writes and AI grounding poisoning by any signed-in caller.</rigor-reason>
     <model-tier>opus</model-tier>

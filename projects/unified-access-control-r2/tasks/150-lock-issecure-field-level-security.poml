@@ -4,7 +4,7 @@
     <title>Lock sprk_issecure — field-level security so ONLY the BFF (through the secure/unsecure endpoints) changes it on project, matter and work assignment; every other writer removed; readers never masked</title>
     <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 2)</phase>
     <gate>after 144 (the endpoints this task routes every secure/unsecure change through are generalized to matter and work assignment there) and 151 (both edit Infrastructure/Dataverse/RecordContainerResolver.cs). Not concurrently with 133 or 148 (all edit ProvisionProjectEndpoint.cs / UnsecureProjectEndpoint.cs — whichever lands second rebases).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse field-level security on an isolation flag, plus .cs and .ts/.tsx changes to the secure-create flow and a new client surface; tags bff-api, auth, security, frontend.</rigor-reason>
     <model-tier>opus</model-tier>
