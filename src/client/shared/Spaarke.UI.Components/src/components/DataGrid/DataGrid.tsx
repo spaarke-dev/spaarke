@@ -769,7 +769,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         const pickedViewId = externalHost ? undefined : activeSavedQueryId;
         const savedQuery: SavedQueryResult | null = pickedViewId
           ? await dataverseClient.retrieveSavedQuery(pickedViewId).catch(() => null)
-          : await resolveSource(dataverseClient, configRecord, undefined);
+          : await resolveSource(dataverseClient, configRecord, undefined, externalHost ? 'external' : 'internal');
         const entityName =
           savedQuery?.entityName ??
           (configRecord?.source?.type === 'savedquery-set' ? configRecord.source.entityLogicalName : undefined);

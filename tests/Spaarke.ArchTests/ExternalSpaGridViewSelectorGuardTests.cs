@@ -173,13 +173,15 @@ namespace Spaarke.ArchTests;
 /// grid's module at a copy without the rule.</item>
 /// <item>A NEW picker UI added inside <c>DataGrid.tsx</c> under another component name and gated on something other
 /// than the pinned switch. The pins refuse a third <c>&lt;ViewSelector</c>, any other use of the raw prop, and any
-/// other call of <c>retrieveSavedQueriesForEntity</c>; a differently named picker is a reviewed change to the shared
+/// other DIRECT call of <c>retrieveSavedQueriesForEntity</c> (the call regex misses an alias such as
+/// <c>const f = c.retrieveSavedQueriesForEntity</c>, a <c>.bind</c> and bracket access, as it did before ontology 054
+/// moved the discovery into <c>resolveGridSource.ts</c>); a differently named picker is a reviewed change to the shared
 /// grid.</item>
 /// </list>
 /// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
 /// every column the picker's views would need, with a 400; it is the data control.</para>
 /// <para><b>Residual 4, reported by CI since fix round c2 (2026-10-03); blocking after the flip.</b> An edit to
-/// <c>DataGrid.tsx</c> that ignores the switch WITHOUT touching a pinned statement. The pin refuses removing or
+/// <c>DataGrid.tsx</c> or <c>resolveGridSource.ts</c> that ignores the switch WITHOUT touching a pinned statement. The pin refuses removing or
 /// rewriting the rule's statements, but not an added statement that shadows the forced value in a nested scope (review
 /// round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect passed this class 194/194, so the grid
 /// would request <c>/savedqueries/{entity}</c> again on the external host). The jest suite
@@ -1617,7 +1619,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         "const showViewSelector = !externalHost && showViewSelectorProp;",
         "if (externalHost && configRecord?.source?.type === 'savedquery-set') {",
         "import { fetchConfigRecord, resolveSource } from './resolveGridSource';",
-        ": await resolveSource(dataverseClient, configRecord, undefined);",
+        ": await resolveSource(dataverseClient, configRecord, undefined, externalHost ? 'external' : 'internal');",
         "const pickedViewId = externalHost ? undefined : activeSavedQueryId;",
         "showViewSelector ? dataverseClient.retrieveSavedQueriesForEntity(entityName)",
         "{showViewSelector && externalViews && externalViews.views.length > 0 ? (",
@@ -1625,11 +1627,18 @@ public class ExternalSpaGridViewSelectorGuardTests
     ];
 
     /// <summary>
-    /// The statements of <see cref="GridSourceFile"/> that hold the savedquery-set discovery: it is one branch, one call.
+    /// The statements of <see cref="GridSourceFile"/> that hold the savedquery-set discovery: the REQUIRED <c>host</c>
+    /// parameter, and the branch that returns null for <c>'external'</c> before its <c>try</c>. That refusal is why
+    /// <c>resolveSource</c>, exported from the package for ontology 054's card, cannot list saved views for an external caller
+    /// that passes its host; the card passes <c>'internal'</c> explicitly. These are presence and count pins, not scope pins:
+    /// hoisting the discovery line above the branch passes the scan (it would run for every source type, but only on an
+    /// internal host once the refusal is in place); <c>DataGrid.externalHost.test.tsx</c> and
+    /// <c>resolveGridSource.host.test.ts</c> catch behaviour, and the jest gate runs them in Tier 1.
     /// </summary>
     private static readonly string[] RequiredResolverStatements =
     [
-        "if (source.type === 'savedquery-set') {",
+        "fallbackEntityName: string | undefined, host: GridSourceHost",
+        "if (source.type === 'savedquery-set') { if (host === 'external') return null; try {",
         "const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);",
     ];
 
@@ -1668,9 +1677,10 @@ public class ExternalSpaGridViewSelectorGuardTests
             }
         }
         // Ontology 054 moved the grid-source resolution into GridSourceFile. The two view-retrieval calls are counted over
-        // the UNION of the two files (an exact total, not a glob), and the resolver's savedquery-set branch is pinned.
-        // The grid refuses a savedquery-set source before it calls resolveSource, and ignores any picked view on the
-        // external host (statements above), so the resolver's discovery call never runs there.
+        // the UNION of the two files (an exact total, not a glob), and the resolver's host parameter and its external
+        // refusal are pinned (presence, not scope). The grid refuses a savedquery-set source before it calls resolveSource,
+        // ignores any picked view on the external host, and passes its host (statements above); resolveSource itself
+        // returns null for 'external' before it lists.
         void ExpectUnionCount(string pattern, int expected, string what)
         {
             var count = Regex.Matches(gridSource, pattern).Count + Regex.Matches(gridSourceResolver, pattern).Count;
@@ -1686,7 +1696,7 @@ public class ExternalSpaGridViewSelectorGuardTests
             if (!squashedResolver.Contains(Squash(statement), StringComparison.Ordinal))
             {
                 violations.Add($"{GridSourceFile}: missing `{statement}`. The grid refuses a savedquery-set source on the external "
-                               + "host before it reaches this branch; the pinned shape keeps the discovery call in that one branch.");
+                               + "host before it reaches this branch, and resolveSource refuses 'external' itself; the pinned text keeps both.");
             }
         }
         ExpectCount(@"(?<![\w$])showViewSelectorProp(?![\w$])", 2, "the raw showViewSelector prop (showViewSelectorProp)");
@@ -2989,7 +2999,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         { "third-picker", "            ) : (\n              <span aria-hidden=\"true\" />", "            ) : (\n              <ViewSelector views={[]} activeViewId=\"\" onViewChange={() => undefined} />" },
         { "third-list-call", "const entityName =", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n        const entityName =" },
         { "second-resolve-source-call", "const entityName =", "void resolveSource(dataverseClient, configRecord, undefined);\n        const entityName =" },
-        { "resolve-source-statement-rewritten", ": await resolveSource(dataverseClient, configRecord, undefined);", ": await resolveSource(dataverseClient, configRecord, undefined) ?? null;" },
+        { "resolve-source-always-internal", "undefined, externalHost ? 'external' : 'internal');", "undefined, 'internal');" },
         { "second-config-read", "const entityName =", "void fetchConfigRecord(dataverseClient, configId);\n        const entityName =" },
         { "picked-view-fetched-again", "const entityName =", "void dataverseClient.retrieveSavedQuery(configId);\n        const entityName =" },
     };
@@ -2997,8 +3007,11 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>Breaks inside <see cref="GridSourceFile"/>, where ontology 054 moved the savedquery-set discovery.</summary>
     public static TheoryData<string, string, string> GridSourceResolverBreaks => new()
     {
+        { "external-refusal-removed", "if (host === 'external') return null;", "" },
+        { "external-refusal-inverted", "if (host === 'external') return null;", "if (host === 'internal') return null;" },
+        { "host-argument-made-optional", "host: GridSourceHost", "host?: GridSourceHost" },
         { "discovery-call-removed", "await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName)", "[] as { id: string; isDefault?: boolean }[]" },
-        { "discovery-moved-out-of-branch", "if (source.type === 'savedquery-set') {", "if (source.type === 'savedquery-set' || true) {" },
+        { "discovery-condition-rewritten", "if (source.type === 'savedquery-set') {", "if (source.type === 'savedquery-set' || true) {" },
         { "second-discovery-call", "const def = queries.find", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n      const def = queries.find" },
         { "second-view-fetch", "const def = queries.find", "void dataverseClient.retrieveSavedQuery('x');\n      const def = queries.find" },
     };
