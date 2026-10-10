@@ -22,6 +22,15 @@ import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/x
 // same pattern as realGetXrm. Never re-implement it here: an identity stub hides brace/case bugs.
 import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/utils/guid';
 
+// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet and HighPrioritySection render their row menu through the
+// shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
+// a stub would hide the menu behaviour these suites assert.
+export { RowActionMenu } from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';
+export type {
+  RowActionDescriptor,
+  RowActionMenuProps,
+} from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MicrosoftToDoIcon: React.FC<any> = props => (
   <svg role="img" aria-label="Microsoft To Do" className={props?.className} width={16} height={16} />

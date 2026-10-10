@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="126" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ISS-009 (#1399): G5 AppendTo for business-owned lookup targets (systemuser, team, businessunit) per the rule uac-r2 picks — own PR, uac-r2 review</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>#1391 merged AND task 048 merged (rule named, D-113)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization check on the shared Dataverse write core; a wrong depth over-grants.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive authorization logic in another project's code (tags auth, security).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits OwnedChildWrite.cs, which PR #1391 and task 048 (move to Services/Dataverse) also edit; sequence after both or rebase.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,auth,security,bug,separate-pr,uac</tags>
+    <estimated-effort>0.5-1 day once the rule is named</estimated-effort>
+  </metadata>
+
+  <prompt>OwnedChildWrite.CheckCallerMayAppendToAsync denies every lookup to a business-owned table (systemuser, team, businessunit) for every caller, because RetrievePrincipalAccess refuses those tables and #1391's fallback covers only organization-owned tables. Implement the AppendTo rule uac-r2 chooses for business-owned targets, nothing more.</prompt>
+  <role>SPAARKE backend security engineer working in uac-r2's code under their review. Fail closed; never widen beyond the named rule.</role>
+  <goal>A caller-supplied lookup to a business-owned target is allowed exactly when uac-r2's rule allows it and denied otherwise with the existing uniform not-found (or the response uac-r2 specifies); user/team-owned and organization-owned behaviour is unchanged.</goal>
+
+  <context>
+    <background>Issue #1399 has the full analysis: measured on spaarkedev1, RetrievePrincipalAccess returns 400 for systemuser and team (BusinessOwned); RightsOnAsync reads that as AccessRights.None; #1391 (open, uac-r2 review) adds the org-owned fallback (table AppendTo privilege + caller read). Suggested rule (hypothesis, uac-r2's call): require prvAppendTo{Table} at a depth reaching the target row's businessunitid (Basic own record, Local same BU, Deep BU and below, Global), read via RetrieveUserSetOfPrivilegesByNames as the caller; alternative: keep the deny and return a clear 400 for caller-chosen user/team lookups. Reachable today through the chat dataverse.create_record tool; latent on browser creates. Harness: tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs ScriptedUserClient (does not model business-owned).
+uac-r2 state re-read when this task was created (2026-10-08, origin/master 6cd5d9a47): OwnedChildWrite.cs last changed on master in d254d7166 (#1312, 2026-10-06); PR #1391 OPEN; PR #1390 OPEN; latest #1355 comments are ours (039, #1391, task 120); no uac-r2 answer on #1399 yet.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs (or its Services/Dataverse location after task 048)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs and the OwnedChildWrite unit tests</file>
+      <file role="canonical-reference">#1391's CallerMayAppendToOrganizationOwnedAsync (same shape: privilege + caller check)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">uac-r2 coordination (project CLAUDE.md section 4, standing memory): before starting, fetch master and re-read OwnedChildWrite, RecordOwnershipResolver, CallerRecordAccessProbe, RecordRouteAccessAuthorizationFilter, the route ledger and ADR-034; check uac-r2's open PRs; name what you read (SHA) in the completion record. If uac-r2 has not answered on #1355 with the rule, post the question there (link #1399, both options) and STOP until they answer; do not pick the rule yourself.</constraint>
+    <constraint source="project">Scope: only the business-owned branch of the AppendTo check, plus the harness modelling it. Server-set lookups (serverSetLookupColumns) and re-file ownership-parent checks stay as they are. If uac-r2 picks the clear-400 option, the response shape and code come from them.</constraint>
+    <constraint source="project">Seeding proof required for the new allow/deny guard (break it, confirm the deny test fails, restore). Two adversarial verifier passes (auth, security tags). Live proof on spaarkedev1 with a real low-privilege user in a child BU: allowed and denied cases through the real route (POST /api/v1/child-records/{table} or the chat tool) with zz-126- rows, deleted afterwards.</constraint>
+    <constraint source="project">NEW worktree off origin/master after #1391 merges (git worktree add C:\wts-126 -b fix/appendto-business-owned-126 origin/master); if task 048 has moved the file, work on the moved file. Own PR reviewed by uac-r2 (request on #1355); do not merge. BFF hygiene (publish size vs fresh master from short paths, CVE); /conflict-check. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+    <constraint source="uac-r2">D-113 THE RULE (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 6). Business-owned targets (systemuser, team, businessunit) are refused by RetrievePrincipalAccess; mirror what a create run as the user checks, beside #1391's organization-owned branch, failing closed: the caller holds the table's AppendTo privilege (RetrieveUserSetOfPrivilegesByNames returns the depth) and the depth covers the TARGET ROW'S business unit: Global = any BU; Deep = the caller's BU or one under it (EqOrUnder on businessunitid, read as the caller); Local = the same BU; Basic = only a systemuser target that is the caller. The row must also be readable as the caller. Anything unanswered is denied with the uniform 404. Tests: one positive and one negative per depth, plus a cross-business-unit refusal. Goes in after the 048 move; our PR, uac-r2 review.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor; do the uac-r2 re-read and record the SHA.</step>
+    <step order="1">Confirm #1391 merged and uac-r2's rule on #1355 (or ask and stop).</step>
+    <step order="2">Implement the rule; model business-owned refusal in the harness; unit tests for allow, deny, and each depth case the rule names.</step>
+    <step order="3">Seeding proof; live proof with a real child-BU user; delete zz-126- rows.</step>
+    <step order="4">Full BFF suite once, ArchTests built explicitly, publish size; PR with CI green; request uac-r2 review; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller with the privilege at a depth the rule accepts can bind a systemuser/team lookup on a G5 create; a caller without it is denied with the existing uniform response (or uac-r2's specified response) — unit tests and live proof.</criterion>
+    <criterion testable="true">User/team-owned and organization-owned targets behave exactly as before (existing tests unchanged); server-set lookups remain exempt.</criterion>
+    <criterion testable="true">The seeding proof is recorded: the deny test fails when the guard is broken.</criterion>
+    <criterion testable="true">PR open against master, CI green, uac-r2 review requested on #1355; Closes #1399.</criterion>
+    <criterion testable="true">Negative: no rule chosen without uac-r2's written answer; no over-grant to a caller without the privilege; zz-126- rows: 0 remain.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>uac-r2's rule conflicts with ADR-034 or with Dataverse's own run-as-user behaviour as measured live: STOP and escalate with the evidence.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-08 by the no-parking sweep (D-81 rule). Coordination channel: #1355.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

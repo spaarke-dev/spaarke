@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Unaudited sweeps, own PR (C-18)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified cleanup with named files and a verification path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on its own branch; shares no files with the ontology worktree or the other wave-I tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt,separate-pr</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Worktree C:\wt091, branch chore/shared-lib-sweeps (created off origin/master when this task starts). Audit then fix the three C-18 items.</prompt>
+  <role>SPAARKE full-stack developer. Cleanup is convergence and deletion with evidence, never a behaviour change in disguise.</role>
+  <goal>The three areas the reuse audit marked UNVERIFIED are verified, and every confirmed problem is fixed.</goal>
+
+  <context>
+    <background>The audit did not reach three areas: a Fluent-token / hard-coded-colour sweep of the shared libraries; whether EmailCardList, MessageRow and ChatSessionCard duplicate RecordCardShell (UNVERIFIED); and whether SECTION_REGISTRY has any external consumer (UNVERIFIED).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this work lands in its OWN pull request, not in the ontology PR #1111. Owner decision 2026-10-03: cleanup unrelated to ontology is fixed now (never deferred to an issue) but kept off the ontology branch so that PR stays reviewable.</constraint>
+    <constraint source="project">Scope: work ONLY in the worktree named in the prompt. Do NOT edit anything in the ontology worktree C:\code_files\spaarke-wt-spaarke-ontology-platform-r1, including its TASK-INDEX.md and this POML. The main session records completion.</constraint>
+    <constraint source="project">Scope: run the affected package tests BEFORE applying any change (that run is the master baseline) and AFTER. Report both. A failure is pre-existing only if it appears in the baseline run; never assert pre-existing without that evidence.</constraint>
+    <constraint source="project">Scope: install dependencies with npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md section 12). Discard every package-lock.json diff that npm install produces; lockfile churn is never part of this PR.</constraint>
+    <constraint source="project">Scope: never use --no-verify. If a pre-commit hook fails, fix the cause (usually a missing node_modules).</constraint>
+    <constraint source="project">Scope: you CANNOT write .claude/ paths. If one is needed, stop and report the exact text for the main session.</constraint>
+    <constraint source="ADR-021">Scope: shared components use Fluent v9 semantic tokens only; no hex, rgb or named colour literals.</constraint>
+    <constraint source="project">Scope: record each finding with file:line in the PR body before fixing it, so the audit gap is closed in writing as well as in code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup with evidence</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/cleanup-placement-plan.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
+    <step order="2">Sweep the shared libraries for hard-coded colours and replace each with the semantic token that matches its role.</step>
+    <step order="3">Compare EmailCardList and MessageRow with RecordCardShell (ChatSessionCard is deleted by task 086 as having zero consumers; if 086 kept it, include it). Where one duplicates RecordCardShell's behaviour, converge it; where behaviour genuinely differs, leave it and say why.</step>
+    <step order="4">Find every consumer of SECTION_REGISTRY, including outside the declaring package; delete it if none exists.</step>
+    <step order="5">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
+    <step order="6">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>
+    <step order="7">Report back: the PR URL, each acceptance criterion with evidence, files changed, the baseline and after test output, and any escalation.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If converging a card component onto RecordCardShell would change what users see, STOP on that component and report it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Install and run package tests</tool>
+    <tool name="gh">Open the pull request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A grep of the shared libraries for hex, rgb() and named colour literals in component styles returns nothing outside tests and token definitions.</criterion>
+    <criterion testable="true">Each of EmailCardList, MessageRow and ChatSessionCard is either converged on RecordCardShell or documented as genuinely different.</criterion>
+    <criterion testable="true">SECTION_REGISTRY is either deleted with zero consumers shown, or kept with its consumer cited.</criterion>
+    <criterion testable="true">A pull request against master is open, ready for review, with the item ids in its body.</criterion>
+    <criterion testable="true">Negative: the PR contains no package-lock.json changes and no file outside this task's scope.</criterion>
+    <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
+  </acceptance-criteria>
+
+  <notes>Dispatched after wave I so it does not compete with six other PR worktrees. May be split into one PR per item if the colour sweep is large.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1122 (chore/shared-lib-sweeps), head 394642e83, open and ready for review, 3 files. (1) Colour sweep: 4 real violations fixed with Fluent tokens: RecordCardShell.tsx loadingOverlay rgba white wash -&gt; colorNeutralBackground1 + opacity (DataGrid precedent); HeaderCellContent.tsx menu boxShadow and drop-shadow rgba -&gt; colorNeutralShadowAmbient/Key; ColumnHeaderMenu.stories.tsx hex -&gt; theme token. Dataverse option-set colour metadata, 'transparent' and union-tag strings documented as not violations. (2) EmailCardList, MessageRow, ChatSessionCard documented as genuinely different from RecordCardShell (each would visibly change layout); no convergence, escalation not fired. (3) SECTION_REGISTRY kept: consumer WorkspaceGrid.tsx default in LegalWorkspace; SpaarkeAi uses createLegalWorkspaceSectionRegistry. Tests: Spaarke.UI.Components baseline on clean master = 7 suites failing deterministically; after = identical, no new failure; tsc clean. Six of those seven are now task 092 scope; the seventh (todoScoreMappings) is fixed by PR #1118.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

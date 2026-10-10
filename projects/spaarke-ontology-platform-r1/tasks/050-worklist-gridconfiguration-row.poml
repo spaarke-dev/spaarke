@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Author the worklist grid configuration row: membership and order per lane, plus three secondary sets</title>
+    <phase>5 The worklist surface</phase>
+    <gate>034, 007 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Configuration data against a shipped framework; no new code surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration authoring following four existing examples.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>034, 007</deps>
+    <tags>dataverse,configuration,frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the sprk_gridconfiguration row that defines worklist membership and order per lane, plus the closed-today, suppressed and closed-earlier sets, so changing them needs no code change. The row is executed server-side by the Signal read route (task 038), not by DataGrid in the browser (amended 2026-10-07, D-15).</prompt>
+  <role>SPAARKE platform developer. Membership is configuration; the row component is code.</role>
+  <goal>Worklist membership and presentation come from a configuration row, with membership computed by rule evaluation rather than a user filter.</goal>
+
+  <context>
+    <background>The DataGrid framework takes a configId and reads a sprk_gridconfiguration row. Four live examples exist for reconciliation (needs-review, email-review-all, email-review-completed, per-team), with membership already expressed in FetchXML.</background>
+    <relevant-files>
+      <file role="new">Dataverse: sprk_gridconfiguration row for the worklist</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: membership must come from RULE EVALUATION, never from a user-authored filter. The query selects Signals whose status is Open or Acknowledged and which are not suppressed; it does not re-implement the predicate.</constraint>
+    <constraint source="project">Scope: read the DENORMALIZED sprk_suppresseduntil so the query is cheap rather than counting Decision Records per load.</constraint>
+    <constraint source="project">Scope: group by sprk_matter. Worklist rows ARE matters grouping Work Items (D-3, decision 28).</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-15, FR-24 amended): the row supplies membership and ORDER only (FetchXML), one query per lane (Decide, Do), executed server-side by task 038's route, which then removes rows the caller cannot read and applies the Do-lane reader scope. It carries no actions (actions come from the policy version's decision plan, FR-49) and no per-user filter.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation W-12): add three secondary queries in the same row: closed today (Resolved with sprk_resolvedon today), suppressed (sprk_suppresseduntil in the future, with the until-date), closed earlier (Resolved before today, bounded to a window stated in the row).</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (D-42): the FetchXML orders by sprk_firstdetected only, as a stable base; the D-42 rank (severity, sprk_highpriority, oldest, record number) is applied by task 038's route, which can read the policy severity, the subject flag and the catalog number field. sprk_rankscore is not written by anything.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (D-23): select the display columns the row needs, including sprk_signal.sprk_duedate (task 007) and the policy short name via a link to sprk_policy.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the queries select both core-record columns (sprk_matter, sprk_project) and order a core record's items together; rows with neither (D-35) are included in the Do-lane query and left for task 038 to return only to their owner under "Not filed". "Grouped by matter" reads "grouped by core record".</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): select sprk_corerecordtype and sprk_corerecordid (not per-type lookups) and order by them; the configuration must not name a core type.</constraint>
+    <constraint source="project">ADDED 2026-10-09 from task 052 (#1536 review F4): the worklist FetchXML must select the policy's `sprk_worktype` (via the Signal's policy / policy version link) so task 038 can return `workType` per item for the lane count filters.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DataGrid framework configuration</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Grid configuration row" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid">Four live gridconfiguration JSON examples; copy the membership-in-FetchXML approach and the columnRenderers override shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read the four existing reconciliation grid configuration rows and the configuration guide.</step>
+    <step order="2">Author the worklist row: per-lane FetchXML selecting Open and Acknowledged Signals, excluding suppressed ones, ordered by sprk_firstdetected then matter number; plus the three secondary queries.</step>
+    <step order="3">Define the display columns the row component needs (no actions; actions come from the decision plan).</step>
+    <step order="4">Verify the configuration loads and the membership query returns the seeded positive matter.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Four live sprk_gridconfiguration rows already exist for reconciliation (needs-review, email-review-all, email-review-completed, per-team), all expressing membership in FetchXML.</existing>
+    <extension>No, in the sense that a new ROW is the intended extension mechanism of the DataGrid framework: the framework is reused and only a configuration row is added. No new code surface.</extension>
+    <cost-of-doing-nothing>Worklist membership would have to be hardcoded in the component, so changing which Signals appear becomes a deployment, which fails success criterion 7 and criterion 1 directly.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Worklist membership loads from configuration">
+      <steps>
+        <step>Open the surface hosting the worklist grid</step>
+        <step>Confirm the seeded positive matter appears</step>
+      </steps>
+      <expected>Membership renders from the configuration row with no hardcoded query in the component.</expected>
+    </test>
+    <test name="Suppressed and closed Signals are excluded">
+      <steps>
+        <step>Suppress one Signal and close another</step>
+        <step>Reload the grid</step>
+      </steps>
+      <expected>Neither appears, proving the FetchXML reads the denormalized suppression column and the status filter.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Reload the grid</step>
+      </steps>
+      <expected>The grid and its column renderers adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: sprk_gridconfiguration row for the worklist</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the configuration row, when the grid loads, then the seeded positive matter appears.</criterion>
+    <criterion testable="true">Given a suppressed Signal, when the grid loads, then it does NOT appear.</criterion>
+    <criterion testable="true">Given a closed Signal, when the grid loads, then it does NOT appear.</criterion>
+    <criterion testable="true">Negative: changing which Signals appear requires only a configuration edit, demonstrated by changing the row and reloading with no code change.</criterion>
+    <criterion testable="true">Rows are grouped by matter.</criterion>
+    <criterion testable="true">Given the row, when read, then it holds one membership query per lane and the three secondary queries, and no action definitions.</criterion>
+    <criterion testable="true">Negative: the order clause references neither sprk_rankscore nor a severity or high-priority column.</criterion>
+    <criterion testable="true">Given the Do-lane query, when run, then project-grouped rows and rows with no core record are both included, and each core record's items are contiguous.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-24 (amended, D-15) and success criterion 7 (the membership half). Amended 2026-10-07 per reconciliation B.2 row 050: membership + order only; the ui-tests below run through the worklist widget (task 059) once 038 exists, or as a direct server-side query before then.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

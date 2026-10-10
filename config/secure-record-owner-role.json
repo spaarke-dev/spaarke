@@ -206,6 +206,14 @@
       "addedBy": "unified-access-control-r2 task 146"
     },
     {
+      "logicalName": "sprk_budgetrevision",
+      "privilegeName": "prvReadsprk_BudgetRevision",
+      "kind": "child",
+      "reason": "Ontology platform R1 task 044 (D-33/D-38): a budget revision recorded by a decision on a Secure matter is created by the Ontology Service writer owned by the named Secure team, so the team needs Read on the table (mirrors sprk_budget).",
+      "evidence": "Negative control 2026-10-09T16:09:21Z, spaarkedev1: POST sprk_budgetrevisions owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc returned HTTP 403 0x80040299 \"Read Privilege Check For Owner failed ... Principal team ... privilegeCount=28 ... is missing prvReadsprk_BudgetRevision privilege (Id=f921db62-3fcf-4d02-9ba3-107d0452f484) on OTC=10999\". Applied via the script at Basic, with the SharePoint four stripped. Positive control at 16:12:11Z and 16:12:50Z: HTTP 201 both times, probes deleted (owner D-109).",
+      "addedBy": "ontology-platform-r1 task 044"
+    },
+    {
       "logicalName": "sprk_kpiassessment",
       "privilegeName": "prvReadsprk_KPIAssessment",
       "kind": "child",

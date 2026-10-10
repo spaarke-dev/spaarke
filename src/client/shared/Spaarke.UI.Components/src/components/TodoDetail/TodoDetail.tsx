@@ -60,7 +60,7 @@ import {
   AddCircleRegular,
 } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
-import { parseDueDate } from '../../utils/dateLocal';
+import { computeTodoScoreBreakdown } from '../../utils/dateLocal';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants (mirror task 009 customization)
@@ -82,59 +82,12 @@ const STATUSCODE_DISMISSED = 659490002;
 export const TODO_ASSIGNED_TO_ENTITY_SET = 'contacts';
 
 // ---------------------------------------------------------------------------
-// To Do Score computation (self-contained — no cross-solution imports)
+// To Do Score — the ONE shared function (task 067 / D-29): `computeTodoScoreBreakdown`
+// in `utils/dateLocal.ts`. The detail pane's live preview, the Kanban boards and the
+// lists all call it, so a To Do reads the same score and the same due tier everywhere.
+// (This file used to keep a private copy of the urgency math, counting elapsed
+// milliseconds instead of calendar days.)
 // ---------------------------------------------------------------------------
-
-/**
- * Compute To Do Score — mirrors the hoisted `computeTodoScore()`
- * (`Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`) exactly.
- *
- * Formula: priority*0.50 + invertedEffort*0.20 + urgencyRaw*0.30
- * Uses Math.ceil for diffDays and Math.round for the final score
- * to match the Kanban card computation.
- *
- * Due-date parsing (spaarke-ontology-platform-r1 task 080 / C-10,
- * 2026-10-03): this used to parse `duedate` with a bare `new Date(duedate)`,
- * which — for a date-only `sprk_duedate` value — reads as the PREVIOUS
- * calendar day in every negative-UTC-offset zone, disagreeing with the
- * Kanban bucket the same To Do landed in. Now uses the canonical
- * `parseDueDate` ("mirrors exactly" is an assertion that drifts unless both
- * sides literally import the same function — see that function's doc
- * comment).
- */
-function computeScore(
-  priority: number,
-  effort: number,
-  duedate: string | null | undefined
-): {
-  todoScore: number;
-  priorityComponent: number;
-  effortComponent: number;
-  urgencyRaw: number;
-  urgencyComponent: number;
-} {
-  const invertedEffort = 100 - effort;
-
-  let urgencyRaw = 0;
-  const due = parseDueDate(duedate);
-  if (due) {
-    const now = new Date();
-    const diffMs = due.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) urgencyRaw = 100;
-    else if (diffDays <= 3) urgencyRaw = 80;
-    else if (diffDays <= 7) urgencyRaw = 50;
-    else if (diffDays <= 10) urgencyRaw = 25;
-  }
-
-  const priorityComponent = priority * 0.5;
-  const effortComponent = invertedEffort * 0.2;
-  const urgencyComponent = urgencyRaw * 0.3;
-  const raw = priorityComponent + effortComponent + urgencyComponent;
-  const todoScore = Math.max(0, Math.min(100, Math.round(raw)));
-
-  return { todoScore, priorityComponent, effortComponent, urgencyRaw, urgencyComponent };
-}
 
 /** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
 function toDateInputValue(dateStr?: string | null): string {
@@ -803,7 +756,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     }
 
     // Compute score from CURRENT field values (live preview)
-    const score = computeScore(priority, effort, dueDate || record.sprk_duedate);
+    const score = computeTodoScoreBreakdown({
+      sprk_priorityscore: priority,
+      sprk_effortscore: effort,
+      sprk_duedate: dueDate || record.sprk_duedate,
+    });
 
     // Derived: is the record already inactive (Completed or Dismissed)?
     const isInactive = record.statecode === STATECODE_INACTIVE;

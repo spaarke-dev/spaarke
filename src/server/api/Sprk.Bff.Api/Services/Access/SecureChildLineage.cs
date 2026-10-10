@@ -75,6 +75,10 @@ internal static class SecureChildLineage
             ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project)),
         T("sprk_budget", "sprk_budgets",
             ("sprk_matter", Matter), ("sprk_project", Project)),
+        // Ontology platform R1 task 044 (D-33/D-38): the revision a decision records is owned by the secure team under a Secure
+        // matter, so it is a child of its budget and its matter (live: sprk_budgetrevision.sprk_budget, .sprk_matter).
+        T("sprk_budgetrevision", "sprk_budgetrevisions",
+            ("sprk_budget", "sprk_budget"), ("sprk_matter", Matter)),
         T("sprk_communication", "sprk_communications",
             new[] { ("sprk_communicationthread", "sprk_communicationthread") }
                 .Concat(Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment))

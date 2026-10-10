@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Invalid appnotification option values in the non-playbook writers (held-email admin alert, grant-expiry reminder, NotificationActionCore toast type): one set of constants, validated, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code in two background jobs; a write that Dataverse rejects at runtime.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR; files disjoint from 131 and 133.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,jobs,bug,separate-pr</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the backend features that write appnotification directly (not through playbooks) with option values Dataverse rejects, so they fail the first time they fire.</prompt>
+  <role>SPAARKE backend engineer.</role>
+  <goal>Every direct appnotification writer sends only option values that the live appnotification metadata accepts, through one set of constants with a validation test, and each formerly broken path is proven to produce a valid request.</goal>
+
+  <context>
+    <background>Playbook-engine sweep (notes/playbook-engine-defect-sweep.md, PB-03b/03c/04): appnotification priority accepts only 200000000/200000001. IncomingCommunicationJobHandler.cs:209 (held-email admin alert) and GrantExpiryReminderJob.cs:99,453 (last-day grant reminder) send 200000002. NotificationActionCore has a wrong toast-type constant. These writers are NOT the notification playbooks (retired by D-100, task 131). D-98 item 9: fix them. Re-read the live option sets (read-only describe) before relying on the values above.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">One shared constants class for the appnotification option values (priority, toast type, icon, and any other option the writers set), with a test that the constants match a checked-in snapshot of the live metadata. Every direct writer uses it. Each fixed path gets a test that fails on the old value. Do not change who gets notified or when. Own worktree off origin/master, own PR, do not merge. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">No appnotification writer in src/ sends a priority or toast type outside the live option set (grep plus tests); the tests fail on the old values.</criterion>
+    <criterion testable="true">The constants are validated against a checked-in metadata snapshot.</criterion>
+    <criterion testable="true">A PR against master is open with CI green and a publish-size delta measured per section 10.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rewritten 2026-10-09 by the main session on D-100 (the original notification PR-A scope is superseded; only the non-playbook writers remain).</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

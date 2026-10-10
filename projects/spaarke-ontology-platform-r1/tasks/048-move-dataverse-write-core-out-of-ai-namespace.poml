@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-66: move the shared Dataverse write core (OwnedChildWrite + helpers) out of Services/Ai to Services/Dataverse, own PR reviewed by uac-r2</title>
+    <phase>3 Decision Record + commit route</phase>
+    <gate>#1391 merged (uac-r2 agreed, D-113)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves BFF code owned by another project (uac-r2); namespaces, DI, ArchTests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,refactor,separate-pr,uac</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move the shared Dataverse write core out of the AI namespace so core code never depends on AI internals (ADR-013 intent: AI -> core, never core -> AI).</prompt>
+  <role>SPAARKE engineer. A mechanical move: behaviour identical, ownership respected.</role>
+  <goal>OwnedChildWrite and its helpers (DataverseWriteItemMapper and the other types under src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse used by non-AI routes such as ChildRecordEndpoints) live in Services/Dataverse (namespace to match); AI tool handlers depend on them; an ArchTest fails if any non-AI namespace references Sprk.Bff.Api.Services.Ai.*; all tests pass unchanged in behaviour.</goal>
+
+  <context>
+    <background>Owner decision D-66 (2026-10-07), raised by task 046: the work-assignment create built on uac-r2's OwnedChildWrite pulls AI-folder types into non-AI code, as uac-r2's ChildRecordEndpoints already does. Owner: neither belongs in the AI namespace; fix it properly (no ADR-013 exception). Five files are in Sprk.Bff.Api.Services.Ai.Handlers.Dataverse today (2026-10-07). uac-r2 owns this code: asked on #1355 (comment 6050669298) for agreement/timing.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-66: own PR to master, reviewed by uac-r2 before merge. Do not start until uac-r2 has replied on #1355 with no objection (or the owner says go). Coordinate per project CLAUDE.md section 4 (re-read their code on master, check their open PRs incl. #1391 which edits OwnedChildWrite.cs — sequence after it or rebase).</constraint>
+    <constraint source="project">Mechanical move only: no behaviour change, no renames beyond namespace/folder, keep public type names; update DI registrations, usings, tests, ArchTests (uac-r2 census tests that reference type names or paths), and the route ledger only if paths are cited there. Add one ArchTest pinning the direction. BFF hygiene per .claude/rules/bff-hygiene.md (publish size vs fresh master from short paths, CVE). Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+    <constraint source="uac-r2">D-113 (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 5): agreed. Mechanical move of OwnedChildWrite, DataverseWriteItemMapper and their helpers to Services/Dataverse/, with one ArchTest pinning the direction; our PR, uac-r2 review. Timing: after #1391 merges and BEFORE 046 builds on it. uac-r2 asked for after #1501 too, but #1501 (task 136) is deferred under D-106, so it does not wait: #1501 rebases onto the moved file later (uac-r2 told 2026-10-09). uac-r2 has no open work on these files.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level per root CLAUDE.md section 8.</step>
+    <step order="1">Inventory every type in Services/Ai/Handlers/Dataverse and every caller; classify which are generic write core vs AI-tool specific.</step>
+    <step order="2">Move the generic core; leave AI-tool-specific handlers in Ai; update references.</step>
+    <step order="3">Add the direction ArchTest; build the solution and ArchTests explicitly; full BFF suite once.</step>
+    <step order="4">Open the PR; request uac-r2 review on #1355; CI green; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">No non-AI code (Api/*, Services/Dataverse, Services/Signals, etc.) references Sprk.Bff.Api.Services.Ai.* for the moved types; the new ArchTest enforces it and fails if a reference is reintroduced.</criterion>
+    <criterion testable="true">All existing tests pass with no assertion changes beyond namespaces; ArchTests (built explicitly) green.</criterion>
+    <criterion testable="true">PR open against master with CI green and uac-r2 review requested.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-07 by the main session on owner decision D-66.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

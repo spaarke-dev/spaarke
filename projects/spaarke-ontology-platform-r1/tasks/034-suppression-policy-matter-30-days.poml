@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Suppression: per (policy, core record), expiring after 30 days</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>031, 036 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Decides what the user stops seeing; an error either buries live work or produces notification fatigue.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified counting rule settled by D-11.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>031, 036</deps>
+    <tags>bff-api,signals,suppression</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement suppression counting dismissals per (policy, matter) with a 30-day expiry, honouring the per-policy countstowardsuppression switch.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>Three dismissals for the same policy on the same matter suppress that pairing for 30 days, and policies flagged otherwise are recorded without counting.</goal>
+
+  <context>
+    <background>D-11 resolved a grain conflict: sprk_dedupekey is per SUBJECT but success criterion 4 says per MATTER, and worklist rows ARE matters. Matter grain suppresses what the user actually dismissed. Per-subject grain would never suppress three dismissals of three different communications on one matter, which is the fatigue case the criterion exists to prevent.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: count dismissals per (policy, matter), NOT per dedupe key. Set sprk_suppresseduntil to 30 days from the third dismissal.</constraint>
+    <constraint source="project">Scope: honour sprk_policy.sprk_countstowardsuppression. When No, the dismissal is still RECORDED, still queryable and still clusterable, but it does not increment the counter. This is what lets a segregated surface keep the shared mechanism instead of being excluded from it.</constraint>
+    <constraint source="project">Scope: sprk_suppresseduntil is DENORMALIZED onto the Signal so the worklist query is cheap rather than counting Decision Records per load.</constraint>
+    <constraint source="project">Scope: suppression EXPIRES. A permanent mute is indistinguishable from a broken rule, and the condition may still be true and by then more serious.</constraint>
+    <constraint source="project">Scope: an auto-closure is not a dismissal and must not count.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13): suppression is what task 031's re-raise rule reads. While sprk_suppresseduntil is in the future no new episode is raised for that (policy, matter); after it lapses the next pass MAY raise a new episode (the 30-day expiry is now reachable). The 14-day quiet window after a 1st or 2nd dismissal (FR-17a) is implemented in task 031's re-raise rule; this task must not implement a second one.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation R-8, R-10; FR-50): a dismissal whose reason code carries countsTowardSuppression = false in task 036's catalog (Wrong matter - misresolved) is recorded and queryable but never increments the counter. Read the code from the "code - detail" form of sprk_reason.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation B.2 row 034): expose a read of the (policy, matter) dismissal count and the current sprk_suppresseduntil for the decision wizard's dismissal step (task 058) and admin (task 100). Authorize it as the caller (caller can read the matter) and add it to the route census (NFR-10).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34; D-11 as amended): count dismissals per (policy, CORE record), the core record being the matter OR the project the Signal groups under (sprk_matter or sprk_project, task 007). Everywhere this POML says (policy, matter), read (policy, core record). The count read authorizes on the caller's read of the core record.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-39): an item with no core record counts per (policy, ITEM): three dismissals of that item for one policy suppress it for 30 days. Its count read is authorized like its Signal (owner only).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): the grain is (policy, sprk_corerecordtype, sprk_corerecordid) for every core type, read from the generic columns (task 007). D-36 (extensibility, owner 2026-10-07): the core-record types are the access-control core taxonomy (CoreAncestorResolver.CoreRecordEntities: matter, project, work assignment, service request today) and the record-type catalog (sprk_recordtype_ref). Nothing in this task may branch on a specific core type: read the type from sprk_corerecordtype (the catalog row) and the id from sprk_corerecordid (task 007), and take display name and number fields from the catalog row (sprk_recorddisplaynamefield, sprk_regardingrecordnumberfield). A test adds a fake fifth core type through the taxonomy + a catalog row and shows this task's code handles it unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Suppression and notification fatigue</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the dismissal counter over Decision Records of class Dismissal, grouped by (policy, matter).</step>
+    <step order="2">On the third dismissal, set sprk_suppresseduntil on current and future Signals for that pairing to now plus 30 days.</step>
+    <step order="3">Skip counting when the policy has countstowardsuppression No, while still recording the dismissal.</step>
+    <step order="4">Exclude suppressed Signals from the worklist query by reading the denormalized column.</step>
+    <step order="5">Add tests: three dismissals suppress; two do not; a countstowardsuppression No policy never suppresses but its dismissals are queryable; suppression lapses after 30 days; an auto-closure does not count.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dismissals cannot be counted per (policy, matter) because the Decision Record does not carry enough to group by, STOP and escalate rather than falling back to the dedupe-key grain. The grain was chosen deliberately in D-11 and the fallback silently fails the criterion-4 fatigue case.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+    <trigger>If counting per (policy, core record) needs any per-core-type code (D-36 extensibility), STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The suppression counter itself is this task's original scope; no route exposes a (policy, matter) dismissal count (grep for suppresseduntil in Api/: none).</existing>
+    <extension>The read is added beside the counter that computes it rather than as a separate service, so the wizard and admin show the same number the evaluator uses.</extension>
+    <cost-of-doing-nothing>The wizard's dismissal step cannot show the suppression effect v4 requires (reconciliation Z-7), and admin cannot show why a rule is quiet on a matter.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given three dismissals for one policy on one matter, when the next evaluation runs, then no new Signal for that pairing surfaces and sprk_suppresseduntil is about 30 days out.</criterion>
+    <criterion testable="true">Given two dismissals, when evaluation runs, then a Signal still surfaces.</criterion>
+    <criterion testable="true">Given three dismissals of three DIFFERENT subjects on the same matter for the same policy, when evaluation runs, then suppression applies (matter grain, not subject grain).</criterion>
+    <criterion testable="true">Given a policy with countstowardsuppression No, when dismissed three times, then suppression does NOT apply, and the three dismissals remain queryable and clusterable.</criterion>
+    <criterion testable="true">Given a suppression set 31 days ago, when evaluation runs, then the Signal surfaces again.</criterion>
+    <criterion testable="true">Negative: an auto-closed Signal does not increment the counter.</criterion>
+    <criterion testable="true">Given three dismissals with reason Wrong matter - misresolved, when evaluation runs, then suppression does NOT apply and the dismissals remain queryable.</criterion>
+    <criterion testable="true">Given a suppression that has lapsed and a predicate that still holds, when evaluation runs, then a new episode is raised (not the old Signal reopened).</criterion>
+    <criterion testable="true">Given the count read, when called by a caller who can read the matter, then it returns the (policy, matter) dismissal count and the until-date; when called by one who cannot, then 404; an unresolved caller gets 403; the route is in the census.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given three dismissals for one policy on one PROJECT (no matter), when the next evaluation runs, then suppression applies to that (policy, project) pair (D-34).</criterion>
+    <criterion testable="true">Given three dismissals of one no-core item for one policy, when the next evaluation runs, then that item is suppressed for 30 days (D-39).</criterion>
+    <criterion testable="true">Given three dismissals on one work assignment and three on one service request, when evaluation runs, then each (policy, core record) pair is suppressed independently (D-36).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-17, FR-17a, FR-03 (amended) and success criterion 4. design.md section 8.0c (D-11). Amended 2026-10-07 for D-13 and the reconciliation's R-8/R-10. Step 4 (exclude suppressed Signals from the worklist query) is now satisfied through task 050's FetchXML and task 038's read route.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

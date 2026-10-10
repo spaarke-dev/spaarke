@@ -206,6 +206,13 @@ describe('todoScoring.ts remains untouched (locked composite formula)', () => {
     // from there. The tier boundaries are identical (pinned by `todoScoring.dueTiers.test.ts` and
     // `dueUrgency.crossSurface.test.ts`); the composite-score weights and `computeTodoScore` /
     // `computeDueDateUrgencyRaw` are byte-for-byte unchanged. Hash of the LF-normalised file.
-    expect(hash).toBe('47f94fe286179fe3945294555a927453e40332459f7d68448e4555bd646e4c00');
+    //
+    // Re-pinned 2026-10-09 (spaarke-ontology-platform-r1 task 067 / D-29, same intent): the urgency
+    // component and the composite formula moved out of this file into the ONE shared
+    // `computeTodoScoreBreakdown` / `todoUrgencyRaw` (`@spaarke/ui-components` `utils/dateLocal.ts`),
+    // because `TodoDetail` lives in that package and cannot import this one, and the urgency now counts
+    // CALENDAR days like `computeDueLabel`. `computeTodoScore` here delegates. Weights and tier points
+    // are unchanged and pinned by `todoScoring.calendarDays.tz.test.ts` and `dateLocal.todoScore.test.ts`.
+    expect(hash).toBe('8406a88916e21e5a8e93227ddf97c30a00d8edda31ee9c68bb04f05f85eaadef');
   });
 });

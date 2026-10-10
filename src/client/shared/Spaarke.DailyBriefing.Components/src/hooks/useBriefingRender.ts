@@ -3,12 +3,13 @@
  * BFF `/api/ai/daily-briefing/render` endpoint and returns the typed response.
  *
  * R7 Wave 12 widget cutover (2026-06-30):
- *   Replaces the legacy two-hook chain (`useBriefingNotifications` →
- *   `useBriefingNarration`) that gated /render behind a successful
- *   `appnotification` table load. The old chain meant that when the operator's
- *   appnotification table was empty (notifications dismissed, scheduler not
- *   running, etc.), /render NEVER fired and the widget early-exited to
- *   EmptyState regardless of what live Dataverse data /render WOULD return.
+ *   Replaces the legacy two-hook chain that gated /render behind a
+ *   successful `appnotification` table load (those two hooks were deleted
+ *   as dead code by ontology-platform-r1 task 010 / C-1, 2026-10-03). The
+ *   old chain meant that when the operator's appnotification table was
+ *   empty (notifications dismissed, scheduler not running, etc.), /render
+ *   NEVER fired and the widget early-exited to EmptyState regardless of
+ *   what live Dataverse data /render WOULD return.
  *
  *   This hook fires /render unconditionally on mount. Empty data is a
  *   property of the response (`status: 'empty'`), not a gate on the call.

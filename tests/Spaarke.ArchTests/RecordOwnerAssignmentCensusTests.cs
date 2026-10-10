@@ -187,6 +187,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TaskActionCore.cs", "sprk_event", 1, Disposition.Routed,
             "AI create-task: ForChild over the stamped parents; the caller-supplied owner no longer owns a filed task "
             + "(B2: the assignee belongs in Assigned To, task 152)."),
+        new CensusEntry("InquiryReplyTodoCreator.cs", "sprk_todo", 1, Disposition.Routed,
+            "Ontology task 071 (D-111): the \"Record the outcome of the budget inquiry\" To Do raised when a reply arrives: ForChild "
+            + "over the matter it is filed against (secure-if-any); the person it is for is Assigned To (task 152's rule); a "
+            + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
         new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
@@ -419,6 +423,8 @@ public class RecordOwnerAssignmentCensusTests
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
+        new OwnerWriteEntry("InquiryReplyTodoCreator.cs", "CreateIfNeededAsync", 1, OwnerWriteKind.Routed,
+            "The budget-inquiry outcome To Do (ontology 071) - ForChild over its matter, the resolver's team; nothing is created on a refusal."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
@@ -467,10 +473,19 @@ public class RecordOwnerAssignmentCensusTests
             "appnotification from a playbook — owned by its recipient."),
         new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
             "A Direct (two-party) thread — per-participant by design (E2)."),
+        new OwnerWriteEntry("SignalWriter.cs", "BuildEntity", 1, OwnerWriteKind.PerUser,
+            "Ontology task 037 (D-35): a Do-lane Signal whose item has NO core record is owner-only: it is owned by the item's " +
+            "own owner, copied from the item and read back. Reached only on CoreAncestorResolver no-core status (Error " +
+            "escalates); every Signal that has a core record takes the resolver's answer (ApplyTo) or the FR-14 business unit. " +
+            "uac-r2 approved on #1355."),
         new OwnerWriteEntry("PlaybookService.cs", "BuildCreatePayload", 1, OwnerWriteKind.PerUser,
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
+        // spaarke-ontology-platform-r1 task 040 (owner D-39): needs uac-r2 review: ontology PR #1600 (listed PerUser; the no-core owner is the item's owner by D-39).
+        new OwnerWriteEntry("DecisionRecordWriter.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
+            "sprk_decisionrecord of an item with NO core record: owned by the item's own owner (a user), never by a team. A "
+            + "Decision Record WITH a core record takes the resolver's answer through ApplyTo (the censused resolver write)."),
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
@@ -1384,8 +1399,19 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+        ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
+                                           + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
+                                           + "is written, so nothing is created or re-filed.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
+        ["DecisionActionExecutors.cs"] = "Ontology platform R1 task 044: the caller PATCHes ONE budget amount column (sprk_totalbudget, D-55) and, on a work "
+                                         + "assignment, sprk_responseduedate / sprk_respondedon / sprk_responseoutcome after their Write — plain columns, never a "
+                                         + "lookup or an owner, so nothing is re-filed. The budget revision is created by the writer, owned through "
+                                         + "IRecordOwnershipResolver (ApplyTo); the To Do and event writes go through the child-records cores.",
+        ["EventDueAssigneeWrite.cs"] = "Ontology platform R1 task 044 (#29): PATCHes an event's sprk_duedate and/or its assignee CONTACT "
+                                       + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
+                                       + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
+                                       + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]

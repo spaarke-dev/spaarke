@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Repair the space-bearing matter-number tokenizer</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the association engine precision and cost profile, which ADR-045 governs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A regex fix with a measured cost delta.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,bug,association</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix WellFormedTokenPattern so space-bearing matter numbers tokenize, and ship it with a measured query-count delta.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>Live matter Form D - 2023 tokenizes, ExplicitReference fires for it, and the cost change is measured rather than assumed.</goal>
+
+  <context>
+    <background>WellFormedTokenPattern needs an alpha prefix IMMEDIATELY followed by a hyphen or dot, so live matter Form D - 2023 never tokenizes and ExplicitReference never fires, even with the number AND name verbatim in the subject.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordMatching</file>
+      <file role="canonical-reference">.claude/adr/ADR-045-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Scope: this changes the association engine precision and cost profile. Ship with a MEASURED query-count delta, not an assumed one.</constraint>
+    <constraint source="project">Scope: loosening the pattern risks false tokens, which cost queries. Measure the query count before and after on a representative sample.</constraint>
+    <constraint source="project">Scope: auto-file stays at 0.85 and remains barred to the AI rung. Recall over precision for NOTIFYING, never for FILING: filing writes data, where a false positive is worse than a miss.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Association engine tokenization</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Reproduce the failure: confirm Form D - 2023 does not tokenize today.</step>
+    <step order="2">Measure the current query count per inbound communication on a representative sample.</step>
+    <step order="3">Adjust the pattern to allow optional whitespace around the separator, without admitting arbitrary prose.</step>
+    <step order="4">Re-measure the query count and record the delta.</step>
+    <step order="5">Add tests: the space-bearing matter tokenizes; ExplicitReference fires with the number and name in the subject; obvious non-tokens are still rejected.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the fix raises the query count materially (for example more than doubling it), STOP and escalate with the measurement rather than shipping it. ADR-045 governs the cost profile and that is an owner trade-off.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordMatching</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/RecordMatching</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/tokenizer-cost-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the subject containing Form D - 2023, when tokenized, then the matter number is extracted.</criterion>
+    <criterion testable="true">Given that subject with both the number and the matter name, when the ladder runs, then ExplicitReference fires.</criterion>
+    <criterion testable="true">Given a representative sample, when query counts are compared before and after, then the delta is measured and recorded.</criterion>
+    <criterion testable="true">Negative: obvious non-tokens (ordinary prose with hyphens) are still rejected.</criterion>
+    <criterion testable="true">Negative: auto-file remains 0.85 and the AI rung still cannot reach it alone.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-43. Completed: WellFormedTokenPattern repaired to tolerate whitespace around the
+  separator and a single-letter second prefix word (e.g. "Form D"), with a digit-in-body requirement added
+  to hold the no-arbitrary-prose criterion. Measured query-count delta per ADR-045: BEFORE 161 queries / 23
+  of 35 representative messages trigger the roster; AFTER 133 queries / 19 of 35 — a net DECREASE of 28
+  queries (not an increase), well inside the escalation threshold. Full methodology + numbers in
+  projects/spaarke-ontology-platform-r1/notes/tokenizer-cost-delta.md. A first draft of the regex was
+  ambiguous (admitted ANY second prefix word, not just one letter) and broke the pre-existing
+  Fr12_NewRecordFraming_... regression test by mis-tokenizing "... related to MAT-123" as "to MAT-123";
+  caught by running the full test file before completion, fixed by restricting the second word to exactly
+  one letter, and pinned permanently as a new corpus row. code-review + adr-check both clean.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

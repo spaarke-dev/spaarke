@@ -453,6 +453,7 @@
     <RolePrivilege name="prvReadsprk_AttachmentArtifact" level="Deep" />
     <RolePrivilege name="prvReadsprk_BillingEvent" level="Deep" />
     <RolePrivilege name="prvReadsprk_Budget" level="Deep" />
+    <RolePrivilege name="prvReadsprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvReadsprk_BudgetBucket" level="Deep" />
     <RolePrivilege name="prvReadsprk_chartdefinition" level="Global" />
     <RolePrivilege name="prvReadsprk_ChartType" level="Global" />

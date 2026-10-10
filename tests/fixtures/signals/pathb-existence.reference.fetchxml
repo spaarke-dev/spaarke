@@ -1,0 +1,24 @@
+<fetch distinct="true">
+  <entity name="sprk_matter">
+    <attribute name="sprk_matterid" />
+    <order attribute="sprk_matterid" />
+    <link-entity name="sprk_communication" from="sprk_regardingmatter" to="sprk_matterid" link-type="inner" alias="c0">
+      <filter type="and">
+        <condition attribute="sprk_triagecategory" operator="in">
+          <value>8b62dd84-1fbc-f111-aaaf-3833c5e9614d</value>
+          <value>8d62dd84-1fbc-f111-aaaf-3833c5e9614d</value>
+        </condition>
+        <condition attribute="sprk_receiveddate" operator="ge" value="2026-09-04T02:15:00Z" />
+        <condition attribute="sprk_reviewoutcome" operator="ne" value="100000003" />
+      </filter>
+    </link-entity>
+    <link-entity name="sprk_budgetrevision" from="sprk_matter" to="sprk_matterid" link-type="outer" alias="c1">
+      <filter type="and">
+        <condition attribute="sprk_revisedon" operator="ge" value="2026-09-04T02:15:00Z" />
+      </filter>
+    </link-entity>
+    <filter type="and">
+      <condition entityname="c1" attribute="sprk_budgetrevisionid" operator="null" />
+    </filter>
+  </entity>
+</fetch>

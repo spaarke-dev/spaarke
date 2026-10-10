@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Closure semantics including aged-out-of-window</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>031 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Decides when a Signal stops existing; errors here either rot the worklist or close live work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified state machine over an existing option set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>031</deps>
+    <tags>bff-api,signals,lifecycle</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the three system closure types and map aged-out-of-window to ConditionCleared, leaving the decision reference null for all of them.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>A Signal closes correctly and distinguishably for each system reason, with no Decision Record written.</goal>
+
+  <context>
+    <background>The resolution vocabulary already half-exists on live sprk_spendsignal (Active, Acknowledged, Resolved, Auto Resolved), where Auto Resolved IS ConditionCleared. So this is vocabulary to copy, not invent. What does not exist is anything that WRITES it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: a Signal whose communication has simply AGED OUT of the window closes as ConditionCleared. The condition genuinely no longer holds. Do NOT add a separate expired resolution type: that would split a closed set over an axis nothing reads.</constraint>
+    <constraint source="project">Scope: for ConditionCleared, Superseded and PolicyRetired, sprk_signal.sprk_decisionrecord stays NULL. Nobody decided anything; the pass closed it. This is the ONLY remaining reason that column is nullable.</constraint>
+    <constraint source="project">Scope: an auto-closure must NEVER count as a human dismissal. The three-dismissal suppression rule is wrong in both directions if it does.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13, D-14): a version is superseded when its sprk_inforceto is set (publishing stamps it, task 101) or when sprk_policy.sprk_currentversion points elsewhere; read sprk_inforceto. Closing as Superseded is followed, in the same pass, by task 031's re-raise of each subject the NEW version still holds, as a new episode citing the new version. Expose the supersede closure as a callable method so task 101's publish can run it.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-22 slice a; FR-16 amended; reconciliation M-5): split Off from Retire. Off (sprk_enabled = No): open Signals close as PolicyRetired at the next pass. Retire (statuscode Retired + sprk_retiredreason, task 007): expose ClosePolicyRetiredNow(policyId) so task 100 closes them immediately. Neither writes a Decision Record.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (#15): no closure path touches a Signal that is already Resolved.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-32): Off is reversible. A policy switched On again after Off has its still-true subjects re-raised as new episodes by task 031; this task's Off closure must therefore leave each Signal's policy, subject and episode intact (no data cleared) so 031 can find the PolicyRetired episode. Retire (statuscode Retired) is not reversed by switching On.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34): wherever a closure or a supersede re-raise touches suppression, the grain is (policy, core record) (matter or project), not (policy, matter); an auto-closure still never counts.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36, D-39): the suppression grain is (policy, core record) for every core type (matter, project, work assignment, service request), and (policy, item) for an item with no core record; no closure path branches on a core type.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Signal lifecycle and resolution semantics</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement ConditionCleared when the predicate no longer holds, including the aged-out case.</step>
+    <step order="2">Implement Superseded when a newer policy version is in force and the Signal cites the older one.</step>
+    <step order="3">Implement PolicyRetired when the policy is disabled or deleted.</step>
+    <step order="4">Set sprk_resolvedon and leave sprk_resolvedby and sprk_decisionrecord null for all three, since no human acted.</step>
+    <step order="5">Add tests for each, plus a test asserting an auto-closure does not increment the dismissal counter.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a Signal needs closing for a reason none of the three covers, STOP and escalate rather than adding a fourth value. The option set is closed and adding to it is a schema change plus a code change with review.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an open Signal whose communication aged out of the window, when the pass runs, then it closes as ConditionCleared.</criterion>
+    <criterion testable="true">Given an open Signal citing a superseded policy version, when the pass runs, then it closes as Superseded.</criterion>
+    <criterion testable="true">Given a disabled policy, when the pass runs, then its open Signals close as PolicyRetired.</criterion>
+    <criterion testable="true">Negative: for all three system closures, sprk_decisionrecord is null and sprk_resolvedby is null.</criterion>
+    <criterion testable="true">Negative: an auto-closure does NOT increment the dismissal counter used by suppression.</criterion>
+    <criterion testable="true">Given a published v2 (v1's sprk_inforceto stamped) and an open v1 Signal whose subject v2 still holds, when the pass (or the callable supersede) runs, then the v1 Signal is Superseded and a new episode citing v2 is open.</criterion>
+    <criterion testable="true">Given a retired policy, when ClosePolicyRetiredNow runs, then its open Signals are PolicyRetired immediately; given a policy switched Off, then they close at the next pass.</criterion>
+    <criterion testable="true">Negative: a Signal already Resolved (e.g. Acted) is not changed by any closure path.</criterion>
+    <criterion testable="true">Given a policy switched Off (Signals closed PolicyRetired) and then On again, when the next pass runs, then subjects that still hold are raised as new episodes and the PolicyRetired Signals are unchanged (D-32, with task 031).</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Negative: an auto-closure of a project-grouped Signal does not increment the (policy, project) dismissal counter.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-16 (amended 2026-10-07: D-13, D-14, Retire), FR-03 (episodes). design.md section 8.3 closing note covers the aged-out mapping. Reconciliation B.2 row 033; #15, #40. D-32 (Off then On re-raise).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

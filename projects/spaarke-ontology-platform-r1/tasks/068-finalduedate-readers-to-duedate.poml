@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-63: remaining sprk_finalduedate readers judge and show sprk_duedate (playbook, VisualHost card, CalendarVisual), own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a live playbook node's query (Dataverse data) and client code; behaviour users see.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; files listed in notes/065-finalduedate-readers.md only.</parallel-reason>
+    <deps>098</deps>
+    <tags>frontend,dataverse,ai,separate-pr</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Apply owner decision D-63 (2026-10-07): sprk_finalduedate is informational only EVERYWHERE. Change the three remaining places that judge or display by it so they use sprk_duedate.</prompt>
+  <role>SPAARKE engineer. A rescheduled task must not be called overdue by its old date.</role>
+  <goal>(1) The live notification playbook node "Query Overdue Tasks" (id 348b6395-a171-f111-ab0d-7ced8ddc4a05) flags a task overdue only when sprk_duedate is before the recipient's today; (2) the VisualHost due-date card shows and judges sprk_duedate only; (3) CalendarVisual uses sprk_duedate when no date field is configured.</goal>
+
+  <context>
+    <background>D-27 made sprk_duedate the one due date for the Do lane, Reschedule and the Daily Briefing (PR #1359, task 065 folded into 098). Task 098 found three more readers still preferring or falling back to sprk_finalduedate; the inventory with file:line is notes/065-finalduedate-readers.md. Owner decision D-63 (2026-10-07): apply D-27 to all three; the playbook data change is approved by that decision.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-63: the playbook node change is approved Dataverse data change in spaarkedev1 only. Record the node's before/after query text. Change only that node's date condition; do not touch other playbook nodes or other playbooks. Record the per-environment step (the playbook row ships with its owning solution) — do not export/import solutions yourself.</constraint>
+    <constraint source="project">Base on origin/master AFTER PR #1359 merges (this task depends on 098). If #1359 has not merged when you start, STOP and report. Keep the "today" boundary per D-25 (recipient's time zone via the helper 098 added); do not reintroduce UTC.</constraint>
+    <constraint source="project">Own PR to master. The blocking Tier 1 Xrm capability guard applies to any getXrm use. PCF builds via scripts/Invoke-PcfBuildProd.ps1 (npm run build:prod; pcf-scripts exits 0 on failure — judge by output). Bump VisualHost PCF version per the PCF deployment guide if the control changes. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level per root CLAUDE.md section 8.</step>
+    <step order="1">Read notes/065-finalduedate-readers.md; confirm the three readers on current master.</step>
+    <step order="2">Change the VisualHost due-date card and CalendarVisual default; tests that fail on the old fallback (America/New_York jest environment from 098).</step>
+    <step order="3">Change the playbook node's query in spaarkedev1; read it back; prove live with a zz-068- task whose final due date has passed but whose due date has not (no overdue notification candidate) and the reverse; delete test rows.</step>
+    <step order="4">Build, tests, Xrm guard, Step 9.5 gates; open the PR against master; CI green; do not merge.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The "Query Overdue Tasks" node's condition references sprk_duedate only; before/after recorded; a rescheduled task (due in future, final due past) is not selected; an overdue task (due past) is selected — proven live, test rows deleted.</criterion>
+    <criterion testable="true">The VisualHost due-date card and CalendarVisual never read sprk_finalduedate to decide what to show; tests fail on the old fallback.</criterion>
+    <criterion testable="true">No other playbook node or reader changed; git grep for sprk_finalduedate shows only informational uses, listed in the PR body.</criterion>
+    <criterion testable="true">A PR against master is open with CI green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The playbook node's query cannot be changed without altering another node or the playbook's structure.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-07 by the main session on owner decision D-63 (from task 098's report).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>COMPLETED 2026-10-08: PR #1413 merged 885d0c5f9 (owner approval). 
+    <status>completed</status>
+    <date>2026-10-08</date>
+    <summary>Branch fix/finalduedate-readers-068 (worktree C:/wts-068) off origin/master 11dc9b0da. VisualHost card (selectDueDate, sprk_duedate only) + CalendarVisual default (sprk_duedate) changed with tests that fail on the old fallback (4 fail when restored; VisualHost jest 84/84); PCF 1.4.38 -> 1.4.39, prod build succeeded via Invoke-PcfBuildProd. Live node Query Overdue Tasks (348b6395-...) in spaarkedev1: the OR-filter over sprk_duedate/sprk_finalduedate replaced by the single sprk_duedate lt {{todayUtc}} condition (before/after text in the PR body); live proof with zz-068- rows: BEFORE query returned rescheduled+overdue, AFTER returned overdue only; rows deleted. Repo copy of the playbook JSON updated. Round 2 (2026-10-08): D-73 applied - live node now orders by sprk_duedate only (before: order sprk_finalduedate then sprk_duedate; after: order sprk_duedate), read back live, repo copy matches; notification-tasks-due-soon.json (repo-only) drops the sprk_finalduedate OR (head e5f55a418). D-72: the statuscode=Open filter is KEPT, an accepted known difference from the Briefing's IsOpenWork (D-57); no change. Also carries the one-line EventRoutesLiveTests compile fix for master (same as PR #1384). Round 3 (2026-10-08, head ded3cc069): F2 fixed - mapEventToCardProps returns null without sprk_duedate (card shows its no-record state, list drops it), test fails on old code. F1 - live node vs repo differ only by the sprk_regardingmatter-in-joinIds condition (pre-existing: live lacked it before 068). D-76 restore ATTEMPTED then REVERTED: Dataverse rejects `operator="in" value="id,id"` (0x80040203 'In is empty'); BFF passes rendered XML unchanged, so restoring would break the node for all recipients. Proved with zz-068 rows that child <value> elements work (member matter selected, non-member not; ids from the real GET /api/users/me/memberships/sprk_matter). Live node left at pre-D-76 text; owner decision needed (child-<value> form via #each or executor expansion, or drop from repo). Same defect likely in live nodes Query New Work Assignments (30371fa5-...) and Query Matter Activity (dfb7e6a0-...).</summary>
+    <needs>CI green and merge of PR #1413; per-environment step: apply the same one-condition edit when the playbook solution is promoted beyond spaarkedev1.</needs>
+  </completion>
+</task>

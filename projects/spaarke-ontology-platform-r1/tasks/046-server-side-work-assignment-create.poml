@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Server-side work-assignment create through the BFF</title>
+    <phase>4b Commit and actions</phase>
+    <gate>008 complete AND task 048 merged (the write core moves once, before this builds on it)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves the create of a secure-record root from the browser to the server; business-unit cascade semantics must survive exactly.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-domain write path for a secure-record root (WP-3), with a client wizard to keep working and an area owner to satisfy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>008, 048</deps>
+    <tags>bff-api,auth,security,dataverse,endpoints</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build a BFF create path for sprk_workassignment that reproduces the client wizard's business-unit cascade server-side, so Assign Work can be a Next step inside a decision, and let the existing wizard call it.</prompt>
+  <role>SPAARKE backend developer. Invariants live on the server (WP-1..WP-3).</role>
+  <goal>A work assignment created through the BFF has the same owner, business unit, regarding and fields as one created by the current wizard; the decision commit route and the wizard can both use it.</goal>
+
+  <context>
+    <background>D-21 (spec section 9; #31): this project builds the server-side create for sprk_workassignment through the BFF (WP-3; secure-record root), so Assign Work is part of the decision; coordinate with the work-assignment area owner; preserve the existing client wizard's business-unit cascade semantics server-side. Today work assignments are created only by browser createRecord with a client-side business-unit cascade (CreateWorkAssignmentWizard/workAssignmentService.ts ~:532). The Dataverse write-path architecture says invariant-bearing tables are written via the BFF, not Xrm.WebApi.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/WorkAssignments/WorkAssignmentCreateService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/WorkAssignments/WorkAssignmentEndpoints.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-21): reproduce workAssignmentService.ts's business-unit cascade and every field it sets, server-side; record a field-by-field parity table in notes before writing code. Do not change what the wizard collects.</constraint>
+    <constraint source="owner">Scope (D-21): the work-assignment area owner reviews the parity table and the PR. Name the reviewer in the PR; do not merge without that review.</constraint>
+    <constraint source="project">Scope: the create runs AS THE CALLER (IDataverseUserClient) so Dataverse enforces Create and AppendTo; an ADR-024 regarding write follows the server-side resolver pattern (TodoRegardingBuilder), not a third implementation.</constraint>
+    <constraint source="project">Scope: the service is callable in-process by task 043 and over HTTP by the wizard; switch the wizard to it only once parity is proven live, and keep its UI unchanged.</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entry, RequireAuthorization, single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: parity proven live: one assignment via the old browser path and one via the BFF for the same inputs, compared field by field, then cleaned up.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check (the work-assignment area is another project's territory).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="uac-r2">D-113 (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 4) SUPERSEDES the new service, new endpoint and new ledger entry above: the canonical core is OwnedChildWrite.CreateAsync, which already creates sprk_workassignment with G5 (Create plus AppendTo on every bound record), the owner from IRecordOwnershipResolver, SecureRootFilingGate.PlanCreateAsync, the creator stamp and the sprk_assignedtointernal materialisation. NO new route and NO third create path: add sprk_workassignment to ChildRecordEndpoints.CreateTables (route POST /api/v1/child-records/sprk_workassignment, already in the route census, so no new ledger entry); task 043 calls OwnedChildWrite.CreateAsync in-process. RecordCreationService (Services/Office) creates only matters and projects; nothing to retire. Since uac-r2 task 175: the filing gate refuses a caller-supplied sprk_issecure, sprk_accesspermission or sprk_accessinheritance, and a filed work assignment takes Secure/Access Permission from its parent, so neither the wizard nor the decision may send those columns. The parity table (wizard vs server) still applies to every other field; the outputs WorkAssignmentCreateService.cs / WorkAssignmentEndpoints.cs are not created.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Server-side writes for secure-record roots</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Server-side ADR-024 write" location="src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs">The server mirror of the polymorphic resolver.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Write the field-by-field parity table from workAssignmentService.ts; get the area owner's review.</step>
+    <step order="2">Implement the create service and endpoint with the census entry.</step>
+    <step order="3">Prove parity live; switch the wizard's create call to the endpoint.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the area owner does not agree with the parity table, or the cascade cannot be reproduced as the caller, STOP and escalate; do not ship a server create that differs from the wizard.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>workAssignmentService.ts creates sprk_workassignment in the browser (~:532); no BFF route creates one (#31).</existing>
+    <extension>No: the existing path is client-side and cannot run inside a server-side commit; its cascade logic is the specification, ported rather than reinvented.</extension>
+    <cost-of-doing-nothing>Assign Work cannot be a Next step inside a decision (D-21), and a secure-record root keeps being written from the browser against WP-3.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="npm">Build the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/WorkAssignments/WorkAssignmentCreateService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/WorkAssignments/WorkAssignmentEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/046-work-assignment-parity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given identical inputs, when one assignment is created by the old browser path and one by the BFF, then every field in the parity table matches, including owner and owning business unit.</criterion>
+    <criterion testable="true">Given the existing Create Work Assignment wizard, when used after the switch, then it creates through the BFF and its UI is unchanged.</criterion>
+    <criterion testable="true">Given task 043, when it calls the service in-process, then the created id is returned for sprk_followons.</criterion>
+    <criterion testable="true">Negative: a caller without Create on sprk_workassignment or AppendTo on the regarding record is refused before writing; an unresolved caller gets 403; the route is in the census.</criterion>
+    <criterion testable="true">The area owner's review is recorded in the PR and notes.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. All tests pass; the BFF and the UI package build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-53, NFR-10; D-21.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

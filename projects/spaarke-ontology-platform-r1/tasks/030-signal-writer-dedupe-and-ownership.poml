@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Signal writer: dedupe upsert, resolver fields and owner from the grouping matter</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>021 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes a secured Dataverse row; an ownership mistake here is a data-exposure bug that is invisible because nothing errors.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified writer reusing a canonical resolver; the judgement was already made in D-3 and FR-14.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Every later lifecycle task depends on the writer existing and on its ownership behavior.</parallel-reason>
+    <deps>021, 006</deps>
+    <tags>bff-api,dataverse,security,signals</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write Signals idempotently via the dedupe key, populate the subject through the canonical polymorphic resolver, and set the owner from the grouping matter.</prompt>
+  <role>SPAARKE backend developer. Security fails closed; ownership is part of the write, not a follow-up.</role>
+  <goal>Re-evaluation upserts rather than duplicating, the subject is written as both a typed lookup and the denormalized trio, and every Signal is owned via its grouping matter.</goal>
+
+  <context>
+    <background>D-3 settled that the worklist reads Signals and groups them by matter, so the shape needs a polymorphic subject PLUS an always-populated matter lookup derived from it. FR-14 is one line in the writer and free now; retrofitting means re-owning every row.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: SET THE OWNER (or owning business unit) FROM THE GROUPING MATTER AT CREATION. A Signal is secured by its OWN owner, not by the matter it points at, while sprk_sentence can carry matter detail. A service-owned Signal at depth-4 read could expose a matter the reader cannot open, with the matter lookup rendering BLANK while the sentence tells them anyway. Live across 6 business units. Spaarke Ontology Service already holds Assign, so no privilege change is needed.</constraint>
+    <constraint source="ADR-024">Scope: write the typed sprk_regarding lookup AND the denormalized resolver fields in ONE call. They are not alternatives. CORRECTED 2026-10-03: the canonical PolymorphicResolverService.applyResolverFields is CLIENT-SIDE TYPESCRIPT (src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts) and a C# writer CANNOT call it. The server-side mirror of the same ADR-024 semantics is Services/Workspace/TodoRegardingBuilder.cs (smart-todo-decoupling-r3), which does exactly this job for sprk_todo. Mirror TodoRegardingBuilder; treat the TypeScript service as the semantic specification, not as a callable dependency. Do NOT invent a third implementation.</constraint>
+    <constraint source="project">Scope: store record ids LOWERCASE with braces stripped. The audit found two divergent regexes in circulation (section 8.3 U1).</constraint>
+    <constraint source="project">Scope: sprk_dedupekey is policycode plus regardingrecordtype plus regardingrecordid. There is NO sprk_subjecttype column on sprk_signal (only on sprk_policy). The alternate key is Active, so the platform enforces uniqueness.</constraint>
+    <constraint source="project">Scope: sprk_matter is ALWAYS populated, derived from the subject. sprk_regardingmatter means the subject IS this matter; sprk_matter is the grouping key. Both are needed and conflating them breaks the worklist grouping.</constraint>
+    <constraint source="project">Scope: write sprk_factsnapshot at DETECTION time. A Signal that auto-closes as ConditionCleared never produces a Decision Record, so without this the detection-time facts are lost entirely.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-03 (task 002 option A): the writer authenticates as the dedicated least-privileged identity provisioned by task 006, which holds only Spaarke Ontology Service. Never write Signals or Decision Records as the sysadmin BFF identity.</constraint>
+    <constraint source="project">TASK 006 RESULT (2026-10-04): authenticate as user-assigned managed identity client id 69040982-612e-469e-a85f-26d5172367c5 (mi-ontology-writer-dev, already attached to spaarke-bff-dev), app-only, pinned via ManagedIdentityId.FromUserAssignedClientId, read from a NEW config key (not ManagedIdentity:ClientId or Graph:ManagedIdentity:ClientId, which are the sysadmin identity). Fail closed if the key is empty: never fall back to the shared Dataverse client. If the token cannot be acquired, STOP and escalate (task 006 trigger). Two findings to act on: (a) Write on sprk_signal and every Read reach the writer only through the root BU default team (Console User, Basic User, Office Add In User); decide with the owner whether to add them to Spaarke Ontology Service so the writer does not depend on the team. (b) the writer reads spendsnapshot, spendsignal, document, account and contact at Basic depth only, so a NOT-EXISTS over those is vacuously true: fail closed. See notes/security-roles.md section 9.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Signal persistence, polymorphic subjects and ownership</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic subject write" location="src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs">The SERVER-SIDE ADR-024 implementation: sets the typed regarding lookup and the denormalized resolver fields together for sprk_todo. Mirror its shape for sprk_signal. The client-side counterpart it names in its own header, PolymorphicResolverService.applyResolverFields, is TypeScript - it is the semantics to match, not code this writer can call.</pattern>
+      <pattern name="Idempotent signal upsert" location="src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs">Lines 241-258 show the OLD key (matter plus type) which does NOT survive a polymorphic subject. Read it to understand what is being replaced, not to copy it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the writer taking a policy, a policy version, a subject reference and a fact snapshot.</step>
+    <step order="2">Write the typed sprk_regarding lookup AND the denormalized resolver fields for the subject in one call, mirroring Services/Workspace/TodoRegardingBuilder.cs (the server-side ADR-024 implementation). The TypeScript PolymorphicResolverService is the semantic spec and is NOT callable from C# - read it to match behavior, then follow TodoRegardingBuilder for the server-side shape.</step>
+    <step order="3">Derive the grouping matter from the subject and populate sprk_matter unconditionally. If it cannot be derived, do not write a Signal with a null grouping matter.</step>
+    <step order="4">Set the owner or owning business unit from the grouping matter.</step>
+    <step order="5">Compose sprk_dedupekey and upsert on it, so re-evaluation updates rather than duplicating.</step>
+    <step order="6">Write sprk_factsnapshot, sprk_sentence (from the version message template), sprk_evidencerefs, sprk_policycode, sprk_firstdetected and sprk_lastevaluated.</step>
+    <step order="7">Verify sprk_sentence against section 0.3: it may assert only what the predicate read.</step>
+    <step order="8">Add tests including the ownership assertion and the upsert-not-duplicate assertion.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the grouping matter cannot be derived for some subject type, STOP and escalate rather than writing a Signal with a null sprk_matter or a service owner. Both break the worklist grouping and the security model respectively, and both fail silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SignalEvaluationService writes sprk_spendsignal rows, but its idempotency key GenerateDeterministicId(matterId, signalType) (:241-258) is matter plus type only and has no room for a polymorphic subject.</existing>
+    <extension>No. The key shape is the thing that must change, and it is embedded in a private method of a service whose rule interface is also private and constructor-instantiated.</extension>
+    <cost-of-doing-nothing>Re-evaluation duplicates Signals instead of updating them, so the worklist fills with repeats and suppression counts become meaningless. Separately, without owner-from-matter a reader can see a Signal about a matter they cannot open.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/SignalWriterTests.cs</output>
+    <output type="test">tests/integration/seam/SignalWriterSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a subject and a firing policy, when the writer runs twice, then exactly ONE Signal row exists and sprk_lastevaluated was updated on the second run.</criterion>
+    <criterion testable="true">Given a Signal about a communication on matter X, when written, then sprk_matter is X and the typed sprk_regardingcommunication lookup is set along with the denormalized trio.</criterion>
+    <criterion testable="true">Given any Signal created by the writer, when read, then its owner derives from its grouping matter and is NOT the service identity.</criterion>
+    <criterion testable="true">Given a record id with braces or uppercase, when stored, then it is lowercase with braces stripped.</criterion>
+    <criterion testable="true">Negative: a subject whose grouping matter cannot be derived does NOT produce a Signal with a null sprk_matter; it escalates.</criterion>
+    <criterion testable="true">Negative: sprk_sentence asserts nothing the rule body did not read.</criterion>
+    <criterion testable="true">sprk_factsnapshot is populated at detection time on every Signal.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-03, FR-14 and NFR-08. FR-14 is the item most likely to be lost into implementation: one line now, a re-own of every row later, and invisible until then because nothing errors.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion date="2026-10-04">
+    <summary>
+      REWORKED after an independent review returned FAIL against the first implementation, using LIVE findings
+      verified by the reviewer as the writer (MSCRMCallerID impersonation). Final design: SignalWriter
+      (Services/Signals/SignalWriter.cs) CREATE-FIRST writes sprk_signal with the full payload (status,
+      firstdetected, owningbusinessunit, policyversion, factsnapshot, sentence — all atomic in one Create
+      call); on sprk_dedupekey's duplicate-key fault (DataverseServiceClientImpl.IsAlternateKeyDuplicate, reused
+      not reinvented) it reconciles to the existing row and updates ONLY sprk_lastevaluated, never re-sending
+      detection-time facts. Writes the ADR-024 typed regarding lookup + denormalized text resolver trio in one
+      call; derives the grouping matter from a CLOSED verified set (sprk_matter = itself; sprk_communication via
+      sprk_regardingmatter; any other subject type escalates). Ownership is owningbusinessunit (NOT a team —
+      team ownership is confirmed unworkable live, 403 0x80040299, for 59/62 matters), read via the shared
+      sysadmin client and read back + verified after create; a mismatch escalates. Authenticates via
+      OntologyWriterDataverseClient (public sealed, ADR-010 Path C — no interface of this project's own; typed
+      seam is the Dataverse SDK's own IOrganizationServiceAsync2), which builds its own ServiceClient directly
+      from OntologyWriterCredentialFactory with NO branch to any other identity (F7/F13/F14), Lazy +
+      PublicationOnly so a transient connect failure is retried, not cached (F15). Every refusal (credential
+      unresolvable, token acquisition failed, Dataverse access-denied, owning-BU mismatch, any escalation) logs
+      OntologyWriterEvents.WriteRefused at Error with a bounded reason tag + policyCode, increments the
+      ontology.writer.failures{reason} metric (Telemetry/OntologyWriterTelemetry.cs, registered in
+      TelemetryModule), and rethrows — never swallowed, never logged as success.
+    </summary>
+    <acceptance-criteria-evidence>
+      <item>Upsert-not-duplicate (create-first + reconcile), lastevaluated updated on re-run: SignalWriterTests.WriteAsync_ConcurrentDuplicateKeyCreate_BecomesAnUpdate_NotAThrow + WriteAsync_ReEvaluation_UpdatesOnlyLastEvaluated_NeverResendsDetectionTimeFields (pass).</item>
+      <item>Communication subject -&gt; sprk_matter=X + typed sprk_regardingcommunication + trio: SignalWriterTests.WriteAsync_CommunicationSubject_DerivesMatterFromRegardingMatter_SetsTypedLookupAndTrio (pass, unit). LIVE seam (WriteAsync_CommunicationSubject_DerivesTheRealGroupingMatter) found F26: the writer lacks AppendTo on sprk_communication (403) — escalated to owner, not fixed here (role edit, out of scope).</item>
+      <item>Owning business unit derives from the grouping matter, never left in the writer's own BU: SignalWriterTests.WriteAsync_SetsOwningBusinessUnitFromGroupingMatter_OwnerLeftDefault + WriteAsync_CreatedRowOwningBusinessUnitMismatch_Escalates + WriteAsync_MatterWithNoOwningBusinessUnit_Escalates (pass). LIVE seam (WriteAsync_MatterSubject_CreatesThenReconciles_AndSetsOwningBusinessUnit) PASSED against real spaarkedev1 data as the writer principal.</item>
+      <item>A resolved Signal stays resolved after re-evaluation: SignalWriterTests.WriteAsync_ReEvaluation_AResolvedSignalStaysResolved (pass).</item>
+      <item>firstdetected set atomically on create: SignalWriterTests.WriteAsync_FirstRun_Creates_SetsFirstDetectedInTheSameCreateCall (pass; asserts exactly one CreateAsync call).</item>
+      <item>Negative — null-matter escalation: SignalWriterTests.WriteAsync_SubjectTypeWithNoVerifiedMatterDerivation_Escalates_AndWritesNothing + WriteAsync_CommunicationWithNoRegardingMatter_Escalates_AndWritesNothing (pass; SignalWriterEscalationException, zero rows written).</item>
+      <item>Negative — sentence asserts only what was read, exactly three checks (key present, value non-null, no leftover placeholder): SignalWriterTests.RenderSentence_TokenNotInFactSnapshot_Throws + RenderSentence_NullFactValue_Throws + RenderSentence_SubstitutedValueLooksLikeALeftoverToken_Throws + WriteAsync_TemplateReferencesUnreadField_Escalates_AndWritesNothing (pass).</item>
+      <item>sprk_factsnapshot populated at detection time, on create: SignalWriterTests.WriteAsync_WritesFactSnapshotVerbatim_OnCreate (pass).</item>
+      <item>Length guards (F21): SignalWriterTests.WriteAsync_PolicyCodeTooLong_ThrowsArgumentException + WriteAsync_ShortHeadlineTooLong_ThrowsArgumentException + WriteAsync_RenderedSentenceTooLong_ThrowsArgumentException (pass).</item>
+      <item>Credential guard (F7): SignalWriterTests.OntologyWriterDataverseClient_EmptyCredentialKey_Throws + OntologyWriterDataverseClient_NeverTakesTheSharedSysadminClientAsADependency (pass).</item>
+      <item>No silent failure (owner directive): SignalWriterTests.WriteAsync_RefusedWrite_LogsWriteRefusedEventId_IncrementsFailureMetric_AndRethrows + WriteAsync_DataverseAccessDenied_IsClassified_LoggedAndMetered_AndRethrown (pass; asserts the EventId, the reason/policyCode structured properties, the metric increment via a scoped MeterListener, the rethrow, and that nothing is logged at Information on a refused write).</item>
+      <item>All tests pass (32 SignalWriterTests); BFF builds: dotnet build 0 errors/0 warnings. Full BFF unit suite, uncontended, final code: "Failed: 1, Passed: 14386, Skipped: 54, Total: 14441, Duration: 21m 41s" — the one failure (EmailAttachmentProcessorTests, unrelated subsystem) re-ran clean in isolation (3/3); see progress notes for the two-different-unrelated-failures-across-two-runs contention evidence.</item>
+    </acceptance-criteria-evidence>
+    <deviations>See projects/spaarke-ontology-platform-r1/notes/030-signal-writer-progress.md "Rework" section for the full finding-by-finding (F1-F26) disposition. Summary: (1) test file paths follow task 021's tests/unit/domain/Signals + tests/integration/seam/Signals convention; (2) grouping-matter derivation verified for exactly 2 of 9 possible subject types; (3) a Critical DI startup-crash hazard found+fixed during the FIRST implementation's self-review (superseded by the rework's larger credential restructure); (4) F2 (nav-property casing) REFUTED as inapplicable — the SDK's typed EntityReference path is unaffected; (5) F26 (NEW, found by the live seam run): the writer lacks AppendTo on sprk_communication — escalated to the owner, not fixed (role edit, out of scope).</deviations>
+    <escalations>F26 (live, new): creating a Signal on a sprk_communication subject fails with a Dataverse AppendToAccess denial. The writer's only PredicateCompiler-produced subject type (sprk_matter) is unaffected. Recommend granting AppendTo on sprk_communication to Spaarke Ontology Service, mirroring its existing AppendTo on sprk_policy/sprk_policyversion. Not applied here (role edit, out of scope). Full detail in progress notes.</escalations>
+    <publish-size>master 45.66 MB (212 files, C:\wt111m @ 62277d50a, unchanged throughout) vs branch (final code) 45.69 MB (212 files) = +0.03 MB. Zip: PowerShell Compress-Archive -CompressionLevel Optimal both sides, re-measured after every substantive change. Branch side published from the uncommitted task worktree, not a separate fresh short-path worktree (uncommitted work cannot be captured by git worktree add) — matching 212/212 file counts are the corroborating signal; see progress notes for the full caveat.</publish-size>
+    <quality-gates>
+      <code-review>Self-applied inline (FULL-rigor task-execute agent) on the first implementation; returned FAIL via a separate independent review pass that verified several claims LIVE. All findings disposed in the rework (see deviations/notes). Path A documented exceptions: ADR-010 (OntologyWriterDataverseClient — concrete, ADR-010-compliant; the original single-impl interface was DELETED per the review's Path C instruction) and ADR-028 (dedicated ManagedIdentityCredential for a dedicated identity — spec.md §6 row, APPROVED by owner 2026-10-04).</code-review>
+      <adr-check>Compliant: ADR-002 (no plugins), ADR-010 (Path C applied — concrete class, SDK-interface test seam), ADR-013 (no AI dependency), ADR-024 (dual-field write; sprk_signal.sprk_regardingrecordtype is TEXT not a lookup, documented adaptation), ADR-028 (owner-approved exception). No new package, no new endpoint, no new background work; dotnet list package --vulnerable --include-transitive: zero vulnerable (checked after both the first implementation and the rework).</adr-check>
+    </quality-gates>
+    <test-rows>sprk_signal ae5d9784-f2bf-f111-a05c-0022482913fc ("ONTOLOGY DEV TEST 030 - writer schema sanity check", via Dataverse MCP, first implementation) — deleted. sprk_signal created by the LIVE seam test's passing matter-subject test ("ONTOLOGY DEV TEST 030 - seam sanity check") — deleted by the seam's own DisposeAsync (operator client). Verified by direct query after the seam run: 0 rows matching 'ONTOLOGY DEV TEST%' remain.</test-rows>
+    <owner-decision-needed>
+      (1) security-roles.md §9: no privilege change required for the writer's CURRENT (sprk_matter-subject) scope — the existing union already covers it. Recommend (not applied) folding prvWritesprk_Signal into Spaarke Ontology Service directly, so the writer's privilege set is self-contained.
+      (2) F26 (new): grant AppendTo on sprk_communication to Spaarke Ontology Service before any sprk_communication-subject rule is authored — today it fails at write time with a 403.
+      (3) Deploy/provisioning: a new environment must have EnableOwnershipAcrossBusinessUnits enabled, or every Signal create escalates (appsettings.template.json's new Ontology.Writer comment documents this).
+      Full reasoning for all three in progress notes. NOTE: item (1)'s "no privilege change required" conclusion only ever covered the sprk_matter-subject path — see F26 above, which is the counter-example found by actually running the sprk_communication-subject path live.
+    </owner-decision-needed>
+  </completion>
+
+  <completion-r2 date="2026-10-04">
+    <summary>
+      Second independent review returned "pass with findings" (R1-R15) against the first rework above. All
+      addressed; disposition per R-number is in projects/spaarke-ontology-platform-r1/notes/030-signal-writer-progress.md
+      "Second independent review" section. Highlights: R1 (High) — the reconcile path now re-selects and
+      re-checks owningbusinessunit (no extra round trip) via a new shared EnsureOwningBusinessUnitMatches
+      helper used on BOTH the create-verify and reconcile paths; a read-back that throws after a successful
+      create is wrapped as its own escalation (OwningBusinessUnitReadBackFailed) rather than propagating
+      unlogged. R2 — removed rendered sentence content from the leftover-placeholder exception message; added
+      sentence_template_invalid as a logged+metered refusal. R3 — OntologyWriterDataverseClient no longer uses
+      Lazy(PublicationOnly) (which let a burst of concurrent failures each attempt+log independently); replaced
+      with a double-checked lock, cache-on-success-only field; the class is now IDisposable (disposes the
+      ServiceClient; DI disposes the singleton at shutdown); a not-ready ServiceClient is disposed before
+      throwing. R4 — spec.md's ADR-028 row rewritten to the accurate rule text; APPROVED marker kept. R5 —
+      renamed RecordOwnershipAcrossBusinessUnits to the real org-setting key EnableOwnershipAcrossBusinessUnits
+      everywhere. R7/R8 — added a distinct connect_failed reason; fixed a double-log/meter risk for one
+      token-provider failure during connect (the SDK swallows that exception internally; a local flag now
+      prevents the IsReady check from logging it a second time). R9 — test fakes now throw TYPED
+      FaultException&lt;OrganizationServiceFault&gt; with the correct ErrorCodes (0x80060892 duplicate-key,
+      0x80040220 access-denied — 0x80040299 was mislabelled in the first rework). R10 (seam) — cleanup now
+      sweeps by sprk_policycode, not just tracked ids; the seam fails fast if SIGNALS_LIVE_CALLER_ID is unset;
+      the BU assertion now reads the matter's BU independently rather than comparing the writer's own value to
+      itself. R12 — added invariant I-12 (renumbered I-14, I-15, then I-16 on 2026-10-07/08, then I-17 on 2026-10-09 after master merges, then I-18 on 2026-10-09 when master took I-17 for the work-assignment floor) to DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5. R13 — checked;
+      sprk_regardingrecordnumber and sprk_privilegeflagged are NOT set by this writer, documented as a gap with
+      citations (neither spec.md/design.md nor the canonical TodoRegardingBuilder reference assigns their
+      population to this task). R14 — the previously-unused _logger field is now used in Dispose(). R6 (the
+      coordinator's own investigation) — progress notes reworded per the exact instruction, not
+      self-explained. R11 — a STALE banner now marks the first-draft sections; test counts below are the
+      verified final numbers.
+    </summary>
+    <verification>
+      dotnet build Sprk.Bff.Api: 0 errors / 0 warnings. SignalWriterTests: Passed! - Failed: 0, Passed: 31,
+      Skipped: 0, Total: 31. Full BFF unit suite, uncontended (third full run this task): Passed! - Failed: 0,
+      Passed: 14388, Skipped: 54, Total: 14442, Duration: 20m 57s — CLEAN, zero failures (the two earlier runs'
+      single unrelated failures, in two different tests, both re-ran clean in isolation; this clean run is
+      further confirmation they were contention). Publish size: master 45.66 MB / 212 files (unchanged,
+      C:\wt111m @ 62277d50a) vs branch 45.69 MB / 212 files = +0.03 MB, consistent with every prior measurement.
+      dotnet list package --vulnerable --include-transitive: clean.
+    </verification>
+  </completion-r2>
+</task>

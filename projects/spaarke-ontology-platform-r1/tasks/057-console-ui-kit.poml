@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Console UI kit in @spaarke/ui-components: reuse first, then EvidenceLine, StatusBar, RecordRow, AggregateCard</title>
+    <phase>5 The worklist surface</phase>
+    <gate>startable (012 complete)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared UI components; each must pass the section 11 gate individually.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small presentational components on Fluent v9 primitives, with the reuse map fixed by D-24.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>frontend,fluent-ui,new-component,shared-ui</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Console kit FR-28 now names, reusing Fluent and shipped components wherever D-24 says to, and adding only EvidenceLine, StatusBar, RecordRow and AggregateCard as new shared components, plus StatusBadge's success tone.</prompt>
+  <role>SPAARKE front-end developer. Reuse first; a new component justifies itself or is not built.</role>
+  <goal>The kit pieces the wizard and worklist need exist in @spaarke/ui-components with tests and a fixture harness, built against the real schema's shapes, light and dark correct.</goal>
+
+  <context>
+    <background>D-24 (spec section 9; FR-28 amended; v4-prototype-vs-solution #20-#22): name the kit; reuse first: Fluent Accordion (Disclosure), MessageBar (StatusBar), Link (ObjectLink), ConfirmModal (DiscardDialog), SprkModal nav (BrowseNav), StatusBadge (StatusChip; add a success tone), extend MetricCard with selected/note/progress (CountFilters, task 052). The remainder become new shared components. MatterCard + IssueLine (the one row component) is task 051. v4 HANDOFF section 1.3 (L93-110) is the design contract (do not port prototype code); section 1.4 L117-118 and L144 bind evidence, Missing and no edit/delete affordance.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/EvidenceLine.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/StatusBar.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/RecordRow.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/AggregateCard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-24): new components are exactly EvidenceLine, StatusBar (a composition on Fluent MessageBar), RecordRow and AggregateCard. Disclosure, ObjectLink, DiscardDialog, BrowseNav and StatusChip are NOT built: use Fluent Accordion, Fluent Link, ConfirmModal, SprkModal nav and StatusBadge. CountFilters is task 052's MetricCard extension.</constraint>
+    <constraint source="project">Scope: StatusBadge gains a success tone; the nine status-bar/chip states (reconciliation R-14, R-15) map onto StatusBadge tones in one table exported with the kit; a Routine record displays as Done (R-4).</constraint>
+    <constraint source="project">Scope: EvidenceLine renders one evidence line per the FR-48 contract (tier Fact / Interpretation / Missing, text, source and as-of, the clause it tested or "context, not tested"); a null fact renders as Missing, never as zero or omitted (H-5). No classifier confidence percentage is shown (#5: none exists).</constraint>
+    <constraint source="project">Scope: no component offers an edit or delete affordance for a Decision Record (FR-21, R-13).</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 semantic tokens only; light and dark both correct; no hex, rgb or named colour literals.</constraint>
+    <constraint source="project">Scope: fixtures use the BUILT schema's shapes (sprk_signal, sprk_decisionrecord columns from task 007), never v4's mock types. A Mode-2 harness via /prototype-harness-setup is allowed for visual iteration; prototype source is never ported.</constraint>
+    <constraint source="project">Scope: everything lands in @spaarke/ui-components, nothing in src/solutions/SpaarkeAi (FR-28).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-50): R1 renders a null fact as Missing (already in scope). Source freshness and the landing-contract columns are NOT built in R1: this task files ONE GitHub issue for them (sources, last sync, cadence, the sourcesystem / sourceid / sourceetag / sourceasof landing columns, spec section 2.1), with the evidence (v4-prototype-vs-solution #8, H-5), and records its URL in notes/defer-issues.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared Fluent v9 components</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/standards/UI-DESIGN-STANDARDS.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Generic status badge" location="src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx">Task 012's badge; extend with success, do not fork.</pattern>
+      <pattern name="Token-only card" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx">Spacing, tokens and focus handling to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 1.3, 1.4 L117-118 and L144) in task notes.</step>
+    <step order="1">Write the per-component section 11 justification for the four new components in notes before coding.</step>
+    <step order="2">Add StatusBadge success and the state-to-tone table.</step>
+    <step order="3">Build EvidenceLine, StatusBar, RecordRow and AggregateCard with tests and fixtures.</step>
+    <step order="4">Export from the package barrel; build the package.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a kit piece the wizard or worklist needs is not on D-24's list and cannot be composed from it, STOP and ask the owner rather than adding a fifth new component.</trigger>
+    <trigger>If rendering Missing needs freshness data that does not exist, STOP: freshness is the D-50 issue, not this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No EvidenceLine, StatusBar, RecordRow or AggregateCard is exported under src/client/shared (#20, grep). StatusBadge (task 012) covers chips; MessageBar, Accordion and Link are Fluent primitives; MetricCard covers count tiles.</existing>
+    <extension>EvidenceLine: no existing component renders a tiered, sourced, clause-linked line. StatusBar: composed on MessageBar rather than new. RecordRow: no shared row renders a Decision Record summary with an Open action. AggregateCard: MetricCard is a square count tile without a link sentence; a non-square option is task 052's, so AggregateCard composes it if 052 has landed.</extension>
+    <cost-of-doing-nothing>The wizard's What was found, read-only status bar and the worklist's aggregate email row each get hand-rolled inside SpaarkeAi, which FR-28 forbids and which is how the three bespoke row menus happened.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Evidence tiers and Missing">
+      <steps>
+        <step>Render EvidenceLine with a Fact, an Interpretation, a context line and a null fact</step>
+      </steps>
+      <expected>Fact plain; Interpretation labelled; context marked "context, not tested"; the null fact reads Missing.</expected>
+    </test>
+    <test name="Status bar states">
+      <steps>
+        <step>Render StatusBar for Decided, Done, Dismissed, Cleared on its own, Superseded and Closed - rule retired</step>
+      </steps>
+      <expected>Each shows the mapped StatusBadge tone and the record id, class, who and when where present.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and re-render every kit component</step>
+      </steps>
+      <expected>All colours adapt via semantic tokens; nothing hardcoded is revealed.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/__tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the package barrel, when inspected, then exactly four new components (EvidenceLine, StatusBar, RecordRow, AggregateCard) are exported and no Disclosure, ObjectLink, DiscardDialog, BrowseNav or StatusChip component exists.</criterion>
+    <criterion testable="true">Given StatusBadge, when rendered with tone success, then it uses semantic success tokens; the nine-state table maps every state to a tone.</criterion>
+    <criterion testable="true">Given a null fact, when EvidenceLine renders, then it reads Missing, never 0 or blank.</criterion>
+    <criterion testable="true">Negative: no kit component renders an edit or delete control for a Decision Record, and none shows a classifier confidence percentage.</criterion>
+    <criterion testable="true">Negative: the component sources contain no hex, rgb or named colour literal.</criterion>
+    <criterion testable="true">Each new component has a written section 11 justification in notes; tests cover the stated contract; the package builds.</criterion>
+    <criterion testable="true">Given notes/defer-issues.md, when read, then it lists the URL of the source-freshness / landing-contract GitHub issue filed by this task (D-50).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-28 (amended, D-24), FR-48; v4 HANDOFF section 1.3. Off the critical path to 031; can start now.</notes>
+
+  <completion>
+    <date>2026-10-07</date>
+    <pr>https://github.com/spaarke-dev/spaarke/pull/1382</pr>
+    <summary>Shipped as its own PR to master (branch feat/console-ui-kit-057). Adds EvidenceLine, StatusBar, RecordRow, AggregateCard and the nine-state CONSOLE_STATE_BADGES table in @spaarke/ui-components; StatusBadge (task 012, branch-only) brought onto master unchanged plus the success tone. 36 tests pass. D-50 issue: https://github.com/spaarke-dev/spaarke/issues/1381 (recorded in notes/defer-issues.md ISS-007). Notes, section 11 justifications, deviations: notes/057-console-ui-kit-notes.md. Merge of PR pending; the ontology branch will see an add/add conflict on StatusBadge files when merging master (take master).</summary>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

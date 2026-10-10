@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The one row component: MatterCard + IssueLine</title>
+    <phase>5 The worklist surface</phase>
+    <gate>057, 012, 007 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New UI surface carrying the row contract; a second row component would be a design failure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New component but tightly specified by HANDOFF section 1.2 and the reconciliation (W-3..W-6).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 052, 054 and 059 all extend or host this component.</parallel-reason>
+    <deps>057, 012, 007</deps>
+    <tags>frontend,fluent-ui,new-component</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build ONE row component, MatterCard with IssueLine, that renders every Work Item shape with data-driven variants: one card per matter, one line per item with the composed headline, the rule's short name, and age (Decide) or due state (Do); the whole line opens the decision wizard.</prompt>
+  <role>SPAARKE front-end developer. One component, data-driven variants, not a family.</role>
+  <goal>A single component in the shared library renders cross-source, threshold and Do-lane Work Items grouped by matter, with no buttons, menus, rule codes or badges in a line, and every line opening the wizard.</goal>
+
+  <context>
+    <background>AMENDED 2026-10-07. v4 (owner-accepted baseline, HANDOFF section 1.2 L74-76, binding): one card per matter, one line per item showing a headline, the rule display name, and age (Decide) or due state (5d overdue, 3d late, due 2 Oct); no buttons, rule codes, clause marks or badges in rows; the whole line opens the wizard (reconciliation W-3, W-5). Evidence tiers and How this was determined moved out of the row into the wizard's What was found step (W-6, task 058). D-23 (spec section 9): the UI composes the row headline from the Signal's display columns (subject name, due state, rule short name); the rule sentence stays literal; witness values are evidence lines. D-24 names the kit; MatterCard + IssueLine is the one row component (FR-25, FR-28 amended). Prototype finding 10: one component carried every shape once five things were in the data.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Worklist/MatterCard.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Worklist/IssueLine.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONE component (MatterCard rendering IssueLines) with data-driven variants. A second row component is a design failure, not a feature (prototype finding 10 proves one suffices).</constraint>
+    <constraint source="project">Scope: it lands in @spaarke/ui-components, NOT in src/solutions/SpaarkeAi/.</constraint>
+    <constraint source="owner">Scope (D-23): the IssueLine headline is composed from display columns only (subject name, due state, rule short name); it never interpolates a value into the rule sentence and never shows a witness value. The due state is computed client-side from sprk_signal.sprk_duedate in the viewer's local date.</constraint>
+    <constraint source="project">Scope (v4 binding, H section 1.2 L76): no button, menu, rule code, clause mark or badge inside a line; the whole line is one activatable element that raises an open-item event with the item id and the visible list (consumed by task 059 / 058). Whether a row menu exists at all is the owner's open C-10 (task 052); this component has none.</constraint>
+    <constraint source="project">Scope: rank and membership are given to the component, never computed by it (row-contract requirement 2). The component must not sort.</constraint>
+    <constraint source="project">Scope: the row must resolve to an OBJECT (a Signal id and its matter), never a text string (row-contract requirement 1).</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 semantic tokens only; light and dark both correct; no hardcoded colors; keyboard reachable (Enter/Space opens).</constraint>
+    <constraint source="project">Scope: the card is a CARD per ASSISTANT-UI-ELEMENT-CRITERIA (a persistent act-on item), not a chip or a bubble.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): a MatterCard renders one CORE record: a matter OR a project (the card shows which, by name and number). A Do-lane "Not filed" card holds the reader's items with no core record (D-35). Still one row component; the name MatterCard is kept.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): a card renders ANY core type (matter, project, work assignment, service request, or a future one): its label, name and number come from the row data the route supplies (catalog-driven), never from a per-type branch in the component.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Worklist row component and the row contract</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/standards/UI-DESIGN-STANDARDS.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md</file>
+    </files>
+    <patterns>
+      <pattern name="Worklist-shaped section" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx">The ancestry: a list of per-record lines. Reuse its spacing and focus handling, not its per-row menu.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 1.2 L74-76, section 1.3 MatterCard/IssueLine; data S-1, S-2) in task notes.</step>
+    <step order="1">Enumerate the row-contract requirements that apply to the row (1 object, 2 deterministic rank given) and keep them as named tests; requirements 3-5 now live in the wizard (task 058).</step>
+    <step order="2">Implement MatterCard and IssueLine against fixtures shaped like the BUILT schema (task 007 columns), never v4's mock types.</step>
+    <step order="3">Compose the headline and the age / due state from display columns only.</step>
+    <step order="4">Make the whole line activatable and raise the open-item event.</step>
+    <step order="5">Tests covering each Work Item shape through the same component.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any Work Item shape cannot render through the same component without a second component, STOP and escalate. Prototype finding 10 says one suffices, and a second component contradicts the design contract rather than extending it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>HighPrioritySection is already a worklist in structure (type badge, status chip, per-row menu) and is the closest neighbour; no MatterCard or IssueLine exists in src/client/shared (#20).</existing>
+    <extension>Partially: it is the ancestry and its layout patterns are reused, but it is one flat list per type with a per-row menu and badges, which v4's binding row (one card per matter, no controls in a line) removes.</extension>
+    <cost-of-doing-nothing>Signals stay invisible, exactly as sprk_spendsignal has been since it shipped: computed, stored, marked active, and never surfaced to anyone.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="All shapes render through one component">
+      <steps>
+        <step>Render a matter with a Path B item, a Threshold item and two Do-lane items</step>
+      </steps>
+      <expected>One MatterCard with four IssueLines; only data differs.</expected>
+    </test>
+    <test name="Line content">
+      <steps>
+        <step>Inspect a Decide line and a Do line</step>
+      </steps>
+      <expected>Decide shows headline, rule short name and age; Do shows headline, rule short name and due state; no buttons, menus, codes or badges.</expected>
+    </test>
+    <test name="Whole line opens">
+      <steps>
+        <step>Click a line; then focus another line and press Enter</step>
+      </steps>
+      <expected>Each raises the open-item event with the item id and the visible list.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Re-render every shape</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; nothing hardcoded is revealed.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Worklist/MatterCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Worklist/IssueLine.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/Worklist/__tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each Work Item shape, when rendered, then the SAME component renders all of them and the repo contains exactly one worklist row component.</criterion>
+    <criterion testable="true">Given a Decide item, when rendered, then the line shows the composed headline, the rule short name and the age; given a Do item, then the headline, the short name and the due state computed from sprk_duedate.</criterion>
+    <criterion testable="true">Given a line, when clicked or activated by Enter/Space, then the open-item event carries the item id and the visible list.</criterion>
+    <criterion testable="true">Given rank-ordered props, when rendered, then the component does not re-sort them.</criterion>
+    <criterion testable="true">Negative: no line contains a button, menu, rule code, clause mark or badge; no line shows a witness value or interpolates into the rule sentence.</criterion>
+    <criterion testable="true">Negative: the row resolves to an object; no row renders only a text string.</criterion>
+    <criterion testable="true">Negative: the component source contains no hex, rgb or named color literal.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. The package builds.</criterion>
+    <criterion testable="true">Given a project-grouped item and a Not filed item, when rendered, then the same component renders a project card and a Not filed card, with no second row component.</criterion>
+    <criterion testable="true">Given cards for a work assignment and a service request, when rendered, then the same component renders them from data with no per-type code (D-36).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-25, FR-26 (requirements 1-2 here; 3-5 in the wizard, task 058), FR-28 (amended, D-24), FR-48; D-23, D-24; reconciliation W-3..W-6 and B.2 row 051. Amended 2026-10-07: was "WorkItemRow" with evidence block, disclosure and action area; those moved to the wizard. Can build against fixtures now; no longer depends on 050. The prototype is the DESIGN contract, not the implementation: do NOT port its source.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1513 merged into docs/ontology-platform-design (9087379955) after independent review + 1 fix round (tone palette to SmartTodo tokens, contrast + focus tests). MatterCard (the one row component) + internal IssueLine in Spaarke.UI.Components/src/components/Worklist; 47 tests. Consumers 038/059 POMLs carry its data contract (pastDueWording, visibleList). Non-blocking findings: notes/defer-issues.md F-22, F-26.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

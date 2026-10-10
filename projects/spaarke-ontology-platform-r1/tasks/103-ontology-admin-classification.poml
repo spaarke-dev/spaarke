@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin slice (c): Classification admin</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>104, 008, 057, 072, 074 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Admin writes to sprk_triagecategory, a cross-domain table that changes classifier behaviour on the next enrichment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>List, form and three writes over one table, all as the caller.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>104, 008, 057, 072, 074</deps>
+    <tags>bff-api,frontend,admin,classifier,endpoints</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Classification area of Ontology admin: triage categories with guidance, On/Off, which rules read each, 30-day volume, an edit form, rename blocked while a rule reads the category, and new categories saving Off, all written through the BFF as the caller.</prompt>
+  <role>SPAARKE full-stack developer. A category edit is live on the next enrichment; treat it as production configuration.</role>
+  <goal>An administrator can create, edit and enable triage categories from the Console, and cannot rename one a rule depends on.</goal>
+
+  <context>
+    <background>D-22 slice (c); reconciliation M-10: categories with guidance, On/Off, which rules read each, 30-day volume, recall vs the 80% / 50-item floor; edit in a form; rename blocked while a rule reads it; a new category saves Off. Task 008 grants Spaarke Ontology Administrator Create/Write/Read on sprk_triagecategory (D-22). Rules reference categories by GUID, so a rename does not break evaluation but does change the constrained-decoding enum name (NFR-09). #44: 30-day volume is available today from sprk_communication.sprk_triagecategory + sprk_receiveddate. Where measured recall is stored is reconciliation C-16, undecided.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminClassificationEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminClassificationService.cs</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/Classification</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-22): every write runs AS THE CALLER (IDataverseUserClient); no service-identity write to sprk_triagecategory.</constraint>
+    <constraint source="project">Scope: "which rules read each" is computed by scanning the enabled and draft policy versions' bodies for the category GUID; rename (sprk_name change) is refused while any version references it; a new category saves with enabled = No.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-49): show each category's recall, labelled-set size and measured-on date from the three sprk_triagecategory columns task 074 creates and fills, against the 80% / 50-item floor; a category not yet measured shows Not measured.</constraint>
+    <constraint source="project">Scope: no confidence calibration (#5: no classifier confidence exists).</constraint>
+    <constraint source="project">Scope (NFR-10, D-29): census entries; single 403 for an unresolved caller.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check (sprk_triagecategory is shared with the email-communication domain).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Classification administration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/004-seed-policy-rows.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 8 L303) in notes.</step>
+    <step order="1">Implement the read (list with rule references and 30-day volume) and the create / update / enable routes as the caller.</step>
+    <step order="2">Build the list and edit form with the task 057 kit.</step>
+    <step order="3">Integration tests as the admin and as a Console User; a rename refused while a rule reads the category.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 074's recall columns do not exist when this task runs, STOP and wait for 074 rather than reading its notes file.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_triagecategory rows are authored in Dataverse directly (task 004); no admin route or UI exists; task 072 makes the guidance live in prompts.</existing>
+    <extension>No existing admin surface to extend; the kit and tab shell are reused.</extension>
+    <cost-of-doing-nothing>Criterion 8 (a new category with guidance changes classifier behaviour with no deployment) can only be exercised by editing rows outside the Console, and nothing stops a rename that silently changes a rule's decoding enum.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Rename blocked while referenced">
+      <steps>
+        <step>Open Fee / rate change and try to rename it</step>
+      </steps>
+      <expected>The rename is refused with the referencing rule named.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>All surfaces adapt.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="npm">Build the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminClassificationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminClassificationEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/Classification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the admin, when the list loads, then each category shows guidance, On/Off, the rules that read it and its 30-day volume.</criterion>
+    <criterion testable="true">Given a new category, when saved, then it is created disabled; given an edit of guidance, then it is saved as the caller.</criterion>
+    <criterion testable="true">Negative: renaming a category referenced by any policy version is refused, naming the rule.</criterion>
+    <criterion testable="true">Negative: a Console User is refused by every write route; an unresolved caller gets 403; every route is in the census.</criterion>
+    <criterion testable="true">Given a measured category, when listed, then its recall, set size and date show against the floor (D-49); negative: no confidence calibration is shown.</criterion>
+    <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-59; D-22; reconciliation M-10, C-16; #41, #44.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

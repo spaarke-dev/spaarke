@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Threshold rule type: JSON Schema and compiler (spend threshold)</title>
+    <phase>2b Rule grammar (D-16)</phase>
+    <gate>024, 031 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a member to the compiled rule-type set; validation, compilation and evaluation all change behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the Existence pattern of tasks 020-022 with a narrower body (one numeric comparison on the subject).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>024, 031</deps>
+    <tags>bff-api,signals,compiler,rule-grammar</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the Threshold rule type's JSON Schema and compiler so a spend-threshold rule (a numeric column on the matter compared with a declared value) validates, compiles to the same compiled-predicate contract as Existence, and is evaluated by the task 031 job with no evaluator change.</prompt>
+  <role>SPAARKE backend developer. A closed rule-type set grows by review, not by convenience.</role>
+  <goal>sprk_ruletype Threshold compiles and fires on real dev data; Switch stays refused.</goal>
+
+  <context>
+    <background>D-16 (spec section 9): R1 ships Path B, the Do-lane grammar extension AND the Threshold rule type for the spend threshold; Switch and the inquiry SLA are deferred. Today PolicyVersionValidator refuses Threshold as RuleTypeUnsupported (~:237-241) because no schema was authored (task 020 scope). The matter's spend facts are Spaarke finance roll-ups (sprk_totalbudget, sprk_totalspendtodate, sprk_budgetutilizationpercent; v4-prototype-vs-solution #8). This task runs after 031 so its acceptance can prove the evaluator needs no change.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/threshold-rule.schema.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodySchemaValidator.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-16): Threshold is a single numeric comparison (gt, ge, lt, le) between ONE numeric column on the subject and a declared literal, optionally with the same when filter Existence allows. No arithmetic between columns, no ratios computed in the rule, no cross-entity reads, no new VerifiedJoins entry.</constraint>
+    <constraint source="project">Scope: the compiled output is the same CompiledPredicate contract the evaluator already consumes, obtained only through PolicyVersionValidator.TryPrepareForEvaluation. If that is impossible without changing SignalReevaluationJob, STOP (escalation).</constraint>
+    <constraint source="project">Scope: Switch remains RuleTypeUnsupported. The closed set (Threshold, Switch, Existence) is unchanged (FR-05).</constraint>
+    <constraint source="project">Scope: the threshold value is template-eligible only as the pinned literal (task 022 rule); the subject's own compared value is eligible as a when-field value. Nothing else.</constraint>
+    <constraint source="project">Scope: if task 026's describer has landed, extend it to describe Threshold bodies in the same change.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: tests asserting matter column names must be paired with a seam test against the real schema.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule types and the compiler</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-020-existence-ruletype-deviations.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/022-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existence rule type" location="src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json">Copy the schema conventions (closed property sets, additionalProperties false, size cap).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Author threshold-rule.schema.json and register it with the schema validator.</step>
+    <step order="2">Compile Threshold bodies to the existing CompiledPredicate; route them through PolicyVersionValidator.</step>
+    <step order="3">Unit tests for valid and refused bodies; a seam test over spaarkedev1 matters with a utilization threshold.</step>
+    <step order="4">Run the task 031 job (test host) with one enabled Threshold policy and show it writes a Signal with no change to SignalReevaluationJob.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a Threshold policy cannot be evaluated without changing SignalReevaluationJob, STOP and escalate: the contract between compiler and evaluator would be forking.</trigger>
+    <trigger>If the spend threshold the owner wants needs a ratio or arithmetic the rule cannot express from one column, STOP and ask rather than adding arithmetic to the grammar.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>existence-rule.schema.json is the only rule-body schema; PolicyVersionValidator refuses Threshold today (~:237-241).</existing>
+    <extension>No for the schema file: each rule type has its own schema by design (task 020). Yes for the compiler and validator, which are extended in place.</extension>
+    <cost-of-doing-nothing>The spend-threshold rule D-16 put in R1 is unsavable and unevaluable; validation refuses it.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/threshold-rule.schema.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</output>
+    <output type="test">tests/unit/domain/Signals/PredicateCompilerTests.cs</output>
+    <output type="test">tests/integration/seam/Signals/SignalPredicateTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Threshold body sprk_budgetutilizationpercent ge 90 on sprk_matter, when validated and compiled, then it passes and yields one FetchXML condition.</criterion>
+    <criterion testable="true">Given a Threshold body comparing two columns, using arithmetic, or reading another entity, when validated, then it is refused with a field-level error.</criterion>
+    <criterion testable="true">Given a Switch body, when validated, then it is refused as RuleTypeUnsupported.</criterion>
+    <criterion testable="true">Given one enabled Threshold policy, when the task 031 job runs, then a Signal is written for a matter over the threshold and none for a matter under it, and SignalReevaluationJob is unchanged in the diff.</criterion>
+    <criterion testable="true">Tests cover the stated shapes and refusals; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-05 (amended), FR-46; D-16. NOTE FOR 025 (from task 026 review, 2026-10-07): RuleBodyDescriber validates every body as Existence only (PolicyVersionValidator.ValidateForSave with Existence), so a Threshold body is refused by the describer today; when this task lands the Threshold grammar, extend the describer for the new shapes and add its tests in the same change.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

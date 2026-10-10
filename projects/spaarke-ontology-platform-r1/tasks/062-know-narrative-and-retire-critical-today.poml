@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Know becomes narrative, Critical Today is retired, the LLM Top action is removed</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>061, 038, 059 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Removes an LLM-chosen priority that violates the row contract, and changes what users see.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration plus a deletion, both well specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>061, 038, 059</deps>
+    <tags>frontend,bff-api,configuration</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move Know items to narrative plus the Context pane, retire Critical Today as a list, and remove the LLM-chosen Top action.</prompt>
+  <role>SPAARKE full-stack developer. Rank is deterministic or it is not explainable.</role>
+  <goal>Awareness items are no longer rows, Critical Today is no longer a list, and no model chooses priority anywhere.</goal>
+
+  <context>
+    <background>New or updated matters, projects, documents and monitored-record activity FAIL row-contract requirement 4: there is nothing to do that changes anything. They stay as awareness, where awareness belongs. sprk_highpriority becomes a rank INPUT and sprk_monitor becomes a SUBSCRIPTION to Know; neither is a reason in the ontology sense, because a flag says someone cares, not what is wrong.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: REMOVE the LLM-chosen Top action. The first row IS the top action because rank is deterministic. A model choosing priority breaks row-contract requirement 2 and decision 15.</constraint>
+    <constraint source="project">Scope: sprk_highpriority becomes a RANK INPUT (and optionally a rule input); sprk_monitor becomes a SUBSCRIPTION to Know. Retire the separate Critical Today list. Nothing it meant is lost.</constraint>
+    <constraint source="project">Scope: Know items must NOT become Work Items. They fail requirement 4.</constraint>
+    <constraint source="project">Scope: the narrative SUMMARISES Do volume rather than listing it.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation W-10; #38): the narrative is hidden while any worklist filter is on, is tagged as written by the Assistant and not choosing or ordering the list, and may not name an item that is not on the list.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-42): ordering lives in the Signal read route (task 038): severity, then sprk_highpriority, then oldest, then record number. sprk_highpriority IS the second rank key; nothing writes sprk_rankscore.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Briefing fold-in and deterministic rank</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/daily-briefing-ontology-fit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Remove the LLM Top action selection and any prompt or playbook section that produced it.</step>
+    <step order="2">Route Know categories to the narrative and the Context pane rather than to rows.</step>
+    <step order="3">Make sprk_monitor a Know subscription. sprk_highpriority is the second rank key in task 038's order (D-42).</step>
+    <step order="4">Delete the Critical Today list surface.</step>
+    <step order="5">Make the narrative summarise Do volume rather than enumerate it.</step>
+    <step order="6">Add tests: no model output influences ordering; Know categories produce no Work Items.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the LLM Top action breaks a downstream consumer that depends on it, STOP and escalate rather than leaving it in. A model choosing priority is a decision-15 violation, not a feature to preserve for compatibility.</trigger>
+    <trigger>If sprk_highpriority is not readable for a subject type the read route ranks, STOP and escalate rather than ranking that type without it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="No LLM-chosen top action">
+      <steps>
+        <step>Open the worklist</step>
+        <step>Inspect the first row and the narrative</step>
+      </steps>
+      <expected>The first row is the highest-ranked item by the deterministic rank; no separately model-chosen top action appears.</expected>
+    </test>
+    <test name="Know items are not rows">
+      <steps>
+        <step>Create a new matter and a new document</step>
+        <step>Open the worklist</step>
+      </steps>
+      <expected>Neither appears as a Work Item; both appear in the narrative or Context pane.</expected>
+    </test>
+    <test name="Critical Today is gone">
+      <steps>
+        <step>Open the Console</step>
+      </steps>
+      <expected>No Critical Today list surface exists.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Open the worklist and the narrative</step>
+      </steps>
+      <expected>Both adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client</tool>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the worklist, when ordered, then no model output influences the order; rank is computed deterministically.</criterion>
+    <criterion testable="true">Given a new matter or document, when the worklist loads, then it is NOT a Work Item.</criterion>
+    <criterion testable="true">Given the Console, when inspected, then Critical Today no longer exists as a list.</criterion>
+    <criterion testable="true">Given sprk_highpriority on a subject, when the read route orders a lane, then it is the second key after severity (D-42).</criterion>
+    <criterion testable="true">Given a worklist filter on, when the widget renders, then the narrative is hidden; given the narrative, when generated, then it names no item absent from the list.</criterion>
+    <criterion testable="true">Negative: no prompt or playbook still asks the model to choose a top action.</criterion>
+    <criterion testable="true">All tests pass; both sides build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-31, FR-32, FR-34. design.md BR-3, BR-5. Amended 2026-10-07 per reconciliation B.2 row 062 (W-10, W-13, W-14) and #38; C-9 open (O-2).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

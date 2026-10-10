@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule grammar extension for the Do lane: subject-only rules, now+Nd, Do subjects, quiet-window knob</title>
+    <phase>2b Rule grammar (D-16)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the rule-body schema, the validator and the predicate compiler that every Signal depends on; a widened grammar that compiles wrongly fires on every row or none.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends task 021's compiler (the project's risk item) and its fail-closed refusal rules; judgement about what stays refused.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021, 022</deps>
+    <tags>bff-api,signals,compiler,rule-grammar</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the Existence rule grammar so the Do-lane rules can be written and compiled: a subject-only rule, now+Nd relative dates, sprk_event / sprk_todo / sprk_workassignment as subjects, and a quietWindowDays knob, keeping everything else refused.</prompt>
+  <role>SPAARKE backend developer. Widen the grammar by exactly what D-16 names; the compiler still fails closed on everything else.</role>
+  <goal>A subject-only Existence body over sprk_event, sprk_todo or sprk_workassignment with now+Nd dates validates at save, compiles through PolicyVersionValidator to one Dataverse filter, and fires on real dev data; every previously refused shape is still refused.</goal>
+
+  <context>
+    <background>D-16 (spec section 9; v4-prototype-vs-solution #12): today only Path B can be written. The schema requires at least one exists/notExists clause (Services/Signals/Schemas/existence-rule.schema.json, minItems 1); relative dates accept only now and now-Nd (PredicateCompiler.cs ~:703); EvaluatorGlobalReadableEntities (~:148-159) omits sprk_workassignment and sprk_servicerequest; VerifiedJoins (~:174) holds only (matter, communication) and (matter, budget revision). D-16 chose option (a): subject-only rules, now+Nd, and matter derivation for event / To Do / work assignment via sprk_regardingmatter. D-13 adds the per-rule quiet window as a knob in the rule body (FR-17a). The writer half (accepting those subjects) is task 037.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodySchemaValidator.cs</file>
+      <file role="modify">tests/unit/domain/Signals/PredicateCompilerTests.cs</file>
+      <file role="modify">tests/integration/seam/Signals/SignalPredicateTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-16): add exactly (1) subject-only Existence bodies (a when filter, zero clauses), (2) now+Nd relative dates alongside now and now-Nd, (3) sprk_event, sprk_todo and sprk_workassignment as permitted subjects (added to EvaluatorGlobalReadableEntities only after confirming the writer principal reads them org-wide; see the escalation), (4) a quietWindowDays integer knob (optional, minimum 0; absent means the 14-day default, D-13). Nothing else is widened: Threshold is task 025, Switch stays refused, no new VerifiedJoins entry, no business-day arithmetic.</constraint>
+    <constraint source="project">Scope: every body still compiles to ONE Dataverse filter (CM-3) with no cross-clause variable passing (FR-06). A shape outside the grammar is refused at save (ValidateForSave) and at evaluation (TryPrepareForEvaluation logs EventId 50301 and meters), exactly as today.</constraint>
+    <constraint source="project">Scope: relative dates still resolve against ONE WindowAnchorUtc per compile. Per-item "today" (D-25) is the evaluator's job (task 031), not the compiler's; do not add time-zone logic here. Document on the compiled predicate which when-fields are Date Only so the evaluator can apply D-25.</constraint>
+    <constraint source="project">Scope: template-eligible fields keep task 022's rule: a subject when field is eligible; nothing else new becomes eligible (D-23: task 022's template rule is unchanged).</constraint>
+    <constraint source="project">Scope: a notExists over a table the evaluating principal reads at less than org-wide depth stays refused (task 030 finding (b), security-roles.md section 9).</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: the new subjects' column names and option-set values asserted in tests must be paired with the seam test touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Predicate compiler and rule grammar</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/021-predicate-compiler-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/022-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/pathb-fetchxml-reference.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fail-closed compiler" location="src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs">RequireGlobalReadable, RequireVerifiedJoin and the relative-date grammar refuse anything unlisted; extend the lists, keep the refusals.</pattern>
+      <pattern name="Do-lane query shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs">The entities, columns and status values the three Do rules use today; the reference for the bodies (FR-30 as amended).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Confirm, live and as the writer principal, the read depth on sprk_event, sprk_todo and sprk_workassignment (security-roles.md section 9 method).</step>
+    <step order="2">Extend the JSON Schema (clauses minItems 0 when a when filter is present; quietWindowDays) and the validator.</step>
+    <step order="3">Extend the compiler: subject-only compile, now+Nd, the three subjects, Date Only field metadata on the compiled predicate.</step>
+    <step order="4">Write the three Do-rule bodies from the collector's predicates (overdue task, task due within 3 days, work assignment past sprk_responseduedate) as test fixtures, using sprk_duedate for events (D-27).</step>
+    <step order="5">Unit tests for every new shape and every still-refused shape; seam tests compiling the three fixtures against spaarkedev1 and checking each returns the rows a hand-written FetchXML returns.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the writer principal reads any of sprk_event, sprk_todo or sprk_workassignment at less than organisation depth, STOP: a rule over it would silently miss rows. Report the depth and ask the owner whether to grant read or drop that subject.</trigger>
+    <trigger>If a Do rule from the collector cannot be expressed as a single subject-only filter (for example it needs a join), STOP and escalate rather than adding a VerifiedJoins entry.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PredicateCompiler, existence-rule.schema.json and PolicyVersionValidator (tasks 020-022) are the only rule grammar; they are extended, not duplicated.</existing>
+    <extension>Yes, extend: this task adds no new file, only new accepted shapes in the existing schema, validator and compiler.</extension>
+    <cost-of-doing-nothing>No Do-lane rule can be saved or evaluated (#12), so the Do lane and the Briefing fold-in (FR-30, FR-35) cannot ship, and a quiet window has nowhere to be declared (FR-17a).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</output>
+    <output type="test">tests/unit/domain/Signals/PredicateCompilerTests.cs</output>
+    <output type="test">tests/integration/seam/Signals/SignalPredicateTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a subject-only body over sprk_event with sprk_duedate lt now-5d and an open-status filter, when validated and compiled, then it passes ValidateForSave and compiles to one FetchXML with no link-entity.</criterion>
+    <criterion testable="true">Given now+3d, when compiled, then it resolves against the same WindowAnchorUtc as now-Nd; given NOW+3d, now+3, now+1h or now+-3d, then it is refused.</criterion>
+    <criterion testable="true">Given each of sprk_event, sprk_todo and sprk_workassignment as subject, when compiled, then it is accepted; given sprk_servicerequest as subject, then it is still refused.</criterion>
+    <criterion testable="true">Given quietWindowDays 7, when validated, then it is accepted and exposed on the compiled predicate; given -1 or a string, then it is refused; given none, then the compiled predicate reports the 14-day default.</criterion>
+    <criterion testable="true">Given a Threshold or Switch body, when validated, then it is still refused as RuleTypeUnsupported (Threshold arrives in task 025).</criterion>
+    <criterion testable="true">Negative: a body with a clause whose join is not in VerifiedJoins, or a notExists over a less-than-org-readable table, is still refused at save and at evaluation.</criterion>
+    <criterion testable="true">Given the three Do-rule fixtures, when the seam test runs against spaarkedev1, then each returns the same row set as the equivalent hand-written FetchXML.</criterion>
+    <criterion testable="true">Tests cover the stated shapes plus the refusals named above; anything beyond that needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-45, FR-17a, FR-30 (amended); D-13, D-16, D-27. #12 lists every current refusal with line numbers.</notes>
+
+  <completion>COMPLETED 2026-10-07. Escalation trigger 2 fired ("task due within 3 days" needs a two-bound range); owner chose option A = D-40 (one lower plus one upper relative-date bound). Trigger 1 checked, not fired: the writer reads sprk_event / sprk_todo / sprk_workassignment at Global (§9.2 method + RetrievePrincipalAccess + identical row counts as admin and writer). Delivered: subject-only bodies, now+Nd, sprk_workassignment as subject, D-40 ranges, quietWindowDays (0..3650, default 14), CompiledPredicate.QuietWindowDays + DateOnlyWhenFields (live-verified DateOnlyColumns catalog); no VerifiedJoins entry; sprk_servicerequest, Threshold, Switch still refused. Three Do-rule fixtures with hand-written reference FetchXML run on spaarkedev1 (12 / 3 / 19 rows); seam test 10/10 live as the writer. Every new test proven to fail without its fix (19 mutations; M14 equivalent). Publish +1,995 B (212 = 212 files, fresh short-path worktrees, Compress-Archive; fresh master 192 files / 36.19 MB for reference); no vulnerable packages. Independent code-review + adr-check: PASS-WITH-FINDINGS, findings fixed. Input for 031: the compiled query is exact at WindowAnchorUtc, so 031 must widen Date Only bounds before judging per item (D-25). uac-r2 re-read on origin/master dbc58d139 (CoreAncestorResolver @ d254d7166, SecureChildLineage.cs, secure-record-owner-role.json, RecordOwnershipResolver, RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, ExternalCallerContext, RouteAuthorizationGuardTests.Ledger.cs, ADR-034): plan not invalidated, no uac-r2 file changed, no core-record derivation added. Pre-existing finding (task 030, not fixed here): arch rule FR-32/§4D I5 fails on OntologyWriterCredentialFactory.cs:78. Detail: notes/024-progress.md.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

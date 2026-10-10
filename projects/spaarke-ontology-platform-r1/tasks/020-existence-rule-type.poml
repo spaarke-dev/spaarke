@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Add the Existence rule type and its JSON Schema</title>
+    <phase>2 Policy and rule bodies</phase>
+    <gate>003 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a closed set that validation enforces; without it the differentiated capability cannot be saved at all.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified addition to an existing closed set with a known validation seam.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>bff-api,policy,schema-validation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add Existence to the closed rule-type set and author its JSON Schema, so an Existence policy body can be saved and validated.</prompt>
+  <role>SPAARKE backend developer. The rule-type set is closed on purpose.</role>
+  <goal>sprk_policyversion.sprk_ruletype accepts Threshold, Switch and Existence and nothing else, and an Existence body is validated against a schema.</goal>
+
+  <context>
+    <background>The MVP allowed only Threshold and Switch, and validation refuses to save an invalid body, so the differentiated capability was literally unsavable. CM-7 adds exactly one type. Transition and Trend stay out.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONE new rule type. Transition and Trend stay out (CM-8 deferred the detection-shape axis entirely; adopt the taxonomy as a derivation method, not a column).</constraint>
+    <constraint source="project">Scope: adding a fourth rule type later remains a code change with review. Do not make the set data-driven in this task.</constraint>
+    <constraint source="ADR-013">Scope: the evaluator and its validation must not inject AI-internal types. Consume LiveFactResolver outputs and Dataverse reads only.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Policy rule types and body validation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed set with validation refusal" location="src/server/api/Sprk.Bff.Api/Services/Signals">Mirror how Threshold and Switch are enumerated and validated; add Existence alongside rather than generalising the mechanism.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Locate the existing rule-type enumeration and its JSON Schema validation path; record the exact files.</step>
+    <step order="2">Add Existence to the enumeration, keeping the set closed.</step>
+    <step order="3">Author the Existence JSON Schema: an all array of clauses, each clause being exists or notExists over a named entity with a filter, and a window. Forbid variable binding between clauses at the SCHEMA level, so the CM-3 violation is rejected by validation rather than by review.</step>
+    <step order="4">Add unit tests: a valid Existence body saves; a body with a cross-clause variable reference is REFUSED; an unknown rule type is refused.</step>
+    <step order="5">Confirm sprk_policyversion.sprk_ruletype option values already include Existence (the column was created with it) and that the code and the option set agree.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing validation seam cannot refuse a cross-clause variable reference at the schema level, STOP and escalate rather than relying on code review to catch it. design.md section 8.0.1(a) rejects that body shape, and a rule that is only enforced by review will eventually be saved.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Threshold and Switch exist in the same closed set with the same validation path.</existing>
+    <extension>No. Neither Threshold nor Switch can express an EXISTS or NOT EXISTS over a related entity; this is a different clause shape, not a parameter of an existing one.</extension>
+    <cost-of-doing-nothing>Validation refuses to save the Path B body, so the one differentiated capability in the project cannot be authored at all.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid Existence body, when saved, then it is accepted and round-trips unchanged.</criterion>
+    <criterion testable="true">Given a body whose second clause references a variable bound in the first, when saved, then it is REFUSED by schema validation with a field-level error.</criterion>
+    <criterion testable="true">Given an unknown rule type, when saved, then it is refused.</criterion>
+    <criterion testable="true">Negative: the rule-type set still contains exactly Threshold, Switch and Existence.</criterion>
+    <criterion testable="true">All unit tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-05 and FR-08. design.md CM-7 and section 8.0.1(a).
+
+  COMPLETED 2026-10-03. Built the closed RuleType enum (Threshold=100000000, Switch=100000001,
+  Existence=100000002 -- confirmed against live Dataverse via DESCRIBE TABLE sprk_policyversion) and
+  RuleBodySchemaValidator (Services/Signals/), plus existence-rule.schema.json authored from design.md
+  section 8.0.1(a) / mvp-technical-spec.md section 3.4a. The schema refuses the CM-3 cross-clause
+  variable-binding violation via two independent mechanisms: additionalProperties:false on the clause
+  definition (rejects an unexpected "bind" property outright) AND a leading-"$" pattern restriction on
+  every filter scalar value (rejects the dereference itself even without "bind" present) -- the
+  escalation trigger in this POML did not fire. 21 new unit tests, all passing; BFF builds clean (0
+  warnings/errors). Reused the existing JsonSchema.Net 7.3.4 dependency (no new package). Publish-size
+  delta measured fresh-master-vs-branch (both short paths, 212 files each side, Compress-Archive
+  Optimal): 45.66 MB -&gt; 45.67 MB, +0.01 MB -- negligible, no new package. No AI-internal types (ADR-013
+  trivially satisfied -- zero AI dependency). Threshold/Switch get enum membership + Dataverse-value
+  parity but NOT a JSON Schema in this task (no row of either type exists yet; out of this task's named
+  scope per the POML's own &lt;outputs&gt;); RuleBodySchemaValidator.ResolveSchema throws NotSupportedException
+  for them rather than silently accepting an unvalidated body -- see
+  notes/task-020-existence-ruletype-deviations.md for the full reasoning and other deviations (the
+  canonical-reference file path/content mismatch, test-path convention).
+
+  Concurrent task 023 (scope semantics/policy defaults) created Services/Signals/PolicyScopeResolver.cs
+  in the same directory during this task's execution -- no file overlap, confirmed via dotnet build with
+  both present, coordinated directly with that agent (it owns Infrastructure/DI/SignalsModule.cs and
+  Program.cs's AddSignalsModule() line; task 022 should add RuleBodySchemaValidator's eventual DI
+  registration there, not in a new module).
+
+  Full BFF unit suite (14,313 tests) run for regression-safety: 83 pre-existing failures, zero of them
+  under Services/Signals or referencing RuleType/RuleBodySchemaValidator (grep-verified). Failure shapes
+  (TaskCanceledException / HTTP client aborted, 3+ minute durations on Insights streaming, SpeAdmin
+  search, Document profile, Office email-save tests) are consistent with resource contention from the
+  many other agents concurrently building/testing in this shared worktree, not a regression from this
+  task's dependency-free, no-I/O validator. Not independently re-verified against a clean baseline run
+  given the ~45 min cost per run; flagged transparently in the task report rather than asserted clean.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

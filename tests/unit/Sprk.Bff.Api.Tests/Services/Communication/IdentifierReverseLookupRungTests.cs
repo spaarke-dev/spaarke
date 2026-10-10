@@ -375,6 +375,71 @@ public class IdentifierReverseLookupRungTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── 8. Task 082: space-bearing matter-number repair ─────────────────────────────────────────────
+    // WellFormedTokenPattern previously required the alpha prefix IMMEDIATELY before the separator, so a
+    // live matter numbered "Form D - 2023" (spaces around the hyphen, a second one-letter prefix word)
+    // never tokenized. Measured query-count delta: projects/spaarke-ontology-platform-r1/notes/tokenizer-cost-delta.md.
+
+    [Fact]
+    public async Task SpaceBearingMatterNumber_Tokenizes_ExplicitReferenceFiresAt090()
+    {
+        // "Form D - 2023" — the exact live-matter repro from the task 082 diagnosis. Both the matter number
+        // AND the matter name appear verbatim in the subject; ExplicitReference must fire for it.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        SetupMatch("sprk_matter", "sprk_matternumber", "Form D - 2023", matterId);
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "Re: Form D - 2023 — status update"), new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle(
+            "the space-bearing matter number must tokenize and resolve via the reverse lookup").Subject;
+        match.RegardingFieldName.Should().Be("sprk_regardingmatter");
+        match.Target!.Id.Should().Be(matterId);
+        match.Confidence.Should().Be(0.90, "a well-formed identifier match auto-files alone (≥ the 0.85 threshold)");
+        match.Rung.Should().Be(RungKind.ExplicitReference);
+    }
+
+    [Theory]
+    [InlineData("Follow-up - please review when free", "please check 441482 later")]
+    [InlineData("state-of-the-art software rollout", null)]
+    [InlineData("Well-known issue being tracked", null)]
+    [InlineData("Re: catch-up - rescheduled", null)]
+    [InlineData("Good-to-go on the merger", null)]
+    [InlineData("Sign-off needed by Friday", null)]
+    [InlineData("Up-to-date figures attached", null)]
+    public async Task OrdinaryHyphenatedProse_NeverExtractsAWellFormedToken_NoQueries(string subject, string? body)
+    {
+        // NEGATIVE (task 082): obvious non-tokens — ordinary hyphenated English compounds — must still be
+        // rejected even though the pattern now tolerates whitespace around the separator. The digit-in-body
+        // requirement is what keeps these out; none of these subjects carries a digit after the hyphen, so no
+        // roster read and no reverse-lookup query should ever fire for the "well-formed" shape.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+
+        var matches = await Rung().EvaluateAsync(Envelope(subject: subject, body: body), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().BeEmpty("none of these ordinary phrases is a record-number shape");
+    }
+
+    [Fact]
+    public async Task SpaceBearingToken_StillBelowAutoFileAiRung_CannotReachThresholdAlone()
+    {
+        // Project rule: auto-file stays at 0.85 and the AI rung alone can never reach it — this fix changes
+        // ONLY the deterministic tokenizer, not the confidence ladder. A well-formed match here is 0.90 (set
+        // deterministically, never by a model), same as every other well-formed identifier.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        SetupMatch("sprk_matter", "sprk_matternumber", "Form D - 2023", matterId);
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "Form D - 2023"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().ContainSingle().Which.Confidence.Should().Be(0.90);
+    }
+
     // ── 7. NFR-04: a lookup failure degrades to no-match, never propagates ─────────────────────────
 
     [Fact]

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>sprk_memo as signal source number two</title>
+    <phase>7 Inquiry and the classifier</phase>
+    <gate>030,072 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Proves the shape generalises; a consumer change here would mean the abstraction failed.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One Action row reusing an existing contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030,072,037,039,031</deps>
+    <tags>bff-api,ai,classifier,signals</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add sprk_memo as a second signal producer writing the SAME Signal shape, with no change to the consumer.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>A second producer writes the same sprk_signal shape as the first, and the consumer diff is empty.</goal>
+
+  <context>
+    <background>Criterion 6 exists to prove the shape generalises. Memos are human-authored, so accuracy is high and cheap. Without this the commitment made on a phone call is never captured.</background>
+    <relevant-files>
+      <file role="new">Dataverse: one sprk_analysisaction row for memo classification</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: reuse sprk_triagecategory (D-4). ONE bounded set keeps cross-source rules simple and preserves the zero-deployment taxonomy property.</constraint>
+    <constraint source="project">Scope: reuse the choices contract. Do NOT copy agreement-classify, which uses a bespoke C# assembler; that is the named anti-pattern not to repeat.</constraint>
+    <constraint source="project">Scope: the CONSUMER MUST NOT CHANGE. If it needs to, the Signal shape failed to generalise and that is an escalation, not a patch.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">ADDED 2026-10-09 from the #1526 (task 123) review: any category-name-to-sprk_triagecategory binding this task adds MUST use `LookupChoicesResolver.AddOfferedRowPredicate` (statecode = 0 + sprk_enabled), so a memo can never bind a disabled or inactive category; the offered $choices set and the resolution set stay the same.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Second signal producer</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Author the memo classification Action row reusing the choices contract and sprk_triagecategory.</step>
+    <step order="2">Wire memo classification to the Signal writer from task 030.</step>
+    <step order="3">Capture the consumer code state before and after, and assert in a test that it is byte-identical.</step>
+    <step order="4">Add tests: a classified memo produces a Signal with the same shape; the worklist renders it through the same row component.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the consumer must change to accept memo-derived Signals, STOP and escalate. Criterion 6 exists precisely to detect that, and patching the consumer would hide the fact that the shape did not generalise.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The triage-email Action plus the choices contract plus LookupChoicesResolver all exist and are the pattern to follow.</existing>
+    <extension>Yes, extend: this is ONE new Action row reusing the existing choices contract, with no new mechanism. agreement-classify shows the wrong way (a bespoke C# assembler).</extension>
+    <cost-of-doing-nothing>The commitment made on a phone call is never captured, so the ontology covers only what arrives by email. It also leaves criterion 6 unprovable, meaning nobody knows whether the Signal shape generalises.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: memo classification Action row</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a classified memo, when processed, then a sprk_signal row exists with the same shape as a communication-derived one.</criterion>
+    <criterion testable="true">Given the consumer code, when diffed before and after this task, then it is UNCHANGED.</criterion>
+    <criterion testable="true">Given a memo-derived Signal, when the worklist renders, then it uses the same row component.</criterion>
+    <criterion testable="true">Negative: no bespoke C# prompt assembler was added; the choices contract was reused.</criterion>
+    <criterion testable="true">Negative: the taxonomy is still one bounded set (sprk_triagecategory), not two.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-39 and success criterion 6. design.md D-4.</notes>
+
+  <notes-2026-10-07>Blocked at start (stream D2, 2026-10-07): SignalWriter accepts only sprk_matter / sprk_communication subjects; no sprk_regardingmemo lookup on sprk_signal (schema change, needs owner approval); the core-record writer path is task 037, secure-child Signals task 039; nothing consumes Signals until 031. Resume after 037 + 039 + 031 land. Schema needed then: sprk_signal.sprk_regardingmemo lookup, and possibly a triage-category lookup on sprk_memo (verify live first). The Action + Binding rows follow infra/dataverse/actions/triage-email.action.json via ConsumerTypes / ICommunicationTriageAi.</notes-2026-10-07>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

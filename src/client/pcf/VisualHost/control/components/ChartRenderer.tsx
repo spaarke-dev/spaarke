@@ -9,7 +9,7 @@ import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import type { IChartDefinition, IAggregatedDataPoint, DrillInteraction, VisualType, IChartData } from '../types';
 import { VisualType as VT } from '../types';
 import {
-  MetricCard,
+  VisualMetricCard,
   MetricCardMatrix,
   type MatrixJustification,
   BarChart,
@@ -229,7 +229,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       const metricLabel = dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
 
       return (
-        <MetricCard
+        <VisualMetricCard
           value={metricValue}
           label={metricLabel}
           description={chartDefinition.sprk_description}

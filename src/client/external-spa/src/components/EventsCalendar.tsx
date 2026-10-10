@@ -179,7 +179,7 @@ const useStyles = makeStyles({
 /**
  * Map the event's `sprk_status` wire value to a label. The BFF reads it from the
  * event's status of record, Dataverse `statuscode` (task 097 review F2 — the same
- * column POST /api/v1/events/{id}/complete writes; `sprk_eventstatus` is not used).
+ * column POST /api/v1/events/{id}/complete writes; the deprecated second status column is not used).
  * Live option set, verified 2026-10-05. An unknown or missing value is shown as
  * such — never defaulted to "Open".
  */

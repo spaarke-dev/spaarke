@@ -88,33 +88,9 @@ const CHOICE_TO_COLUMN: Record<number, TodoColumn> = {
 // copy both packages depend on.
 // ---------------------------------------------------------------------------
 
-const W_PRIORITY = 0.5;
-const W_EFFORT = 0.2;
-const W_URGENCY = 0.3;
-
-/** Convert days-until-due into a 0-100 urgency raw score. */
-function computeDueDateUrgencyRaw(dueDate: Date | null): number {
-  if (!dueDate) return 0;
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return 100;
-  if (diffDays <= 3) return 80;
-  if (diffDays <= 7) return 50;
-  if (diffDays <= 10) return 25;
-  return 0;
-}
-
-/** Composite To Do Score for an item — 0-100, clamped. */
-function computeTodoScore(todo: IKanbanTodoLike): number {
-  const rawPriority = todo.sprk_priorityscore ?? 50;
-  const rawEffort = todo.sprk_effortscore ?? 50;
-  const dueDate = parseDueDate(todo.sprk_duedate);
-  const rawUrgency = computeDueDateUrgencyRaw(dueDate);
-
-  const raw = rawPriority * W_PRIORITY + (100 - rawEffort) * W_EFFORT + rawUrgency * W_URGENCY;
-  return Math.max(0, Math.min(100, Math.round(raw)));
-}
+// The composite score is the ONE shared function (task 067 / D-29):
+// `computeTodoScore` in `../utils/todoScoring`. This hook used to keep a private
+// copy of the urgency + composite math; it now calls the shared one.
 
 // ---------------------------------------------------------------------------
 // Pure bucketing helpers (also exported as `bucketTodoItems` for the widget's

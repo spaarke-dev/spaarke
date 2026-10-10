@@ -154,6 +154,10 @@ export * from './PaneHeaderToolsMenu';
 // TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
 export * from './TagFilter';
 
+// RowActionMenu - the ONE shared descriptor-driven row-action menu (C-9; DocumentRowMenu and the four former
+// bespoke row menus are built on it)
+export * from './RowActionMenu';
+
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
 
@@ -299,6 +303,11 @@ export type {
   ChooserFileArgs,
 } from './GetStartedCards/CreateRecordChooserModal';
 
+// StatusBadge - generic status/severity badge (label + tone), no domain
+// vocabulary. The ONE legitimately-new UI primitive added by
+// spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41).
+export * from './StatusBadge';
+
 // AccessGrantModal - the person-icon access-grant modal opened from
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
@@ -317,3 +326,8 @@ export * from './StatusBadge';
 // EvidenceLine, StatusBar, RecordRow, AggregateCard + the console-state to
 // StatusBadge-tone table (spaarke-ontology-platform-r1 task 057, FR-28/D-24).
 export * from './ConsoleKit';
+
+// Worklist - MatterCard, the ONE worklist row component (one card per core record,
+// one IssueLine per Work Item; data-driven variants). spaarke-ontology-platform-r1
+// task 051 (FR-25/FR-28, D-24).
+export * from './Worklist';

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="136" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Create Analysis started from the Console hub fails at Finish: "A record this analysis is filed under was not found. The analysis was not saved." (404)</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>User-facing create path that loses work; BFF write path (filing parent resolution) and a shared wizard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,ai,frontend,bug,separate-pr</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Find out why Create Analysis, started from the Spaarke Console hub, fails at Finish with a 404, and fix it so the analysis is created and runs.</prompt>
+  <role>SPAARKE full-stack engineer.</role>
+  <goal>Starting Create Analysis from the Console hub, choosing an NDA analysis and pressing Finish creates the analysis and runs it in dev. Root cause is proven with evidence, every other entry point of the same wizard is checked for the same fault, and a test fails on the old code.</goal>
+
+  <context>
+    <background>Found by the owner on the task 111 checklist (artifact 3FPj4oT83f25v2r8yutkMV, results/r1, 2026-10-08T14:10Z, spaarkedev1). Card r1 is "Create Analysis, started from the hub (the canary)". The modal checks (opens, light, dark, Esc, backdrop) passed; Finish failed. Owner's note, verbatim: "NDA analysis did not run; A record this analysis is filed under was not found. The analysis was not saved. Console: Failed to load resource: the server responded with a status of 404 ()".
+The message is the BFF's secure-child "filed under ... not found" 404 (the same wording family as the to-do and budget variants; see bffChildWriteAdapter and the secure-child write routes). The hub launch may pass no parent, or a parent of the wrong type or id, or the wizard may send an id the BFF looks up in the wrong table. That is a hypothesis to prove or disprove, not a conclusion.
+Tasks 056/111/112/113 moved wizards into the standard modal and the in-app host (InAppWizardHost in ThreePaneShell); check whether that move changed what context the wizard receives.</background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Investigate first: reproduce from the code path (and read-only App Insights / Dataverse reads for 2026-10-08 around 14:00-14:15Z) before changing anything. Record the root cause with evidence in notes/task-136-create-analysis-404.md. Fix the cause, not the message. Check every entry point that opens the same wizard (hub, matter, project, document, ribbon) for the same fault and fix or prove each. If an analysis created without a filing parent is a legitimate case, the server must accept it; if it is not, the wizard must require a parent before Finish. Choose based on the existing contract and say which. A test fails on the old code. Own worktree off origin/master, own PR, do not merge. No dev data writes beyond creating one test analysis through the fixed UI path after deploy approval. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Root cause recorded with evidence (code path plus telemetry or a reproduction).</criterion>
+    <criterion testable="true">Create Analysis from the hub completes (unit or integration test fails on the old code and passes on the new).</criterion>
+    <criterion testable="true">Every other entry point of the wizard is checked and listed with its result.</criterion>
+    <criterion testable="true">A PR against master is open with CI green; owner re-runs checklist card r1 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-09 by the main session from the owner's checklist result r1 (no-parking rule).</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

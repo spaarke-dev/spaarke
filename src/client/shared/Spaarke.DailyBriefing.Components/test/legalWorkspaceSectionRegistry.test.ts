@@ -13,7 +13,7 @@
  *      We assert the registry build does not throw and the dailyBriefing
  *      entry has the correct id — verifying the option is at least accepted
  *      by the factory signature (the loader's actual fetch-time invocation
- *      is exercised by the existing useBriefingNotifications + smoke tests).
+ *      is exercised by the existing useBriefingRender coverage).
  *
  *   3. The legacy band-aid API `setLegalWorkspaceDailyBriefingNotificationLoader`
  *      from R2 task 002 (Wave 8) is REMOVED from the LegalWorkspace barrel.
