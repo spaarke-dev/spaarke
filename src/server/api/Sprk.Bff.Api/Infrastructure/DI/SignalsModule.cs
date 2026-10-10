@@ -56,6 +56,10 @@ public static class SignalsModule
         // AddRecordOwnershipResolver) — the one owner of invariant I-6, reused, never re-derived here.
         services.AddSingleton<SignalWriter>();
 
+        // DecisionRecordWriter (task 040, FR-18..FR-22): the one append-only Decision Record per review, created through the same
+        // dedicated writer client and uac-r2's IRecordOwnershipResolver. Called last by the commit route (task 043).
+        services.AddSingleton<DecisionRecordWriter>();
+
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the
         // caller-identity client, so scoped) and the plan resolver (the catalog itself is a static table). Both
         // unconditional -- the route that uses them is mapped unconditionally (bff-extensions.md F.1).
