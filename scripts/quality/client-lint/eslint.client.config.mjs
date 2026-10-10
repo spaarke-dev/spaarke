@@ -129,6 +129,8 @@ function generateTsconfig(pkg, extraSources = []) {
       rootDir: rel(here, REPO_ROOT),
       allowImportingTsExtensions: true,
       skipLibCheck: true,
+      // Default @types discovery walks up from .generated/, missing the package's own @types/node, @types/jest, ...
+      ...(raw.compilerOptions?.typeRoots ? {} : { typeRoots: [rel(here, path.join(pkgDir, "node_modules", "@types"))] }),
     },
     include: [rel(here, path.join(pkgDir, "src")) + "/**/*", ...extraSources],
     exclude: [
@@ -157,7 +159,10 @@ export const IGNORES = [
   "**/*.stories.{ts,tsx}",
 ];
 
-const NUC = { "@typescript-eslint/no-unnecessary-condition": "error" };
+const NUC = {
+  // `while (true)` SSE/stream reader loops are legitimate; only literal constants are allowed.
+  "@typescript-eslint/no-unnecessary-condition": ["error", { allowConstantLoopConditions: "only-allowed-literals" }],
+};
 
 /**
  * Existing source carries `// eslint-disable-next-line react-hooks/exhaustive-deps`-style directives for rules this

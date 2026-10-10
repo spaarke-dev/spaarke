@@ -665,6 +665,8 @@ Today's violations are recorded per file and rule in `scripts/quality/client-lin
 
 - **You fixed existing debt:** `node scripts/quality/client-lint/client-lint.mjs prune`, then commit the smaller `eslint-suppressions.json` with the fix.
 - **You added a violation:** fix it. If the condition is genuinely defensive (for example a dual-shape fetch), narrow the type or use `// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- <reason>`. Do not hand-edit the JSON to add entries.
+- **After moving or renaming a file with recorded findings:** run `client-lint.mjs baseline --package <id>` (re-records only that package, merging into the JSON and pruning the old path), then explain the diff in the PR.
+- **Lockfiles:** on a dev box, `install` can rewrite a stale tracked `package-lock.json`; commit the regenerated lock (CI fails on a stale one: `npm install --package-lock-only --legacy-peer-deps` in that dir).
 - **Re-baselining everything** (`client-lint.mjs baseline`) is rare and reviewed in the PR; the diff must be explained.
 - **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not). If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
 

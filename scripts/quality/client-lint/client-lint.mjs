@@ -5,7 +5,9 @@
  *   node scripts/quality/client-lint/client-lint.mjs install [--package <id>]   npm install the covered packages (types)
  *   node scripts/quality/client-lint/client-lint.mjs check   [--package <id>]   lint; FAILS on a new violation or an unpruned suppression
  *   node scripts/quality/client-lint/client-lint.mjs prune                      drop suppressions that no longer occur (after fixing code)
- *   node scripts/quality/client-lint/client-lint.mjs baseline                   re-record ALL current violations (rare; reviewed in the PR)
+ *   node scripts/quality/client-lint/client-lint.mjs baseline [--package <id>]  re-record current violations (rare; reviewed in the PR).
+ *                                                                               With --package: only that package, merged into the JSON.
+ *                                                                               After moving/renaming a file with recorded findings, run this, then explain the diff in the PR.
  *   node scripts/quality/client-lint/client-lint.mjs controls                   assert the must-fire / must-not-fire fixtures
  *
  * `check` is the default. Run from anywhere; the runner pins cwd to the repo root (suppression keys are repo-relative).
@@ -50,7 +52,9 @@ function requireToolchain() {
   }
 }
 
-function runEslint(extra, targets, configFile = CONFIG) {
+const STALE_RE = /suppressions left that do not occur anymore/;
+
+function runEslint(extra, targets, configFile = CONFIG, onStderr = null) {
   return new Promise((resolve) => {
     const started = Date.now();
     const child = spawn(
@@ -66,8 +70,12 @@ function runEslint(extra, targets, configFile = CONFIG) {
         ...extra,
         ...targets,
       ],
-      { cwd: REPO_ROOT, stdio: "inherit" },
+      { cwd: REPO_ROOT, stdio: onStderr ? ["inherit", "inherit", "pipe"] : "inherit" },
     );
+    child.stderr?.on("data", (d) => {
+      process.stderr.write(d);
+      onStderr(String(d));
+    });
     child.on("exit", (code) => resolve({ code: code ?? 1, ms: Date.now() - started }));
   });
 }
@@ -95,10 +103,11 @@ async function check() {
   requireToolchain();
   const timings = [];
   let exit = 0;
+  let stale = false;
   // One ESLint process per package keeps each TypeScript program (and heap) small and gives per-package timing.
   // The suppressions file is shared; ESLint only reconciles entries for files it linted.
   for (const p of selected) {
-    const r = await runEslint([], [`${p.dir}/src`]);
+    const r = await runEslint([], [`${p.dir}/src`], CONFIG, (t) => (stale ||= STALE_RE.test(t)));
     timings.push([p.id, r.ms, r.code]);
     if (r.code !== 0) exit = r.code;
   }
@@ -126,16 +135,20 @@ async function prune() {
 
 async function baseline() {
   requireToolchain();
-  if (only) {
-    console.error("baseline re-records every package; do not combine with --package.");
-    process.exit(2);
-  }
-  fs.rmSync(SUPPRESSIONS, { force: true });
+  // Whole-repo baseline starts from scratch; --package merges (ESLint --suppress-rule adds to the existing JSON).
+  if (!only) fs.rmSync(SUPPRESSIONS, { force: true });
   let exit = 0;
-  for (const p of PACKAGES) {
+  for (const p of selected) {
     const r = await runEslint(["--suppress-rule", "@typescript-eslint/no-unnecessary-condition"], [`${p.dir}/src`]);
     console.log(`${p.id}: ${fmt(r.ms)}`);
     if (r.code > 1) exit = r.code;
+  }
+  if (only && exit === 0) {
+    // Drop the entries a moved/renamed file left behind at its old path.
+    for (const p of selected) {
+      const r = await runEslint(["--prune-suppressions"], [`${p.dir}/src`]);
+      if (r.code > 1) exit = r.code;
+    }
   }
   process.exit(exit);
 }
