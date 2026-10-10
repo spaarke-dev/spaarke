@@ -146,7 +146,7 @@ public static class OntologyWriterFailureReason
     public const string DataverseAccessDenied = "dataverse_access_denied";
 
     /// <summary>The grouping matter's subject type has no verified matter-derivation path
-    /// (<see cref="Sprk.Bff.Api.Services.Signals.SignalWriter.VerifiedMatterDerivation"/>).</summary>
+    /// (<see cref="Sprk.Bff.Api.Services.Signals.SignalWriter.VerifiedSubjects"/>).</summary>
     public const string MatterDerivationUnverified = "matter_derivation_unverified";
 
     /// <summary>The subject's own matter-lookup field (e.g. <c>sprk_communication.sprk_regardingmatter</c>)
@@ -182,6 +182,25 @@ public static class OntologyWriterFailureReason
     /// <summary>Task 039 (D-33): a Signal the resolver gave to the Secure Record Owners team does not read back
     /// with that team as its <c>owningteam</c> — after the create, or on a re-evaluation (reconcile) read.</summary>
     public const string SecureOwnerMismatch = "secure_owner_mismatch";
+
+    /// <summary>Task 037 (D-34): <c>CoreAncestorResolver</c> could not derive the subject's core record (a read or
+    /// metadata fault, or a subject naming two different records of one core type). The write is refused.</summary>
+    public const string CoreRecordUnresolved = "core_record_unresolved";
+
+    /// <summary>Task 037 (D-37): the subject names more than one core record and neither its direct filed-under record
+    /// nor matter-over-project decides between them. The write is refused.</summary>
+    public const string CoreRecordAmbiguous = "core_record_ambiguous";
+
+    /// <summary>Task 037 (D-36): the core record's table has no active <c>sprk_recordtype_ref</c> catalog row, so the
+    /// Signal's <c>sprk_corerecordtype</c> cannot be written.</summary>
+    public const string CoreRecordTypeNotCataloged = "core_record_type_not_cataloged";
+
+    /// <summary>Task 037 (D-35): a subject with no core record is owned by the subject's owner, and that owner is neither a
+    /// system user nor a team (or is empty). The write is refused rather than owned by the writer.</summary>
+    public const string NoCoreOwnerUnresolved = "no_core_owner_unresolved";
+
+    /// <summary>Task 037 (D-35): a no-core Signal does not read back with the subject's owner as its <c>ownerid</c>.</summary>
+    public const string NoCoreOwnerMismatch = "no_core_owner_mismatch";
 
     // ── sprk_policyversion validation sub-reasons (task 022 rework, review finding #7) ─────────────────────
     // Replaces the single bucket "policy_version_rule_body_invalid" with bounded, mutually-exclusive
