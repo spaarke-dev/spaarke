@@ -136,7 +136,6 @@ export function useCommandRouting(deps: CommandRoutingDeps): CommandRoutingContr
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
           });
-          if (!response.ok) return null;
           const json = (await response.json()) as { sessionId?: string };
           const newId =
             typeof json?.sessionId === "string" && json.sessionId.length > 0

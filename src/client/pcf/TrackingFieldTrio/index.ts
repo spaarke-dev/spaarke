@@ -123,6 +123,12 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.46 (task 181, unified-access-control-r2 — owner round 89 item 3): the bundled `AccessGrantModal` no longer
+ *   shows the dev "Internal notify (deep-link) is not yet available … (escalated; see project notes)" notice. The BFF
+ *   now notifies an internal user in-app (a link to the record) when `/grant` or `/share-user` gives them access; the
+ *   modal reports "Granted access to N item(s)." and, when the server says a notification could not be sent, adds
+ *   "Some people could not be notified; share the record link with them." No host wiring changed.
+ *
  * v1.0.45 (task 175, unified-access-control-r2 — owner round 87, refining round 84: the parent sets a FLOOR; a filed
  *   work assignment or project may be made stricter by hand, never looser, and its grants and shares are unaffected):
  *   `evaluateGrantGate` keeps `followsParents` and the floor (`floorSecure`, `floorAccessPermission`,
@@ -1482,7 +1488,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.45 • Built 2026-10-09',
+      versionText: 'v1.0.46 • Built 2026-10-09',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they

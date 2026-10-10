@@ -77,6 +77,7 @@ import {
 } from '@fluentui/react-icons';
 import { SprkModal, useDangerButtonClassName } from '../SprkModal';
 import { closeSecureProject, type ICloseProjectResponse } from './closureService';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -102,12 +103,10 @@ export interface ICloseProjectDialogProps {
    */
   onClosed?: (result: ICloseProjectResponse) => void;
   /** MSAL-backed authenticated fetch function for BFF API calls. */
-  // Narrowed from `typeof fetch` 2026-09-04. `typeof fetch` takes `RequestInfo | URL`, but the
-  // repo-wide `@spaarke/auth` contract (ADR-028) is `(url: string, init?) => Promise<Response>` — so
-  // the wider type REJECTED the real `authenticatedFetch` by parameter contravariance, which is what
-  // blocked WorkspaceGrid from consuming this component. This shape overstates nothing and still
-  // accepts a genuine `fetch`.
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  // `@spaarke/auth`'s throwing `authenticatedFetch` (ADR-028): a non-2xx rejects (`ApiError`), it is never
+  // returned. (Narrowed from `typeof fetch` 2026-09-04, whose `RequestInfo | URL` parameter rejected the
+  // real fetch by contravariance.)
+  authenticatedFetch: AuthenticatedFetchFn;
   /** BFF API base URL. */
   bffBaseUrl: string;
   /**

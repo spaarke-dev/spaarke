@@ -15,6 +15,7 @@ import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SprkChat } from '../SprkChat';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
+import { authExhausted } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -231,7 +232,8 @@ describe('SprkChat', () => {
       // letting createSession hit the default 200 success. Reset and make all
       // mounted fetches fail so we definitely exercise the session-error path.
       mockFetch.mockReset();
-      mockFetch.mockResolvedValue(createFetchResponse('Unauthorized', 401));
+      // authenticatedFetch THROWS (AuthError once its 401 retries are spent); it never resolves a 401.
+      mockFetch.mockRejectedValue(authExhausted());
 
       await act(async () => {
         renderWithProviders(<SprkChat {...defaultProps} />);

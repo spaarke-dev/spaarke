@@ -342,7 +342,6 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
           `${bffBaseUrl}/api/documents/${encodeURIComponent(stableDocumentId)}/preview-url`,
           { method: 'GET' }
         );
-        if (!response.ok) return null;
         const body = (await response.json()) as { previewUrl?: string | null };
         const fresh = body.previewUrl ?? null;
         // Defensive: never re-introduce the bug even if a server ever returned

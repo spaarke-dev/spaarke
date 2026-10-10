@@ -326,7 +326,10 @@ public class GrantLifecycleCharacterizationTests
         var firstId = await Grant(client, Request());
         var secondId = await Grant(client, Request());
 
-        secondId.Should().Be(firstId, "the second grant must resolve to the existing row, not a new one");
+        // Compared by row id: the outcomes differ in AccessGained (task 181) — the first call gave access, the no-op did not.
+        secondId.AccessRecordId.Should().Be(firstId.AccessRecordId, "the second grant must resolve to the existing row, not a new one");
+        firstId.AccessGained.Should().BeTrue();
+        secondId.AccessGained.Should().BeFalse("a no-op re-grant gives nothing (task 181: nobody is notified)");
         table.ActiveRows.Should().ContainSingle("exactly one active row backs one logical grant");
         table.CreateCount.Should().Be(1, "the second call must not issue a CREATE");
     }

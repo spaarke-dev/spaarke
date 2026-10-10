@@ -60,13 +60,13 @@ public class AssignedAccessMarkerTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new WriteProbe(),
-            _h.Materializer, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private Task<IResult> ShareUser(Guid user) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", _matter, user, ExternalAccessLevel.Collaborate),
             _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer, Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>Batch 4 integration (task 149): the share routes fan out to a secure root's children — the REAL
     /// synchronizer over a world with no secure record, so it answers "not applicable" for this ordinary matter.</summary>
