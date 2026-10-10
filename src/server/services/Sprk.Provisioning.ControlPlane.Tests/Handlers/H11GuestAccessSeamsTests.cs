@@ -19,7 +19,10 @@
 //     - add member: 204 → success; 400 "already exist" → success (idempotent);
 //       403 → Failure.
 //   DataverseWebApiGuestUserWriter
-//     - roles resolved in the root business unit; none or several matches refused;
+//     - roles resolved in the CUSTOMER's business unit (T259); none or several matches refused;
+//     - T259: a guest Dataverse added to the ROOT is moved to the customer unit (PATCH businessunitid,
+//       If-Match *) and read back BEFORE any role; one already there is not patched; one in any other
+//       unit is InForeignBusinessUnit with nothing written; a move that does not land associates no role;
 //       a quote in a role name doubled;
 //     - the systemuser is read by the azureactivedirectoryobjectid alternate key
 //       (which adds a group member on demand) — no POST systemusers;
@@ -50,6 +53,7 @@ public sealed class H11GuestAccessSeamsTests
     private const string RootBuId = "bbbbbbbb-1111-2222-3333-444444444444";
     private const string RoleId = "cccccccc-1111-2222-3333-444444444444";
     private const string SystemUserId = "dddddddd-1111-2222-3333-444444444444";
+    private const string CustomerBuId = "eeeeeeee-1111-2222-3333-444444444444";
 
     private static readonly UserProvisioningEntry Ada = new("Ada", "Lovelace", "ada@customer.com", null);
 
@@ -188,15 +192,16 @@ public sealed class H11GuestAccessSeamsTests
     // ---------------- Dataverse guest-user writer ----------------
 
     [Fact]
-    public async Task ResolveRolesAsync_FindsEachRoleInTheRootBusinessUnit()
+    public async Task ResolveRolesAsync_FindsEachRoleInTheCustomersBusinessUnit_NeverTheRoot()
     {
         var http = DataverseFake(roleRows: 1, roleHeld: false);
 
-        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["Spaarke Basic User"], CancellationToken.None);
+        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, Guid.Parse(CustomerBuId), ["Spaarke Basic User"], CancellationToken.None);
 
         outcome.Should().BeOfType<GuestRoleResolution.Resolved>().Which.RoleIds.Should().Equal(Guid.Parse(RoleId));
         var query = http.Requests.Single().Uri;
-        query.Should().Contain("Spaarke%20Basic%20User").And.Contain($"_businessunitid_value%20eq%20{RootBuId}");
+        query.Should().Contain("Spaarke%20Basic%20User").And.Contain($"_businessunitid_value%20eq%20{CustomerBuId}")
+            .And.NotContain(RootBuId, "T259: Deep read at the root reaches the Secure Record unit");
     }
 
     [Theory]
@@ -206,7 +211,7 @@ public sealed class H11GuestAccessSeamsTests
     {
         var http = DataverseFake(roleRows: rows, roleHeld: false);
 
-        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["Spaarke Basic User"], CancellationToken.None);
+        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, Guid.Parse(CustomerBuId), ["Spaarke Basic User"], CancellationToken.None);
 
         outcome.Should().BeOfType(expected);
         http.Requests.Single().Uri.Should().Contain("$top=2", "a second match must be visible to be refused");
@@ -217,7 +222,7 @@ public sealed class H11GuestAccessSeamsTests
     {
         var http = DataverseFake(roleRows: 1, roleHeld: false);
 
-        await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["O'Brien Role"], CancellationToken.None);
+        await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, Guid.Parse(CustomerBuId), ["O'Brien Role"], CancellationToken.None);
 
         http.Requests.Single().Uri.Should().Contain("O%27%27Brien");
     }
@@ -237,6 +242,74 @@ public sealed class H11GuestAccessSeamsTests
         var associate = http.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Post).Subject;
         associate.Uri.Should().EndWith($"/systemusers({SystemUserId})/systemuserroles_association/$ref");
         associate.Body.Should().Contain($"https://spaarke-acme.crm.dynamics.com/api/data/v9.2/roles({RoleId})");
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AGuestAddedToTheRoot_IsMovedToTheCustomerUnit_AndReadBack_BeforeAnyRole()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.Success(SystemUserId));
+        var patchIndex = http.Requests.FindIndex(r => r.Method == HttpMethod.Patch);
+        var patch = http.Requests[patchIndex];
+        patch.Uri.Should().EndWith($"/api/data/v9.2/systemusers({SystemUserId})");
+        patch.Body.Should().Contain($"\"businessunitid@odata.bind\":\"/businessunits({CustomerBuId})\"");
+        patch.IfMatch.Should().Be("*", "an update, never an upsert");
+        http.Requests.FindIndex(r => r.Uri.Contains($"/systemusers({SystemUserId})?$select=_businessunitid_value"))
+            .Should().BeGreaterThan(patchIndex, "the move is read back");
+        http.Requests.FindIndex(r => r.Method == HttpMethod.Post).Should().BeGreaterThan(patchIndex,
+            "a business-unit change strips roles, so roles are associated only after the move");
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AGuestAlreadyInTheCustomerUnit_IsNotPatched()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: true, userUnit: CustomerBuId);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.Success(SystemUserId));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch || r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AGuestInAnotherUnit_IsNeverMoved_AndGetsNoRole()
+    {
+        var secureUnit = "ffffffff-1111-2222-3333-444444444444";
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: secureUnit);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.InForeignBusinessUnit(SystemUserId, Guid.Parse(secureUnit)));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch || r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AMoveThatDoesNotLand_IsAFailure_AndGetsNoRole()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: RootBuId);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic.Should().Contain("did not land");
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post, "no role on a user outside the customer unit");
+    }
+
+    [Fact]
+    public async Task EnsureGuestUserAsync_AGuestHoldingARootRole_IsRefused_NothingAssociatedOrRemoved()
+    {
+        // An organisation that keeps roles on a unit change: the moved guest still holds the ROOT copy (Deep read there
+        // reaches the Secure Record unit).
+        var http = DataverseFake(roleRows: 1, roleHeld: false, userUnit: RootBuId, unitAfterMove: CustomerBuId, heldRoleUnit: RootBuId);
+
+        var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
+
+        outcome.Should().Be(new DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit(SystemUserId, Guid.Parse(RoleId), Guid.Parse(RootBuId)));
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post || r.Method == HttpMethod.Delete);
+        http.Requests.Single(r => r.Uri.Contains("/systemuserroles_association?")).Uri
+            .Should().Contain("_businessunitid_value", "every held role's unit is read");
     }
 
     [Fact]
@@ -291,15 +364,21 @@ public sealed class H11GuestAccessSeamsTests
     // ---------------- helpers ----------------
 
     private static DataverseGuestUserRequest Request()
-        => new(EnvUrl, TenantId, GuestId, [Guid.Parse(RoleId)]);
+        => new(EnvUrl, TenantId, GuestId, Guid.Parse(CustomerBuId), [Guid.Parse(RoleId)]);
 
-    private static FakeHttp DataverseFake(int roleRows, bool roleHeld, Func<HttpResponseMessage>? userRead = null)
+    private static FakeHttp DataverseFake(
+        int roleRows, bool roleHeld, Func<HttpResponseMessage>? userRead = null, string userUnit = CustomerBuId,
+        string? unitAfterMove = null, string? heldRoleUnit = null)
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
-            if (req.Method == HttpMethod.Post)
+            if (req.Method == HttpMethod.Post || req.Method == HttpMethod.Patch)
             {
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            if (uri.Contains($"/systemusers({SystemUserId})?$select=_businessunitid_value"))
+            {
+                return Json(HttpStatusCode.OK, $$"""{"_businessunitid_value":"{{unitAfterMove ?? userUnit}}"}""");
             }
             if (uri.Contains("/roles?"))
             {
@@ -308,11 +387,14 @@ public sealed class H11GuestAccessSeamsTests
             }
             if (uri.Contains("/systemuserroles_association?"))
             {
-                return Json(HttpStatusCode.OK, roleHeld ? $$"""{"value":[{"roleid":"{{RoleId}}"}]}""" : """{"value":[]}""");
+                return Json(HttpStatusCode.OK, heldRoleUnit is not null
+                    ? $$"""{"value":[{"roleid":"{{RoleId}}","_businessunitid_value":"{{heldRoleUnit}}"}]}"""
+                    : roleHeld ? $$"""{"value":[{"roleid":"{{RoleId}}","_businessunitid_value":"{{CustomerBuId}}"}]}""" : """{"value":[]}""");
             }
             if (uri.Contains("/systemusers(azureactivedirectoryobjectid="))
             {
-                return userRead?.Invoke() ?? Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}"}""");
+                return userRead?.Invoke()
+                    ?? Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}","_businessunitid_value":"{{userUnit}}"}""");
             }
             return Json(HttpStatusCode.BadRequest, $"{{\"error\":{{\"code\":\"unexpected request {req.Method} {uri}\"}}}}");
         });
@@ -352,12 +434,13 @@ public sealed class H11GuestAccessSeamsTests
     /// <summary>Hand-rolled fake handler (NOT Mock&lt;HttpMessageHandler&gt;) recording each request.</summary>
     private sealed class FakeHttp(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
-        public List<(HttpMethod Method, string Uri, string? Body)> Requests { get; } = [];
+        public List<(HttpMethod Method, string Uri, string? Body, string? IfMatch)> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            Requests.Add((request.Method, request.RequestUri!.AbsoluteUri, body));
+            Requests.Add((request.Method, request.RequestUri!.AbsoluteUri, body,
+                request.Headers.TryGetValues("If-Match", out var ifMatch) ? ifMatch.Single() : null));
             return respond(request);
         }
     }

@@ -27,4 +27,14 @@ public sealed class H10DataverseAppUserGraphParityOptions
 
     /// <summary>Per-request timeout for Microsoft Graph REST HTTP calls.</summary>
     public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Task 261: how many times the T3 "nothing extra remains" re-read is attempted while it still lists a role H10
+    /// just removed. Microsoft Graph is eventually consistent — a deleted appRoleAssignment can still be listed for a
+    /// few seconds — so one early read must not decide.
+    /// </summary>
+    public int ExtrasRecheckAttempts { get; set; } = 5;
+
+    /// <summary>Task 261: delay before each re-read after the first (multiplied by the attempt number).</summary>
+    public TimeSpan ExtrasRecheckDelay { get; set; } = TimeSpan.FromSeconds(4);
 }

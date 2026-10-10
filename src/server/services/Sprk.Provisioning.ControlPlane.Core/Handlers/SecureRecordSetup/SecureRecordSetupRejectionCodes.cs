@@ -9,8 +9,9 @@
 //
 // §4C CLASS (INCOMING-145 §2.3): every failure is Resumable except where an owner decision is needed before anything
 // can change — users in the business unit, members of the owner team, a business unit under the wrong parent, a root
-// default team that reaches the secure unit by depth, and a field-security writer nobody named (on sprk_issecure or on
-// an identity-binding column). Those are
+// default team that reaches the secure unit by depth, a field-security writer nobody named (on sprk_issecure or on
+// an identity-binding column), and (T259, §6 T1/T3) a customer business unit that is missing or not under the root, or a
+// BFF application user outside it. Those are
 // QuarantineRequired: a retry cannot fix them, and the handler never moves a user, a team member or a business unit.
 // -----------------------------------------------------------------------------
 
@@ -75,6 +76,25 @@ public static class SecureRecordSetupRejectionCodes
     public const string RootDefaultTeamReachesSecureUnit = "secure_setup.root_default_team_reaches_secure_bu";
 
     /// <summary>
+    /// T259 (§6 T1, ISS-010): the customer's business unit H10 recorded (InterStepState.CustomerBusinessUnitId) does not
+    /// exist. H10 created it and the BFF's application users in it; something removed it since — an operator must find out
+    /// what before anything is configured (QuarantineRequired).
+    /// </summary>
+    public const string CustomerBusinessUnitMissing = "secure_setup.customer_bu_missing";
+
+    /// <summary>
+    /// T259 (§6 T1, ISS-010): the customer's business unit is not a DIRECT child of the root (or is the root). Only as a
+    /// sibling of the Secure Record unit does Deep depth there stop short of every secure record (QuarantineRequired).
+    /// </summary>
+    public const string CustomerBusinessUnitWrongParent = "secure_setup.customer_bu_wrong_parent";
+
+    /// <summary>
+    /// T259 (§6 T3, ISS-010): one of H10's two BFF application users is not in the customer's business unit (or does not
+    /// exist). Moving it strips its roles — an owner decision (QuarantineRequired).
+    /// </summary>
+    public const string AppUserOutsideCustomerBusinessUnit = "secure_setup.app_user_outside_customer_bu";
+
+    /// <summary>
     /// S10/S15: a field-security profile H7b maintains memberships of (the two BFF-managed profiles, the two identity-link
     /// profiles) is missing or ambiguous — every one ships in SpaarkeMaster (Resumable).
     /// </summary>
@@ -112,6 +132,19 @@ public static class SecureRecordSetupRejectionCodes
     /// column — the reader profile included (QuarantineRequired).
     /// </summary>
     public const string IdentityLinkLockOtherWriter = "secure_setup.identity_link_lock_other_writer";
+
+    /// <summary>
+    /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
+    /// does not grant Read on it (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string StandingGrantLockIncomplete = "secure_setup.standing_grant_lock_incomplete";
+
+    /// <summary>
+    /// S21 (ISS-020 / #1565): the task-154 role split is not in place — the Access Administrator or Core User role is missing
+    /// from the root unit, the former lacks Read on <c>sprk_noaccessentry</c> at Global, or the latter holds it (Resumable:
+    /// re-import SpaarkeMaster or run scripts/Set-NoAccessEntryRolePrivileges.ps1).
+    /// </summary>
+    public const string NoAccessEntryRolesIncomplete = "secure_setup.no_access_entry_roles_incomplete";
 
     /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing

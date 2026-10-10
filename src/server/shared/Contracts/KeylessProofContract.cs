@@ -4,7 +4,8 @@
 //
 // customer-provisioning-orchestration-r1 task 230b (owner D13): the customer's BFF proves, with its own managed
 // identity, one real call to each Azure service of its stamp; L2's acceptance gate (H13) calls that proof and refuses
-// Ready unless every service is proved. Three parties must agree on these strings — the BFF endpoint and its filter,
+// Ready unless every service is proved. Task 260 (ISS-014) adds the stamp's secure-record isolation census behind the
+// same role (nested class SecureRecordIsolationCensus). Three parties must agree on these strings — the BFF endpoint and its filter,
 // H3 (which defines the app role on the customer's BFF app registration and assigns it to the L2 Worker identity) and
 // H13 (which calls the route and parses the outcomes). Two deployables, one definition: this file is compiled into
 // both with <Compile Include="..." Link="..." /> and is `internal` in each.
@@ -82,5 +83,29 @@ internal static class KeylessProofContract
             ServiceBus, Redis, OpenAiChat, OpenAiEmbeddings, DocumentIntelligence, AiSearch, Cosmos, BlobStorage,
             ContentSafetyPromptShield, ContentSafetyGroundedness,
         };
+    }
+
+    /// <summary>
+    /// Task 260 (ISS-014): the stamp BFF's read-only secure-record isolation census, behind the SAME application role
+    /// (<see cref="AppRoleValue"/>) and called by the same party (H13) as the keyless proof — so it shares this contract
+    /// rather than adding a third source-linked file. H13 refuses Ready unless the status is <see cref="Isolated"/>.
+    /// Response: <c>{"status","verdict","findings":[{"verdict","message"}]}</c> — the scheduled job's result, no more.
+    /// </summary>
+    public static class SecureRecordIsolationCensus
+    {
+        /// <summary>The BFF route H13 calls (POST — it reads the whole directory, so it is never cached or prefetched).</summary>
+        public const string Route = "/api/platform/secure-record-isolation-census";
+
+        /// <summary>No principal reaches the Secure Record unit and every NFR-05 clause holds. The only passing status.</summary>
+        public const string Isolated = "isolated";
+
+        /// <summary>At least one clause is violated (an exposure, a coverage gap, an ambiguous or vacuous census).</summary>
+        public const string Findings = "findings";
+
+        /// <summary>The Secure Record unit does not exist, so nothing was asserted. Never a pass.</summary>
+        public const string Inert = "inert";
+
+        /// <summary>The census could not be read (or did not finish in time): isolation is unknown. Never a pass.</summary>
+        public const string Error = "error";
     }
 }

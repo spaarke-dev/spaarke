@@ -198,6 +198,21 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H10)]
     public string? BffAppRegSystemUserId { get; set; }
 
+    /// <summary>
+    /// T259 (ISS-010 / #1486, owner decision 2026-10-09; INCOMING-145 §6 T1): the customer's own Dataverse business unit —
+    /// named by intake <c>displayName</c>, a DIRECT child of the root and a sibling of the Secure Record unit — that H10
+    /// found or created and created both BFF application users in. Canonical lowercase GUID (ADR-044). H7b checks the
+    /// unit's parent and that both application users are in it; H11 puts every guest in it.
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (same discipline as <see cref="BffAppRegSystemUserId"/>): a typed key, not an ad-hoc
+    /// dictionary insert.
+    /// </remarks>
+    [JsonPropertyName("customerBusinessUnitId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
+    public string? CustomerBusinessUnitId { get; set; }
+
     /// <summary>Correlation ID for the SPE consent flow (design intent: H0.5 output). No handler writes it today.</summary>
     [JsonPropertyName("speConsentCorrelationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -331,7 +346,7 @@ public sealed class InterStepState
     /// <summary>
     /// The stamp's own BFF base URL — the production slot H9 deployed to and health-probed
     /// (<c>https://{appServiceName}.azurewebsites.net</c>, no <c>/api</c> suffix). Task 245b: H7 writes it
-    /// as <c>sprk_BffApiBaseUrl</c>, H13 probes it, H14 derives its webhook receiver URLs from it.
+    /// as <c>sprk_BffApiBaseUrl</c>, H13 probes it.
     /// Before T245b those read run parameters nothing wrote, and H7 fell back to the PLATFORM BFF.
     /// </summary>
     [JsonPropertyName("bffApiUrl")]

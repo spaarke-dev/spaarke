@@ -20,6 +20,7 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 
 import { FindSimilarApp } from "../../../../../FindSimilarCodePage/src/App";
 import { App as WorkspaceLayoutWizardApp } from "../../../../../WorkspaceLayoutWizard/src/App";
+import { httpError } from "../../../__tests__/helpers/httpError";
 
 let platformClose: jest.Mock;
 let platformButton: HTMLButtonElement;
@@ -252,7 +253,9 @@ describe("WorkspaceLayoutWizard App — in-app (SprkModal)", () => {
     });
 
     it("an in-app load failure is shown inside the modal with a token class, not an inline colour (ADR-050)", async () => {
-      fetchMock.mockImplementation(async () => ({ ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }));
+      fetchMock.mockImplementation(async () => {
+        throw httpError(500);
+      });
       mountEdit({ onClose: jest.fn() });
 
       const message = await screen.findByText(/Could not load workspace/);

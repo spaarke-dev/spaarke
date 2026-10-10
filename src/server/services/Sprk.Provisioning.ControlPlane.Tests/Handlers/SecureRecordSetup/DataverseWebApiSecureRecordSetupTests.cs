@@ -242,6 +242,44 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         JsonDocument.Parse(request.Body!).RootElement.GetProperty("sprk_issecure").GetBoolean().Should().BeFalse();
     }
 
+    // ------------------------------------------------------------ T259: §6 T1/T3 reads
+
+    [Fact]
+    public async Task W10_GetBusinessUnit_ReadsItsParent_And404IsNone()
+    {
+        var parent = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => Json(new Dictionary<string, object>
+        {
+            ["businessunitid"] = Unit.ToString(), ["name"] = "Acme Corporation", ["_parentbusinessunitid_value"] = parent.ToString(),
+        }));
+
+        var unit = await Api(http).GetBusinessUnitAsync(Unit, CancellationToken.None);
+
+        unit.Should().Be(new SecureSetupBusinessUnit(Unit, "Acme Corporation", parent));
+        http.Requests.Single().Uri.Should().EndWith(
+            $"/api/data/v9.2/businessunits({Unit})?$select=businessunitid,name,_parentbusinessunitid_value");
+
+        var missing = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        (await Api(missing).GetBusinessUnitAsync(Unit, CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task W11_GetUserBusinessUnit_ReadsTheLookup_404IsNone_AndAFaultIsTheSeamException()
+    {
+        var user = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => Json(new Dictionary<string, object> { ["_businessunitid_value"] = Unit.ToString() }));
+
+        (await Api(http).GetUserBusinessUnitAsync(user, CancellationToken.None)).Should().Be(Unit);
+        http.Requests.Single().Uri.Should().EndWith($"/api/data/v9.2/systemusers({user})?$select=_businessunitid_value");
+
+        var missing = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        (await Api(missing).GetUserBusinessUnitAsync(user, CancellationToken.None)).Should().BeNull();
+
+        var denied = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
+        var act = () => Api(denied).GetUserBusinessUnitAsync(user, CancellationToken.None);
+        (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(SecureRecordSetupFaultKind.Auth);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private static SecureRecordSetupWebApi Api(Recorder http)

@@ -48,6 +48,9 @@
 //       swallowed as InfraFault.
 //   T18 Uses UAMI SP object id (not client id) when calling the parity
 //       verifier -- regression guard: probe MUST NOT confuse the two ids.
+//   T261 (G31): any Graph app role outside the Entra-granted set -> Failed
+//       (a mailbox role adds the Exchange-scope explanation; a directory-write
+//       role is named); the extras re-read failing -> InfraFault, never Passed.
 //
 // SILENT-FAIL AUDIT (parent-dispatch "task 143 lesson: wrong-but-non-null GUID
 // silent-fails"):
@@ -111,7 +114,9 @@ public sealed class GraphAppRoleParityT3ProbeTests
 
         outcome.Should().BeOfType<TrapVerificationOutcome.Passed>()
             .Which.Kind.Should().Be(TrapKind.T3GraphAppRoleParity);
-        verifier.CallCount.Should().Be(2, "one read for the Entra roles, one proving the mailbox roles are absent");
+        verifier.CallCount.Should().Be(1, "one read for the Entra roles");
+        verifier.ExtrasCallCount.Should().Be(1, "one read proving nothing outside the stamp set is held (task 261)");
+        verifier.LastAllowedRoles!.Select(r => r.Value).Should().Equal("FileStorageContainer.Selected");
     }
 
     [Fact]
@@ -124,8 +129,53 @@ public sealed class GraphAppRoleParityT3ProbeTests
 
         var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
 
-        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Which.Diagnostic
-            .Should().Contain("mailbox role(s) granted through Entra: Mail.Send");
+        var diagnostic = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Which.Diagnostic;
+        diagnostic.Should().Contain("outside the stamp set: Mail.Send");
+        diagnostic.Should().Contain("Mailbox role(s) Mail.Send are granted through Exchange");
+    }
+
+    [Theory]
+    [InlineData("Directory.ReadWrite.All")]
+    [InlineData("User.Invite.All")]
+    [InlineData("Sites.ReadWrite.All")]
+    public async Task ProbeAsync_RoleOutsideTheStampSet_ReturnsFailed(string extra)
+    {
+        // Task 261 (G31): a stamp in Spaarke's tenant must hold nothing beyond FileStorageContainer.Selected in Entra.
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value).Append(extra));
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        var diagnostic = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Which.Diagnostic;
+        diagnostic.Should().Contain($"outside the stamp set: {extra}");
+        diagnostic.Should().NotContain("Mailbox role(s)");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_NullExtrasResult_IsInfraFault_OnlyNonePasses()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value));
+        verifier.ReturnNullExtras = true;
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>();
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ExtrasReReadFails_IsInfraFault_NeverPassed()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value));
+        verifier.ExtrasOverride = new GraphAppRoleExtrasResult.Unknown("GET appRoleAssignments failed: 503");
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>().Which.Diagnostic.Should().Contain("503");
     }
 
     // ---------- T3 parity mismatch (silent-fail catch) ----------
@@ -568,6 +618,38 @@ public sealed class GraphAppRoleParityT3ProbeTests
         public static FakeParityVerifier Granting(IEnumerable<string> grantedValues)
             => new(new GraphAppRoleParityResult.Verified(0)) { _granted = new HashSet<string>(grantedValues, StringComparer.Ordinal) };
 
+        public int ExtrasCallCount { get; private set; }
+        public IReadOnlyList<GraphAppRoleEntry>? LastAllowedRoles { get; private set; }
+        public GraphAppRoleExtrasResult? ExtrasOverride { get; set; }
+        public bool ReturnNullExtras { get; set; }
+
+        public Task<GraphAppRoleExtrasResult> FindUnexpectedRolesAsync(
+            string uamiServicePrincipalObjectId,
+            string tenantId,
+            IReadOnlyList<GraphAppRoleEntry> allowedRoles,
+            CancellationToken cancellationToken)
+        {
+            ExtrasCallCount++;
+            LastAllowedRoles = allowedRoles;
+            if (_throwOnCall is not null)
+            {
+                throw _throwOnCall;
+            }
+            if (ReturnNullExtras)
+            {
+                return Task.FromResult<GraphAppRoleExtrasResult>(null!);
+            }
+            if (ExtrasOverride is not null)
+            {
+                return Task.FromResult(ExtrasOverride);
+            }
+            var allowed = allowedRoles.Select(r => r.Value).ToHashSet(StringComparer.Ordinal);
+            var extras = (_granted ?? new HashSet<string>(StringComparer.Ordinal)).Where(v => !allowed.Contains(v)).ToArray();
+            return Task.FromResult<GraphAppRoleExtrasResult>(extras.Length == 0
+                ? new GraphAppRoleExtrasResult.None()
+                : new GraphAppRoleExtrasResult.Found(extras));
+        }
+
         public Task<GraphAppRoleParityResult> VerifyAsync(
             string uamiServicePrincipalObjectId,
             string tenantId,
@@ -615,26 +697,14 @@ public sealed class GraphAppRoleParityT3ProbeTests
 
         public static FakeGraphAppRolesRegistry WithFullCatalog()
         {
-            // Fixture mirroring L2GraphAppRolesRegistry's real 15-entry catalog
-            // shape (identical Values + AppRoleIds so probe diagnostics that
-            // cite specific role names in the missing-list read realistically).
+            // Fixture mirroring L2GraphAppRolesRegistry's real catalog (task 261: the stamp set — identical Values +
+            // AppRoleIds so probe diagnostics that cite specific role names read realistically).
             return new FakeGraphAppRolesRegistry(new[]
             {
                 new GraphAppRoleEntry("FileStorageContainer.Selected", "40dc41bc-0f7e-42ff-89bd-d9516947e474"),
-                new GraphAppRoleEntry("Files.Read.All", "01d4889c-1287-42c6-ac1f-5d1e02578ef6"),
-                new GraphAppRoleEntry("Files.ReadWrite.All", "75359482-378d-4052-8f01-80520e7db3cd"),
-                new GraphAppRoleEntry("Sites.Read.All", "332a536c-c7ef-4017-ab91-336970924f0d"),
-                new GraphAppRoleEntry("Sites.ReadWrite.All", "9492366f-7969-46a4-8d15-ed1a20078fff"),
-                new GraphAppRoleEntry("User.Read.All", "df021288-bdef-4463-88db-98f22de89214"),
-                new GraphAppRoleEntry("Group.Read.All", "5b567255-7703-4780-807c-7be8301ae99b"),
                 new GraphAppRoleEntry("Mail.Read", "810c84a8-4a9e-49e6-bf7d-12d183f40d01"),
                 new GraphAppRoleEntry("Mail.ReadWrite", "e2a3a72e-5f79-4c64-b1b1-878b674786c9"),
                 new GraphAppRoleEntry("Mail.Send", "b633e1c5-b582-4048-a93e-9f11b44c7e96"),
-                new GraphAppRoleEntry("MailboxSettings.Read", "40f97065-369a-49f4-947c-6a255697ae91"),
-                new GraphAppRoleEntry("User.ReadWrite.All", "741f803b-c850-494e-b5df-cde7c675a1ca"),
-                new GraphAppRoleEntry("GroupMember.ReadWrite.All", "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"),
-                new GraphAppRoleEntry("Directory.ReadWrite.All", "19dbc75e-c2e2-444c-a770-ec69d8559fc7"),
-                new GraphAppRoleEntry("User.Invite.All", "09850681-111b-4a89-9bed-3f2cae46d706"),
             });
         }
 

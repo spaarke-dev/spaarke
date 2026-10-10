@@ -142,6 +142,7 @@ public sealed class H7bSecureRecordSetupHandlerTests
     [InlineData("bffAppRegId")]
     [InlineData("bffAppRegSystemUserId")]
     [InlineData("systemUserId")]
+    [InlineData("customerBusinessUnitId")]
     public async Task MissingUpstreamValue_FailsResumable_BeforeAnyDataverseCall(string missing)
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
@@ -153,6 +154,7 @@ public sealed class H7bSecureRecordSetupHandlerTests
             case "bffAppRegId": run.InterStepState.BffAppRegId = " "; break;
             case "bffAppRegSystemUserId": run.InterStepState.BffAppRegSystemUserId = null; break;
             case "systemUserId": run.InterStepState.SystemUserId = "not-a-guid"; break;
+            case "customerBusinessUnitId": run.InterStepState.CustomerBusinessUnitId = null; break;
         }
 
         var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
@@ -182,6 +184,22 @@ public sealed class H7bSecureRecordSetupHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
         repo.LastWrittenRun.Quarantine!.QuarantinedByHandler.Should().Be("H7b");
         repo.LastWrittenRun.GateStates.Should().ContainKey($"h7b-{SecureRecordSetupRejectionCodes.BusinessUnitHasUsers}");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T259_ApplicationUserOutsideTheCustomerUnit_QuarantinesTheRun_WritingNothing()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.UserUnit[dv.BffAppUser] = dv.RootUnitId;   // created in the root (pre-T259 H10)
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
         dv.Writes.Should().BeEmpty();
     }
 
@@ -398,6 +416,7 @@ public sealed class H7bSecureRecordSetupHandlerTests
         run.InterStepState.BffAppRegId = BffAppRegId;
         run.InterStepState.BffAppRegSystemUserId = dv.BffAppUser.ToString();
         run.InterStepState.SystemUserId = dv.MiAppUser.ToString();
+        run.InterStepState.CustomerBusinessUnitId = dv.CustomerUnitId.ToString();   // T259 (H10)
         return run;
     }
 

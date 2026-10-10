@@ -46,6 +46,9 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 // ── Fetch boundary (ADR-028) — the Load leg under test ──────────────────────
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // The REAL error class (pure, no MSAL): ComposeWorkspace branches on `err instanceof ApiError`, so the
+  // thrown failures in this suite must be instances of the class the component imports.
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -125,6 +128,7 @@ jest.mock('./ComposeEditor', () => {
 // Import AFTER mocks are registered.
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
+import { httpError } from '../__tests__/helpers/httpError';
 
 function renderWorkspace(props: Partial<React.ComponentProps<typeof ComposeWorkspace>> = {}) {
   return render(
@@ -195,7 +199,7 @@ beforeEach(() => {
   // Benign default for any secondary call (e.g. the FR-04 refresh-durability `compose-outputs`
   // probe fired once the editor reaches 'loaded') — mirrors ComposeWorkspace.browse.test.tsx's
   // beforeEach. Tests that drive a real Load response override this via `mockLoadResponse`.
-  authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [], text: async () => '' });
+  authenticatedFetchMock.mockRejectedValue(httpError(404));
   editorProps.current = {};
 });
 

@@ -9,7 +9,7 @@
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="appInsightsKey" display-name-key="App Insights Key (ignored)" description-key="Deprecated and ignored: browser telemetry uses this environment's App Insights connection string from the BFF at runtime. Leave empty." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="appInsightsKey" display-name-key="App Insights Key (ignored)" description-key="Deprecated and ignored: browser telemetry uses the App Insights connection string of this environment, from the BFF, at runtime. Leave empty." of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="searchScope" display-name-key="Search Scope" description-key="Search scope mode: all=system-wide, entity=auto-detect from form, custom=document IDs" of-type="Enum" usage="input" required="false">
       <value name="all" display-name-key="All">all</value>
       <value name="entity" display-name-key="Entity">entity</value>

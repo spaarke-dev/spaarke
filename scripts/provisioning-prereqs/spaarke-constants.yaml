@@ -79,6 +79,24 @@ name_templates:
     demo: https://spaarke-demo.crm.dynamics.com # placeholder; not yet provisioned
     prod: https://spaarke-registry-prod.crm.dynamics.com # placeholder; not yet provisioned
 
+# --- Azure management groups (ADR-027 "MUST use Azure Management Groups for common policy across customer
+# subscriptions"; G36 / task 262, owner approval 2026-10-09). Tenant-wide, not per env. Created by
+# infrastructure/bicep/management-groups.bicep (its parameter defaults mirror these values — tests/scripts/
+# Management-Groups.Tests.ps1 fails when they disagree) via scripts/provisioning/Deploy-ManagementGroups.ps1, which
+# reads the ids from here. Ids are lowercase-hyphenated and immutable once created.
+#   Tenant Root Group
+#   └── spaarke-environments  — Spaarke's own environment subscriptions (Development, Shared Production)
+#       └── spaarke-customers — EVERY customer subscription (one per customer, ADR-027); infrastructure/bicep/
+#                               customer-policy.bicep is assigned here. PRQ-S-06 checks a customer subscription's
+#                               parent is this group ({customerManagementGroupId}).
+management_groups:
+  environments:
+    id: spaarke-environments
+    displayName: Spaarke Environments
+  customers:
+    id: spaarke-customers
+    displayName: Spaarke Customers
+
 # --- Per-env values ---
 # containerTypeId: the "Spaarke Model 1" container type (standard billing, registered in Spaarke's tenant),
 # one per env — every customer stamp gets its own container inside it (H8). Created ONCE out of band via a
