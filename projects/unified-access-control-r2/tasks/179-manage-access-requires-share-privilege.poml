@@ -3,7 +3,7 @@
   <metadata>
     <title>Managing access requires Dataverse's Share privilege on the table in addition to Write on the record: delegation filter, can-manage-access, ribbon and Manage Access affordance (owner round 89 item 1)</title>
     <phase>Session 28 — UAC (owner round 89, 2026-10-09)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the authorization rule on every access-management route (auth/security).</rigor-reason>
     <model-tier>opus</model-tier>
