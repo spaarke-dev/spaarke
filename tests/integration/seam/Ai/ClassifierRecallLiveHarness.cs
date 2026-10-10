@@ -149,6 +149,7 @@ public sealed class ClassifierRecallLiveHarness
             results.Add(new RecallItemResult(
                 item.Id, item.Label, item.LabelSource,
                 Rung5Category: classification?.Category,
+                Rung5TriageCategory: classification?.TriageCategory,
                 SignalPresent: classification is not null,
                 Predicted: triage?.Category,
                 Priority: triage?.Priority,
@@ -177,15 +178,8 @@ public sealed class ClassifierRecallLiveHarness
         _output.WriteLine(JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
 
         // Run validity, not the gate: a run with degraded plumbing measures the plumbing, not the classifier.
-        warnings.Where(w => w.Category.Contains("LookupChoicesResolver", StringComparison.Ordinal)
-                            || w.Message.Contains("$choices", StringComparison.Ordinal))
-            .Should().BeEmpty("a $choices/guidance resolution failure means the prompt was not the production prompt");
-        warnings.Where(w => w.Category.Contains(nameof(CommunicationTriageAi), StringComparison.Ordinal))
-            .Should().BeEmpty("a triage that failed (as opposed to classified) is a harness/plumbing failure, not a miss");
-        warnings.Where(w => w.Level >= LogLevel.Error)
-            .Should().BeEmpty("an error anywhere on the path (Dataverse, routing, OpenAI) means the run did not measure the classifier");
-        results.Where(r => r.SignalPresent && r.Predicted is null)
-            .Should().BeEmpty("TriageAsync returned no category for an item that had a classification signal");
+        RecallRunValidity.Problems(logs.Entries, results)
+            .Should().BeEmpty("a run with any Warning-or-higher log entry, or a signal without a rung-5 triage category, did not measure the production path");
     }
 
     [Fact]
@@ -216,7 +210,56 @@ public sealed class ClassifierRecallLiveHarness
         m.PredicateMisses.Should().Equal("d");
 
         static RecallItemResult Row(string id, string label, string predicted) =>
-            new(id, label, "test", null, true, predicted, null, null, null);
+            new(id, label, "test", null, null, true, predicted, null, null, null);
+    }
+
+    [Fact]
+    public void Validity_FailsOnAnyWarning_AndOnAMissingRung5TriageCategory()
+    {
+        var ok = new RecallItemResult("a", "Fee / rate change", "test", "Billing", "Fee / rate change", true, "Fee / rate change", null, null, null);
+        var cleanLogs = new[] { new CapturingLoggerProvider.Entry("X", LogLevel.Information, "fine", null) };
+        RecallRunValidity.Problems(cleanLogs, [ok]).Should().BeEmpty();
+
+        // The two degradations the old guard missed, plus a plain Warning with an unrelated category.
+        foreach (var message in new[]
+                 {
+                     "Failed to parse JPS schema; falling back to flat text rendering",
+                     "Communication classification: triage taxonomy lookup:sprk_triagecategory.sprk_name resolved no rows; classifying without it (non-fatal).",
+                     "anything else",
+                 })
+        {
+            var logs = cleanLogs.Append(new CapturingLoggerProvider.Entry("Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer", LogLevel.Warning, message, null)).ToList();
+            RecallRunValidity.Problems(logs, [ok]).Should().ContainSingle().Which.Should().Contain(message);
+        }
+
+        var noTaxonomy = ok with { Id = "b", Rung5TriageCategory = null };
+        RecallRunValidity.Problems(cleanLogs, [ok, noTaxonomy]).Should().ContainSingle().Which.Should().StartWith("b:");
+
+        // No signal, no triage category expected.
+        RecallRunValidity.Problems(cleanLogs, [noTaxonomy with { SignalPresent = false, Predicted = null }]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Scorer_DoesNotCountADismissedGatedPrediction_AsAPredicateHit()
+    {
+        var rows = new[]
+        {
+            Row("a", "Fee / rate change", "Fee / rate change", "Dismiss"),   // gated but dismissed: policy would not fire
+            Row("b", "Scope / budget change", "Scope / budget change", "Pending"),
+            Row("c", "Administrative", "Fee / rate change", "dismiss"),      // dismissed false positive: not a policy fire
+            Row("d", "Administrative", "Scope / budget change", "File"),     // real false positive
+        };
+
+        var m = RecallScorer.Score(rows, RecallFixture.GatedCategories);
+
+        m.Positives.Should().Be(2);
+        m.PredicateRecall.Should().Be(0.5);                  // b only
+        m.PredicateMisses.Should().Equal("a");
+        m.PredicatePrecision.Should().Be(0.5);               // b of {b, d}
+        m.PredicateFalsePositives.Should().Equal("d");
+
+        static RecallItemResult Row(string id, string label, string predicted, string? outcome) =>
+            new(id, label, "test", null, null, true, predicted, null, outcome, null);
     }
 
     private static string Required(string name) =>
@@ -311,6 +354,7 @@ public sealed record RecallItemResult(
     string Label,
     string LabelSource,
     string? Rung5Category,
+    string? Rung5TriageCategory,
     bool SignalPresent,
     string? Predicted,
     string? Priority,
@@ -334,7 +378,29 @@ public sealed record RecallMetrics(
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Confusion);
 
 /// <summary>
-/// Pure scoring. Predicate = "labelled Fee OR Scope → predicted Fee OR Scope" (D-64 gate); strict = same category.
+/// Run validity: pure so it is unit-testable offline. Any captured log entry at Warning or above is a degradation
+/// (renderer flat-text fallback, rung-5 taxonomy resolved no rows, $choices failure, Dataverse/OpenAI error, ...),
+/// and every item that produced a classification signal must carry a rung-5 triage category (a base without the
+/// taxonomy code, or an empty taxonomy, yields none).
+/// </summary>
+internal static class RecallRunValidity
+{
+    public static IReadOnlyList<string> Problems(IReadOnlyList<CapturingLoggerProvider.Entry> entries, IReadOnlyList<RecallItemResult> results)
+    {
+        var problems = new List<string>();
+        problems.AddRange(entries.Where(e => e.Level >= LogLevel.Warning)
+            .Select(e => $"[{e.Level}] {e.Category}: {e.Message}{(e.ExceptionType is null ? "" : $" ({e.ExceptionType})")}"));
+        problems.AddRange(results.Where(r => r.SignalPresent && string.IsNullOrWhiteSpace(r.Rung5TriageCategory))
+            .Select(r => $"{r.Id}: classification signal present but rung-5 TriageCategory is null"));
+        problems.AddRange(results.Where(r => r.SignalPresent && r.Predicted is null)
+            .Select(r => $"{r.Id}: TriageAsync returned no category for an item that had a classification signal"));
+        return problems;
+    }
+}
+
+/// <summary>
+/// Pure scoring. Predicate = "labelled Fee OR Scope → predicted Fee OR Scope AND review outcome is not Dismiss"
+/// (D-64 gate + the POL-COMMIT-BUDGET filter <c>sprk_reviewoutcome &lt;&gt; Dismiss</c>); strict = same category.
 /// No triage result counts as a miss, exactly as production leaves the category unset.
 /// </summary>
 public static class RecallScorer
@@ -344,8 +410,11 @@ public static class RecallScorer
         bool IsGated(string? c) => c is not null && gated.Contains(c);
 
         var positives = rows.Where(r => IsGated(r.Label)).ToList();
-        var predictedPositive = rows.Where(r => IsGated(r.Predicted)).ToList();
-        var caught = positives.Count(r => IsGated(r.Predicted));
+        // POL-COMMIT-BUDGET (notes/004-seed-policy-rows.md) fires on a gated category AND sprk_reviewoutcome <> Dismiss.
+        bool IsHit(RecallItemResult r) => IsGated(r.Predicted) && !IsDismiss(r.ReviewOutcome);
+
+        var predictedPositive = rows.Where(IsHit).ToList();
+        var caught = positives.Count(IsHit);
 
         var per = gated.ToDictionary(g => g, g =>
         {
@@ -380,10 +449,13 @@ public static class RecallScorer
             PredicatePrecision: predictedPositive.Count == 0 ? null : (double)predictedPositive.Count(r => IsGated(r.Label)) / predictedPositive.Count,
             ExactAccuracy: rows.Count == 0 ? 0 : (double)rows.Count(r => r.Label == r.Predicted) / rows.Count,
             PerCategory: per,
-            PredicateMisses: positives.Where(r => !IsGated(r.Predicted)).Select(r => r.Id).ToList(),
+            PredicateMisses: positives.Where(r => !IsHit(r)).Select(r => r.Id).ToList(),
             PredicateFalsePositives: predictedPositive.Where(r => !IsGated(r.Label)).Select(r => r.Id).ToList(),
             Confusion: confusion);
     }
+
+    private static bool IsDismiss(string? reviewOutcome) =>
+        string.Equals(reviewOutcome?.Trim(), "Dismiss", StringComparison.OrdinalIgnoreCase); // same map as CommunicationEnrichmentService
 
     private static (double Low, double High) Wilson(int successes, int n)
     {
