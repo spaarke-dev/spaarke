@@ -87,6 +87,75 @@ public static class OntologyWriterTelemetry
     /// <see cref="RuleDescriptionRefusalReason"/>'s constants.</summary>
     public static void RecordRuleDescriptionRefused(string reason) =>
         RuleDescriptionRefusedCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>
+    /// <c>customMetrics/ontology.evaluator.runs</c> (task 031, owner directive 2026-10-04): one per attempt of the
+    /// re-evaluating job, dimension <c>outcome</c> = <c>succeeded</c> | <c>failed</c>. A failed run is never recorded as a
+    /// successful run with zero Signals.
+    /// </summary>
+    private static readonly Counter<long> EvaluatorRunsCounter = Meter.CreateCounter<long>(
+        name: "ontology.evaluator.runs",
+        unit: "{run}",
+        description: "Re-evaluating job attempts by outcome (succeeded | failed).");
+
+    /// <summary>
+    /// <c>customMetrics/ontology.evaluator.signals</c> (task 031): what each run did, dimension <c>action</c> (see
+    /// <see cref="EvaluatorSignalAction"/>): written, updated, closed, reraised, refused, reassigned.
+    /// </summary>
+    private static readonly Counter<long> EvaluatorSignalsCounter = Meter.CreateCounter<long>(
+        name: "ontology.evaluator.signals",
+        unit: "{signal}",
+        description: "Signals the re-evaluating job wrote, updated, closed, re-raised, reassigned or was refused, by action.");
+
+    private static long _lastEvaluatedUnixSeconds;
+
+    /// <summary>
+    /// <c>customMetrics/ontology.evaluator.last_evaluated</c> (task 031, D-61): the run-level last-evaluated time (Unix
+    /// seconds) of the last COMPLETED run in this process. Staleness is told from this, never from a per-row stamp.
+    /// </summary>
+    private static readonly ObservableGauge<long> LastEvaluatedGauge = Meter.CreateObservableGauge(
+        name: "ontology.evaluator.last_evaluated",
+        observeValue: () => Interlocked.Read(ref _lastEvaluatedUnixSeconds),
+        unit: "s",
+        description: "Unix time of the re-evaluating job's last completed run in this instance (D-61: run-level, not per Signal).");
+
+    /// <summary>Records one run of the re-evaluating job (task 031).</summary>
+    public static void RecordEvaluatorRun(bool succeeded, DateTimeOffset evaluatedAt, IReadOnlyDictionary<string, long> signalsByAction)
+    {
+        ArgumentNullException.ThrowIfNull(signalsByAction);
+        EvaluatorRunsCounter.Add(1, new KeyValuePair<string, object?>("outcome", succeeded ? "succeeded" : "failed"));
+        foreach (var (action, count) in signalsByAction)
+        {
+            if (count > 0)
+            {
+                EvaluatorSignalsCounter.Add(count, new KeyValuePair<string, object?>("action", action));
+            }
+        }
+
+        Interlocked.Exchange(ref _lastEvaluatedUnixSeconds, evaluatedAt.ToUnixTimeSeconds());
+    }
+}
+
+/// <summary>The bounded <c>action</c> values of <c>ontology.evaluator.signals</c> (task 031).</summary>
+public static class EvaluatorSignalAction
+{
+    /// <summary>A new Signal (episode 1) was created.</summary>
+    public const string Written = "written";
+
+    /// <summary>An open Signal's result changed (its date) and it was reconciled.</summary>
+    public const string Updated = "updated";
+
+    /// <summary>An open Signal whose predicate no longer holds was closed (ConditionCleared).</summary>
+    public const string Closed = "closed";
+
+    /// <summary>A new episode (n+1) was raised after the previous one was resolved.</summary>
+    public const string Reraised = "reraised";
+
+    /// <summary>A hit the writer or the ownership resolver refused; nothing was written for it.</summary>
+    public const string Refused = "refused";
+
+    /// <summary>A no-core Signal was reassigned to its item's current owner.</summary>
+    public const string Reassigned = "reassigned";
 }
 
 /// <summary>Bounded-cardinality reasons a rule description could not be produced (task 026).</summary>
@@ -207,6 +276,20 @@ public static class OntologyWriterFailureReason
 
     /// <summary>Task 037 (D-35): a no-core Signal does not read back with the subject's owner as its <c>ownerid</c>.</summary>
     public const string NoCoreOwnerMismatch = "no_core_owner_mismatch";
+
+    /// <summary>Task 031: a system closure (ConditionCleared) of a Signal failed in Dataverse.</summary>
+    public const string SignalCloseFailed = "signal_close_failed";
+
+    /// <summary>Task 031 (D-35): reassigning a no-core Signal to its item's current owner failed in Dataverse.</summary>
+    public const string SignalReassignFailed = "signal_reassign_failed";
+
+    /// <summary>Task 031 (D-13): a <c>sprk_signal.sprk_dedupekey</c> under a policy is not
+    /// <c>{policycode}|{type}|{id}|{episode}</c>, so its episode cannot be read and the subject is not re-raised.</summary>
+    public const string DedupeKeyUnparseable = "dedupe_key_unparseable";
+
+    /// <summary>Task 031: a write raised by the re-evaluating job failed with an exception the writer did not classify
+    /// (for example a Dataverse timeout). Logged by the job and counted here once.</summary>
+    public const string WriteFailed = "write_failed";
 
     // ── sprk_policyversion validation sub-reasons (task 022 rework, review finding #7) ─────────────────────
     // Replaces the single bucket "policy_version_rule_body_invalid" with bounded, mutually-exclusive

@@ -21,7 +21,22 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="Ref">A typed reference string, e.g. <c>"sprk_communication:{guid}"</c>.</param>
 /// <param name="Tier"><c>"Fact"</c> or <c>"Observation"</c>.</param>
 /// <param name="Confidence">Only meaningful (and typically present) for <c>Observation</c>-tier refs.</param>
-public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, double? Confidence = null);
+public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, double? Confidence = null)
+{
+    /// <summary>Task 031 (FR-48, D-23): the witness's display value (for a communication, its subject). Never copied into
+    /// <c>sprk_sentence</c>.</summary>
+    public string? Text { get; init; }
+
+    /// <summary>Task 031 (FR-48): where the witness came from (for a communication, its sender).</summary>
+    public string? Source { get; init; }
+
+    /// <summary>Task 031 (FR-48): when the witness was true, ISO 8601 UTC (the clause's date field on the witness row).</summary>
+    public string? AsOf { get; init; }
+
+    /// <summary>Task 031 (FR-48): the clause the witness satisfied (<c>all[N]</c>, task 026's clause id). Null marks a context
+    /// line, which the UI shows as "context, not tested".</summary>
+    public string? Clause { get; init; }
+}
 
 /// <summary>
 /// Everything <see cref="SignalWriter.WriteAsync"/> needs to write ONE <c>sprk_signal</c> row (task 030; spec
@@ -75,7 +90,17 @@ public sealed record SignalWriteRequest(
     int? Severity,
     string MessageTemplate,
     IReadOnlyDictionary<string, object?> FactValues,
-    IReadOnlyList<SignalEvidenceRef>? EvidenceRefs = null);
+    IReadOnlyList<SignalEvidenceRef>? EvidenceRefs = null)
+{
+    /// <summary>Task 031 (D-13, FR-03): the episode this write belongs to, the last segment of the dedupe key. 1 for a
+    /// subject's first Signal under the policy; the evaluator passes n+1 to re-raise after episode n was resolved.</summary>
+    public int Episode { get; init; } = 1;
+
+    /// <summary>Task 031 (R13, ADR-024's fifth resolver field): the subject's record number, read by the evaluator from the
+    /// field the subject table's <c>sprk_recordtype_ref</c> catalog row names (<c>sprk_regardingrecordnumberfield</c>).
+    /// Written to <c>sprk_regardingrecordnumber</c> on create; null when the table has no number field.</summary>
+    public string? SubjectRecordNumber { get; init; }
+}
 
 /// <summary>The result of one <see cref="SignalWriter.WriteAsync"/> call.</summary>
 /// <param name="SignalId">The (possibly pre-existing) <c>sprk_signal</c> row id.</param>
@@ -105,6 +130,29 @@ public sealed record SignalWriteResult(Guid SignalId, bool Created, Guid Groupin
 
     /// <summary>True when the resolver refused and nothing was written (<see cref="SkippedRefusalCode"/>).</summary>
     public bool IsSkipped => SkippedRefusalCode is not null;
+}
+
+/// <summary>
+/// The core record a subject groups under (task 037/031; D-34, D-36), as <see cref="SignalWriter.DeriveCoreRecordAsync"/>
+/// derives it: <see cref="Entity"/> and <see cref="Id"/> name the core record, <see cref="TypeRefId"/> its
+/// <c>sprk_recordtype_ref</c> catalog row (what <c>sprk_corerecordtype</c> holds). For a no-core Do item (D-35)
+/// <see cref="Entity"/> and <see cref="TypeRefId"/> are null, <see cref="Id"/> is empty and <see cref="NoCoreOwner"/> is the
+/// item's owner.
+/// </summary>
+public sealed record SignalCoreRecord(string? Entity, Guid Id, Guid? TypeRefId, EntityReference? NoCoreOwner)
+{
+    /// <summary>True for a D-35 item with no core record.</summary>
+    public bool IsNoCore => Entity is null;
+}
+
+/// <summary>What <see cref="SignalWriter.CloseAsync"/> did.</summary>
+public enum SignalCloseOutcome
+{
+    /// <summary>The Signal was closed.</summary>
+    Closed,
+
+    /// <summary>The Signal changed after it was read (its row version moved), so nothing was written.</summary>
+    ChangedSinceRead,
 }
 
 /// <summary>
@@ -248,8 +296,22 @@ public sealed partial class SignalWriter
     public const int SeverityInfo = 100000000;
     public const int SeverityWarning = 100000001;
     public const int SeverityCritical = 100000002;
-    private const int SignalStatusOpen = 100000000;
-    private const int SignalStatusAcknowledged = 100000001;
+    // sprk_signalstatus and sprk_resolutiontype, verified against the live schema (spaarkedev1, 2026-10-10, task 031).
+    public const int SignalStatusOpen = 100000000;
+    public const int SignalStatusAcknowledged = 100000001;
+    public const int SignalStatusResolved = 100000002;
+    public const int ResolutionActed = 100000000;
+    public const int ResolutionDismissed = 100000001;
+    public const int ResolutionConditionCleared = 100000002;
+    public const int ResolutionSuperseded = 100000003;
+    public const int ResolutionPolicyRetired = 100000004;
+
+    /// <summary>The system closures (FR-16): written by the evaluator, never by a human, so no Decision Record.</summary>
+    private static readonly FrozenSet<int> SystemResolutions =
+        new[] { ResolutionConditionCleared, ResolutionSuperseded, ResolutionPolicyRetired }.ToFrozenSet();
+
+    // Optimistic-concurrency refusal (ConcurrencyVersionMismatch): the row changed since the evaluator read it.
+    private const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
 
     // ── Schema length limits (F21). ────────────────────────────────────────────────────────────────────────
     private const int PolicyCodeMaxLength = 50;
@@ -331,7 +393,7 @@ public sealed partial class SignalWriter
 
     /// <summary>
     /// Writes one <c>sprk_signal</c> row for <paramref name="request"/>. Re-running with the same
-    /// (<c>PolicyCode</c>, subject) pair reconciles to the EXISTING row and refreshes only
+    /// (<c>PolicyCode</c>, subject, <see cref="SignalWriteRequest.Episode"/>) reconciles to the EXISTING row and refreshes only
     /// <c>sprk_lastevaluated</c> (CM-9's create-then-reconcile contract — see class remarks).
     /// </summary>
     /// <exception cref="ArgumentException">A required field is missing, exceeds its schema length limit, or
@@ -364,6 +426,8 @@ public sealed partial class SignalWriter
             throw new ArgumentException($"Lane {request.Lane} is not a valid sprk_signal.sprk_lane option value.", nameof(request));
         if (request.Severity is { } sev && !ValidSeverities.Contains(sev))
             throw new ArgumentException($"Severity {sev} is not a valid sprk_signal.sprk_severity option value.", nameof(request));
+        if (request.Episode < 1)
+            throw new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request));
 
         var cleanSubjectId = request.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
 
@@ -432,7 +496,7 @@ public sealed partial class SignalWriter
                 : await ResolveRecordTypeRefIdAsync(core.Entity, ct).ConfigureAwait(false);
 
             var nowUtc = _timeProvider.GetUtcNow();
-            var dedupeKey = BuildDedupeKey(request.PolicyCode, subjectEntity, cleanSubjectId);
+            var dedupeKey = BuildDedupeKey(request.PolicyCode, subjectEntity, cleanSubjectId, request.Episode);
             var entity = BuildEntity(request, subjectEntity, cleanSubjectId, core, coreTypeRefId, owningBusinessUnitId, secureOwner, dueDate, sentence, nowUtc);
             entity["sprk_dedupekey"] = dedupeKey;
 
@@ -626,14 +690,190 @@ public sealed partial class SignalWriter
         return false;
     }
 
-    /// <summary>spec FR-03: <c>{policycode}|{regardingrecordtype}|{regardingrecordid}</c>.</summary>
-    internal static string BuildDedupeKey(string policyCode, string subjectEntity, string cleanSubjectId) =>
-        $"{policyCode}|{subjectEntity}|{cleanSubjectId}";
+    /// <summary>spec FR-03 as amended by D-13 (task 031): <c>{policycode}|{regardingrecordtype}|{regardingrecordid}|{episode}</c>.
+    /// Task 007 re-keyed the existing dev rows as episode 1.</summary>
+    internal static string BuildDedupeKey(string policyCode, string subjectEntity, string cleanSubjectId, int episode) =>
+        $"{policyCode}|{subjectEntity}|{cleanSubjectId}|{episode.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>The begins-with prefix every episode key of one (policy, subject) pair shares (D-13's latest-episode
+    /// lookup): <c>{policycode}|{type}|{id}|</c>. The trailing separator keeps <c>POL-A</c> from matching <c>POL-AB</c>.</summary>
+    internal static string DedupeKeySubjectPrefix(string policyCode, string subjectEntity, string cleanSubjectId) =>
+        $"{policyCode}|{subjectEntity}|{cleanSubjectId}|";
+
+    /// <summary>The begins-with prefix of every episode key under one policy: <c>{policycode}|</c>.</summary>
+    internal static string DedupeKeyPolicyPrefix(string policyCode) => $"{policyCode}|";
+
+    /// <summary>
+    /// Splits an episode-scoped dedupe key into its parts, reading from the RIGHT so a policy code is never split. False
+    /// for a key that is not exactly <c>{code}|{type}|{id}|{episode}</c> with a lowercase id and an episode from 1.
+    /// </summary>
+    internal static bool TryParseDedupeKey(
+        string? key, out string policyCode, out string subjectEntity, out Guid subjectId, out int episode)
+    {
+        policyCode = subjectEntity = string.Empty;
+        subjectId = Guid.Empty;
+        episode = 0;
+        if (string.IsNullOrEmpty(key))
+        {
+            return false;
+        }
+
+        var episodeSep = key.LastIndexOf('|');
+        var idSep = episodeSep > 0 ? key.LastIndexOf('|', episodeSep - 1) : -1;
+        var typeSep = idSep > 0 ? key.LastIndexOf('|', idSep - 1) : -1;
+        if (typeSep <= 0)
+        {
+            return false;
+        }
+
+        var idText = key.AsSpan(idSep + 1, episodeSep - idSep - 1);
+        if (!int.TryParse(key.AsSpan(episodeSep + 1), NumberStyles.None, CultureInfo.InvariantCulture, out episode) || episode < 1
+            || !Guid.TryParseExact(idText, "D", out subjectId)
+            || !idText.SequenceEqual(subjectId.ToString("D", CultureInfo.InvariantCulture)))
+        {
+            episode = 0;
+            return false;
+        }
+
+        subjectEntity = key.Substring(typeSep + 1, idSep - typeSep - 1);
+        policyCode = key[..typeSep];
+        return LogicalName().IsMatch(subjectEntity);
+    }
 
     /// <summary>The core record a Signal groups under, or, when <see cref="Entity"/> is null, the owner of a
     /// no-core Do item (D-35): a system user, or the team that owns it (12 of the 25 no-core To Dos in dev are
     /// team-owned).</summary>
     private sealed record CorePlan(string? Entity, Guid Id, EntityReference? NoCoreOwner);
+
+    /// <summary>
+    /// Task 031 (D-34, D-36, D-35): the core record <see cref="WriteAsync"/> would group <paramref name="subjectId"/> under,
+    /// derived exactly as the write derives it (<see cref="CoreAncestorResolver"/>, then the <c>sprk_recordtype_ref</c>
+    /// catalog row), so the evaluator compares, suppresses and re-groups on the SAME answer the writer will write. Reads
+    /// only: nothing is written and nothing is logged or metered here; the caller owns the refusal.
+    /// </summary>
+    /// <exception cref="SignalWriterEscalationException">The core record cannot be derived (the writer's refusal).</exception>
+    internal async Task<SignalCoreRecord> DeriveCoreRecordAsync(
+        string subjectEntityLogicalName, Guid subjectId, int lane, CancellationToken ct = default)
+    {
+        var subjectEntity = RequireSubjectEntity(subjectEntityLogicalName);
+        if (subjectId == Guid.Empty)
+            throw new ArgumentException("subjectId must not be Guid.Empty.", nameof(subjectId));
+
+        var core = await ResolveCoreAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+        Guid? typeRefId = core.Entity is null ? null : await ResolveRecordTypeRefIdAsync(core.Entity, ct).ConfigureAwait(false);
+        return new SignalCoreRecord(core.Entity, core.Id, typeRefId, core.NoCoreOwner);
+    }
+
+    /// <summary>
+    /// Task 031 (FR-16, FR-15): closes ONE Signal as a system resolution (<see cref="ResolutionConditionCleared"/>,
+    /// <see cref="ResolutionSuperseded"/> or <see cref="ResolutionPolicyRetired"/>). <c>sprk_decisionrecord</c> is never
+    /// written: a system closure has no Decision Record. The update is conditional on <paramref name="rowVersion"/>
+    /// (<c>sprk_signal</c> has optimistic concurrency enabled), so a Signal a person resolved after the evaluator read it is
+    /// never closed a second time; that case returns <see cref="SignalCloseOutcome.ChangedSinceRead"/> and writes nothing.
+    /// A failure is logged at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown.
+    /// </summary>
+    internal async Task<SignalCloseOutcome> CloseAsync(
+        Guid signalId, string? rowVersion, int resolutionType, string policyCode, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (!SystemResolutions.Contains(resolutionType))
+            throw new ArgumentException(
+                $"Resolution {resolutionType} is not a system resolution (ConditionCleared, Superseded, PolicyRetired); a person's " +
+                "resolution is written by the commit route with its Decision Record (FR-16).", nameof(resolutionType));
+        if (string.IsNullOrWhiteSpace(rowVersion))
+            throw new ArgumentException(
+                "rowVersion is required: closing without it could re-close a Signal a person resolved since it was read (FR-16).",
+                nameof(rowVersion));
+
+        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        var fields = new Dictionary<string, object>
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(SignalStatusResolved),
+            ["sprk_resolutiontype"] = new OptionSetValue(resolutionType),
+            ["sprk_resolvedon"] = nowUtc,
+            ["sprk_lastevaluated"] = nowUtc,
+        };
+
+        try
+        {
+            await _writerClient.UpdateIfRowVersionMatchesAsync("sprk_signal", signalId, rowVersion, fields, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Signal {SignalId} closed for policy {PolicyCode} (resolution {ResolutionType}, no Decision Record).",
+                signalId, policyCode, resolutionType);
+            return SignalCloseOutcome.Closed;
+        }
+        catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+        {
+            _logger.LogInformation(
+                "Signal {SignalId} changed since the evaluator read it; NOT closed (policy {PolicyCode}). The next pass re-reads it.",
+                signalId, policyCode);
+            return SignalCloseOutcome.ChangedSinceRead;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalCloseFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Signal close refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Task 031 (task 037 hand-off, D-35): a no-core Signal follows its item's owner. When the To Do or event is reassigned
+    /// after its Signal was written, the Signal is reassigned to the item's CURRENT owner (the writer holds Assign) instead of
+    /// the reconcile escalating <see cref="OntologyWriterFailureReason.NoCoreOwnerMismatch"/> on every pass. Logged once
+    /// (the write changes the owner, so the next pass sees no drift). A failure is logged at Error, metered and rethrown.
+    /// </summary>
+    internal async Task ReassignNoCoreOwnerAsync(
+        Guid signalId, EntityReference owner, string policyCode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (owner.Id == Guid.Empty || owner.LogicalName is not ("systemuser" or "team"))
+            throw new ArgumentException("owner must be a system user or a team (D-35).", nameof(owner));
+
+        try
+        {
+            await _writerClient.UpdateAsync("sprk_signal", signalId, new Dictionary<string, object>
+            {
+                ["ownerid"] = new EntityReference(owner.LogicalName, owner.Id),
+            }, ct).ConfigureAwait(false);
+            _logger.LogInformation(OntologyWriterEvents.NoCoreSignalReassigned,
+                "No-core Signal {SignalId} (policy {PolicyCode}) reassigned to its item's current owner {OwnerEntity} {OwnerId} (D-35).",
+                signalId, policyCode, owner.LogicalName, owner.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalReassignFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "No-core Signal reassignment refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).",
+                policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    /// <summary>True when <see cref="WriteAsync"/> has already logged <paramref name="ex"/> at Error and metered it on
+    /// <c>ontology.writer.failures</c> (an escalation, a sentence-template refusal, a privilege refusal), so a caller does not
+    /// count it a second time.</summary>
+    internal static bool IsMeteredByWriter(Exception ex) =>
+        ex is SignalWriterEscalationException or SignalSentenceTemplateException || IsDataverseAccessDenied(ex);
+
+    private static bool IsConcurrencyVersionMismatch(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault && fault.Detail?.ErrorCode == ConcurrencyVersionMismatch)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Derives the subject's CORE record (task 037; D-34, D-36, D-37, D-35) with <see cref="CoreAncestorResolver"/>, the
@@ -923,6 +1163,11 @@ public sealed partial class SignalWriter
         entity["sprk_regardingrecordtype"] = subjectEntity;
         entity["sprk_regardingrecordname"] = request.SubjectDisplayName ?? string.Empty;
         entity["sprk_regardingrecordurl"] = BuildRecordUrl(subjectEntity, cleanSubjectId);
+        if (!string.IsNullOrWhiteSpace(request.SubjectRecordNumber))
+        {
+            // Task 031 (R13): ADR-024's fifth resolver field, from the field the subject's catalog row names.
+            entity["sprk_regardingrecordnumber"] = request.SubjectRecordNumber;
+        }
 
         if (core.Entity is not null)
         {

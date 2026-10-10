@@ -72,7 +72,7 @@ public class SignalWriterTests
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
         var dedupeKey = SignalWriter.BuildDedupeKey(
-            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -95,7 +95,7 @@ public class SignalWriterTests
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
         var dedupeKey = SignalWriter.BuildDedupeKey(
-            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -120,7 +120,7 @@ public class SignalWriterTests
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
         var dedupeKey = SignalWriter.BuildDedupeKey(
-            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+            request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -201,7 +201,7 @@ public class SignalWriterTests
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
-        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         // R1: the reconcile path now re-checks owningbusinessunit, so the seeded row must carry the CORRECT
         // BU for this test's premise (ownership is not TOUCHED on reconcile, but it IS still verified) — a
         // row with no BU at all would (correctly) escalate under the test right below this one.
@@ -227,7 +227,7 @@ public class SignalWriterTests
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
-        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         var wrongBusinessUnitId = Guid.NewGuid();
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
@@ -535,7 +535,7 @@ public class SignalWriterTests
         // business-unit check here (secureTeamId not passed) would compare against Guid.Empty and refuse this row.
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
-        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         var existingId = writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -561,7 +561,7 @@ public class SignalWriterTests
         // business-unit mismatch) and is not touched.
         var writerOrg = new FakeOrganizationService();
         var request = MatterSubjectRequest();
-        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant());
+        var dedupeKey = SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_matter", MatterId.ToString("D").ToLowerInvariant(), 1);
         writerOrg.SeedExisting(dedupeKey, new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -881,7 +881,7 @@ public class SignalWriterTests
             });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(status),
@@ -908,7 +908,7 @@ public class SignalWriterTests
             });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_corerecordid"] = MatterId.ToString("D"),
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
@@ -1133,7 +1133,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
@@ -1157,7 +1157,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = Lower(MatterId),
@@ -1179,7 +1179,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", otherMatter) });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = Lower(MatterId),
@@ -1199,7 +1199,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()) });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
@@ -1219,7 +1219,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) });
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId),
@@ -1239,7 +1239,7 @@ public class SignalWriterTests
             .Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }); // no sprk_duedate
         var writerOrg = new FakeOrganizationService();
         var request = DoRequest("sprk_todo", TodoId);
-        var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId)), new Entity("sprk_signal")
+        var existingId = writerOrg.SeedExisting(SignalWriter.BuildDedupeKey(request.PolicyCode, "sprk_todo", Lower(TodoId), 1), new Entity("sprk_signal")
         {
             ["sprk_signalstatus"] = new OptionSetValue(100000000),
             ["sprk_corerecordid"] = MatterId.ToString("D"),
@@ -1385,9 +1385,9 @@ public class SignalWriterTests
     [Fact]
     public void BuildDedupeKey_ComposesPolicyCodeSubjectTypeAndCleanId()
     {
-        var key = SignalWriter.BuildDedupeKey("POL-COMMIT-BUDGET", "sprk_matter", "2444af6d-e1f2-f011-8406-7ced8d1dc988");
+        var key = SignalWriter.BuildDedupeKey("POL-COMMIT-BUDGET", "sprk_matter", "2444af6d-e1f2-f011-8406-7ced8d1dc988", 1);
 
-        key.Should().Be("POL-COMMIT-BUDGET|sprk_matter|2444af6d-e1f2-f011-8406-7ced8d1dc988");
+        key.Should().Be("POL-COMMIT-BUDGET|sprk_matter|2444af6d-e1f2-f011-8406-7ced8d1dc988|1", "D-13: the key ends with the episode");
     }
 
     // =====================================================================================
