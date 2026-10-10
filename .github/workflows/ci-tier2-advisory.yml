@@ -780,56 +780,6 @@ jobs:
           }
 
   # ============================================================================
-  # Job 7b — client-lint (type-aware ESLint ratchet over the client packages).
-  #
-  # ADVISORY like every Tier 2 job. Deliberately NOT in tier2-pr-comment.needs: it reports as its own
-  # check ("CI / Tier 2 (Advisory) / Client lint (type-aware ratchet)") so the aggregator and every
-  # existing verdict are untouched while the CI shadow window is open. Promote it later by adding it to
-  # that needs list (or to tier1) once the shadow window has closed.
-  #
-  # What it enforces: @typescript-eslint/no-unnecessary-condition on non-test src/** of 10 packages, with
-  # today's violations recorded in scripts/quality/client-lint/eslint-suppressions.json. A NEW violation
-  # fails; so does a suppression that no longer occurs (run `prune` and commit). Config, runner and the
-  # must-fire/must-not-fire controls: scripts/quality/client-lint/. Docs: docs/procedures/testing-and-code-quality.md.
-  # ============================================================================
-  client-lint:
-    name: Client lint (type-aware ratchet)
-    runs-on: ubuntu-latest
-    continue-on-error: true   # Advisory — never blocking
-    timeout-minutes: 30       # runaway guard; deps install + 10 typed programs
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Cache npm
-        uses: actions/cache@v6
-        continue-on-error: true
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-client-lint-${{ hashFiles('src/client/shared/*/package-lock.json', 'src/solutions/SpaarkeAi/package-lock.json', 'src/solutions/LegalWorkspace/package-lock.json', 'src/solutions/Reporting/package-lock.json', 'src/client/code-pages/SemanticSearch/package-lock.json', 'scripts/quality/client-lint/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-client-lint-
-
-      - name: Install lint toolchain
-        working-directory: scripts/quality/client-lint
-        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
-
-      - name: Install package deps (types)
-        # Same `--legacy-peer-deps` rule as every other client install (repo lockfiles drift).
-        run: node scripts/quality/client-lint/client-lint.mjs install
-
-      - name: Controls (must-fire / must-not-fire)
-        run: node scripts/quality/client-lint/client-lint.mjs controls
-
-      - name: Ratchet (fails on a new violation or an unpruned suppression)
-        run: node scripts/quality/client-lint/client-lint.mjs check
-
-  # ============================================================================
   # Job 8 — tier2-pr-comment. Aggregates jobs 1-7 results into ONE deduplicated
   # PR comment.
   #

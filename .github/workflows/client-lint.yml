@@ -1,0 +1,82 @@
+# Client lint — type-aware ESLint ratchet over the client packages (Phase 3 / P2).
+#
+# Enforces @typescript-eslint/no-unnecessary-condition on non-test src/** of the client packages that use
+# @spaarke/auth's AuthenticatedFetchFn (returns OkResponse since #1541): a `!res.ok` / status check after
+# it is dead code. Today's violations are recorded in scripts/quality/client-lint/eslint-suppressions.json
+# (ESLint bulk suppressions). A NEW violation fails this check; so does a suppression that no longer occurs
+# (run `node scripts/quality/client-lint/client-lint.mjs prune` and commit).
+#
+# Standalone on purpose: it changes no file of the CI router/tier1/tier2 set, so the CI shadow window's
+# verdict comparison is untouched. It is not (yet) a required check — owner decision 2026-10-09 is
+# "block new violations only"; make it required in the master ruleset once it has run green and the
+# shadow window has closed.
+#
+# Config, runner, controls: scripts/quality/client-lint/. Docs: docs/procedures/testing-and-code-quality.md.
+
+name: Client lint
+
+on:
+  pull_request:
+    paths:
+      - 'src/client/shared/**'
+      - 'src/solutions/SpaarkeAi/**'
+      - 'src/solutions/LegalWorkspace/**'
+      - 'src/solutions/Reporting/**'
+      - 'src/client/code-pages/SemanticSearch/**'
+      - 'scripts/quality/client-lint/**'
+      - '.github/workflows/client-lint.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'src/client/shared/**'
+      - 'src/solutions/SpaarkeAi/**'
+      - 'src/solutions/LegalWorkspace/**'
+      - 'src/solutions/Reporting/**'
+      - 'src/client/code-pages/SemanticSearch/**'
+      - 'scripts/quality/client-lint/**'
+      - '.github/workflows/client-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client-lint:
+    name: Client lint (type-aware ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-client-lint-${{ hashFiles('src/client/shared/*/package-lock.json', 'src/solutions/SpaarkeAi/package-lock.json', 'src/solutions/LegalWorkspace/package-lock.json', 'src/solutions/Reporting/package-lock.json', 'src/client/code-pages/SemanticSearch/package-lock.json', 'scripts/quality/client-lint/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-client-lint-
+
+      - name: Install lint toolchain
+        working-directory: scripts/quality/client-lint
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: Install package deps (types)
+        # Same `--legacy-peer-deps` rule as every other client install (repo lockfiles drift).
+        run: node scripts/quality/client-lint/client-lint.mjs install
+
+      - name: Controls (must-fire / must-not-fire)
+        run: node scripts/quality/client-lint/client-lint.mjs controls
+
+      - name: Ratchet (fails on a new violation or an unpruned suppression)
+        run: node scripts/quality/client-lint/client-lint.mjs check

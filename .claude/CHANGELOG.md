@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
+
+Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.
+
+- **`scripts/quality/client-lint/`** (new): one shared ESLint 9 toolchain, a type-aware `@typescript-eslint/no-unnecessary-condition` over 10 client packages, an ESLint bulk-suppressions baseline (1,059 existing findings), must-fire/must-not-fire controls and the `install|check|prune|baseline|controls` runner. `npm run lint:client`.
+- **`.github/workflows/client-lint.yml`** (new, standalone): kept out of the router/tier files while the CI shadow window is open. It is not yet a required check.
+- **ADR-028 MUST line and `spaarke-sso-binding.md`:** both now name the lint as the mechanism for `!res.ok`. `docs/procedures/testing-and-code-quality.md` has the how-to.
+
+---
 ###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
 
 - **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
