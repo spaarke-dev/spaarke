@@ -238,6 +238,19 @@ public class GrantAccessNotificationTests
         _h.SentNotifications.Should().BeEmpty("an inactive contact resolves for nobody");
     }
 
+    /// <summary>The link is honoured as it is, but an inactive granted contact is nobody's: its linked user is not told.</summary>
+    [Fact]
+    public async Task Grant_ToAnInactiveContactWithALinkedUser_TellsNobody()
+    {
+        var contact = _h.Contact(stateCode: 1);
+        _h.Store.UsersByLink.GetOrAdd(contact, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(Guid.NewGuid(), contact, Guid.NewGuid(), false, 0, null, false));
+
+        await Grant(contact);
+
+        _h.SentNotifications.Should().BeEmpty();
+    }
+
     /// <summary>A leak path: the user's link names ANOTHER contact, so this contact's grant is not theirs, whatever the oid.</summary>
     [Fact]
     public async Task Grant_ToAContactCarryingTheOidOfAUserLinkedToAnotherContact_TellsNobody()
