@@ -309,19 +309,20 @@ public class InternalUserShareTests
     }
 
     /// <summary>
-    /// The caller's rights need not be one of the three levels — a role can grant Read and Write without Append. The
-    /// share is still written, at the intersection, and reports <c>accessLevel: null</c> because those rights match no
-    /// level. Refusing instead would block an administrator from giving a colleague exactly the access they have.
+    /// The caller's rights need not be one of the three levels — a role can grant Read, Write and Share without Append
+    /// (Share is part of every caller who reaches this handler since task 179: the group filter requires it). The share
+    /// is still written, at the intersection, and reports <c>accessLevel: null</c> because those rights match no level.
+    /// Refusing instead would block an administrator from giving a colleague exactly the access they have.
     /// </summary>
     [Fact]
     public async Task Share_WhenTheCallersRightsMatchNoLevel_GrantsTheIntersectionAndReportsNoLevel()
     {
         var result = await Share(UserId, ExternalAccessLevel.Collaborate,
-            callerRights: AccessRights.Read | AccessRights.Write);
+            callerRights: AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
-            UserId, AccessLevel: null, AccessRightsMask: 3, InternalShareEndpoints.OutcomeCreated, Narrowed: true));
-        _shares.Writes.Should().Equal("GrantAccess ReadAccess,WriteAccess");
+            UserId, AccessLevel: null, AccessRightsMask: 262147, InternalShareEndpoints.OutcomeCreated, Narrowed: true));
+        _shares.Writes.Should().Equal("GrantAccess ReadAccess,WriteAccess,ShareAccess");
     }
 
     /// <summary>

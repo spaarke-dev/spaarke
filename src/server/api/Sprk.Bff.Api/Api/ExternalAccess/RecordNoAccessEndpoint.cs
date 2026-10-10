@@ -14,24 +14,25 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <remarks>
 /// <para><b>Who reads what</b> (owner O2, 2026-10-01). Every caller who holds Read on the record gets the two signals,
 /// <c>secure</c> and <c>noAccess</c>, each <c>applies</c> / <c>doesNotApply</c> / <c>unknown</c> (task 153's banner). A
-/// caller who ALSO holds Write gets the covering entries (task 067's read-only list in Manage Access): the BFF reads the
+/// caller who ALSO may manage its access (Write and Share, the delegation rule since owner round 89, task 179) gets the
+/// covering entries (task 067's read-only list in Manage Access): the BFF reads the
 /// table on their behalf, because under O2 only the access-administrator role reads it directly. Nobody gets an entry's
 /// Reason (task 143: a refusal never reveals it).</para>
 ///
 /// <para><b>The gate.</b> <see cref="RecordRouteAccessAuthorizationFilter"/>'s fixed-entity-set form with the existing
 /// <c>read</c> operation key: the caller's rights on the record, asked of Dataverse AS THE CALLER over OBO
 /// (<see cref="CallerRecordAccessProbe"/>), before this handler runs. No Read — including no bearer token, a record that
-/// does not exist and any probe fault — is the uniform 404, so the route is not an existence oracle. The Write decision
-/// reuses the rights that same probe call returned (published by the filter); no second probe and no app-only read stands
+/// does not exist and any probe fault — is the uniform 404, so the route is not an existence oracle. The entries decision
+/// (Write and Share) reuses the rights that same probe call returned (published by the filter); no second probe and no app-only read stands
 /// in for the caller's gate. Not on the <c>/api/v1/external-access</c> group: its <see cref="DelegationRuleFilter"/>
-/// demands Write for every route, and the banner must answer Read-only callers.</para>
+/// demands Write and Share for every route, and the banner must answer Read-only callers.</para>
 ///
 /// <para><b>What "covers" means</b> is <see cref="NoAccessShareEnforcer.ReadCoverageAsync"/>, the lookup the enforcer's
 /// "Update Access" path uses — one source of truth: an active entry whose object is the record, or an organization the
 /// record references in ANY org-typed lookup (B-10), and the same for every secure record it is filed under (round 61).
 /// An entry counts toward <c>noAccess</c> only when it is in force on this record (<see cref="InForce"/>): well-formed
 /// (<see cref="NoAccessShareEnforcer.TryClassify"/>, the enforcer's rule), and — for a USER wall — on a Secure record or
-/// through a secure parent (owner Q4: a user wall binds only Secure records). The Write tier lists every active entry,
+/// through a secure parent (owner Q4: a user wall binds only Secure records). The entries tier lists every active entry,
 /// with <c>inForce</c> and the reason when it is not, so a malformed or inert entry can be seen and fixed.</para>
 ///
 /// <para><b>Fails closed, visibly</b> (NFR-01, ADR-003). A signal that cannot be read is <c>unknown</c>, never
@@ -83,10 +84,10 @@ public static class RecordNoAccessEndpoint
     }
 
     private static RouteHandlerBuilder Described(this RouteHandlerBuilder route, string type) => route
-        .WithSummary($"Whether this {type} is Secure and under a No Access restriction, and (with Write) which entries")
+        .WithSummary($"Whether this {type} is Secure and under a No Access restriction, and (with Write and Share) which entries")
         .WithDescription(
             $"For a caller who holds Read on the {type}: 'secure' and 'noAccess', each applies / doesNotApply / unknown " +
-            "(unknown when it could not be read, never doesNotApply). For a caller who also holds Write: the active No Access " +
+            "(unknown when it could not be read, never doesNotApply). For a caller who also holds Write and Share: the active No Access " +
             "entries covering it (its own, walls over organizations it references, and those of secure records it is filed " +
             "under), never their Reason. A caller without Read, and a record that does not exist, get the same 404.")
         .Produces<RecordNoAccessStatus>(StatusCodes.Status200OK)
@@ -131,7 +132,9 @@ public static class RecordNoAccessEndpoint
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
 
-        var canSeeEntries = (rights & AccessRights.Write) == AccessRights.Write;
+        // Task 179 (owner round 89): the entries are Manage Access's list, so they follow the delegation rule (Write AND
+        // Share), asked of the same rights answer: no second probe.
+        var canSeeEntries = DelegationRuleFilter.MayManageAccess(rights);
         var (secure, accessPermission, inheritedFrom) =
             await ReadEffectiveAccessAsync(logicalName, recordId, participations, logger, ct).ConfigureAwait(false);
         var (noAccess, entriesState, entries) =
