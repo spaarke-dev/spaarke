@@ -13,6 +13,7 @@
  */
 
 import type { AuthenticatedFetchFn } from './EntityCreationService';
+import { isApiError, problemOf } from '../utils/thrownFetchError';
 
 /** The three Assigned-To roots — the BFF's `recordType` tokens. */
 export type AssignedAccessRecordType = 'project' | 'matter' | 'workassignment';
@@ -76,11 +77,16 @@ export async function syncAssignedAccess(
     );
     return { ok: false, status: response.status, reason };
   } catch (err) {
+    // `@spaarke/auth`'s authenticatedFetch THROWS ApiError for a non-2xx (status + parsed problem details); an
+    // exhausted-401 AuthError and a transport failure carry no status and are reported as 'network'.
+    const status = isApiError(err) ? err.status : undefined;
+    const reason = problemOf(err)?.reasonCode ?? (status ? undefined : 'network');
     console.warn(
-      `[AssignedAccessSync] The call failed for ${recordType} ${recordId}. The record was created; the reconciliation ` +
-        'job grants access within minutes.',
+      `[AssignedAccessSync] The call failed for ${recordType} ${recordId}` +
+        `${status ? ` (HTTP ${status}${reason ? `, ${String(reason)}` : ''})` : ''}. The record was created; the ` +
+        'reconciliation job grants access within minutes.',
       err
     );
-    return { ok: false, reason: 'network' };
+    return { ok: false, status, reason: reason as string | undefined };
   }
 }

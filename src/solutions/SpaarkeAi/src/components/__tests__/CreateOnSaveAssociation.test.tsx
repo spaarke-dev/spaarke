@@ -34,6 +34,7 @@ import { associateDocumentToParent, bffDocumentRefile, type DocumentRefile } fro
 import { useCreateOnSaveAssociation } from '../compose/useCreateOnSaveAssociation';
 import { useCreateOnSaveAssociationGate } from '../compose/useCreateOnSaveAssociationGate';
 import { CreateOnSaveAssociationGateDialog } from '../compose/CreateOnSaveAssociationGateDialog';
+import { httpError } from '../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -153,12 +154,12 @@ describe('CreateOnSaveAssociationPrompt', () => {
     });
 
     it('aRefusedRefileReturnsTheServersMessageAsTheWarning', async () => {
-      const response = {
-        ok: false,
-        status: 404,
-        json: async () => ({ detail: 'The record was not found, or you do not have access to it.' }),
-      } as Response;
-      const fetchMock = jest.fn().mockResolvedValue(response);
+      // authenticatedFetch THROWS ApiError(detail, 404, problem) for a non-2xx; it never resolves { ok: false }.
+      const fetchMock = jest
+        .fn()
+        .mockRejectedValue(
+          httpError(404, { title: 'Not Found', detail: 'The record was not found, or you do not have access to it.' })
+        );
 
       const result = await associateDocumentToParent(bffDocumentRefile(fetchMock, 'https://bff.example'), 'doc-guid-1', {
         entityType: 'sprk_project',

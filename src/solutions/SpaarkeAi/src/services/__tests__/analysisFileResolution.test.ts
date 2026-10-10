@@ -23,6 +23,7 @@ import {
   type AnalysisFilePreviewResolved,
 } from '../analysisFileResolution';
 import type { ISprkAnalysisRecord } from '../../types/sprkAnalysis';
+import { httpError } from '../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -143,9 +144,10 @@ describe('resolveAnalysisFilePreview', () => {
     await expect(resolved.fetchPreviewUrl()).resolves.toBeNull();
   });
 
-  test('fetchPreviewUrl resolves to null when the response is not ok', async () => {
+  test('fetchPreviewUrl resolves to null when the fetch throws an ApiError (non-2xx)', async () => {
     const analysis = makeAnalysis();
-    const authenticatedFetch = jest.fn().mockResolvedValue({ ok: false, json: async () => ({}) });
+    // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+    const authenticatedFetch = jest.fn().mockRejectedValue(httpError(404));
 
     const resolved = resolveAnalysisFilePreview(analysis, {
       bffBaseUrl: 'https://bff.example',

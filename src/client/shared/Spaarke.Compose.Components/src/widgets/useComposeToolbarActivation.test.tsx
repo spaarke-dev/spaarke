@@ -28,8 +28,10 @@ import { ComposeAiToolbar, __resetComposeAiToolbarActionsForTests } from './Comp
 import { useComposeToolbarActivation } from './useComposeToolbarActivation';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import type { DispatchConsumer } from '@spaarke/ui-components';
+import { httpError } from '../__tests__/helpers/httpError';
 
 jest.mock('@spaarke/auth', () => ({
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   useAuth: () => ({
     isAuthenticated: true,
     getAccessToken: async () => 'test-access-token',
@@ -193,11 +195,9 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
   it('a fetch failure leaves buttons DISABLED — no throw, no error UI', async () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
-    const failing = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    } as unknown as Response) as unknown as typeof fetch;
+    // The fetchOverride stands in for `authenticatedFetch`, which THROWS ApiError for a non-2xx
+    // (it never resolves { ok: false }).
+    const failing = jest.fn().mockRejectedValue(httpError(500)) as unknown as typeof fetch;
 
     render(<ActivationHost editor={editor} fetchOverride={failing} />);
 

@@ -23,6 +23,8 @@ import type { SavedSearch, SearchFilters } from '../../types';
 // ---------------------------------------------------------------------------
 
 jest.mock('@fluentui/react-icons', () => ({
+  // Keep the real exports (bundleIcon, bundled icons used by shared components); override only the stubs below.
+  ...jest.requireActual('@fluentui/react-icons'),
   ChevronDownRegular: () => <span data-testid="icon-chevron-down" />,
   SaveRegular: () => <span data-testid="icon-save" />,
   StarRegular: () => <span data-testid="icon-star" />,
