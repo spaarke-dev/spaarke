@@ -127,7 +127,7 @@ beforeAll(() => {
       ledger.set(session, [...(ledger.get(session) ?? []), entry]);
       return sseCompleteResponse(entry.payload);
     }
-    return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+    throw httpError(404);
   }) as unknown as typeof fetch;
 });
 afterAll(() => {
@@ -143,7 +143,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit) 
     const session = sessionFromUrl(url);
     return { ok: true, status: 200, json: async () => ledger.get(session) ?? [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 // ---------------------------------------------------------------------------
@@ -217,6 +217,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 
 // Import AFTER mocks.
 import { ConversationPane, COMPOSE_EDIT_CONFIRMATION } from '../ConversationPane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // UAT round-8 #7 (ConversationPane.tsx dispatchComposeAction) appends a
 // "**What I changed:**" explanation line — sourced from the dispatched ledger

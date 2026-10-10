@@ -77,7 +77,7 @@ beforeAll(() => {
       dispatchPostBodies.push(typeof init?.body === 'string' ? init.body : '');
       return sseCompleteResponse({ edits: [], rationale: 'revised', sources: [] });
     }
-    return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+    throw httpError(404);
   }) as unknown as typeof fetch;
 });
 afterAll(() => {
@@ -123,7 +123,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit) =
   if (url.includes('/compose-outputs')) {
     return { ok: true, status: 200, json: async () => [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 // SprkChat stub — captures the send-time hooks + the attachment lifecycle + drives injection.
@@ -207,6 +207,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 
 // Import AFTER mocks.
 import { ConversationPane, REVISE_MOUNT_ASK_MESSAGE } from '../ConversationPane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const bridgeRef: { current: ComposeActionBridgeValue | null } = { current: null };
 function BridgeCapture(): null {

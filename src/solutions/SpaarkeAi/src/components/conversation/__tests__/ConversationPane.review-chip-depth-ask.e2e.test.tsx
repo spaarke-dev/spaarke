@@ -114,7 +114,7 @@ beforeAll(() => {
       dispatchPostBodies.push(parsedBody);
       return sseCompleteResponse({ overallRisk: 'low', flaggedSections: [] });
     }
-    return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+    throw httpError(404);
   }) as unknown as typeof fetch;
 });
 afterAll(() => {
@@ -149,7 +149,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
   if (url.includes('/compose-outputs')) {
     return { ok: true, status: 200, json: async () => [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 const captured: {
@@ -234,6 +234,7 @@ jest.mock('@spaarke/ui-components', () => {
 // Import AFTER mocks.
 import { ConversationPane } from '../ConversationPane';
 import { LOCAL_CHIP } from '../localActionChips';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 let bus: PaneEventBus;
