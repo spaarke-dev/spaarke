@@ -1,6 +1,6 @@
 # 039: Signals and Decision Records as secure children: progress and completion record
 
-> **Date**: 2026-10-07/08 · **Rigor**: FULL · **Status**: code done, two PRs/branches pushed; the deployed-BFF part of the live gate waits on a dev deploy (owner decision, see section 7)
+> **Date**: 2026-10-07/08, live gate finished 2026-10-10 · **Rigor**: FULL · **Status**: code merged to master (#1390) and PR'd to the ontology branch (#1554, writer half). Live gate PASS on spaarkedev1 against the deployed master BFF `ebacd2e15` (section 5.2). Open items: two SPE containers for a SharePoint admin to delete, and one scheduler defect recorded as document-only (section 7).
 > **uac-r2 review**: accepted on #1355 (https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6047438504), conditions A and B. PR linked on #1355: https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6049869568
 
 ## 1. The split, and why
@@ -57,6 +57,8 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
 
 ## 5. Live evidence (spaarkedev1)
 
+### 5.1 Writer half (2026-10-07/08)
+
 - **Role -Verify** with the new config: `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` → **VERIFY PASS, 28 of 28** (includes `sprk_signal`, `sprk_decisionrecord`).
 - **Role edits read live**:
   - Spaarke Basic User: `prvReadsprk_Signal` and `prvReadsprk_DecisionRecord` at depth 1.
@@ -78,27 +80,121 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
   - The seam Signals were swept by policy code; `sprk_signals` count → **0**, `sprk_decisionrecords` → **0**.
   - No matter, project or work assignment was created, so no SPE container was created.
 
+### 5.2 Deployed-BFF half (2026-10-10, owner decision D-67): PASS
+
+**Setup.**
+- **BFF**: spaarke-bff-dev runs master `ebacd2e15`, deployed by uac-r2, with #1390 and #1391; healthz 200. App Insights shows the new instance's first secure-child run at about 00:22Z.
+- **Jobs at start** (01:12Z): both secure-child jobs enabled on `*/2`, last run Succeeded, `recentChanges.mode = write`, `rootsTotal 2`.
+- **Writer**: the real `SignalWriter` was run locally through `SignalWriterSeamTests.WriteAsync_SubjectUnderASecureRecord_…`, as the writer principal `3121bf1b-…` via CallerId, using the real uac-r2 resolver. The branch was `task/ontology-039-writer` (PR #1554), with `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` and `SIGNALS_LIVE_*`.
+  - The seam's `DisposeAsync` sweeps its Signals at the end of the test, before the share steps could run. So for this gate only, a **local, uncommitted** line skipped that sweep when `ONTOLOGY_039_KEEP_ROWS=1`. The line was reverted afterwards, and the gate script deleted every row itself.
+- **Identities**: admin (`az`). **A** = testuser1 `8d7bad7a-…` (BU1, non-admin; Spaarke Basic User, Office Add In User). **B** = uac.child `d6f8f439-…` (BU1, non-admin; Basic and Core User).
+  - Root-BU users read every Secure-team-owned row in dev (accepted finding #1081, uac-r2 G3), so they cannot be sharee subjects.
+  - Reads ran as each user with the admin token plus `MSCRMCallerID`, uac-r2's documented method. A was also read with testuser1's own token (`AZURE_CONFIG_DIR=C:/tmp/az-uac-child`).
+- **Recipe**: uac-r2's `gate175.py` (batch-5 notes; G149-2 lineage). Throwaway roots were created by admin through the Web API. Every transition went through the BFF's own routes: `POST /api/v1/external-access/provision-project` (`transition: make-secure`), `/share-user` (View Only), `/unshare-user`, `/unsecure-project`.
+- **Scripts and raw logs**: session scratchpad `gate039/`: `gate039.py`, `run1.out`, `results.json`; `gate039b.py`, `runB1.out`, `runB2.out`, `resultsB*.json`.
+
+**Run A, 01:18:18–01:21:43Z (`20261010-0118Z`).**
+
+Probe roots: matter **M** `335a7c78-48c4-f111-a05c-3833c5e9614d` and work assignment **W** `355a7c78-48c4-f111-a05c-3833c5e9614d`, both standalone.
+
+Probe rows:
+
+| Label | Row | How written |
+|---|---|---|
+| S1 | Signal `39337a97-48c4-f111-a05c-3833c5e9614d` | writer, subject `sprk_matter:M` |
+| S2 | Signal `86337a97-48c4-f111-a05c-3833c5e9614d` | admin Web API, `sprk_matter` = M |
+| S2w | Signal `42748b9c-48c4-f111-a05a-7c1e520a989f` | admin Web API, `sprk_regardingworkassignment` = W |
+| D1 | Decision Record `a4337a97-48c4-f111-a05c-3833c5e9614d` | admin Web API, `sprk_matter` = M |
+| D2 | Decision Record `44748b9c-48c4-f111-a05a-7c1e520a989f` | admin Web API, `sprk_workassignment` = W |
+| C | communication `46748b9c-48c4-f111-a05a-7c1e520a989f` | admin, regarding the ordinary seed matter `2444af6d` AND W |
+| S3 | Signal `d09eb4c7-48c4-f111-a05c-0022482913fc` | writer, subject `sprk_communication:C`; grouping matter = the ordinary seed matter |
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 0 | Provision a Secure matter and a Secure work assignment (uac-r2 route) | PASS | 01:18:19Z M → 200 and 01:18:40Z W → 200. Both `sprk_issecure` true, owner Secure Record Owners `6eabc7f9…`, own SPE container (section 7). |
+| 1 | Writer Signal on the Secure matter | PASS | S1 created 01:19:13Z, `createdby` = writer `3121bf1b…`. `owningteam` = **Secure Record Owners**, `owninguser` null, `owningbusinessunit` = Secure Record `d9ec0b6f…` (derived from the team). The seam asserts the same on the writer's result (`SecureOwnerTeamId`). That `owningbusinessunit` is not sent on the secure path is pinned by the unit test `WriteAsync_SecureOwner_SetsTheSecureTeamInTheCreate_SendsNoOwningBusinessUnit_ReadsTheTeamBack`. The live row cannot show what was sent, only the result. |
+| 2 | **Re-own within ~2 min** (uac-r2 D-113 expectation): Signals and Decision Records created out of product on Secure roots | PASS | S2, S2w, D1, D2 and C were created 01:19:19–21Z by the admin user and read back owned by the admin user. All five were owned by **Secure Record Owners** **57 s** later, at the 01:20 run: `recentRowsChanged=5`, `recentRoots=2`, `changed=5`, `sharesWritten=5`, duration 24.5 s. |
+| 3 | Writer Signal whose subject sits under the Secure work assignment (D-36), with an ordinary grouping matter | PASS | S3 `owningteam` = Secure Record Owners, `owninguser` null, BU Secure Record. The resolver's secure-if-any over the subject decided it. |
+| 4 | Baseline: nobody shared | PASS | 01:20:40Z: A (impersonated), A (own token) and B all **403** on S1, S2, S2w, D1, D2 and S3. |
+| 5 | Share M and W with A (View Only, `/share-user`): A reads within 2 min, B does not | PASS | 01:20:40Z share M → 200 `created`, mask 1. 01:20:46Z share W → 200. A **200 on all six** within **0–1 s**: `/share-user` mirrors onto the secure children inline through `SecureChildShareSynchronizer`, so the 2-minute job is not needed on this path. A's own token also gets 200 on all six. B is **403** on all six. |
+| 6 | Unshare | PASS | 01:20:58Z unshare M → 200 `removed: true`. 01:21:04Z unshare W → 200. A **403 on all six** within 1 s; B 403. |
+| 7 | Unsecure releases to the business unit's default team | PASS | 01:21:12Z `unsecure-project` M → 200: `sweepComplete: true`, `sharesRevoked 2`, children reowned 3 (`sprk_signal` 2, `sprk_decisionrecord` 1). 01:21:20Z W → 200: reowned 4 (`sprk_communication` 1, `sprk_decisionrecord` 1, `sprk_signal` 2). M and W are no longer Secure. All six rows and C are owned by **`09fbf21c…` "Spaarke"**, the default team of the roots' business unit (the root BU: both roots were created by the admin), within 1 s. S3 was released too, although its grouping matter is an ordinary BU1 matter: it followed C into W's release. |
+| 8 | Clean-up | PASS | 01:21:34–42Z: 4 Signals, 2 Decision Records, C, W and M all DELETE 204, read-back **404**. |
+
+**Run B: the share-JOB path (the model-driven Share dialog: Web API `GrantAccess` / `RevokeAccess` on the root, uac-r2 G149-2 step 4).**
+
+The root is uac-r2's G149-1 probe recipe: admin create with `sprk_issecure = true`, then the owner PATCHed to Secure Record Owners. This creates **no SPE container**.
+
+- **B-1, 01:23:57–01:29:40Z.** Matter `bc285b42-49c4-f111-a05c-0022482913fc`; writer Signal S4 `deaeb044-49c4-f111-a05a-7c1e520a989f`, owned by Secure Record Owners.
+  - Before the grant, A and B were both 403.
+  - `GrantAccess` (A, Read) at 01:24:14Z → 204. A read the root at once and read **S4 after 116 s**: the 01:26 share run granted it (`[SECURE-CHILD-SHARES] grant … on sprk_signal deaeb044…`). B stayed 403.
+  - `RevokeAccess` at 01:26:11Z → 204. A could **still** read S4 at 204 s, so this sub-step **failed**. Cause: the 01:28 tick of both secure-child jobs never ran.
+    - At 01:28:00.0026Z, `ScheduledJobHost refreshed — 15 job(s) scheduled` landed on the due tick, and no secure-child job was dispatched at 01:28.
+    - This is a scheduler defect, not a lineage one. It is recorded as document-only in section 7.
+  - Clean-up: 204 / 404 for both rows.
+- **B-2 re-run, 01:37:09–01:40:14Z.** Matter `bb949c16-4bc4-f111-a05c-0022482913fc`; S4 `ebcfef1c-4bc4-f111-a05c-0022482913fc`, owned by Secure Record Owners.
+  - `GrantAccess` at 01:37:24Z → A reads S4 after **44 s** (the 01:38 run). B 403.
+  - `RevokeAccess` at 01:38:09Z (just after the 01:38 run) → A is **403 after 120 s** (the 01:40 run). B 403.
+  - **PASS.** Clean-up: 204 / 404.
+
+**Final sweep after both runs.**
+- `startswith(…,'zz-039')` on `sprk_matters`, `sprk_workassignments`, `sprk_communications`, `sprk_signals` and `sprk_decisionrecords` → **0 each**.
+- `sprk_signals` total **0**; `sprk_decisionrecords` total **0**.
+- Neither the ordinary seed matter `2444af6d` nor uac-r2's fixture `65a3fab2` was modified.
+
+**Not run, and why.**
+- **The Secure project sharee case (acceptance criterion 11).** Its owner half was proven in 5.1 on `65a3fab2`. Sharing that project would modify uac-r2's fixture, which is forbidden. The share and release half uses the same table-generic lineage mechanism the matter and work-assignment cases proved above.
+- **The service-request case (D-36)** is covered by the lineage (no service-request lookup) and by unit tests. No live probe was run.
+
 ## 6. Secure-sync load (scoping 5.2 item 4; uac-r2 #1355 §5)
 
 - **Cap**: 20 pages × 5,000 = 100,000 changed rows per table per 2-minute window; past it the whole recent-changes pass throws for every table (#1378).
 - **Dev now**: 0 Signals / 0 DRs. The jobs list `recentRowsChanged` avg 0.07, max 2 per run, with p95 about 5 s.
 - **With D-61** the nightly pass writes only Signals whose result changed (plus new creates). The listing grows with **churn**, not with the open-Signal count, so a production pass approaches the cap only if more than 100k Signals change result in one 2-minute window. That is implausible for one nightly pass: it would mean 100k result changes landing in the same window.
 - **Residual risk**: one high-volume first run of 031 (initial raise of many Signals at once). 031 should batch its first run or accept one retry window. Noted for 031; uac-r2 asked for a production open-Signal estimate to size #1378.
-- **Re-measure** after 031 exists and the lineage BFF is deployed.
+- **Re-measured 2026-10-10 with the lineage deployed** (master `ebacd2e15` on spaarke-bff-dev, first run on the new instance at about 00:22Z). 031 is still not built, so there is no nightly pass to measure yet.
+  - Sources: Log Analytics `spe-logs-dev-67e2xz` for the 24 h before the deploy; App Insights `6a76b012…` after it. App Insights holds data only from 2026-10-10T00:00Z.
+  - Calls are the Dataverse dependencies (`spaarkedev1`, SDK and Web API) between each tick and the later of the two jobs' completions. Only ticks on even minutes that are not `*/5` minutes are counted, so that no other scheduled job shares the window.
+  - Run A's window (01:18–01:23Z) and run B's window (01:25–01:40Z) are excluded from the call counts. Durations and rows include them.
+
+| Measure | 24 h before (2026-10-09 00:22Z → 10-10 00:22Z) | Since the deploy (00:22 → 01:40Z) |
+|---|---|---|
+| `secure-child-reconciliation` runs | 703 | 30 |
+| Its duration p50 / p95 / max | 4.7 / 6.8 / 137.6 s | 4.9 / 24.5 / 29.2 s |
+| Rows listed per run (`recentRowsChanged`) avg / max | 0.37 / 38 | 0.17 / 5 |
+| `secure-child-share-reconciliation` runs | 704 | 30 |
+| Its duration p50 / p95 / max | 3.0 / 4.7 / 117.0 s | 3.1 / 4.7 / 5.1 s |
+| Share-job `inScope` avg / max | 2 / 2 | 2.03 / 3 |
+| Dataverse calls per tick (both jobs) p50 / p95 / max | 16 / 24 / 274 (564 ticks) | 18 / 57 / 80 (23 ticks) |
+
+Reading the "since the deploy" column:
+- The two high durations are the new instance's first catch-up run (00:28Z, 29.2 s) and this gate's own run (01:20Z, 24.5 s), which re-owned and mirrored the 5 probe rows.
+- Steady-state calls rose by about 2 per tick (p50 16 → 18). That fits the recent-changes listing now including two more child tables per run.
+- Rows listed stay at churn level: 5 at most, which was the gate.
+- Against the cap of 100,000 changed rows per table per window and the 2-minute window, dev is about four orders of magnitude below the row cap. Run time is about 5 s against 120 s.
+- No escalation trigger fired. The D-61 reasoning above still holds; the residual risk remains 031's first high-volume run.
 
 ## 7. Escalations / owner decisions
 
-- **🔔 Dev BFF deploy for the rest of the live gate.** Steps not yet run:
-  - user A (shared) reads the Signal within 2 minutes and user B does not;
-  - unshare;
-  - unsecure releases the Signal to the BU default team;
-  - the Secure matter and Secure work-assignment cases.
-
-  These need spaarke-bff-dev running a build that carries the #1390 lineage (and, for writer-created Signals, the stream branch). spaarke-bff-dev is deployed from worktrees many times a day (3 OneDeploys in 2 h). A deploy is an Azure change, which needs owner approval per the project manual §5, so this task did not deploy. Options:
-  - (a) merge #1390, then deploy master to dev, then run the gate with a provisioned `zz-039-` Secure matter and work assignment;
-  - (b) deploy `feat/secure-child-signals-039` to dev now.
-
-  Provisioning a Secure matter creates an SPE container that the cleanup must also delete (SPE admin recycle-bin delete).
+- **Resolved: the dev BFF deploy (D-67).** #1390 was merged to master. uac-r2 deployed master `ebacd2e15` to dev, and the gate ran (section 5.2).
+- **Owner action: delete two SPE containers.** These were created by provisioning in run A. Both are empty, and both of their records are deleted.
+  - Matter M `335a7c78…`: `b!QPhJA-4NgU6Tx4SFIauctdNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`.
+  - Work assignment W `355a7c78…`: `b!vlLJSaMQZE6HXqqB9TzOr9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`.
+  - The only recorded recipe is uac-r2's `projects/unified-access-control-r2/notes/Remove-TestContainers.ps1`. It is run by a SharePoint administrator with `Connect-SPOService` (interactive), so this task did not run it. The exact commands are:
+    ```powershell
+    Connect-SPOService -Url 'https://spaarke-admin.sharepoint.com'
+    Remove-SPOContainer -Identity 'b!QPhJA-4NgU6Tx4SFIauctdNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'
+    Remove-SPOContainer -Identity 'b!vlLJSaMQZE6HXqqB9TzOr9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'
+    ```
+    The main session recorded the same commands as the owner script `projects/spaarke-ontology-platform-r1/notes/Remove-039TestContainers.ps1`.
+  - Run B used the G149-1 recipe and created no container.
+- **Document only (D-106; not 039 scope): `ScheduledJobHost` drops the tick that is due when its hourly definition refresh lands on it.**
+  - The code: `src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs` `RefreshDefinitionsAsync` rebuilds every job's `nextFire` as `cron.GetNextOccurrence(now)`, which excludes `now`. A refresh at 01:28:00.0026Z therefore replaced the 01:28:00 occurrence that was still due with 01:30:00.
+  - The evidence:
+    - Run B-1: no secure-child dispatch at 01:28Z; the refresh trace is at 01:28:00.0026Z.
+    - Log Analytics, last 3 days: 86 refreshes, 61 of them on an even minute. 42 of those 61 have **no** `secure-child-share-reconciliation` run in that minute.
+  - The effect: about once an hour, every job due at the refresh moment skips one occurrence. For the two secure-child jobs, the "≤ 2 minutes" bound becomes about 4 minutes plus the run, for that one occurrence. This affects every table they cover, not just Signals.
+  - Owner of the code: platform scheduling (ADR-036). Filed by the main session as **#1575** (project issue log F-52).
 - **Do not deploy a post-#1390 master BFF to demo or any customer environment** before the ontology schema is there (#1378). The PR says so.
 
 ## 8. Tests
@@ -111,6 +207,9 @@ Open PRs checked (`gh pr list --state open`): no uac-r2 PR open; none of the ope
   - Signals/Ontology/DecisionPlan/RuleBody tests: 514 passed.
   - ArchTests (rebuilt): 818 passed. The first run caught an unlisted owner write, fixed by routing through `ApplyTo`.
   - Full suite after the merge: 18,882 passed, 0 failed, 54 skipped.
+- PR #1554 (`task/ontology-039-writer` @ `626241c00`, 2026-10-10). This is the writer branch merged with `docs/ontology-platform-design` @ `2b0bea645` (which contains #1390), plus the B-1 pin test `SecurePath_DependsOn_SignalLineageEntry_AndSecureRecordOwnerRead`.
+  - `--filter Signals|SecureChildLineage|Census`: 706 passed, 0 failed.
+  - ArchTests (built explicitly): 927 passed, 9 failed. All 9 failures are `ExternalSpaGridViewSelectorGuardTests`, already red on the project branch and being fixed in another lane.
 - PR #1390 CI: 33 pass, 5 skipping, 0 pending, 0 failing. One advisory job (Markdown Link Validator) first came back "cancelled" although every step succeeded; it passed on a rerun.
 - New unit tests (4), the contract set: secure (owner in the create, no BU, `owningteam` read back, resolver parents), read-back mismatch (part of "verify by reading back owningteam"), not secure (FR-14 unchanged), refused (no write, Warning 50304, `owner_refused`).
 - Publish size (#1390): fresh master `36ff14147` 36.22 MB / 192 files vs branch `0615f9781` 36.22 MB / 192 files, `Compress-Archive` Optimal from short paths. Delta 0.00 MB. No package change.
