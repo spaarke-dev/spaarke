@@ -151,7 +151,7 @@ function _sprkChatContextMap_loadMsal() {
         }
 
         var script = document.createElement("script");
-        script.src = "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js";
+        script.src = "https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js";
         script.crossOrigin = "anonymous";
         script.onload = function () {
             console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "MSAL library loaded");
