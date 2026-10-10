@@ -58,7 +58,10 @@ interface LedgerRow {
 function makeAuthFetch(stub: { current: LedgerRow[] }): jest.Mock {
   return jest.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     // Only 2xx answers are RETURNED: `@spaarke/auth`'s authenticatedFetch THROWS for any other status.
-    const jsonResponse = (status: number, data: unknown): Response => ({ ok: true, status, json: async () => data } as Response);
+    const jsonResponse = (status: number, data: unknown): Response => {
+      if (status >= 300) throw httpError(status, data as Parameters<typeof httpError>[1]);
+      return { ok: true, status, json: async () => data } as Response;
+    };
 
     if (url.includes('/compose-outputs/supersede') && init?.method === 'POST') {
       const ref: string = JSON.parse(String(init.body)).supersedesRef;
