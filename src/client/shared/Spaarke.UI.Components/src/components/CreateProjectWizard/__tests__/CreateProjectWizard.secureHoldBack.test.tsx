@@ -19,6 +19,7 @@ import type { IUploadedFile } from '../../FileUpload/fileUploadTypes';
 import { CreateProjectWizard } from '../CreateProjectWizard';
 import { describeHeldBackForSecure } from '../provisioningService';
 import { ASSIGNED_ACCESS_SYNC_PATH } from '../../../services/assignedAccessSync';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
 jest.mock('../../CreateRecordWizard', () => ({
@@ -121,8 +122,9 @@ const ADDS = ['work-assignment', 'event', 'upload', 'document-records', 'email']
  * Assigned-To sync (`syncAssignedAccess`, which a secure-requested project gets right after provisioning) is logged as
  * its own entry. The sync writes no content and nothing to storage — it is not one of the ADDS this suite holds back.
  */
+// authenticatedFetch THROWS ApiError for a non-2xx: the double turns a refused provision answer into that failure.
 const bffFetch = (provisionResponse: Response) =>
-  jest.fn().mockImplementation(async (url: string) => {
+  throwingAuthenticatedFetch(async (url: string) => {
     if (String(url).endsWith(ASSIGNED_ACCESS_SYNC_PATH)) {
       mockCalls.push('assigned-access-sync');
       return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
