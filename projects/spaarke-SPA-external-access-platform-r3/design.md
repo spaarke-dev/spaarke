@@ -242,9 +242,12 @@ C3 in-portal notify, C6 send) on provisioned customers.** (C2 is workforce-only,
   members of the `sprk-{customerId}-users` workforce groups the directory resolves, so that mechanism can't
   enumerate a contact's customers. A contact's customer relationship is established at **invite/grant** time —
   which is exactly R3's **C3 deep-link** ("you've been granted access to {record}" → one record on one stamp).
-  So C3's deep-link should encode `{customerId, apiBaseUrl}`, and the C3 notification mechanism **converges
-  with** contact→backend routing. Cold-landing (no deep-link) needs a contact→customers map in the shared
-  registry (written at invite time) or an "enter invite / pick organization" prompt.
+  ~~So C3's deep-link should encode `{customerId, apiBaseUrl}`~~ **Superseded by T240d (owner-accepted
+  2026-10-09):** the link carries ONLY the customer key (+ record id for C3); the SPA resolves key → BFF base
+  URL + per-customer scope `api://{bffAppId}/user_impersonation` through the T240c directory's CIAM-authenticated
+  lookup, never from the link. The C3 notification mechanism still **converges with** contact→backend routing.
+  Cold-landing: customer picker from keys already seen (localStorage); new device → re-use the invite link.
+  R3 review + requests: `notes/coordination/2026-10-09-to-provisioning-t240d-review.md`.
 - **Provisioner → keyless federated credential** from the stamp's managed identity (not a Key Vault cert).
   Note this is **cross-tenant workload-identity federation** (stamp MI → CIAM app in `spaarkeextid`) — confirm
   support before committing.
