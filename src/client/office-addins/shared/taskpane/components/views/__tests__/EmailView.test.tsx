@@ -82,6 +82,20 @@ function fakeResponse(status: number, body: unknown): Response {
   return make();
 }
 
+/** A non-JSON failure body as the pane fetch RETURNS it (e.g. an App Service 502 HTML page, or an empty 500). */
+function textResponse(status: number, text: string, contentType: string | null): Response {
+  const make = (): Response =>
+    ({
+      ok: false,
+      status,
+      headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? contentType : null) },
+      json: async () => JSON.parse(text),
+      text: async () => text,
+      clone: () => make(),
+    }) as unknown as Response;
+  return make();
+}
+
 let fetchMock: jest.Mock;
 
 beforeEach(() => {
@@ -234,11 +248,36 @@ describe('Send', () => {
     addToRecipient('jane@acme.test');
     await clickSend();
 
-    expect(await screen.findByText(`Email not sent: ${detail}`)).toBeInTheDocument();
+    // The server's reason, inside the shared failure wording (`describeSendFailure`).
+    expect(
+      await screen.findByText(content => content.startsWith('Email not sent:') && content.includes(detail))
+    ).toBeInTheDocument();
     expect(screen.queryByText('Email sent')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open in spaarke/i })).not.toBeInTheDocument();
     // The form is kept so the user can fix and retry.
     expect(within(screen.getByRole('group', { name: 'To' })).getByText(/jane@acme\.test/)).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      'a returned 502 HTML error page',
+      502,
+      '<!DOCTYPE html><html><body><h1>502 - Web server received an invalid response</h1></body></html>',
+      'text/html',
+    ],
+    ['a bare 500 with no body', 500, '', null],
+  ])('%s → the shared wording, never the raw body or "HTTP n"', async (_label, status, text, contentType) => {
+    fetchMock.mockResolvedValue(textResponse(status, text, contentType));
+    renderView();
+    await screen.findByRole('region', { name: 'Email composer' });
+
+    addToRecipient('jane@acme.test');
+    await clickSend();
+
+    const message = await screen.findByText(content => content.startsWith('Email not sent:'));
+    expect(message.textContent).toContain("The email service couldn't send this right now. Try again shortly.");
+    expect(message.textContent).not.toMatch(/<|DOCTYPE|HTTP \d{3}/);
+    expect(screen.queryByText('Email sent')).not.toBeInTheDocument();
   });
 
   it('a 2xx without a record id → "Email sent, but not recorded" (never silent, never "Email sent")', async () => {

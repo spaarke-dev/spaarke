@@ -45,7 +45,9 @@ param(
     [string]$Container = 'provisioning-artifacts',
     [string]$ManifestBlobName = 'dataverse-solutions-latest.json',
     [string]$AuthoringEnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com',
-    [int]$MaxAsyncWaitMinutes = 60
+    [int]$MaxAsyncWaitMinutes = 60,
+    # D-103: an unmanaged publish that would also publish someone else's pending changes STOPS before the import unless this is given.
+    [switch]$AllowPendingCollateral
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,7 +107,8 @@ $zip = Join-Path $work $blobName
 $pacArgs = @('solution', 'import', '--environment', $EnvironmentUrl, '--path', $zip, '--async', '--max-async-wait-time', "$MaxAsyncWaitMinutes",
     '--force-overwrite', '--activate-plugins')
 if ($plan.StageAndUpgrade) { $pacArgs += '--stage-and-upgrade' }
-if (-not $managed) { $pacArgs += '--publish-changes' }   # unmanaged changes take effect only once published
+# Unmanaged changes take effect only once published. Task 130 (D-83): never a tenant-wide publish; after the import this
+# script publishes exactly SpaarkeMaster's components (scripts/lib/Publish-SolutionComponents.ps1).
 
 if (-not $PSCmdlet.ShouldProcess($EnvironmentUrl, "$($plan.Action) SpaarkeMaster $($entry.version) ($PackageType)")) {
     Write-Host "    WOULD RUN: pac $($pacArgs -join ' ')" -ForegroundColor DarkYellow
@@ -116,6 +119,14 @@ Get-StoreBlob $blobName $zip
 $packed = Get-PackedSolutionInfo -ZipPath $zip
 if ($packed.UniqueName -ne 'SpaarkeMaster' -or $packed.Version -ne $entry.version -or $packed.Managed -ne $managed) {
     throw "$blobName holds $($packed.UniqueName) $($packed.Version) (managed=$($packed.Managed)); the manifest promised SpaarkeMaster $($entry.version) ($PackageType)."
+}
+
+if (-not $managed) {
+    # Before importing anything (same pre-flight as Invoke-ScopedSolutionImport): component types of the ZIP and the installed
+    # solution must be publishable, and other people's pending views/forms on the entities to be published are reported.
+    . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
+    Invoke-ImportPreflight -Context (Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl) -ZipPath $zip -SolutionUniqueName 'SpaarkeMaster' `
+        -AllowPendingCollateral:$AllowPendingCollateral -RerunCommand "pwsh scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl $EnvironmentUrl -PackageType $PackageType" | Out-Null
 }
 
 Write-Host "==> pac $($pacArgs -join ' ')" -ForegroundColor Cyan
@@ -129,4 +140,8 @@ if (-not $after -or (Compare-PackageVersion -A $after.Version -B $entry.version)
     throw "After the import the environment holds SpaarkeMaster $what; expected $($entry.version) ($PackageType)."
 }
 Write-Host "==> SpaarkeMaster $($entry.version) ($PackageType) installed in $EnvironmentUrl." -ForegroundColor Green
+if (-not $managed) {
+    Publish-SolutionComponents -Context (Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl) -SolutionUniqueName 'SpaarkeMaster' -SkipCollateralCheck -AllowPendingCollateral:$AllowPendingCollateral | Out-Null
+    Write-Host "==> Published exactly SpaarkeMaster's components (no tenant-wide publish)." -ForegroundColor Green
+}
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue -WhatIf:$false

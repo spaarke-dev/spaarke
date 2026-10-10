@@ -90,6 +90,21 @@ public static class IntakeParameterCatalog
     public static readonly IReadOnlySet<string> AllowedSolutionPackageTypes =
         new HashSet<string>(StringComparer.Ordinal) { ManagedSolutionPackage, UnmanagedSolutionPackage };
 
+    /// <summary>
+    /// T256 — H7b dry run: <c>true</c> makes H7b (Secure Record setup) read everything, record its plan in the gate
+    /// evidence and write nothing; the run then stops at H7b. <c>false</c> or absent applies. Exact lower case; validated at
+    /// POST /api/runs by <c>SecureRecordSetupIntake</c>, the rule H7b applies.
+    /// </summary>
+    public const string SecureRecordSetupDryRun = "secureRecordSetupDryRun";
+
+    /// <summary>
+    /// Task 255 (INCOMING-141, UAC-r2 task 141) — the CUSTOMER's Entra tenant id(s) whose employees use the stamp: a JSON
+    /// array of GUID strings, required for every model; stored canonical. Rule:
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.CustomerWorkforceTenantsRule"/> (POST /api/runs, H4b, H13).
+    /// H4b writes <c>WorkforceIdentity__CustomerTenantIds__N</c> on both slots; H13 T7 checks them.
+    /// </summary>
+    public const string CustomerWorkforceTenantIds = "customerWorkforceTenantIds";
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -160,6 +175,7 @@ public static class IntakeParameterCatalog
         new(OpenAiMonthlyLimitUsd, "OPTIONAL monthly Azure OpenAI spend limit of the stamp in USD (task 254, owner G37). Absent = no limit (the default). Validated at POST /api/runs (OpenAiMonthlyLimitRule); H4b writes AiSpendLimit__MonthlyLimitUsd on both slots only when present. Change or remove later with scripts/Set-AiSpendLimit.ps1."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
         new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
+        new(CustomerWorkforceTenantIds, "T255 (INCOMING-141): JSON array of the CUSTOMER's Entra tenant id(s) whose employees use the stamp — Model 1: the customer's home tenant, never Spaarke's or the run's tenantId; Model 2: the customer's tenant. Required for every model; 1-10 distinct non-zero GUIDs, never a CIAM tenant (CustomerWorkforceTenantsRule, validated at POST /api/runs and stored canonical). H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots; H13 T7 checks them."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6); a Model1 run takes only B2BGuest (owner D2, T232). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),
@@ -192,6 +208,9 @@ public static class IntakeParameterCatalog
 
         // --- H0 probe tuning ---------------------------------------------------------
         new("openaiPinFreshnessMinDays", "H0 OpenAI model-pin freshness threshold."),
+
+        // --- Secure Record setup (H7b) -------------------------------------------------
+        new(SecureRecordSetupDryRun, "H7b (T256): 'true' = dry run — H7b reads everything, records its plan in gate h7b-secure-setup-plan, writes nothing, and the run stops at H7b (secure_setup.dry_run). 'false' or absent = apply. Validated at POST /api/runs (SecureRecordSetupIntake)."),
 
         // --- Dataverse environment-variable values (H7) -------------------------------
         new("msalClientId", "H7 env-var value: MSAL client id for code pages."),

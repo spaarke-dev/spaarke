@@ -73,6 +73,8 @@ function readEmailContext(): QuickSaveEmailContext | null {
 
   return {
     internetMessageId: item.internetMessageId,
+    // Task 121: the Exchange item id travels in its own field — the server's Graph fallback key.
+    ...(item.itemId ? { exchangeItemId: item.itemId } : {}),
     subject: item.subject ?? '',
     ...(item.from?.emailAddress ? { senderEmail: item.from.emailAddress } : {}),
     ...(item.from?.displayName ? { senderName: item.from.displayName } : {}),

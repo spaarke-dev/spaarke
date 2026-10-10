@@ -166,6 +166,9 @@ $Stacks = @(
             environmentName = $TestEnvironment
             location        = $Location
         }
+        # The dev .bicepparam carries every required-no-default param (adminDataverseEnvironmentUrl, redisEndpoint,
+        # ciamTenantIds, ...) so this what-if cannot drift from them; WhatIfParams above override it inline.
+        WhatIfParamsFile = Join-Path $BicepDir 'parameters/platform-controlplane-dev.bicepparam'
         Owner           = 'task 033'
     }
 )
@@ -340,6 +343,10 @@ function Invoke-StackWhatIf {
             '--result-format', 'ResourceIdOnly',
             '--no-pretty-print'
         )
+        if ($Stack.WhatIfParamsFile) {
+            $args += '--parameters'
+            $args += $Stack.WhatIfParamsFile
+        }
         if ($paramArgs.Count -gt 0) {
             $args += '--parameters'
             $args += $paramArgs

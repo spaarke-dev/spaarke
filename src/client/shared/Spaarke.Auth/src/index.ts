@@ -1,8 +1,18 @@
 // Types
-export type { IAuthConfig, IProblemDetails, TokenResult, AuthenticatedFetchFn } from './types';
+export type {
+  IAuthConfig,
+  IProblemDetails,
+  TokenResult,
+  AuthenticatedFetchFn,
+  ResponseFetchFn,
+  OkResponse,
+  OkStatus,
+} from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';
+// Guards for what authenticatedFetch THROWS (it never returns a non-2xx Response)
+export { isApiError, problemOf, isAuthFailure } from './errorGuards';
 
 // Config
 export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';

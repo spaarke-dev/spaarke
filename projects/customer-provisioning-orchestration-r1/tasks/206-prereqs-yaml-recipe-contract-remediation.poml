@@ -4,7 +4,7 @@
     <title>Remediate 32 recipe-contract violations in scripts/provisioning-prereqs/prereqs.yaml (SESSION 12 exit-1 contract was written but never applied beyond PRQ-E-14)</title>
     <phase>Post-Live-Fire remediation — prereqs manifest correctness</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the manifest that gates every customer provisioning run (Step 0.5). A silent-PASS false positive on any recipe here is the exact failure mode the manifest exists to catch (F16/F19/F20/T108/F14 root causes). Each recipe fix requires understanding what "success" looks like for that specific check + adding an appropriate `exit 1` guard.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,4 +82,18 @@ Apply the exit-1 guard pattern to every recipe. Verify each via manual invocatio
       - **12 additional recipes from the SESSION 14 empty-output-implies-fail sweep** (T-03, T-04, T-05, T-06, T-07, S-04, E-03, E-04, E-05, E-09, E-10, C-05) also touched in the same sweep. C-05 was subsequently marked server-side-only (PRQ-02).
     See notes/pre-dispatch-audit-punchlist-2026-08-27.md § PRQ-03, PRQ-10, PRQ-12 for the full analysis.</criterion>
   </acceptance-criteria>
+  <notes>
+    2026-10-08 (SESSION 46, isolated-worktree agent) - re-measured and executed against the CURRENT manifest (v9 -> v10). The POML counts (32 violations / 27 prereqs) were August figures; between then and now the manifest was redesigned (D-12 dedicated stamp, T225-T228, T232, T251) and, importantly, NONE of the August hardening (commit 75537850a etc.) survives in the file: every recipe except the new S-00 / S-04 / C-09 / C-12 was still the original un-guarded text.
+
+    Re-measured with the new validate.ps1 recipe lints, run over the pre-change manifest (git show HEAD:...): 36 active recipes; 33 had no explicit `exit 1` (T-01..T-06, S-01/02/03/05, E-01..E-05, E-07..E-15 except E-06, C-01/02/03/06/07/08/10/11/12). After: 0. Beyond the lintable class, the assertion-recompute set was redone from the code, not the August notes:
+    - OBSOLETE (retired, nothing to fix): PRQ-E-06 (T226), PRQ-C-04 (T228), PRQ-C-05 (T227a), PRQ-T-07 (D-12/D-13). PRQ-S-04 and PRQ-S-00 were rewritten by T228 and were already compliant; PRQ-C-09 / PRQ-C-12 / PRQ-S-00 already had `exit 1` (C-09 and S-00 still needed the Windows az.cmd parenthesis fix).
+    - OBSOLETE premises: PRQ-C-01 / PRQ-C-02 checked gpt-5 + GlobalStandard + a {pinnedVer} placeholder. The stamp pins are gpt-4o 2024-11-20, gpt-4.1-mini 2025-04-14, text-embedding-3-large 1, all DataZoneStandard (openai.bicep, PinnedModelCatalog.cs; H0 checks them server-side since T247). Both recipes now iterate those three pins, and a Pester test fails if they drift from PinnedModelCatalog.
+    - DONE as the August amendment specified: E-11 AND of Sender + Receiver; S-03 failed-flag loop; C-01 numeric limit - current >= requested; C-02 per-pin lifecycle; C-06 numeric >= 25600000; E-09 name list; E-12 sessions AND dedup; C-07 bash-native grep.
+    - DEFECTS FOUND THAT THE AUGUST LIST DID NOT HAVE (all fixed): E-01 / E-02 / E-09 named resources that do not exist (sprk{env}artifacts, sprk{env}acr, sprk-{env}-kv vs the real sprkcpartifacts{env}, sprkcontrolplane{env}acr, sprk-controlplane-{env}-kv) - so they could only fail, and E-09 checked the customer-vault catalog instead of the three secrets Seed-PlatformKeyVault.ps1 seeds; E-07 asked Graph for the Graph SP's own appRoleAssignments (wrong direction) and expected a stale 14-role count - now diffs the UAMI's grants against every Id* constant in GraphAppRoles.cs; E-08 used `pac org list-users --query` (no such command/flag) - now Dataverse Web API; E-13 used `pac data list` and a column that does not exist (sprk_environmentid; the key is sprk_dataverseenvironmentid); E-15 now also asserts the federated credential and the no-secret/no-certificate rule; Windows az.cmd breaks on a parenthesis in an argument (S-00, E-07, E-14, C-09 - rewritten to filter in bash or call the REST API with curl); `grep -i -F` aborts (exit 134) in the grep shipped with Git for Windows (found by the new tests; E-09, E-15); az prints CRLF on Windows so every compared value is `tr -d '\r'`-ed.
+    - T-01 / T-02: a 403 to the Azure CLI token is the documented T248 outcome (the CLI app is not consented for container-type reads; Step 0.5c SKIPs it and H0 SpeOwnerCredential proves the registration) - the recipes print SKIP and exit 0 on 403 only, 404 / other / id mismatch exit 1.
+
+    Verification: validate.ps1 exit 0 with the new lints (also fails the pre-change manifest on 33 / 5 / 4 / 1 / 4 / 2 findings); tests/scripts/Prereqs-Recipes.Tests.ps1 runs 41 Pester 3.4 cases (recipes against fake az/curl/pac, the PinnedModelCatalog parity, the validate.ps1 lints). No live call was made. Not asserted by any recipe (needs a live session): the exact JSON shape of `az cognitiveservices usage list`/`model list`, `pac application list`, `pac licensing get-environment-billing-policy`, and the Graph container-type response bodies.
+
+    Owner decisions left open: PRQ-T-05 (Copilot bot, "optional per profile") and PRQ-T-06 (Power BI, BI is out of project scope) now FAIL when absent, because the contract is exit code only; the manifest has no `optional:` field. Either add one and have Step 0.5b WARN on it, or retire them.
+  </notes>
 </task>

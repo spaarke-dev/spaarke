@@ -59,6 +59,7 @@ import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
+  describeSendFailure,
   RichFilePreviewDialog,
   OOB_MODAL_SIZES,
   cleanGuid,
@@ -890,11 +891,18 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             );
             closeEmailDialog();
           }}
+          // This host tells the user itself (the error toast below), so the composer's own
+          // "Email not sent" dialog is switched off — one report per failure.
+          sendFailureDisplay="host"
           onError={err => {
+            const failure = describeSendFailure(err);
             dispatchToast(
               <Toast>
-                <ToastTitle>Send failed</ToastTitle>
-                <ToastBody>{err.detail ?? 'The email could not be sent.'}</ToastBody>
+                <ToastTitle>{failure.title}</ToastTitle>
+                <ToastBody>
+                  {failure.message}
+                  {failure.reference ? ` Reference: ${failure.reference}` : ''}
+                </ToastBody>
               </Toast>,
               { intent: 'error', timeout: 8000 }
             );

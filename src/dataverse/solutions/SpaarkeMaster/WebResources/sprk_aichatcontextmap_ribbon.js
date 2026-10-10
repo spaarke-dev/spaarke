@@ -6,7 +6,8 @@
  * WORKS WITH: sprk_aichatcontextmap entity (AI Chat Context Map)
  * DEPLOYMENT: Ribbon button on entity form and list view command bar
  *
- * @version 1.0.0
+ * @version 1.1.0 - client id / tenant / redirect / BFF URL come from Dataverse environment
+ *                 variables (no hardcoded dev values); scope is user_impersonation (#1453)
  * @namespace Spaarke.Commands.ChatContextMap
  */
 
@@ -15,24 +16,25 @@
 // ============================================================================
 
 var SPRK_CHAT_CONTEXT_MAP_CONFIG = {
-    // BFF API URL - determined at runtime from environment
+    // BFF API URL - resolved at runtime from the sprk_BffApiBaseUrl environment variable
     bffApiUrl: null,
 
-    // MSAL Configuration (shared across Spaarke webresources)
+    // MSAL Configuration - resolved at runtime from Dataverse environment variables
+    // (sprk_MsalClientId, sprk_BffApiAppId, sprk_TenantId) and the Dataverse org URL
     msal: {
-        clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
-        bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-        tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+        clientId: null,
+        bffAppId: null,
+        tenantId: null,
         get authority() {
             return "https://login.microsoftonline.com/" + this.tenantId;
         },
         get scope() {
-            return "api://" + this.bffAppId + "/SDAP.Access";
+            return "api://" + this.bffAppId + "/user_impersonation";
         },
-        redirectUri: "https://spaarkedev1.crm.dynamics.com"
+        redirectUri: null
     },
 
-    version: "1.0.0"
+    version: "1.1.0"
 };
 
 var SPRK_CHAT_CONTEXT_MAP_LOG = "[Spaarke.ChatContextMap]";
@@ -42,33 +44,91 @@ var SPRK_CHAT_CONTEXT_MAP_LOG = "[Spaarke.ChatContextMap]";
 // ============================================================================
 
 /**
- * Determine BFF API URL based on the current Dataverse environment.
- * Falls back to dev if environment is not recognized.
+ * Query one Dataverse Environment Variable by schema name (override value first, then default).
+ * Same resolution as sprk_DocumentOperations.js / sprk_emailactions.js.
+ * @param {string} schemaName
+ * @returns {Promise<string|null>}
  */
-function _sprkChatContextMap_initBffUrl() {
-    if (SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl) {
-        return; // Already initialized
+function _sprkChatContextMap_getEnvVar(schemaName) {
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'" +
+        "&$select=environmentvariabledefinitionid,defaultvalue" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+    ).then(function (result) {
+        if (result.entities && result.entities.length > 0) {
+            var definition = result.entities[0];
+            var values = definition.environmentvariabledefinition_environmentvariablevalue;
+            if (values && values.length > 0 && values[0].value) {
+                return values[0].value;
+            }
+            if (definition.defaultvalue) {
+                return definition.defaultvalue;
+            }
+        }
+        return null;
+    });
+}
+
+/**
+ * A usable single-tenant identifier: a GUID or a dotted domain. Rejects "organizations",
+ * "common", "undefined", "null" and "" (the values that sign a B2B guest in against their
+ * HOME tenant or build a malformed authority - #1453).
+ * @param {*} value
+ * @returns {boolean}
+ */
+function _sprkChatContextMap_isValidTenant(value) {
+    if (typeof value !== "string") return false;
+    var v = value.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ||
+        /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(v);
+}
+
+var _sprkChatContextMap_configPromise = null;
+
+/**
+ * Resolve the BFF URL, MSAL client id, BFF app id and tenant from Dataverse Environment
+ * Variables (sprk_BffApiBaseUrl, sprk_MsalClientId, sprk_BffApiAppId, sprk_TenantId) and the
+ * redirect URI from the Dataverse org URL. No environment is hardcoded. Cached; a failure is
+ * not cached so the next click retries.
+ * @returns {Promise<void>}
+ */
+function _sprkChatContextMap_resolveConfig() {
+    if (_sprkChatContextMap_configPromise) {
+        return _sprkChatContextMap_configPromise;
     }
 
-    try {
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var clientUrl = globalContext.getClientUrl();
-
-        if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) {
-            SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) {
-            SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl = "https://spe-api-uat.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) {
-            SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl = "https://spe-api-prod.azurewebsites.net";
-        } else {
-            SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
+    var cfg = SPRK_CHAT_CONTEXT_MAP_CONFIG;
+    _sprkChatContextMap_configPromise = Promise.all([
+        _sprkChatContextMap_getEnvVar("sprk_BffApiBaseUrl"),
+        _sprkChatContextMap_getEnvVar("sprk_MsalClientId"),
+        _sprkChatContextMap_getEnvVar("sprk_BffApiAppId"),
+        _sprkChatContextMap_getEnvVar("sprk_TenantId")
+    ]).then(function (v) {
+        var missing = [];
+        if (!v[0]) missing.push("sprk_BffApiBaseUrl");
+        if (!v[1]) missing.push("sprk_MsalClientId");
+        if (!v[2]) missing.push("sprk_BffApiAppId");
+        if (!_sprkChatContextMap_isValidTenant(v[3])) missing.push("sprk_TenantId (a tenant GUID or domain)");
+        if (missing.length > 0) {
+            throw new Error("Missing Dataverse environment variable(s): " + missing.join(", "));
         }
 
-        console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "BFF API URL:", SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl);
-    } catch (error) {
-        console.error(SPRK_CHAT_CONTEXT_MAP_LOG, "Init failed:", error);
-        SPRK_CHAT_CONTEXT_MAP_CONFIG.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-    }
+        // HOST ONLY: strip trailing slashes and a trailing /api (paths add /api themselves).
+        cfg.bffApiUrl = v[0].replace(/\/+$/, "").replace(/\/api$/i, "");
+        cfg.msal.clientId = v[1];
+        cfg.msal.bffAppId = v[2];
+        cfg.msal.tenantId = v[3].trim();
+        cfg.msal.redirectUri = Xrm.Utility.getGlobalContext().getClientUrl().replace(/\/+$/, "");
+
+        console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "BFF API URL:", cfg.bffApiUrl);
+    }).catch(function (error) {
+        _sprkChatContextMap_configPromise = null;
+        console.error(SPRK_CHAT_CONTEXT_MAP_LOG, "Config resolution failed:", error);
+        throw error;
+    });
+
+    return _sprkChatContextMap_configPromise;
 }
 
 // ============================================================================
@@ -150,6 +210,7 @@ function _sprkChatContextMap_initMsal() {
  * @returns {Promise<string>} Access token
  */
 async function _sprkChatContextMap_getAccessToken() {
+    await _sprkChatContextMap_resolveConfig();
     var msalInstance = await _sprkChatContextMap_initMsal();
     var scope = SPRK_CHAT_CONTEXT_MAP_CONFIG.msal.scope;
 
@@ -197,11 +258,11 @@ async function _sprkChatContextMap_getAccessToken() {
 async function refreshMappings() {
     try {
         console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "========================================");
-        console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "refreshMappings: Starting v1.0.0");
+        console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "refreshMappings: Starting v" + SPRK_CHAT_CONTEXT_MAP_CONFIG.version);
         console.log(SPRK_CHAT_CONTEXT_MAP_LOG, "========================================");
 
-        // Initialize BFF URL
-        _sprkChatContextMap_initBffUrl();
+        // Resolve config (BFF URL, MSAL client / tenant) from Dataverse environment variables
+        await _sprkChatContextMap_resolveConfig();
 
         // Show progress
         Xrm.Utility.showProgressIndicator("Refreshing context mapping cache...");

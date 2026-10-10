@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -53,6 +53,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
+- [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
+- [G-19: Sub-agent fan-out multiplies cost and exhausts memory](#g-19-sub-agent-fan-out-multiplies-cost-and-exhausts-memory)
 
 ---
 
@@ -1121,5 +1123,43 @@ every read that carries a value — and in-memory doubles that serialize the sha
 **What happens.** A cache key carries a version constant so a deploy can retire entries whose meaning changed. A test that asserts `CacheVersion.Should().Be(N)` passes on the day it is written, then fails on the next change that legitimately bumps the version. That makes a correct bump look like a regression. In task 172, `AccessCacheFaultCachingTests` pinned the membership resolver cache version at exactly 5, and the needed bump to 6 failed it.
 
 **Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
+
+---
+
+### G-18: `git stash pop` in one worktree applies ANOTHER session's stash
+
+> **Added 2026-10-08** by the module-CLAUDE.md / procedure-calibration work. **Class**: shared mutable state between parallel agents.
+
+**What happens.** The stash stack lives in the shared `.git` directory, so every worktree and every session sees one stack. A session that pushes its own stash and then pops "the top" can get a stash another session pushed in between. On 2026-10-08 a verification agent's before/after script did exactly that: its `pop` applied the customer-provisioning session's stash (seven files) into the agent's worktree and removed it from the list. Nothing was lost only because that session had already committed the same work. The stash list showed hundreds of dropped stashes from four parallel projects that week.
+
+**Rule.**
+- Agents and workflow scripts never use `git stash`. To set changes aside, copy files or make a temporary WIP commit on your own branch.
+- A human session that must stash uses `git stash push -u -m "<unique-tag>"`, records the SHA, restores with `git stash apply <sha>`, and drops its own entry by tag.
+- **Enforced by:** `permissions.ask` on `git stash pop/apply/drop/clear` (`.claude/settings.json`, root §16) — the human confirms each one.
+
+---
+
+### G-19: Sub-agent fan-out multiplies cost and exhausts memory
+
+> **Added 2026-10-09** by the procedure / code-quality cleanup session. **Class**: shared resources between parallel agents (machine memory, spend).
+
+**What happens.** Every tool step of an agent re-sends its whole context. In early October 2026, five parallel projects ran fan-outs: 65–92% of 6,500–19,000 model calls a day came from sub-agents, averaging ~300k tokens of context per call. Most ran on Opus, because `settings.json` sets `"model": "opus"` and sub-agents inherit it. Estimated spend rose from $60–240 a day to $1,100–2,600. About two-thirds of the sub-agent cost was cache writes, because each new agent writes its context once. An agent resumed after its 5-minute cache expired writes its whole context again: in one session, 96 of 138 large writes came after a 5–60 minute pause. The same parallelism exhausted Windows memory. Bash fork failed with `0xC000012D` (commit limit) and Claude Code exited with `0xC0000409`.
+
+**Rule.** `.claude/constraints/agent-cost.md`:
+- every agent states the model and effort chosen for its work;
+- one top-tier independent review per change set;
+- small, scoped agents;
+- a fresh short-brief agent rather than resuming an idle one;
+- one or two heavy projects at a time per machine;
+- compact main sessions at 400k.
+
+**Enforced by:** `.claude/settings.json`:
+- a `PreToolUse` hook (`scripts/quality/require-agent-model.py`) that refuses an agent launch naming no model, so the session chooses one per the model table, superseding the brief `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default (owner 2026-10-09: no arbitrary default);
+- `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`;
+- `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`;
+- `workflowSizeGuideline: small`;
+- `autoCompactWindow: 400000`.
+
+Cross-session concurrency is not enforceable by settings; it stays a practice.
 
 ---

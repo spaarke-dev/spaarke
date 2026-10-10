@@ -426,12 +426,11 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
         }
         else if (executeRequest is not null && TryGetRouteGuid(httpContext, out playbookId))
         {
-            // The execute handler's existing 400 (same constant, same { error } body), before any rights query.
+            // The execute handler's existing 400 (same constant, same ProblemDetails body), before any rights query.
             if (executeRequest.DocumentIds is not { Length: > 0 } requested)
             {
-                return Results.Json(
-                    new { error = PlaybookRunEndpoints.DocumentIdsRequiredMessage },
-                    statusCode: StatusCodes.Status400BadRequest);
+                return ProblemDetailsHelper.FromLegacyError(
+                    StatusCodes.Status400BadRequest, PlaybookRunEndpoints.DocumentIdsRequiredMessage);
             }
 
             documentIds = requested.Distinct().ToArray();

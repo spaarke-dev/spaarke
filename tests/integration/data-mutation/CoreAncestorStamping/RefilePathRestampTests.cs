@@ -2,7 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.FieldMappings;
@@ -45,7 +45,7 @@ public class RefilePathRestampTests
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
-            Substitute.For<IFieldMappingDataverseService>(),
+            new Mock<IFieldMappingDataverseService>().Object,
             services.GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
 
@@ -64,7 +64,7 @@ public class RefilePathRestampTests
     {
         var world = CommunicationWorld();
         var core = new UpdateRecordActionCore(
-            Substitute.For<IFieldMappingDataverseService>(),
+            new Mock<IFieldMappingDataverseService>().Object,
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), // no restamper at all
             NullLogger.Instance);
 
@@ -83,7 +83,7 @@ public class RefilePathRestampTests
     {
         var world = CommunicationWorld();
         var handler = new DataverseUpdateHandler(
-            Substitute.For<IFieldMappingDataverseService>(), world.Service, world.Restamper,
+            new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
 
@@ -103,7 +103,7 @@ public class RefilePathRestampTests
             .Row("sprk_todo", TodoUnderEvent,
                 [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
                 pairId: Event.ToString());
-        var fieldMapping = Substitute.For<IFieldMappingDataverseService>();
+        var fieldMapping = new Mock<IFieldMappingDataverseService>().Object;
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             fieldMapping,
@@ -139,7 +139,7 @@ public class RefilePathRestampTests
             .FailWrite("sprk_todo", TodoUnderEvent);
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
-            Substitute.For<IFieldMappingDataverseService>(),
+            new Mock<IFieldMappingDataverseService>().Object,
             world.Restamper,
             [
                 new FieldMappingRuleDto

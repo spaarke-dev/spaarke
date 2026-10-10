@@ -17,7 +17,6 @@
     <!-- MimeKit 4.17.0: aligned with Sprk.Bff.Api (task 004/005) to avoid NU1605; retains the
          CVE-2026-30227 fix (CRLF injection in SMTP envelope address, fixed 4.15.1). -->
     <PackageReference Include="MimeKit" Version="4.17.0" />
-    <PackageReference Include="NSubstitute" Version="5.3.0" />
     <PackageReference Include="xunit" Version="2.9.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <PrivateAssets>all</PrivateAssets>
@@ -66,8 +65,8 @@
     CICD-084 (2026-06-26) — KEEP-path relocation per ADR-038 §2 path #5 (endpoint contract).
     HTTP-contract tests physically relocated to tests/integration/contract/** but kept compiled
     into THIS assembly so fixtures (CustomWebAppFactory, WorkspaceTestFixture, AdminJobsTestFixture,
-    etc.) and project-specific package refs (NSubstitute, WireMock.Net, Cosmos SDK, MimeKit,
-    Newtonsoft.Json) remain accessible without duplication in a second test project.
+    etc.) and project-specific package refs (WireMock.Net, Cosmos SDK, MimeKit, Newtonsoft.Json)
+    remain accessible without duplication in a second test project.
     Namespaces preserved (Sprk.Bff.Api.Tests.*) for the same reason. Full assembly migration to
     Spe.Integration.Tests is deferred to a future task once fixture coupling is untangled.
   -->

@@ -9,7 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { readSseStream, parseSseEvent } from './useSseStream';
+import { readSseStream, parseSseEvent, errorBodyReason } from './useSseStream';
 
 /**
  * Stable playbook ID (GUID format) for the "Document Profile" playbook used by
@@ -375,7 +375,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
           signal: abortController.signal,
           mapHttpError: async response => {
             const errorText = await response.text();
-            return new Error(errorText || `HTTP ${response.status}`);
+            return new Error(errorBodyReason(errorText) || `HTTP ${response.status}`);
           },
           onLine: (line: string) => {
             if (finished) return;

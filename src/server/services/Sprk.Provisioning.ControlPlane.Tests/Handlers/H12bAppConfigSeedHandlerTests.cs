@@ -24,7 +24,8 @@
 //   - Seeder input carries InterStepState.DataverseEnvUrl
 //   - Run not found in Cosmos partition → Failure(Resumable, RunNotFound)
 //   - HandlerId mismatch → throws InvalidOperationException (defensive dispatch bug detector)
-//   - Manifest not found → Failure(Resumable, ManifestNotFound)
+//   - Manifest not found (the reader's NotFound) → Failure(Resumable, ManifestNotFound)
+//   - Task 253: the idempotency key's manifestHash is the shared ISeedManifestReader's content hash
 //   - Optimistic-concurrency race on success write → Failure(Resumable, ConcurrentWriteConflict)
 //   - Enqueue failure → still returns Success (reconciler re-emits)
 //   - Seeder throws unexpected exception → Failure(Resumable, SeederInfrastructureError)
@@ -36,7 +37,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
@@ -46,32 +47,15 @@ using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
-public sealed class H12bAppConfigSeedHandlerTests : IDisposable
+public sealed class H12bAppConfigSeedHandlerTests
 {
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-appconfig-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
 
-    private readonly string _manifestPath;
-    private readonly string _expectedManifestHash;
-
-    public H12bAppConfigSeedHandlerTests()
-    {
-        // Write a deterministic manifest fixture on disk so ComputeManifestHash
-        // returns a stable SHA-256. Cleanup handled via IDisposable.
-        _manifestPath = Path.Combine(Path.GetTempPath(), $"h12b-manifest-{Guid.NewGuid():N}.yaml");
-        File.WriteAllText(_manifestPath, "schemaVersion: 1\nartifacts: []\n");
-        _expectedManifestHash = H12bAppConfigSeedHandler.ComputeManifestHash(_manifestPath);
-    }
-
-    public void Dispose()
-    {
-        if (File.Exists(_manifestPath))
-        {
-            File.Delete(_manifestPath);
-        }
-    }
+    // Task 253: H12b's manifestHash is the shared seed-manifest reader's content hash (no disk file).
+    private const string _expectedManifestHash = "3f6a0c1d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f";
 
     // ---------- AC-1 Happy path ----------
 
@@ -172,29 +156,26 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
     }
 
     [Fact]
-    public void AC3_ComputeManifestHash_IsDeterministic()
+    public async Task AC3_ManifestEdit_NewReaderHash_ReDrivesTheSeeders()
     {
-        var h1 = H12bAppConfigSeedHandler.ComputeManifestHash(_manifestPath);
-        var h2 = H12bAppConfigSeedHandler.ComputeManifestHash(_manifestPath);
-        h1.Should().Be(h2);
-        h1.Length.Should().Be(64, "SHA-256 hex is 32 bytes = 64 hex chars.");
-    }
+        // A run that completed H12b under the OLD manifest hash re-seeds when the manifest changes.
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H12b",
+            IdempotencyKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            JobId = RunId,
+        });
+        var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
+        var handler = NewHandlerWithReader(new FakeRepository(run, "etag-edit"), new FakeEnqueuer(), new[] { seeder },
+            FakeSeedManifestReader.WithHash("aa11" + _expectedManifestHash[4..]));
 
-    [Fact]
-    public void AC3_ComputeManifestHash_ChangesOnManifestByteEdit()
-    {
-        var tmp2 = Path.Combine(Path.GetTempPath(), $"h12b-manifest2-{Guid.NewGuid():N}.yaml");
-        try
-        {
-            File.WriteAllText(tmp2, "schemaVersion: 1\nartifacts:\n  - id: some-new-scope\n");
-            var h1 = _expectedManifestHash;
-            var h2 = H12bAppConfigSeedHandler.ComputeManifestHash(tmp2);
-            h1.Should().NotBe(h2, "a manifest byte-edit MUST produce a new manifestHash to force re-seed.");
-        }
-        finally
-        {
-            if (File.Exists(tmp2)) File.Delete(tmp2);
-        }
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seeder.CallCount.Should().Be(1, "a new manifest hash is a new idempotency key — the seeders run again");
     }
 
     // ---------- AC-5 Seeder failure ----------
@@ -352,10 +333,10 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
     [Fact]
     public async Task ManifestNotFound_ReturnsFailure_ManifestNotFound_NoCosmosRead()
     {
-        var missingPath = Path.Combine(Path.GetTempPath(), $"h12b-missing-{Guid.NewGuid():N}.yaml");
         var repo = new FakeRepository(BuildRun(), "etag-1");
         var enqueuer = new FakeEnqueuer();
-        var handler = NewHandlerWithManifest(repo, enqueuer, Array.Empty<IAppConfigSeeder>(), missingPath);
+        var handler = NewHandlerWithReader(repo, enqueuer, Array.Empty<IAppConfigSeeder>(),
+            FakeSeedManifestReader.Missing("embedded resource 'seed manifest'"));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -495,25 +476,32 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
     // Helpers + fakes
     // -------------------------------------------------------------------------
 
-    private H12bAppConfigSeedHandler NewHandler(
+    private static H12bAppConfigSeedHandler NewHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         IReadOnlyList<IAppConfigSeeder> seeders)
-        => NewHandlerWithManifest(repository, enqueuer, seeders, _manifestPath);
+        => NewHandlerWithReader(repository, enqueuer, seeders, FakeSeedManifestReader.WithHash(_expectedManifestHash));
 
-    private static H12bAppConfigSeedHandler NewHandlerWithManifest(
+    private static H12bAppConfigSeedHandler NewHandlerWithReader(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         IReadOnlyList<IAppConfigSeeder> seeders,
-        string manifestPath)
-    {
-        var options = Options.Create(new AppConfigSeedOptions { ManifestPath = manifestPath });
-        return new H12bAppConfigSeedHandler(
+        ISeedManifestReader manifestReader)
+        => new(
             repository,
             enqueuer,
             seeders,
-            options,
+            manifestReader,
             NullLogger<H12bAppConfigSeedHandler>.Instance);
+
+    /// <summary>The shared seed-manifest reader (H12a's), canned: a content hash, or NotFound.</summary>
+    private sealed class FakeSeedManifestReader : ISeedManifestReader
+    {
+        private readonly SeedManifestReadResult _result;
+        private FakeSeedManifestReader(SeedManifestReadResult result) => _result = result;
+        public static FakeSeedManifestReader WithHash(string hash) => new(new SeedManifestReadResult.Success(hash, null));
+        public static FakeSeedManifestReader Missing(string attempted) => new(new SeedManifestReadResult.NotFound(attempted));
+        public Task<SeedManifestReadResult> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(_result);
     }
 
     private static ProvisioningRun BuildRun()

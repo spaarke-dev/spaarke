@@ -14,7 +14,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-
 const CLIENT_ROOT = path.resolve(__dirname, '../../../..');
 const RIBBON_SCRIPT = path.join(CLIENT_ROOT, 'webresources/js/sprk_access_ribbon.js');
 const ASSIGNED_ACCESS_SCRIPT = path.resolve(CLIENT_ROOT, '../solutions/webresources/sprk_assignedaccess_postsave.js');
@@ -38,8 +37,8 @@ function load(retrieveRecord: jest.Mock = jest.fn()) {
   win.Spaarke = { BffAuth: { getToken: jest.fn().mockResolvedValue(null) } };
   inject(ASSIGNED_ACCESS_SCRIPT);
   inject(RIBBON_SCRIPT);
-  expect(win.Spaarke.Access.Ribbon.VERSION).toBe('1.6.0'); // the real script ran
-  expect(win.Spaarke.AssignedAccess.Config.version).toBe('1.1.0');
+  expect(win.Spaarke.Access.Ribbon.VERSION).toBe('1.8.0'); // the real script ran
+  expect(win.Spaarke.AssignedAccess.Config.version).toBe('1.1.1');
   return { ribbon: win.Spaarke.Access.Ribbon, assigned: win.Spaarke.AssignedAccess, retrieveRecord };
 }
 
@@ -129,7 +128,9 @@ describe('isShareAllowedForSelection — the platform grid / subgrid Share comma
     const { ribbon } = load();
     win.Xrm.WebApi.retrieveMultipleRecords = retrieveMultiple;
 
-    await expect(ribbon.isShareAllowedForSelection([`{${RECORD_ID.toUpperCase()}}`, OTHER], 'sprk_matter')).resolves.toBe(false);
+    await expect(
+      ribbon.isShareAllowedForSelection([`{${RECORD_ID.toUpperCase()}}`, OTHER], 'sprk_matter')
+    ).resolves.toBe(false);
     expect(retrieveMultiple).toHaveBeenCalledTimes(1);
     expect(retrieveMultiple.mock.calls[0][0]).toBe('sprk_matter');
     expect(retrieveMultiple.mock.calls[0][1]).toBe(
@@ -228,5 +229,67 @@ describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
         restrictedExternal: { outcome: 'not-restricted', removed: [], failures: [], noInternalReader: false },
       })
     ).toBe('');
+  });
+});
+
+describe('assignedaccess_postsave.js 1.1.1 — the BFF base URL (#1488)', () => {
+  const HOST = 'https://bff.example.test';
+  const SYNC_URL = `${HOST}/api/v1/external-access/assigned-access/sync`;
+
+  /** The env-var reads getApiBaseUrl makes: a definition, then its value. */
+  function envVar(value: string) {
+    return jest.fn(async (entity: string) =>
+      entity === 'environmentvariabledefinition'
+        ? { entities: [{ environmentvariabledefinitionid: 'def-1', defaultvalue: null }] }
+        : { entities: [{ value }] }
+    );
+  }
+
+  /** Runs one sync and returns the URL fetched and the base URL handed to Spaarke.BffAuth.getToken. */
+  async function syncUrls(assigned: any) {
+    const getToken = jest.fn().mockResolvedValue('token');
+    win.Spaarke.BffAuth = { getToken };
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    (global as any).fetch = fetchMock;
+    await assigned.sync({ recordType: 'matter', recordId: RECORD_ID });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    return { url: fetchMock.mock.calls[0][0] as string, tokenBase: getToken.mock.calls[0][0] as string };
+  }
+
+  it.each([`${HOST}/api`, `${HOST}/api/`, `${HOST}/API`])(
+    'env var %s → getApiBaseUrl is the host, and the sync URL has exactly one /api segment',
+    async value => {
+      const { assigned } = load();
+      win.Xrm.WebApi.retrieveMultipleRecords = envVar(value);
+
+      await expect(assigned.getApiBaseUrl()).resolves.toBe(HOST);
+      const { url, tokenBase } = await syncUrls(assigned);
+      expect(url).toBe(SYNC_URL);
+      expect(url.match(/\/api\//g)).toHaveLength(1);
+      expect(tokenBase).toBe(HOST); // bff_auth.js appends /api/config/client to this
+    }
+  );
+
+  it.each([HOST, `${HOST}/`, `${HOST}/apis`])(
+    'env var %s without /api → unchanged (trailing slash only)',
+    async value => {
+      const { assigned } = load();
+      win.Xrm.WebApi.retrieveMultipleRecords = envVar(value);
+
+      await expect(assigned.getApiBaseUrl()).resolves.toBe(value.replace(/\/+$/, ''));
+    }
+  );
+
+  it('the URL onLoad warms into Config.apiBaseUrl, and a Config.apiBaseUrl override ending in /api, are the host', async () => {
+    const { assigned } = load();
+    win.Xrm.WebApi.retrieveMultipleRecords = envVar(`${HOST}/api`);
+    assigned.onLoad({ getFormContext: () => form(100000000).context });
+    for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    expect(assigned.Config.apiBaseUrl).toBe(HOST);
+
+    assigned.Config.apiBaseUrl = `${HOST}/api/`;
+    const { url, tokenBase } = await syncUrls(assigned);
+    expect(url).toBe(SYNC_URL);
+    expect(tokenBase).toBe(HOST);
   });
 });

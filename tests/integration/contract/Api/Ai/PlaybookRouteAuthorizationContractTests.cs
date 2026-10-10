@@ -327,7 +327,11 @@ public class PlaybookRouteAuthorizationContractTests
         var response = await host.SendAsync(Execute(playbookId));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain(PlaybookRunEndpoints.DocumentIdsRequiredMessage);
+        // ProblemDetails (ADR-019) so authenticatedFetch reads the text; the legacy `error` member is kept.
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        body["detail"]!.GetValue<string>().Should().Be(PlaybookRunEndpoints.DocumentIdsRequiredMessage);
+        body["error"]!.GetValue<string>().Should().Be(PlaybookRunEndpoints.DocumentIdsRequiredMessage);
         host.Access.Calls.Should().BeEmpty();
         host.Playbooks.VerifyNoOtherCalls();
         host.VerifyNothingRan();

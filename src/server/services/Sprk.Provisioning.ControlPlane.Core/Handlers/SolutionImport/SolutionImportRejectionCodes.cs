@@ -154,14 +154,12 @@ public static class SolutionImportRejectionCodes
     public const string RetiredSolutionReintroduction = "retired-solution-reintroduction";
 
     /// <summary>
-    /// HANDLER-07 (Wave 2 pre-dispatch remediation 2026-08-27) — F13 verbatim.
-    /// One or more required Power Platform applications (e.g.
-    /// msft_PowerBI_Anchor) could not be installed on the target Dataverse
-    /// env within the pre-import ensure step. Solution import would fail
-    /// 5 min in with MissingDependency; H6 fails fast (Resumable) with the
-    /// specific app-name list so the operator can pre-install manually
-    /// before re-running.
+    /// RETIRED (task 253): H6 no longer installs Power Platform applications. The CI-built SpaarkeMaster depends on
+    /// no application a fresh environment lacks — F13's Power BI Extensions dependency is gone from the package, and
+    /// <c>SpaarkeMasterApplicationDependencyTests</c> fails the build if one returns. Kept per the stability rule
+    /// above; never emitted.
     /// </summary>
+    [Obsolete("Task 253 — H6 installs no application (SpaarkeMaster depends on none a fresh environment lacks). Never emitted.")]
     public const string MissingRequiredApplication = "missing-required-application";
 
     /// <summary>

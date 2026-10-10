@@ -1340,4 +1340,84 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         errors.Should().ContainSingle(e => e.RecordId == workAssignment && e.Error.Contains(RecordOwnerRefusal.ParentUndetermined));
         _writes.Should().BeEmpty();
     }
+
+    // ── Task 175 fix round 2 (K3): sprk_issecure is never a generic writer's to set ─────────────────────────────────────
+
+    /// <summary>
+    /// K3, the output orchestrator's update handler: a payload that sets <c>sprk_issecure</c> on a work assignment (true or
+    /// false) is refused <c>secure_flag_transition_only</c> and nothing is written — only Make Secure / Remove Secure (F3,
+    /// with their isolation steps) and the cascade set it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateHandler_ASecureFlagWrite_IsRefused_AndNothingIsWritten(bool value)
+    {
+        var workAssignment = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: !value);
+        var handler = new DataverseUpdateHandler(
+            FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
+            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance);
+
+        var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
+            new Dictionary<string, object?> { ["sprk_issecure"] = value }, ConcurrencyMode.None, 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>K3, the UpdateRecord node / ActionSeam core (playbooks): the same refusal, nothing written.</summary>
+    [Fact]
+    public async Task ActionCore_ASecureFlagWrite_IsRefused_AndNothingIsWritten()
+    {
+        var workAssignment = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: true);
+        var services = new ServiceCollection()
+            .AddSingleton(new StampWorld().Restamper)
+            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(_gate)
+            .BuildServiceProvider();
+        var core = new UpdateRecordActionCore(
+            FieldMappingWritingToTheWorld().Object, services.GetRequiredService<IServiceScopeFactory>(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(
+            new UpdateRecordActionInput("sprk_project", workAssignment, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written.</summary>
+    [Fact]
+    public async Task FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing()
+    {
+        var workAssignment = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
+
+        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            FieldMappingWritingToTheWorld().Object,
+            new StampWorld().Restamper,
+            [
+                new FieldMappingRuleDto
+                {
+                    SourceField = "sprk_issecure", TargetField = "sprk_issecure",
+                    SourceFieldType = "Boolean", TargetFieldType = "Boolean", Priority = 1,
+                },
+            ],
+            new Dictionary<string, object?> { ["sprk_issecure"] = true },
+            "sprk_workassignment",
+            [workAssignment],
+            Guid.Parse("0000c158-0000-0000-0000-00000000ca11"),
+            NullLogger.Instance,
+            CancellationToken.None,
+            rootFiling: _gate);
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle(e => e.RecordId == workAssignment && e.Error.Contains(AccessFollowsParent.SecureFlagReasonCode));
+        _writes.Should().BeEmpty();
+    }
 }

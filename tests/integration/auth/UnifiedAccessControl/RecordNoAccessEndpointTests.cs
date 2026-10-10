@@ -322,6 +322,39 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
                 ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference(Matter, SecureMatter)));
     }
 
+    /// <summary>
+    /// Task 174 (owner round 84; verifier F2 and F1-d): the route reports the EFFECTIVE values of a work assignment whose own
+    /// flags are Standard and not secure, filed under a non-flagged project under a secure, Restricted matter — and, to a
+    /// Read-only caller, names only the DIRECT parent (the project, on the record's own lookup), never the matter above it.
+    /// </summary>
+    [Fact]
+    public async Task AReadOnlyCaller_OnAChildGovernedByAGrandparent_GetsTheEffectiveValues_AndOnlyTheDirectParent()
+    {
+        var middleProject = Guid.Parse("06406406-0000-4000-8000-0000000000d3");
+        var matterType = Guid.Parse("06406406-0000-4000-8000-0000000000d4");
+        H.Participations.Flags[FiledWorkAssignment] = RootRecordFlags.None;
+        H.ChildWorld = SecureChildShareWorld.Standard()
+            .Add("sprk_recordtype_ref", matterType, ("sprk_recordlogicalname", Matter))
+            .Add(Matter, SecureMatter, ("sprk_issecure", true), ("sprk_mattername", "Hidden Matter"),
+                ("sprk_accesspermission", new Microsoft.Xrm.Sdk.OptionSetValue(ExternalParticipationService.AccessPermissionRestricted)))
+            .Add(Project, middleProject, ("sprk_issecure", false), ("sprk_projectname", "Middle Project"),
+                ("sprk_regardingrecordid", SecureMatter.ToString("D")),
+                ("sprk_regardingrecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", matterType)))
+            .Add(WorkAssignment, FiledWorkAssignment, ("sprk_issecure", false),
+                ("sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference(Project, middleProject)));
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.Applies, "secure through the matter");
+        body.GetProperty("accessPermission").GetString().Should().Be(EffectiveAccessPermission.Restricted);
+        var from = body.GetProperty("inheritedFrom");
+        from.GetProperty("recordId").GetGuid().Should().Be(middleProject);
+        from.GetProperty("name").GetString().Should().Be("Middle Project");
+        body.GetRawText().Should().NotContain(SecureMatter.ToString("D")).And.NotContain("Hidden Matter",
+            "a record above the direct parent is not disclosed");
+    }
+
     [Fact]
     public async Task AnEntryOnTheSecureMatterAWorkAssignmentIsFiledUnder_CoversIt_ViaTheSecureParent()
     {
@@ -400,7 +433,8 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
-        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.DoesNotApply);
+        // Task 174 (owner round 84): secure is the EFFECTIVE flag — the record is secure through its parent.
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.Applies);
         body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies,
             "the wall reaches the record through its secure parent (round 61), whatever its own flag reads");
         var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle("listed once").Subject;
@@ -412,8 +446,13 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         row.GetProperty("notInForceReason").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
+    /// <summary>
+    /// Task 174 (owner rounds 82/84 — Q4's "secure" is the record or any filing ancestor): a user wall over an organization
+    /// only the not-yet-flagged child references is IN FORCE, because the child is secure through its parent; it is still
+    /// not marked as reaching it via the parent. (Before task 174 the child's own false flag made it not in force.)
+    /// </summary>
     [Fact]
-    public async Task AUserWallOverAnOrganizationOnlyTheNonSecureRecordReferences_IsNotInForce_AndNotMarkedViaTheParent()
+    public async Task AUserWallOverAnOrganizationOnlyTheNotYetFlaggedChildReferences_IsInForce_AndNotMarkedViaTheParent()
     {
         SecureMatterWithAFiledWorkAssignment();
         H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
@@ -423,10 +462,11 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
-        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.DoesNotApply);
+        body.GetProperty("secure").GetString().Should().Be(AccessSignalState.Applies);
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
         var row = body.GetProperty("entries").EnumerateArray().Should().ContainSingle().Subject;
         row.GetProperty("alsoViaSecureParent").GetBoolean().Should().BeFalse();
-        row.GetProperty("notInForceReason").GetString().Should().Be(NoAccessEntryNotInForceReason.UserWallOnNonSecureRecord);
+        row.GetProperty("inForce").GetBoolean().Should().BeTrue();
     }
 
     [Fact]

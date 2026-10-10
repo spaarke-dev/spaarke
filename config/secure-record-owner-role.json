@@ -228,6 +228,22 @@
       "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of a report card under a secure root reassigns it to the named Secure team.",
       "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:32Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_ReportCard privilege (Id=2a9a818c-f493-49b8-a459-3ecc3bab5f8c) on OTC=10705 for entity 'sprk_reportcard' (LocalizedName='Report Card'). context.Call'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
       "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_signal",
+      "privilegeName": "prvReadsprk_Signal",
+      "kind": "child",
+      "reason": "Owner decision D-33 (spaarke-ontology-platform-r1, 2026-10-07): Signals on a Secure matter, project or work assignment are secure children. The ontology Signal writer (SignalWriter) owns such a Signal by the Secure Record Owners team at create (I-6, RecordOwnershipResolver), and SecureChildReconciler / SecureChildReconciliationJob re-own existing ones into and out of isolation. Reviewed by unified-access-control-r2 on #1355.",
+      "evidence": "spaarke-ontology-platform-r1 task 079 (spaarkedev1, 2026-10-07T14:58:39Z, 14:58:41Z, 14:58:44Z; 3 of 3 polls): a probe sprk_signal assigned to the Secure Record Owners team, before this privilege was added, was refused with HTTP 403, code 0x80040299, verbatim: 'Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=26, MetadataCachePrivilegesCount=7334, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Signal privilege (Id=226178d2-9528-4cde-b903-a8a84788b09e) on OTC=11003 for entity 'sprk_signal' (LocalizedName='Signal'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.' privilegeCount=26 matched the role's privilege count, so the reading was current. Record: projects/spaarke-ontology-platform-r1/notes/079-uac-coordination.md section 3 (ontology branch docs/ontology-platform-design) and issue #1355.",
+      "addedBy": "spaarke-ontology-platform-r1 task 039"
+    },
+    {
+      "logicalName": "sprk_decisionrecord",
+      "privilegeName": "prvReadsprk_DecisionRecord",
+      "kind": "child",
+      "reason": "Owner decision D-33 (spaarke-ontology-platform-r1, 2026-10-07): Decision Records on a Secure matter, project or work assignment are secure children, owned by the Secure Record Owners team at create (I-6) and re-owned by SecureChildReconciler / SecureChildReconciliationJob. The table stays append-only by privilege: no human role holds Write or Delete, so mirrored share rights are inert. Reviewed by unified-access-control-r2 on #1355.",
+      "evidence": "spaarke-ontology-platform-r1 task 079 (spaarkedev1, 2026-10-07T14:58:48Z, 14:58:51Z, 14:58:54Z; 3 of 3 polls): a probe sprk_decisionrecord assigned to the Secure Record Owners team, before this privilege was added, was refused with HTTP 403, code 0x80040299, verbatim: 'Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=26, MetadataCachePrivilegesCount=7334, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_DecisionRecord privilege (Id=3e9b0585-c7a8-4cfa-b194-3bb12623d910) on OTC=11002 for entity 'sprk_decisionrecord' (LocalizedName='Decision Record'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.' privilegeCount=26 matched the role's privilege count, so the reading was current. Record: projects/spaarke-ontology-platform-r1/notes/079-uac-coordination.md section 3 (ontology branch docs/ontology-platform-design) and issue #1355.",
+      "addedBy": "spaarke-ontology-platform-r1 task 039"
     }
   ]
 }

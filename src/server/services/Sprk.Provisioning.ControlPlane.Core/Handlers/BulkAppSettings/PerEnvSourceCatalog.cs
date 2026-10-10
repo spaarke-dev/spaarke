@@ -19,10 +19,18 @@
 // discipline T226 applied to the secret manifest's value_source.
 //
 // The source KEY (the part after the colon) also names the generated
-// Configure-AppServiceSettings script parameter (PascalCase), so it must stay
-// stable once used in the manifest.
+// Configure-AppServiceSettings script parameter (PascalCase — the operator
+// artifact H4b's settings are parity-tested against, task 253), so it must
+// stay stable once used in the manifest.
+//
+// LIST SOURCES (task 255): a source whose value is a list (ResolveList set) feeds
+// only an `indexed: true` manifest entry — H4b writes {key}__0..{key}__{n-1} and
+// removes every other {key}__* setting, so a value dropped from the list cannot
+// linger on a slot. A scalar source never feeds an indexed entry, nor a list
+// source a scalar one (FilePerEnvSettingsManifest refuses both).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
@@ -32,13 +40,21 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 /// <param name="SourceKey">The part after the colon — also the generated script parameter's base name.</param>
 /// <param name="ProducerHandlerId">The handler whose output this is, or <c>null</c> for an intake value.</param>
 /// <param name="Location">Where the value lives, for diagnostics (e.g. <c>InterStepState.KeyVaultUri</c>).</param>
-/// <param name="Resolve">Reads the value from the run; null/blank when not (yet) present.</param>
+/// <param name="Resolve">Reads the value from the run; null/blank when not (yet) present. For a list source it returns
+/// null — read <paramref name="ResolveList"/> instead.</param>
+/// <param name="ResolveList">Task 255: set only for a LIST source (feeds an <c>indexed: true</c> entry) — the values in
+/// order, or null/empty when not present.</param>
 public sealed record PerEnvSource(
     string Expression,
     string SourceKey,
     string? ProducerHandlerId,
     string Location,
-    Func<ProvisioningRun, string?> Resolve);
+    Func<ProvisioningRun, string?> Resolve,
+    Func<ProvisioningRun, IReadOnlyList<string>?>? ResolveList = null)
+{
+    /// <summary>True for a list source (task 255).</summary>
+    public bool IsList => ResolveList is not null;
+}
 
 /// <summary>
 /// The closed set of non-literal <c>per_env_source</c> values H4b can resolve.
@@ -55,6 +71,11 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:redis_endpoint", HandlerIds.H2a, nameof(InterStepState.RedisEndpoint), r => r.InterStepState.RedisEndpoint),
         // T246: the stamp's Azure AI Content Safety endpoint — a plain setting; the account has local auth disabled.
         Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
+        // T258 (204e-F6): the stamp BFF's own public URL, PublicConfig__BffUrl — derived from H2a's App Service name
+        // with the one derivation H9 records as BffApiUrl (StampBffUrl), so H4b needs nothing from H9 (which runs after it).
+        new("from-h2a-output:bff_url", "bff_url", HandlerIds.H2a,
+            $"InterStepState.{nameof(InterStepState.AppServiceName)} ({HandlerIds.H2a} output) as https://{{name}}.azurewebsites.net",
+            r => string.IsNullOrWhiteSpace(r.InterStepState.AppServiceName) ? null : StampBffUrl.Production(r.InterStepState.AppServiceName)),
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
         // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
         // write: H5 runs after H4). H4b ← H5 in the DAG.
@@ -72,6 +93,14 @@ public static class PerEnvSourceCatalog
         // RUNTIME-IDENTITY §1.1 — a second derivation is how two components end up with two spellings).
         new("from-intake-parameter:customer_id", "customer_id", null,
             "intake customerId (POST /api/runs body — run.CustomerId)", r => r.CustomerId),
+        // T255 (INCOMING-141): the customer's workforce tenant ids — a LIST source (indexed entry
+        // WorkforceIdentity__CustomerTenantIds). POST /api/runs stored the canonical JSON array; H4b re-applies
+        // CustomerWorkforceTenantsRule before it resolves this, so a malformed stored value never reaches a slot.
+        new("from-intake-parameter:customer_workforce_tenant_ids", "customer_workforce_tenant_ids", null,
+            $"intake parameter '{IntakeParameterCatalog.CustomerWorkforceTenantIds}' (JSON array)",
+            _ => null,
+            r => CustomerWorkforceTenantsRule.ParseStored(
+                r.Parameters.NonSecret.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var v) ? v : null)),
     ];
 
     /// <summary>Accepted sources, by source key (the part after the colon; ordinal).</summary>

@@ -460,7 +460,12 @@ public static class EndpointMappingExtensions
         // Captures the customer admin tid from the Microsoft admin-consent redirect and enqueues
         // the L2 provisioning pipeline via Service Bus. See Endpoints/Onboarding/OnboardingModule.cs
         // and design.md D18 + §4.3a.2 for the Anonymous+HMAC exception rationale.
-        app.MapConsentCallbackEndpoint();
+        // Task 258: mapped only when Onboarding:Enabled (the same gate as AddOnboardingModule) — off on
+        // every customer stamp, which cannot serve the Model 2 consent callback (OnboardingOptions.Enabled).
+        if (OnboardingModule.IsEnabled(app.Configuration))
+        {
+            app.MapConsentCallbackEndpoint();
+        }
 
         // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
         // GET /api/admin/jobs               — list registered jobs + status summary

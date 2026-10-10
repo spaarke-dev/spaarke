@@ -1456,6 +1456,7 @@
         <Library name="sprk_matter_insight_card_mount.js" libraryUniqueId="{a1b1c1d1-0001-4000-8000-000000000002}" />
         <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{1e82d24f-3e75-20b8-37e0-05fe29864648}" />
         <Library name="sprk_/scripts/assignedaccess_postsave.js" libraryUniqueId="{eb213817-b296-9b62-6137-113e5b8be344}" />
+        <Library name="sprk_/scripts/accessstatus_banner.js" libraryUniqueId="{01cc0365-ad75-a93f-bd44-a8cdcb40fbc2}" />
       </formLibraries>
       <events>
         <event name="onload" application="false" active="false">
@@ -1466,6 +1467,7 @@
             <Handler functionName="Spaarke.MatterInsight.onLoad" libraryName="sprk_matter_insight_onload.js" handlerUniqueId="{54d137d3-78e3-4b99-95bc-3e08d598d11a}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.MatterInsightCard.onLoad" libraryName="sprk_matter_insight_card_mount.js" handlerUniqueId="{93e6f182-d942-47db-b5f6-513d6b55eb00}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.AssignedAccess.onLoad" libraryName="sprk_/scripts/assignedaccess_postsave.js" handlerUniqueId="{a7ee2da3-cc6e-8224-b5d5-715307f272ad}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.AccessStatus.onLoad" libraryName="sprk_/scripts/accessstatus_banner.js" handlerUniqueId="{61d68a00-ef8d-ba28-c02a-6320abf82c13}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>

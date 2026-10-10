@@ -62,7 +62,7 @@ Spaarke.NoAccessEntry.Config = {
      * AccessibleRecordSetService composes only these). An entry on any other table is stored and enforced nowhere.
      */
     allowedObjectTypes: ["sprk_project", "sprk_matter", "sprk_workassignment"],
-    version: "1.1.0"
+    version: "1.1.1"
 };
 
 /** Xrm save mode of the Deactivate command (getEventArgs().getSaveMode()). */
@@ -300,6 +300,16 @@ Spaarke.NoAccessEntry._cleanId = function (id) {
 // Lifecycle
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * The BFF base URL as the HOST only (#1488): trailing slashes removed, then a trailing "/api" (any case). Every path
+ * this script and sprk_/scripts/bff_auth.js append starts with "/api/", and sprk_BffApiBaseUrl carries "/api" on some
+ * environments (dev: https://spaarke-bff-dev.azurewebsites.net/api), so an unnormalised value called /api/api/... (401).
+ * The repo rule (sprk_emailactions.js, Spaarke.Auth resolveRuntimeConfig.ts). An empty value gives "".
+ */
+Spaarke.NoAccessEntry._normalizeBaseUrl = function (value) {
+    return value ? String(value).replace(/\/+$/, "").replace(/\/api$/i, "") : "";
+};
+
 /** Resolves the BFF base URL from the sprk_BffApiBaseUrl environment variable (value override, else default). */
 Spaarke.NoAccessEntry.getApiBaseUrl = function () {
     if (Spaarke.NoAccessEntry._cachedApiBaseUrl) {
@@ -321,11 +331,12 @@ Spaarke.NoAccessEntry.getApiBaseUrl = function () {
             "'&$select=value"
         ).then(function (values) {
             var value = values.entities && values.entities.length > 0 ? values.entities[0].value : definition.defaultvalue;
-            if (!value) {
+            var baseUrl = Spaarke.NoAccessEntry._normalizeBaseUrl(value);
+            if (!baseUrl) {
                 throw new Error("Environment variable sprk_BffApiBaseUrl has no value.");
             }
 
-            Spaarke.NoAccessEntry._cachedApiBaseUrl = value.replace(/\/+$/, "");
+            Spaarke.NoAccessEntry._cachedApiBaseUrl = baseUrl;
             return Spaarke.NoAccessEntry._cachedApiBaseUrl;
         });
     });
@@ -900,7 +911,8 @@ Spaarke.NoAccessEntry._summarize = function (report) {
 
 Spaarke.NoAccessEntry._enforce = async function (formContext, entryId) {
     try {
-        var baseUrl = Spaarke.NoAccessEntry.Config.apiBaseUrl || await Spaarke.NoAccessEntry.getApiBaseUrl();
+        var baseUrl = Spaarke.NoAccessEntry._normalizeBaseUrl(Spaarke.NoAccessEntry.Config.apiBaseUrl) ||
+            await Spaarke.NoAccessEntry.getApiBaseUrl();
         if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
             console.error("[No Access] Spaarke.BffAuth is not loaded (register sprk_/scripts/bff_auth.js first); " +
                 "the 5-minute job will enforce this entry.");

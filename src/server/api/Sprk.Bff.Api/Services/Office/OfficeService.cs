@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -62,6 +63,8 @@ public class OfficeService : IOfficeService
     // sprk_document archive. Required (task 059): CommunicationModule registers it unconditionally. CaptureAsync
     // is itself best-effort (NFR-04) and never throws out of the save.
     private readonly EmailUploadCaptureService _emailUploadCapture;
+    // Task 121: files an existing, unfiled communication the save reconciled to (owner 2026-10-09).
+    private readonly ReconciledEmailFiling _reconciledEmailFiling;
     // Task 059: the Office add-in's Dataverse READS — the "File to" entity search (impersonated, task 062), the
     // matter-type list, and the sprk_recordtype_ref lookup the To Do writer below stamps. Extracted so this
     // class issues no Dataverse read of its own; the IOfficeService search members delegate to it.
@@ -105,6 +108,7 @@ public class OfficeService : IOfficeService
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         OfficeSearchService search,
         EmailUploadCaptureService emailUploadCapture,
+        ReconciledEmailFiling reconciledEmailFiling,
         IGenericEntityService genericEntityService,
         ICallerSystemUserResolver callerSystemUserResolver,
         OfficeProfileQueue profileQueue,
@@ -131,6 +135,8 @@ public class OfficeService : IOfficeService
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
+        _reconciledEmailFiling = reconciledEmailFiling
+            ?? throw new ArgumentNullException(nameof(reconciledEmailFiling));
         _search = search;
         _genericEntityService = genericEntityService;
         _callerSystemUserResolver = callerSystemUserResolver;
@@ -405,7 +411,16 @@ public class OfficeService : IOfficeService
 
             // Step 2: Check for existing job with this idempotency key. Task 060 (#1084): this read never worked in
             // production (`dynamic` over another assembly's anonymous type threw, and was swallowed into "no duplicate").
-            var existingJob = await _jobs.FindExistingAsync(idempotencyKey, cancellationToken);
+            //
+            // Task 121: a save is the duplicate only of the CALLER's own job — the lookup finds the caller's newest job
+            // under the key. An email key names the message by its RFC Message-ID, which is the same in every recipient's
+            // mailbox (the pane used to send a mailbox-specific item id; Quick Save always sent the Message-ID), so two
+            // recipients saving one email to the same record share a key. Answering the second with the first user's job
+            // left that user with a job they may not read (GetAsync proves ownership) and no document; and a newer job of
+            // another user must not hide the caller's own (A, B, then A again is A's duplicate). IdempotencyFilter's
+            // response cache is per user already. A row that records no initiator is nobody's duplicate (the save runs;
+            // content dedup still applies).
+            var existingJob = await _jobs.FindExistingAsync(idempotencyKey, userId, cancellationToken);
 
             // Task 047: a key names CONTENT, not a moment. For a version save, a Completed job under this key is the
             // duplicate only while the document still holds exactly this content. Otherwise B, then A, then B again
@@ -490,7 +505,15 @@ public class OfficeService : IOfficeService
             // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
             if (request.ContentType == SaveContentType.Email)
             {
-                await _emailUploadCapture.CaptureAsync(request, userId, cancellationToken);
+                var capture = await _emailUploadCapture.CaptureWithOutcomeAsync(request, userId, cancellationToken);
+
+                // Task 121 (owner 2026-10-09, "file it if unfiled"): the email may already have been captured — from a
+                // mailbox, or saved by someone else — and so reconciled to an existing communication, which the capture
+                // leaves as it is. When that communication is filed to nothing and the caller may change it, it is filed
+                // to the record picked for THIS save. Never moved when already filed; nothing filed by an unfiled save.
+                // Best-effort: it never fails the save.
+                await _reconciledEmailFiling.FileIfUnfiledAsync(
+                    request, capture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken);
             }
 
             // Step 3: Determine job type based on content type
@@ -1174,7 +1197,8 @@ public class OfficeService : IOfficeService
         var canonical = $"{request.ContentType}|" +
                        $"{request.TargetEntity?.EntityType}|" +
                        $"{request.TargetEntity?.EntityId}|" +
-                       $"{request.Email?.InternetMessageId ?? request.Email?.Subject}|" +
+                       // Task 121: the stored message id (the RFC id, or an older pane's / a draft's item id).
+                       $"{(request.Email is null ? null : OfficeEmailEnricher.ResolveStoredMessageId(request.Email)) ?? request.Email?.Subject}|" +
                        $"{request.Attachment?.AttachmentId}|" +
                        $"{request.Document?.FileName}|" +
                        $"{request.Document?.ExistingDocumentId}";
@@ -1190,8 +1214,9 @@ public class OfficeService : IOfficeService
         // it again to the same record under the same name got the second save answered "Duplicate" from the
         // first save's job — the edits were silently never written. Identical bytes still hash identically, so
         // a true retry is still de-duplicated here (and a byte-identical but deliberate re-save is content
-        // dedup's job — link/graduate, task 028 — not this cache's). Email and Attachment keep their string
-        // byte-for-byte: they name an immutable message or attachment, never editable content.
+        // dedup's job — link/graduate, task 028 — not this cache's). Email and Attachment are not content-keyed:
+        // they name an immutable message or attachment, never editable content. (Task 121: an email is named by its
+        // RFC Message-ID, the same in every mailbox — SaveAsync therefore only treats the CALLER's job as a duplicate.)
         if (request.ContentType == SaveContentType.Document)
         {
             var contentHash = HashContent(request.Document?.ContentBase64);

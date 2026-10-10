@@ -8,7 +8,7 @@
  * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
  */
 
-import { initAuth, authenticatedFetch as sharedAuthFetch } from "@spaarke/auth";
+import { initAuth, authenticatedFetch as sharedAuthFetch, type OkResponse } from "@spaarke/auth";
 import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId } from "../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ export function ensureAuthInitialized(): Promise<void> {
 export async function authenticatedFetch(
   url: string,
   init?: RequestInit
-): Promise<Response> {
+): Promise<OkResponse> {
   await ensureAuthInitialized();
   return sharedAuthFetch(url, init);
 }
