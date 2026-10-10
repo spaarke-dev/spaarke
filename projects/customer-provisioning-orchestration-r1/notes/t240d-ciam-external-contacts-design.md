@@ -200,6 +200,26 @@ Use the dev BFF app (multitenant, FIC'd), or a throwaway multitenant app plus a 
   stamp certificate (against D13 and A6) or a Spaarke-side broker.
 - Only (iii) fails: use option 2 for the audience; (c) is unchanged.
 
+### S1 results — 2026-10-10 (owner-approved; dev only)
+
+Setup: throwaway multitenant app "Spaarke CIAM Spike S1 - Dev" (`40ec7b2b-…`, Spaarke tenant, `requestedAccessTokenVersion=2`,
+FIC trusting throwaway UAMI `id-spaarke-ciam-spike-s1-dev`); its service principal + Graph `User.Create` in `spaarkeextid` by the
+owner's **admin-consent URL** (the CLI device-code sign-in into `spaarkeextid` is refused — "You don't have access to this" — for both
+ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as the UAMI.
+
+- **(i) PASS — keyless works.** MI assertion → client-credentials token for `spaarkeextid` from authority
+  `https://login.microsoftonline.com/{ciamTenantId}`: `aud=https://graph.microsoft.com`, `tid=7052feba…`, `roles=["User.Create"]`,
+  `idtyp=app`. The **`*.ciamlogin.com` authority REFUSES app-only** (`AADSTS500206: The account type can't be used for the
+  application`) → the stamp provisioner must use `login.microsoftonline.com`. `POST /users` with an `emailAddress` identity
+  (issuer `spaarkeextid.onmicrosoft.com`) → **201**. `User.Create` cannot read `/organization` (initial domain): carry the
+  issuer domain as configuration (`Ciam:Domain`), do not read it.
+- **(ii)** Same email again → **400 `Request_BadRequest` / `ObjectConflict` on `proxyAddresses`** (because the request sets `mail`).
+  This is the "already has an account" signal the invite path must handle (ISS-009 / design §5).
+- **(iii)/(iv) pending** — need a user token from a client registered IN `spaarkeextid` (owner portal step) and the
+  audience-refusal check (R1/FR-22 acceptance shape).
+- Leftover: test local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`) — `User.Create` cannot delete it; delete in
+  the Entra admin center when S1 ends, with the spike app, its SP in `spaarkeextid` and the UAMI.
+
 ## 9. Open decisions
 
 | # | Decision | Owner |
