@@ -51,4 +51,10 @@ public sealed record RungMatch
     /// <c>deadline-response</c>. Feed W5 Responsive Intelligence (FR-19); not persisted here.
     /// </summary>
     public IReadOnlyList<string> Obligations { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Optional <c>sprk_triagecategory</c> taxonomy name rung 5 chose (spaarke-ontology-platform-r1 D-117(b)) — the
+    /// hint TRIAGE-EMAIL reads back from provenance. Null for every other rung and when the taxonomy was unavailable.
+    /// </summary>
+    public string? TriageCategory { get; init; }
 }

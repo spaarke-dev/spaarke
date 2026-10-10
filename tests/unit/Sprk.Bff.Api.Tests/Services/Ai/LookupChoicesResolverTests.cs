@@ -85,6 +85,39 @@ public class LookupChoicesResolverTests
     }
 
     [Fact]
+    public async Task ResolveChoicesReference_SameShapeAsJpsPath_NamesAndGuidanceFromTheSameEnabledRows()
+    {
+        // D-117(b): rung 5 resolves the taxonomy reference directly (no JPS); it must get exactly what the
+        // TRIAGE-EMAIL Action gets for the same reference.
+        var (sut, scope) = Build(new[] { "Fee / rate change", "Scheduling" });
+        scope.Setup(s => s.QueryLookupGuidanceAsync(
+                "sprk_triagecategories", "sprk_name", "sprk_classifierguidance", "sprk_enabled eq true", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, string> { ["Fee / rate change"] = "A change to rates." });
+
+        var direct = await sut.ResolveChoicesReferenceAsync(TriageRef);
+        var viaJps = await Build(new[] { "Fee / rate change", "Scheduling" }).sut.ResolveFromJpsAsync(JpsWithLookup(TriageRef));
+
+        direct[TriageRef].Should().Equal("Fee / rate change", "Scheduling");
+        direct[LookupChoicesResolver.GuidanceKey(TriageRef)].Should().Equal("Fee / rate change — A change to rates.", "Scheduling");
+        direct[TriageRef].Should().Equal(viaJps[TriageRef]);
+        scope.Verify(s => s.QueryLookupValuesAsync("sprk_triagecategories", "sprk_name", "sprk_enabled eq true", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("downstream:node.field")]
+    [InlineData("sprk_triagecategory.sprk_name")]
+    public async Task ResolveChoicesReference_UnsupportedReference_ReturnsEmpty_AndReadsNothing(string choicesRef)
+    {
+        var (sut, scope) = Build(new[] { "x" });
+
+        var result = await sut.ResolveChoicesReferenceAsync(choicesRef);
+
+        result.Should().BeEmpty();
+        scope.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ResolveFromJps_NewTaxonomyRowWithGuidance_IsLiveWithNoDeployment()
     {
         // The zero-deployment property: names and guidance are read per run from the same rows, so a row added

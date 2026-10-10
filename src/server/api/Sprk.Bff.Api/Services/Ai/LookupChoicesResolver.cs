@@ -172,20 +172,51 @@ public sealed class LookupChoicesResolver
             if (result.ContainsKey(choicesRef))
                 continue; // Already resolved (multiple fields referencing same source)
 
-            var values = await ResolveReferenceAsync(choicesRef, fieldName, cancellationToken);
-            if (values != null)
-            {
-                result[choicesRef] = values;
-
-                var guidanceLines = await ResolveGuidanceLinesAsync(choicesRef, values, cancellationToken);
-                if (guidanceLines != null)
-                {
-                    result[GuidanceKey(choicesRef)] = guidanceLines;
-                }
-            }
+            await ResolveIntoAsync(result, choicesRef, fieldName, cancellationToken);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Resolves ONE <c>$choices</c> reference that is not declared in a JPS document, with the same result shape
+    /// as <see cref="ResolveFromJpsAsync"/>: the bare names under <paramref name="choicesRef"/> and, for a
+    /// taxonomy with a guidance column, the "name — guidance" lines under <see cref="GuidanceKey"/>. Used by a
+    /// code-constant prompt that classifies against the same editable taxonomy as a JPS Action (rung 5,
+    /// spaarke-ontology-platform-r1 D-117(b)), so both read the same rows through the same filter and budget.
+    /// </summary>
+    /// <returns>Empty when the reference has an unsupported prefix or resolves to no values.</returns>
+    public async Task<IReadOnlyDictionary<string, string[]>> ResolveChoicesReferenceAsync(
+        string choicesRef,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrWhiteSpace(choicesRef)
+            || !SupportedPrefixes.Any(p => choicesRef.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        {
+            return result;
+        }
+
+        await ResolveIntoAsync(result, choicesRef, choicesRef, cancellationToken);
+        return result;
+    }
+
+    /// <summary>Resolves one reference (names, then guidance lines when the taxonomy has them) into <paramref name="result"/>.</summary>
+    private async Task ResolveIntoAsync(
+        Dictionary<string, string[]> result, string choicesRef, string fieldName, CancellationToken cancellationToken)
+    {
+        var values = await ResolveReferenceAsync(choicesRef, fieldName, cancellationToken);
+        if (values == null)
+            return;
+
+        result[choicesRef] = values;
+
+        var guidanceLines = await ResolveGuidanceLinesAsync(choicesRef, values, cancellationToken);
+        if (guidanceLines != null)
+        {
+            result[GuidanceKey(choicesRef)] = guidanceLines;
+        }
     }
 
     /// <summary>
