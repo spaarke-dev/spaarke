@@ -48,7 +48,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// not have).
 /// </remarks>
 [Trait("status", "task-158-uac-r2")]
-public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, IClassFixture<ProvisionProjectTestFixture>
+public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, IClassFixture<ProvisionProjectTestFixture>
 {
     private readonly ProvisionProjectTestFixture _fixture;
     private readonly SecureRootFilingGate _gate;

@@ -2,7 +2,9 @@
  * workAssignmentService.ts
  * Service for the Work Assignment wizard.
  *
- * Creates sprk_workassignment records in Dataverse via IDataService.
+ * Creates sprk_workassignment records through the BFF (ontology task 046, D-21/D-113): the wizard builds the Web API
+ * payload and POSTs it to `/api/v1/child-records/sprk_workassignment`; the server writes it (WP-3). Reads still go through
+ * IDataService.
  * Follows the nav-prop discovery pattern from MatterService/EventService.
  *
  * Dependencies are injected via constructor -- no solution-specific imports.
@@ -13,7 +15,7 @@
  *   - searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup
  */
 
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { withBffChildWrites, createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import type {
   ICreateWorkAssignmentFormState,
   IAssignWorkState,
@@ -35,7 +37,6 @@ import {
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { getXrmUserId } from '../../utils/xrmUserId';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -497,10 +498,21 @@ export class WorkAssignmentService {
     }
 
     try {
-      console.info('[WorkAssignmentService] createRecord payload:', JSON.stringify(entity, null, 2));
-      // IDataService.createRecord returns Promise<string> (just the id)
-      workAssignmentId = await this._dataService.createRecord('sprk_workassignment', entity);
-      console.info('[WorkAssignmentService] createRecord success, workAssignmentId:', workAssignmentId);
+      console.info('[WorkAssignmentService] create payload:', JSON.stringify(entity, null, 2));
+      // Ontology task 046 (D-21; uac-r2 D-113): the SAME payload goes to the BFF instead of Xrm.WebApi — checked as the
+      // user there (Create/Append, AppendTo on every record it binds), created by the server owned by the business-unit
+      // team with the user as its creator person, and created secure when filed under a secure matter or project. The
+      // server also gives the "Assigned *" contacts their access, so the client's syncAssignedAccess call (task 142) is no
+      // longer made for this create. A server warning (a secure create not yet complete) is shown like any other.
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
+        'sprk_workassignment',
+        entity
+      );
+      workAssignmentId = created.id;
+      warnings.push(...created.warnings);
+      console.info('[WorkAssignmentService] create success, workAssignmentId:', workAssignmentId);
     } catch (err) {
       console.error('[WorkAssignmentService] createRecord error:', err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -512,10 +524,6 @@ export class WorkAssignmentService {
         warnings: [],
       };
     }
-
-    // -- Step 1b (task 142, owner Q5 + R3): the work assignment's "Assigned *" people get their access NOW --
-    // The client create's L1 trigger (see syncAssignedAccess). Never throws, never fails the wizard.
-    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'workassignment', workAssignmentId);
 
     // -- Step 2: Upload files to SPE -----------------------------------------
     //
@@ -583,9 +591,10 @@ export class WorkAssignmentService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
+    // (Ontology task 046: a former `else if (uploadedFiles.length > 0 && !this._containerId)` branch was unreachable — its
+    // condition is covered by the `if` above, eslint no-dupe-else-if, which blocks a commit of this file — and lost its
+    // meaning when task 076 made the server pick the container. Removed; no behaviour changes.)
 
     return {
       status: warnings.length > 0 ? 'partial' : 'success',

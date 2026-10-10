@@ -10,6 +10,7 @@ import {
   BFF_CHILD_CREATE_TABLES,
   ChildRecordWriteError,
   createChildRecordViaBff,
+  createRecordViaBffWithWarnings,
   FILING_ONLY_REFILE_TABLES,
   isFilingKey,
   splitFilingPayload,
@@ -45,8 +46,24 @@ describe('BFF child-record writes (task 147 r1)', () => {
         'sprk_memo',
         'sprk_reportcard',
         'sprk_todo',
+        // Ontology task 046 (D-113): a work assignment is created through the same route (a root; the server plans it).
+        'sprk_workassignment',
       ].sort()
     );
+  });
+
+  it("returns the server's warnings with the id, and none when the body carries none (task 046)", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(json(201, { id: ID, warnings: ['securing it could not be finished yet', 7, ''] }))
+      .mockResolvedValueOnce(json(201, { id: ID }));
+
+    const withWarning = await createRecordViaBffWithWarnings(fetchFn, BFF, 'sprk_workassignment', { sprk_name: 'x' });
+    const without = await createRecordViaBffWithWarnings(fetchFn, BFF, 'sprk_workassignment', { sprk_name: 'x' });
+
+    expect(withWarning).toEqual({ id: ID, warnings: ['securing it could not be finished yet'] });
+    expect(without).toEqual({ id: ID, warnings: [] });
+    expect(fetchFn.mock.calls[0][0]).toBe('https://bff.example.com/api/v1/child-records/sprk_workassignment');
   });
 
   it('creates a child through POST /api/v1/child-records/{table} with the unchanged Web API payload', async () => {

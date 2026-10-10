@@ -45,6 +45,13 @@ namespace Sprk.Bff.Api.Api;
 /// <c>IOpenAiClient</c> / <c>IPlaybookService</c>); <see cref="OwnedChildWrite"/> and
 /// <see cref="DataverseWriteItemMapper"/> are the shared Dataverse write cores (Services/Dataverse; the chat tools use them too, D-66)
 /// and depend on nothing in Services/Ai.</para>
+/// <para><b>Work assignments (spaarke-ontology-platform-r1 task 046, D-21; uac-r2 D-113).</b> The one server create path for
+/// <c>sprk_workassignment</c>, a ROOT: the same G5 core with the secure-create plan (<see cref="SecureRootFilingGate"/>), so a
+/// work assignment filed under a secure matter or project is created INTO isolation and completed here
+/// (<see cref="CompleteRootCreateAsync"/>), then its "Assigned *" contacts get their access. Provisioning's own columns are
+/// refused (<see cref="RootServerOwnedColumns"/>). The Create Work Assignment wizard posts its payload here; a decision's
+/// Assign Work follow-on calls the same handler in-process (<c>DecisionRouteCores.CreateChildAsync</c>). A caller with no
+/// Dataverse identity is #1312's single 403 on this create route.</para>
 /// </remarks>
 public static class ChildRecordEndpoints
 {
@@ -60,6 +67,22 @@ public static class ChildRecordEndpoints
     {
         "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
         "sprk_budget", "sprk_kpiassessment", "sprk_billingevent",
+        // spaarke-ontology-platform-r1 task 046 (D-21; uac-r2's answer D-113 on #1355): the Create Work Assignment wizard's
+        // create and a decision's Assign Work follow-on — ONE server create path for the table, this one. A work assignment is
+        // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
+        // isolation, task 158 r1) and this route completes it (CompleteRootCreateAsync).
+        "sprk_workassignment",
+    };
+
+    /// <summary>
+    /// Ontology task 046: the columns of a work assignment that provisioning owns — its own SPE container and the secure
+    /// business unit it is isolated in (<c>SecureRecordRoot</c>). Neither is field-secured (live, spaarkedev1 2026-10-10),
+    /// so the G5 check would let an app-only create carry a caller's value: refused here. The secure flag and the access
+    /// record are field-secured and refused by the G5 check and the secure-create plan (task 175).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RootServerOwnedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_containerid", "sprk_securitybu",
     };
 
     /// <summary>
@@ -77,6 +100,12 @@ public static class ChildRecordEndpoints
 
     /// <summary>A table these routes do not write.</summary>
     internal const string UnsupportedTableCode = "child_record.table_unsupported";
+
+    /// <summary>
+    /// Ontology task 046 (NFR-10, D-29): a caller WhoAmI cannot name under their own token is #1312's single 403 — the same
+    /// code the events list and the decision plan answer.
+    /// </summary>
+    internal const string CallerUnresolvedReasonCode = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerUnresolvedReasonCode;
 
     /// <summary>The payload is not a Web API payload this route accepts.</summary>
     internal const string InvalidPayloadCode = "child_record.invalid_payload";
@@ -145,7 +174,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event)")
+            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event) or a work assignment")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
@@ -181,6 +210,8 @@ public static class ChildRecordEndpoints
         [FromServices] IFieldMappingDataverseService appOnly,
         [FromServices] CoreAncestorRestamper restamper,
         [FromServices] SecureChildShareSynchronizer shares,
+        [FromServices] SecureRootFilingGate rootFiling,
+        [FromServices] IServiceScopeFactory scopes,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -189,33 +220,70 @@ public static class ChildRecordEndpoints
         if (!CreateTables.Contains(entity))
             return Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode, $"'{table}' records are not created here.");
 
+        // Ontology task 046 (NFR-10, D-29): a caller who cannot be named in Dataverse is the single 403, before anything about
+        // the payload or the records it binds is asked. WhoAmI needs no privilege, so only "no Dataverse identity" fails it.
+        var who = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        if (who.Failure is { } whoFailure)
+        {
+            if (IsUnresolvedCaller(whoFailure))
+            {
+                logger.LogWarning("[CHILD-RECORD] create of {Entity} refused: the caller has no Dataverse identity ({ErrorCode})",
+                    entity, whoFailure.ErrorCode);
+                return Problem(StatusCodes.Status403Forbidden, CallerUnresolvedReasonCode,
+                    $"You could not be identified in Dataverse, so the {Noun(entity)} was not created.");
+            }
+
+            return CallerFailure(whoFailure, entity);
+        }
+
         var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct).ConfigureAwait(false);
         if (mapped.ValidationError is { } invalid)
             return Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, invalid);
         if (mapped.ClientFailure is { } mapFailure)
             return CallerFailure(mapFailure, entity);
 
+        var isRoot = SecureRootInheritance.Inherits(entity);
+        if (isRoot && mapped.Item!.Columns.FirstOrDefault(RootServerOwnedColumns.Contains) is { } rootColumn)
+        {
+            return Problem(StatusCodes.Status403Forbidden, DeniedCode,
+                $"Column '{rootColumn}' of a {Noun(entity)} is set by Spaarke when it is provisioned — omit it.");
+        }
+
+        // The secure-create plan is passed for every table; it decides only for a root (work assignment / project) and costs
+        // nothing for a child.
         var owned = await OwnedChildWrite.CreateAsync(
             user, ownership, appOnly, entity, mapped.Item!, serverSetLookupColumns: null,
-            CallerObjectId(httpContext), ct).ConfigureAwait(false);
+            CallerObjectId(httpContext), ct, rootFiling).ConfigureAwait(false);
 
         if (owned.CreatedId is not { } id)
         {
             logger.LogWarning(
                 "[CHILD-RECORD] create of {Entity} refused: denied={Denied} parentUnavailable={ParentUnavailable} " +
-                "owner={OwnerCode} secureFiling={SecureFiling} clientStatus={ClientStatus}",
+                "owner={OwnerCode} plan={PlanCode} secureFiling={SecureFiling} clientStatus={ClientStatus}",
                 entity, owned.Denied is not null, owned.ParentUnavailable, owned.OwnerRefusal?.RefusalCode,
-                owned.SecureFilingRefused is not null, owned.ClientFailure?.StatusCode);
+                owned.PlanRefusal?.RefusalCode, owned.SecureFilingRefused is not null, owned.ClientFailure?.StatusCode);
             return owned switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
+                { PlanRefusal: { } plan } => PlanRefused(plan, entity, httpContext.TraceIdentifier),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),
                 { SecureFilingRefused: { } secure } => ProblemDetailsHelper.RecordOwnerRefused(
                     RecordOwnerRefusal.NoOwnerSource, secure, Noun(entity), httpContext.TraceIdentifier),
                 _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not created."),
             };
+        }
+
+        var warnings = new List<string>();
+        if (isRoot)
+        {
+            var completion = await CompleteRootCreateAsync(
+                entity, id, owned, rootFiling, scopes, CallerObjectId(httpContext), httpContext.TraceIdentifier, logger, ct)
+                .ConfigureAwait(false);
+            if (completion.Removed is { } removed)
+                return removed;
+            warnings.AddRange(completion.Warnings);
         }
 
         // WP-1: the core-ancestor stamp is the server's. Whatever the client previewed, the row's own copy is derived from
@@ -234,12 +302,112 @@ public static class ChildRecordEndpoints
 
         // Task 149's mirror, inline (task 147 r1): a child created under a secure record is shared with the record's
         // sharees now, not at the next two-minute reconcile. The create stands either way; a mirror that did not finish is
-        // completed by SecureChildShareReconciliationJob (owner round 11 item 2).
-        await MirrorAsync(shares, entity, id, logger).ConfigureAwait(false);
+        // completed by SecureChildShareReconciliationJob (owner round 11 item 2). A root is not a secure child: an isolated
+        // root got its parents' sharees from CompleteRootCreateAsync.
+        if (SecureChildLineage.IsChild(entity))
+            await MirrorAsync(shares, entity, id, logger).ConfigureAwait(false);
 
-        logger.LogInformation("[CHILD-RECORD] created {Entity} {Id} (G5, team-owned)", entity, id);
-        return Results.Created($"/api/v1/child-records/{entity}/{id:D}", new { id });
+        logger.LogInformation("[CHILD-RECORD] created {Entity} {Id} (G5, team-owned, isolated={Isolated}, warnings={Warnings})",
+            entity, id, owned.Isolated is not null, warnings.Count);
+        return Results.Created($"/api/v1/child-records/{entity}/{id:D}",
+            warnings.Count == 0 ? new { id } : (object)new { id, warnings });
     }
+
+    /// <summary>What completing a root's create came to: a refusal when the row was removed again, otherwise warnings.</summary>
+    internal sealed record RootCreateCompletion(IResult? Removed, IReadOnlyList<string> Warnings);
+
+    /// <summary>
+    /// Ontology task 046: after the app-only create of a ROOT (a work assignment) — the steps the chat create tool runs after
+    /// the same core (<c>DataverseCreateRecordHandler</c>, task 158 r1 and task 142). (1) A row created INTO isolation is
+    /// completed now through provisioning's own re-entry steps: the creator's share (read back; a share that fails deletes
+    /// the row again — then the create is refused, nothing is left), its own container, its secure parents' sharees. The
+    /// person is the one the plan checked and the create stamped (<see cref="OwnedChildWrite.Outcome.IsolatedFor"/>),
+    /// never asked again. The messages are <c>RecordCreationService</c>'s for an isolated project. (2) The "Assigned *"
+    /// contacts get their grant or share now (I-12 L1; never throws — a fault is the job's).
+    /// </summary>
+    internal static async Task<RootCreateCompletion> CompleteRootCreateAsync(
+        string entity, Guid id, OwnedChildWrite.Outcome owned, SecureRootFilingGate rootFiling, IServiceScopeFactory scopes,
+        Guid? callerObjectId, string traceId, ILogger logger, CancellationToken ct)
+    {
+        var warnings = new List<string>();
+        var noun = Noun(entity);
+        if (owned.Isolated is not null)
+        {
+            var secured = await rootFiling.CompleteIsolatedCreateAsync(entity, id, owned.IsolatedFor!.Value, traceId)
+                .ConfigureAwait(false);
+
+            if (secured.RowRemoved)
+            {
+                logger.LogWarning("[CHILD-RECORD] isolated {Entity} {Id} removed again: its creator could not be shared ({Code})",
+                    entity, id, secured.ReasonCode);
+                return new RootCreateCompletion(Problem(StatusCodes.Status500InternalServerError,
+                    secured.ReasonCode ?? SecureRootInheritance.ReasonUnexpectedResult,
+                    $"The {noun} is filed under a secure record, so it is created secure and shared to you, and that share " +
+                    $"could not be made, so the new {noun} was removed again. Nothing was created. " +
+                    (secured.CompletesAutomatically
+                        ? "Try again in a few minutes."
+                        : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
+                          "administrator needs to review your access to the secure record it would be filed under.")),
+                    Array.Empty<string>());
+            }
+
+            if (secured.RowStranded)
+            {
+                warnings.Add(
+                    $"The {noun} was created as a secure record, but it could not be shared to you and could not be removed " +
+                    $"again ({secured.ReasonCode}); " +
+                    (secured.CompletesAutomatically
+                        ? "it is shared to you automatically once that step succeeds (it is retried every few minutes)."
+                        : "it will not be shared to you automatically — only an administrator can open it, and an administrator " +
+                          "needs to review and remove it."));
+            }
+            else if (!secured.IsComplete)
+            {
+                warnings.Add(
+                    $"The {noun} was created as a secure record shared to you, but securing it could not be finished yet " +
+                    $"({secured.ReasonCode}); it is completed automatically within a few minutes.");
+            }
+        }
+
+        await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                scopes, entity, id, writtenColumns: null, grantorOid: callerObjectId?.ToString("D"), logger, ct)
+            .ConfigureAwait(false);
+
+        return new RootCreateCompletion(null, warnings);
+    }
+
+    /// <summary>
+    /// Ontology task 046: the secure-create plan's refusal (task 158 r1), in this route's contract. No AppendTo on a secure
+    /// parent named only by the polymorphic pair is the uniform not-found (a typed lookup's is, too — the plan must not tell
+    /// a caller which record is secure); a caller walled off a secure parent is 403; a check that could not be made or a
+    /// named team that could not be resolved is 500; a server-only column is 403; anything else (an unreadable parent flag)
+    /// is the owner refusal, 409 — never "not secure". The split is <c>RecordCreationService.KindFor</c>'s.
+    /// </summary>
+    private static IResult PlanRefused(RecordOwnerResolution plan, string entity, string traceId) => plan.RefusalCode switch
+    {
+        DataverseUserClientErrorCodes.AccessDenied => ParentNotFound(entity),
+        Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
+            or AccessFollowsParent.SecureFlagReasonCode
+            or AccessInheritance.ServerOnlyReasonCode =>
+            Problem(StatusCodes.Status403Forbidden, plan.RefusalCode!,
+                $"The {Noun(entity)} was not created: {plan.Reason ?? "it may not be filed there"}."),
+        Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable
+            or RecordOwnerRefusal.SecureOwnerTeamUnresolved =>
+            Problem(StatusCodes.Status500InternalServerError, plan.RefusalCode!,
+                $"The {Noun(entity)} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}."),
+        _ => ProblemDetailsHelper.RecordOwnerRefused(plan, Noun(entity), traceId),
+    };
+
+    /// <summary>
+    /// A WhoAmI failure that means the caller has no Dataverse identity — Dataverse refusing them, no user context on the
+    /// request, or no On-Behalf-Of token for them — the codes <c>SignalCoreRecordAccess</c> reads as unresolved (D-29).
+    /// Throttling, a 5xx or a transport fault says nothing about who they are and stays their own error.
+    /// </summary>
+    private static bool IsUnresolvedCaller(DataverseUserResponse failure) =>
+        failure.ErrorCode is DataverseUserClientErrorCodes.AccessDenied
+            or DataverseUserClientErrorCodes.UserContextRequired
+            or DataverseUserClientErrorCodes.OboExchangeFailed
+            or DataverseUserClientErrorCodes.OboNotConfigured;
 
     /// <summary>PATCH /api/v1/child-records/{table}/{id}.</summary>
     internal static Task<IResult> RefileAsync(
@@ -440,6 +608,7 @@ public static class ChildRecordEndpoints
         "sprk_budget" => "budget",
         "sprk_kpiassessment" => "KPI assessment",
         "sprk_billingevent" => "billing event",
+        "sprk_workassignment" => "work assignment",
         _ => "record",
     };
 
