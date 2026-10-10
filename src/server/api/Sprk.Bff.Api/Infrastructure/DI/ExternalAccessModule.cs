@@ -88,9 +88,19 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
-        // Module entitlement resolver (task 072, owner Option B) — resolves the Tier-1 module-code set
-        // the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements): workforce
-        // from sprk_approlemodulemap (App-Role → module), CIAM blanket outside-counsel set. Typed
+        // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
+        // A7). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
+        // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
+        // below and by the "service-requests" descriptor. ValidateOnStart so an unparseable value fails startup
+        // rather than the first external module read; no custom validator (a bound bool has no invalid value).
+        services.AddOptions<ExternalAccessOptions>()
+            .BindConfiguration(ExternalAccessOptions.SectionName)
+            .ValidateOnStart();
+
+        // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A7) — resolves the
+        // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
+        // workforce → legal-front-door + policy-library + sprk_approlemodulemap extras (App-Role → module); CIAM →
+        // assigned-work (+ legal-front-door when ExternalAccess:PartnerServiceRequestsEnabled is on). Typed
         // HttpClient (app-only Dataverse read, broker-only NFR-02) with a 60s Redis map cache (ADR-009 —
         // caches the small GLOBAL config map as DATA, never an authorization decision). Concrete
         // registration (ADR-010) — single implementation, mirroring ExternalParticipationService.
@@ -446,30 +456,12 @@ public static class ExternalAccessModule
             },
         });
 
-        // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
-        // (sprk_requestedby == caller contact). Fail-closed for the CIAM partner plane: the accessible
-        // set is empty for a non-workforce caller, so a partner sees 0 rows even if the tab were somehow
-        // requested — server-side enforcement of "internal-only" that does not rely on the client hiding
-        // the tab (the external-spa also entitlement-gates the tab off the partner surface).
-        services.AddExternalModule(new ExternalModuleDescriptor
-        {
-            Name = "service-requests",
-            RecordEntity = "sprk_servicerequest",
-            RecordIdAttribute = "sprk_requestedby",
-            AccessibleRecordIds = p =>
-                p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
-                    ? new HashSet<Guid> { p.ContactId }
-                    : EmptyRecordIds,
-            // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
-            // sibling-view column here).
-            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
-            PrimaryNameAttribute = "sprk_name",
-            ReadableColumns = new HashSet<string>
-            {
-                "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
-                "sprk_requestedby",
-            },
-        });
+        // Service Requests (task 028; partner switch r3 task 011). Shows the caller's OWN submitted requests
+        // (sprk_requestedby == caller contact). The descriptor is built from ExternalAccessOptions at registry
+        // construction, so it is registered through a factory rather than AddExternalModule (which takes a built
+        // instance); the registry enumerates it like every other descriptor. See ServiceRequestsModule below.
+        services.AddSingleton(sp => ServiceRequestsModule(
+            sp.GetRequiredService<IOptions<ExternalAccessOptions>>().Value.PartnerServiceRequestsEnabled));
 
         // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
         // sprk_gridconfiguration record via BffDataverseClient.retrieveRecord BEFORE it can resolve
@@ -681,4 +673,35 @@ public static class ExternalAccessModule
         services.AddSingleton(descriptor);
         return services;
     }
+
+    /// <summary>
+    /// The Service Requests module (task 028; FR-06 partner switch, external-access-platform-r3 task 011). A caller sees
+    /// only its OWN requests: the single scope dimension is <c>sprk_requestedby</c> and the accessible set is exactly the
+    /// caller's contact id. Workforce callers with a contact always qualify. A CIAM partner contact qualifies ONLY when
+    /// <paramref name="partnerServiceRequestsEnabled"/> is on (<c>ExternalAccess:PartnerServiceRequestsEnabled</c>,
+    /// default off); with it off the CIAM set is empty, so a partner sees 0 rows even if the tab were requested —
+    /// server-side enforcement that does not rely on the client hiding the tab. A principal with no contact
+    /// (<see cref="Guid.Empty"/>) is always empty. Internal for the switch-off/switch-on tests.
+    /// </summary>
+    internal static ExternalModuleDescriptor ServiceRequestsModule(bool partnerServiceRequestsEnabled) => new()
+    {
+        Name = "service-requests",
+        RecordEntity = "sprk_servicerequest",
+        RecordIdAttribute = "sprk_requestedby",
+        AccessibleRecordIds = p =>
+            p.ContactId != Guid.Empty
+            && (p.Plane == CallerPrincipalPlane.Workforce
+                || (partnerServiceRequestsEnabled && p.Plane == CallerPrincipalPlane.CiamContact))
+                ? new HashSet<Guid> { p.ContactId }
+                : EmptyRecordIds,
+        // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
+        // sibling-view column here).
+        SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
+        PrimaryNameAttribute = "sprk_name",
+        ReadableColumns = new HashSet<string>
+        {
+            "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+            "sprk_requestedby",
+        },
+    };
 }
