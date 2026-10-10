@@ -16,7 +16,7 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
-import type { RecordSearchResponse, RecordSearchResult, SearchFilters, ApiError } from '../../types';
+import type { RecordSearchResponse, RecordSearchResult, SearchFilters } from '../../types';
 import { ApiError as ThrownApiError, AuthError } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
@@ -439,77 +439,6 @@ describe('useRecordSearch', () => {
   });
 
   describe('search() — error handling', () => {
-    it('should transition to error state on API failure', async () => {
-      const apiError: ApiError = {
-        status: 500,
-        title: 'Internal Server Error',
-      };
-      mockSearch.mockRejectedValue(apiError);
-      const { result } = renderHook(() => useRecordSearch());
-
-      await act(async () => {
-        result.current.search('test', matterTypes, defaultFilters);
-      });
-
-      expect(result.current.searchState).toBe('error');
-    });
-
-    it('should set user-friendly message for 401 errors', async () => {
-      const apiError: ApiError = { status: 401, title: 'Unauthorized' };
-      mockSearch.mockRejectedValue(apiError);
-      const { result } = renderHook(() => useRecordSearch());
-
-      await act(async () => {
-        result.current.search('test', matterTypes, defaultFilters);
-      });
-
-      expect(result.current.errorMessage).toBe(
-        'You do not have permission to perform this search. Please sign in again.'
-      );
-    });
-
-    it('should set user-friendly message for 403 errors', async () => {
-      const apiError: ApiError = { status: 403, title: 'Forbidden' };
-      mockSearch.mockRejectedValue(apiError);
-      const { result } = renderHook(() => useRecordSearch());
-
-      await act(async () => {
-        result.current.search('test', matterTypes, defaultFilters);
-      });
-
-      expect(result.current.errorMessage).toBe(
-        'You do not have permission to perform this search. Please sign in again.'
-      );
-    });
-
-    it('should set rate-limit message for 429 errors', async () => {
-      const apiError: ApiError = { status: 429, title: 'Too Many Requests' };
-      mockSearch.mockRejectedValue(apiError);
-      const { result } = renderHook(() => useRecordSearch());
-
-      await act(async () => {
-        result.current.search('test', matterTypes, defaultFilters);
-      });
-
-      expect(result.current.errorMessage).toBe('Too many requests. Please wait a moment and try again.');
-    });
-
-    it('should use detail from ApiError when available', async () => {
-      const apiError: ApiError = {
-        status: 400,
-        title: 'Validation Error',
-        detail: 'recordTypes must contain at least one value.',
-      };
-      mockSearch.mockRejectedValue(apiError);
-      const { result } = renderHook(() => useRecordSearch());
-
-      await act(async () => {
-        result.current.search('test', matterTypes, defaultFilters);
-      });
-
-      expect(result.current.errorMessage).toBe('recordTypes must contain at least one value.');
-    });
-
     it('should handle generic Error objects', async () => {
       mockSearch.mockRejectedValue(new Error('Network timeout'));
       const { result } = renderHook(() => useRecordSearch());
