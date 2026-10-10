@@ -57,4 +57,14 @@ public sealed record CommunicationClassificationResult
     /// <summary>Short human-readable rationale, written into <c>sprk_associationprovenance</c> for the W4 review surface.</summary>
     [JsonPropertyName("rationale")]
     public string? Rationale { get; init; }
+
+    /// <summary>
+    /// The editable <c>sprk_triagecategory</c> taxonomy name the classifier chose (spaarke-ontology-platform-r1
+    /// D-117(b)), constrained to the live enabled rows by the schema enum. A HINT for the TRIAGE-EMAIL Action,
+    /// which makes the triage decision; it is never written to <c>sprk_triagecategory</c> by itself. Additive:
+    /// <see cref="Category"/> keeps its free-form vocabulary for its existing consumers. Null when the taxonomy was
+    /// unavailable or turned off, and for signals persisted before this field existed.
+    /// </summary>
+    [JsonPropertyName("triageCategory")]
+    public string? TriageCategory { get; init; }
 }
