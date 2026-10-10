@@ -12,8 +12,8 @@ public static class DelegationRuleFilterExtensions
 {
     /// <summary>
     /// Enforces the delegation rule on EVERY route in the group: a caller may perform an
-    /// external-access mutation on a record only if they hold <see cref="AccessRights.Write"/> on
-    /// that record, evaluated as the caller.
+    /// access-management action on a record only if they hold <see cref="AccessRights.Write"/> AND
+    /// <see cref="AccessRights.Share"/> on that record, evaluated as the caller (owner round 89, task 179).
     /// </summary>
     /// <remarks>
     /// Applied at the GROUP rather than per route, deliberately. The group is a closed
@@ -48,17 +48,40 @@ public static class DelegationRuleFilterExtensions
 /// <paramref name="TableWritePrivilege"/> is set only for an ORGANIZATION-owned table: Dataverse refuses
 /// <c>RetrievePrincipalAccess</c> on such a table (400 0x80040800), and Write on any of its rows is the table's Write
 /// privilege, so the filter asks that privilege instead of the record's rights.
+/// <paramref name="WriteSuffices"/> is set only for <c>/assigned-access/sync</c> (task 179): that route applies the
+/// record's OWN Assigned-To columns, exactly as the app-only reconciliation job does within minutes, so it changes nothing
+/// a Write-holder could not cause by saving the record. Its default (<c>false</c>) is the full rule, so a target built
+/// without it, <c>default</c> included, asks for Share too.
 /// </summary>
-internal readonly record struct DelegationTarget(string EntitySet, Guid RecordId, string? TableWritePrivilege = null)
+internal readonly record struct DelegationTarget(
+    string EntitySet, Guid RecordId, string? TableWritePrivilege = null, bool WriteSuffices = false)
 {
     public override string ToString() => $"{EntitySet}({RecordId})";
 }
 
 /// <summary>
-/// FR-07 / finding A-6 — the delegation rule: <b>you may grant access to a record only if you hold
-/// Write on that record</b> (owner decision B-14), checked AS THE CALLER.
+/// FR-07 / finding A-6 — the delegation rule: <b>you may change who can access a record only if you hold
+/// Write on that record AND Dataverse's Share privilege on its table at a depth that reaches it</b>
+/// (owner decision B-14, tightened by owner round 89 / task 179), checked AS THE CALLER.
 /// </summary>
 /// <remarks>
+/// <para><b>Share since round 89 (task 179).</b> Write alone (task 118, D-1) let any role that can edit a record open
+/// Manage Access and grant. The owner made Dataverse's own Share privilege, set per security role, the second half of
+/// the test. It is read from the SAME <c>RetrievePrincipalAccess</c> answer the Write check already used: Dataverse
+/// reports <c>ShareAccess</c> on the record for a caller whose roles grant Share at a depth covering it (user, business
+/// unit, parent-child business unit or organization), so the rule costs no new round trip. Microsoft Learn documents
+/// that the privilege check runs before the record-access check and that a share cannot give rights the role does not
+/// allow (<i>How access to a record is determined</i>); whether <c>RetrievePrincipalAccess</c> applies that check to a
+/// SHARED ShareAccess is not documented, so the live gate in the task notes confirms it on dev. Either way the answer is
+/// Dataverse's own, never a client mirror. Two exceptions, each stated where its target is resolved:
+/// <list type="bullet">
+/// <item>an ORGANIZATION-owned table has no Share privilege at all (Dataverse creates none: on dev
+/// <c>sprk_noaccessentry</c> has Create, Read, Write, Delete, Append and AppendTo only), so <c>/no-access/enforce</c>
+/// keeps the table Write privilege. Asking for a privilege that cannot exist would refuse every role, the access
+/// administrator included;</item>
+/// <item><c>/assigned-access/sync</c> keeps Write (see <see cref="DelegationTarget"/>).</item>
+/// </list></para>
+///
 /// <para><b>What was wrong.</b> The <c>/api/v1/external-access</c> group carried a bare
 /// <c>RequireAuthorization()</c> and nothing else (<c>ExternalAccessEndpoints.cs:109-111</c>). Every
 /// write on it — mint a grant, revoke one, onboard a CIAM identity, cascade-close a project,
@@ -85,13 +108,21 @@ internal readonly record struct DelegationTarget(string EntitySet, Guid RecordId
 /// </remarks>
 internal sealed class DelegationRuleFilter : IEndpointFilter
 {
-    /// <summary>The right that confers the ability to delegate access (owner decision B-14).</summary>
-    private const AccessRights RequiredRight = AccessRights.Write;
-
     internal const string DenyNoCallerToken = "sdap.access.deny.delegation_no_caller_token";
     internal const string DenyTargetUnresolved = "sdap.access.deny.delegation_target_unresolved";
     internal const string DenyWriteRequired = "sdap.access.deny.delegation_write_required";
     internal const string DenyCheckFailed = "sdap.access.deny.delegation_check_failed";
+
+    /// <summary>
+    /// Task 179 (owner round 89): the caller holds Write on the record but Dataverse reports no Share on it: their
+    /// security roles do not grant the table's Share privilege at a depth that reaches the record.
+    /// </summary>
+    internal const string DenyShareRequired = "sdap.access.deny.delegation_share_required";
+
+    /// <summary>The one user-facing sentence for both record-rights refusals: it names the whole rule.</summary>
+    internal const string RightsRequiredDetail =
+        "To change who else can access this record you need Write access to it and the Share privilege on its table " +
+        "(set in your security role).";
 
     private readonly CallerRecordAccessProbe _probe;
     private readonly DataverseWebApiClient _dataverseClient;
@@ -122,12 +153,12 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
         if (callerToken is null)
         {
             _logger.LogWarning(
-                "[DELEGATION] DENIED on {Route}: no caller bearer token, so the Write check cannot be " +
+                "[DELEGATION] DENIED on {Route}: no caller bearer token, so the Write and Share check cannot be " +
                 "evaluated as the caller. Refusing to fall back to app-only (fail closed).", route);
 
             return Deny(httpContext, DenyNoCallerToken,
-                "This operation requires Write access on the target record, evaluated as the calling user. " +
-                "No caller credential was present on the request.");
+                "This operation requires Write access and the Share privilege on the target record, evaluated as the " +
+                "calling user. No caller credential was present on the request.");
         }
 
         DelegationTarget? target;
@@ -149,7 +180,7 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
             // 403 not 400/404 — see the class remarks on enumeration.
             _logger.LogWarning(
                 "[DELEGATION] DENIED on {Route}: no target record could be resolved from the request, so " +
-                "there is nothing to check Write against. Fail closed (ADR-003).", route);
+                "there is nothing to check Write and Share against. Fail closed (ADR-003).", route);
 
             return Deny(httpContext, DenyTargetUnresolved,
                 "The target record for this operation could not be resolved from the request.");
@@ -160,7 +191,8 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
             // Organization-owned table: the caller's table Write privilege IS Write on the row. The probe answers
             // false on any failure (fail closed). A caller without it gets the same 403 whether or not the row
             // exists, so the id stays unenumerable; a caller with it may already read the table, so the handler's
-            // own 404 for an absent row discloses nothing new.
+            // own 404 for an absent row discloses nothing new. No Share half here (task 179): an organization-owned
+            // table has no Share privilege to hold (see the class remarks).
             if (!await _probe.CallerHoldsPrivilegeAsync(callerToken, privilege, ct))
             {
                 _logger.LogWarning(
@@ -192,15 +224,26 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 "The caller's access to the target record could not be determined.");
         }
 
-        if ((rights & RequiredRight) != RequiredRight)
+        // ONE answer decides both halves (task 179): the rights RetrievePrincipalAccess returned for this record. Write is
+        // checked first, so a caller holding neither keeps the long-standing write_required code.
+        if ((rights & AccessRights.Write) != AccessRights.Write)
         {
             _logger.LogWarning(
                 "[DELEGATION] DENIED on {Route} for {Target}: caller holds {Rights}, which does not include " +
-                "{RequiredRight}. A caller may delegate access to a record only if they can write it (B-14).",
-                route, target.Value, rights, RequiredRight);
+                "Write. A caller may delegate access to a record only if they can write it (B-14).",
+                route, target.Value, rights);
 
-            return Deny(httpContext, DenyWriteRequired,
-                "You must have Write access to this record to change who else can access it.");
+            return Deny(httpContext, DenyWriteRequired, RightsRequiredDetail);
+        }
+
+        if (!target.Value.WriteSuffices && (rights & AccessRights.Share) != AccessRights.Share)
+        {
+            _logger.LogWarning(
+                "[DELEGATION] DENIED on {Route} for {Target}: caller holds {Rights}, which includes Write but not " +
+                "Share. Managing access needs the table's Share privilege at a depth that reaches the record (round 89).",
+                route, target.Value, rights);
+
+            return Deny(httpContext, DenyShareRequired, RightsRequiredDetail);
         }
 
         _logger.LogInformation(
@@ -272,15 +315,15 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
 
                 // ── /unsecure-project (task 061; three root types since task 144) ──
                 // Removing the secure designation is at least as consequential as applying it, so it
-                // is gated by the same Write-on-the-record check, evaluated as the caller, on the root the
-                // handler's own resolver names. Omitting this case would not have opened a hole — an
+                // is gated by the same delegation check (Write and Share on the record), evaluated as the caller, on
+                // the root the handler's own resolver names. Omitting this case would not have opened a hole — an
                 // unresolved target denies — but it would have made the route permanently 403.
                 case UnsecureProjectRequest unsecure:
                     return FromGrantRoot(UnsecureProjectEndpoint.ResolveRoot(unsecure));
 
                 // ── /set-record-share-expiry (task 098, FR-33) ────────────────
                 // Changing when every share on a record ends changes who can access it, so it takes the same
-                // Write-on-the-record check. The target comes from the SAME ResolveRoot the handler uses, and
+                // delegation check (Write and Share). The target comes from the SAME ResolveRoot the handler uses, and
                 // that request has no legacy projectId — so the record authorized here is the record whose
                 // shares are written. Without this case the route would deny every caller (default branch).
                 case SetRecordShareExpiryRequest shareExpiry:
@@ -288,9 +331,9 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
 
                 // ── /share-user, /unshare-user, /user-shares (task 063, FR-29) ─────
                 // Internal system-user shares change — or, for the list, disclose — who can reach a record, so they
-                // take the same Write-on-the-record check. Each target comes from the SAME explicit-root resolver its
-                // handler uses, and none of these requests has a legacy projectId, so the record authorized is the
-                // record whose shares are read or written. Without these cases every call would deny (default branch).
+                // take the same delegation check (Write and Share on the record). Each target comes from the SAME
+                // explicit-root resolver its handler uses, and none of these requests has a legacy projectId, so the
+                // record authorized is the record whose shares are read or written. Without these cases every call would deny (default branch).
                 case ShareRecordWithUserRequest shareUser:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(shareUser.RecordType, shareUser.RecordId));
 
@@ -324,13 +367,20 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                         : null;
 
                 // ── /assigned-access/sync, /assigned-access, /assigned-access/dismiss (task 142) ──
-                // The Assigned-To routes change (or, for the list, disclose) who can reach a record, so they take the same
-                // Write-on-the-record check as /share-user — the post-save script, a wizard and the "Update Access" ribbon
-                // command all call them as the user. Each target comes from the SAME explicit-root resolver its handler
+                // The Assigned-To routes change (or, for the list, disclose) who can reach a record, so they are gated on
+                // the record as /share-user is — the post-save script, a wizard and the "Update Access" ribbon command all
+                // call them as the user. Each target comes from the SAME explicit-root resolver its handler
                 // uses, so the record authorized is the record materialized. Without these cases the default branch below
                 // would deny every caller — the filter "attached" but never reaching the request type.
+                // Task 179: /sync alone keeps Write. It applies the record's own Assigned-To columns, exactly what the
+                // app-only AssignedAccessReconciliationJob applies within five minutes, and the post-save script and every
+                // create wizard call it on each save. Requiring Share there would protect nothing and would warn every
+                // Write-holder without Share on every save. /assigned-access (the Manage Access list) and /dismiss (a
+                // decision about who gets access) take the full rule.
                 case AssignedAccessSyncRequest sync:
-                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(sync.RecordType, sync.RecordId));
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(sync.RecordType, sync.RecordId)) is { } syncTarget
+                        ? syncTarget with { WriteSuffices = true }
+                        : null;
 
                 case AssignedAccessListQuery assignedList:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(assignedList.RecordType, assignedList.RecordId));
@@ -366,7 +416,7 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
     /// changes request cost" — was evaluated here and does not fire.</para>
     ///
     /// <para>The row read is app-only. That is not the authorization decision; it only answers "which
-    /// record is this request about". The decision itself is the caller-scoped Write check that
+    /// record is this request about". The decision itself is the caller-scoped Write and Share check that
     /// follows, on the root this read identifies.</para>
     /// </remarks>
     private static async Task<DelegationTarget?> FromAccessRecordAsync(

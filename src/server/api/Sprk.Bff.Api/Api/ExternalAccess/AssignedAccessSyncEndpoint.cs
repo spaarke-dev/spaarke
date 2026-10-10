@@ -63,7 +63,9 @@ public sealed record AssignedAccessDismissResponse(Guid EntryId, int Declined);
 /// </summary>
 /// <remarks>
 /// <para><b>Who may call them.</b> They join the <c>/api/v1/external-access</c> group, so <see cref="DelegationRuleFilter"/>
-/// gates each on Write on the RECORD, evaluated as the caller over OBO, before the handler runs — through a case for each
+/// gates each on the RECORD, evaluated as the caller over OBO, before the handler runs: Write and Share for the list and
+/// dismiss (Manage Access decisions, owner round 89), Write alone for the sync (task 179: it applies the record's own columns,
+/// as the app-only reconciliation job does) — through a case for each
 /// request type that resolves the record with <see cref="GrantExternalAccessEndpoint.ResolveExplicitRoot"/> (the
 /// <c>/share-user</c> case). An unknown record id and a record the caller cannot write are the filter's identical 403
 /// (enumeration-safe); the handler never distinguishes them. The ribbon's enable rule is a convenience only.</para>
@@ -117,7 +119,7 @@ public static class AssignedAccessSyncEndpoint
             .WithDescription(
                 "Returns the record's live Assigned-To ledger entries: suggestions waiting on a secure record (naming the " +
                 "source field), automatic grants and shares, declined and skipped entries, and the read-time access " +
-                "(standing or organization grant) a contact keeps if its grant is removed. Requires Write on the record.")
+                "(standing or organization grant) a contact keeps if its grant is removed. Requires Write and Share on the record.")
             .Produces<AssignedAccessListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -129,7 +131,7 @@ public static class AssignedAccessSyncEndpoint
             .WithSummary("Dismiss an Assigned-To suggestion on a secure record")
             .WithDescription(
                 "Marks a suggestion Declined: the Assigned-To rule will not suggest or grant it again while the assignment " +
-                "persists. A manual grant of the same person still succeeds. Requires Write on the record.")
+                "persists. A manual grant of the same person still succeeds. Requires Write and Share on the record.")
             .Produces<AssignedAccessDismissResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

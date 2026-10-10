@@ -559,7 +559,9 @@ function classifyAccessFailure(err: unknown): IAccessFailure | null {
   if (err.status === 403 && err.reasonCode?.startsWith('sdap.access.deny.delegation_')) {
     return {
       kind: 'delegation',
-      message: 'You need Write access on this record to change who else can access it.',
+      // Task 179 (owner round 89): the same sentence as the server's DelegationRuleFilter refusal (Write and Share).
+      message:
+        'To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).',
     };
   }
   return null;
@@ -775,7 +777,7 @@ interface IGrantBatchOutcome {
  * priority (a denial or a failure dominates a related-records-pending,
  * narrowed or notify-pending success). Denial and failure are reported separately because they call for
  * different next actions: a failure invites retry; a denial does not (retrying
- * without Write on the record fails the same way). */
+ * without Write and Share on the record fails the same way). */
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
   const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
@@ -787,7 +789,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   if (denied) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.${relatedSuffix}`,
+      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access to this record and the Share privilege on its table to grant more.${relatedSuffix}`,
     };
   }
   if (policyRefusals.length > 0) {
@@ -2088,7 +2090,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
                       <MessageBarTitle>
-                        {accessDenyState.kind === 'delegation' ? 'Write access required' : 'Sign-in expired'}
+                        {accessDenyState.kind === 'delegation' ? 'Write and Share required' : 'Sign-in expired'}
                       </MessageBarTitle>
                       {accessDenyState.message}
                     </MessageBarBody>

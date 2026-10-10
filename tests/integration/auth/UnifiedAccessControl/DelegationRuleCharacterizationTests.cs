@@ -13,8 +13,8 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
 /// The delegation rule — finding A-6 (spec FR-07), closed by task 008: <b>a caller may change who can
-/// access a record only if they hold Write on that record</b> (owner decision B-14), evaluated as the
-/// caller.
+/// access a record only if they hold Write on that record</b> (owner decision B-14) <b>and the Share
+/// privilege on its table</b> (owner round 89, task 179), evaluated as the caller.
 ///
 /// <para><b>What was wrong.</b> The whole <c>/api/v1/external-access</c> group sat behind a bare
 /// <c>RequireAuthorization()</c>. Minting a grant, revoking one, onboarding a CIAM identity,
@@ -40,8 +40,14 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     /// <summary>Dataverse's own wire spelling for a caller who can read but not write.</summary>
     private const string ReadOnly = "ReadAccess";
 
-    /// <summary>A caller who can write — and therefore may delegate (B-14).</summary>
-    private const string ReadWrite = "ReadAccess,WriteAccess";
+    /// <summary>A caller who can write AND share — and therefore may delegate (B-14 + round 89).</summary>
+    private const string Delegator = "ReadAccess,WriteAccess,ShareAccess";
+
+    /// <summary>
+    /// Task 179: Write on the record but no Share — what Dataverse reports for a role that grants Write and not the
+    /// table's Share privilege. Not enough to manage access since owner round 89.
+    /// </summary>
+    private const string WriteWithoutShare = "ReadAccess,WriteAccess";
 
     /// <summary>
     /// Everything EXCEPT Write. Guards against a check written as "any rights at all" or as a
@@ -100,7 +106,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     public async Task ExternalAccessMutation_ForCallerWithWriteOnTarget_ReachesHandlerValidation(string route)
     {
         // Arrange — Write on the target, but a body the handler itself rejects.
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         var (path, body) = RequestWithHandlerInvalidBody(route, Guid.NewGuid());
 
         // Act
@@ -124,7 +130,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     public async Task ExternalAccessMutation_ForCallerWithWriteOnTarget_IsNotDeniedByTheDelegationRule(string route)
     {
         // Arrange
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         var (path, body) = RequestFor(route, Guid.NewGuid());
 
         // Act
@@ -140,7 +146,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     /// Read is not licence to grant. A caller holding every Dataverse right EXCEPT Write is still
     /// refused — this fails if the rule is ever weakened to "has some access" or "rights string is
     /// non-empty", which would readmit exactly the read-only caller A-6 is about. Still true after task 139
-    /// (owner 2026-09-30): Collaborate now CARRIES Share, but Write — not Share — is what lets a person grant.
+    /// (owner 2026-09-30) and task 179 (round 89): Share is now required too, but it never substitutes for Write.
     /// </summary>
     [Fact]
     public async Task PostGrant_ForCallerHoldingEveryRightExceptWrite_IsStillDenied()
@@ -152,7 +158,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired,
-            "Write is the delegation right (B-14) — Share, Append and the rest do not substitute for it");
+            "Write is half the delegation rule (B-14) — Share, Append and the rest do not substitute for it");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -169,7 +175,8 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     /// <summary>
     /// Criterion 10, positive twin: a caller holding exactly the new Collaborate rights passes the gate on every grant
     /// route — each request reaches the handler's own validation (400), which only happens after authorization.
-    /// Write is what admits them; the Share right they now hold is not consulted (the pins above stay true).
+    /// Write and Share admit them (task 179): Dataverse reports the Share of a Collaborate share only for a caller whose
+    /// roles grant the table's Share privilege.
     /// </summary>
     [Theory]
     [InlineData("grant")]
@@ -217,13 +224,119 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         };
         var path = $"/api/v1/external-access/can-manage-access?recordType=matter&recordId={matterId}";
 
-        using var writer = _fixture.CreateClientWithRights(ReadWrite);
+        using var writer = _fixture.CreateClientWithRights(Delegator);
         using var reader = _fixture.CreateClientWithRights(ReadOnly);
 
         (await writer.GetAsync(path)).StatusCode.Should().Be(HttpStatusCode.OK);
         var denied = await reader.GetAsync(path);
         denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(denied)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 179 (owner round 89) — Write is not enough: the Share privilege is required too
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Acceptance criterion 1: a caller holding Write but no Share is refused on every route family that changes who can
+    /// reach a record (grant, revoke, share, expiry; the invite, close and provisioning routes share the same target
+    /// resolution), with the Share deny code, and the check is aimed at the record. The positive twins are the
+    /// <c>ForCallerWithWriteOnTarget</c> theories above, which differ only by <c>ShareAccess</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("grant")]
+    [InlineData("invite")]
+    [InlineData("invite-and-grant")]
+    [InlineData("revoke")]
+    [InlineData("close-project")]
+    [InlineData("provision-project")]
+    [InlineData("set-record-share-expiry")]
+    [InlineData("share-user")]
+    [InlineData("unshare-user")]
+    public async Task ExternalAccessMutation_ForCallerWithWriteButNoShare_DeniedForTheSharePrivilege(string route)
+    {
+        var projectId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(WriteWithoutShare);
+        var (path, body) = RequestFor(route, projectId);
+
+        var response = await client.PostAsJsonAsync(path, body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "round 89: managing access on {0} needs the Share privilege as well as Write", route);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+        _fixture.ProbedTargets.Should().Contain(("sprk_projects", projectId));
+    }
+
+    /// <summary>
+    /// Acceptance criterion 1, the internal-share family end to end: the share is refused and nothing is written to the
+    /// share table; the user-share list (which discloses who can reach the record) is refused too.
+    /// </summary>
+    [Fact]
+    public async Task InternalShareRoutes_ForCallerWithWriteButNoShare_AreDeniedAndWriteNothing()
+    {
+        var matterId = Guid.NewGuid();
+        var writesBefore = _fixture.RecordShares.Writes.Count;
+        using var client = _fixture.CreateClientWithRights(WriteWithoutShare);
+
+        var share = await client.PostAsJsonAsync(ShareUserPath, new
+        {
+            recordType = "matter",
+            recordId = matterId,
+            systemUserId = Guid.NewGuid(),
+            accessLevel = (int)ExternalAccessLevel.ViewOnly
+        });
+        var list = await client.GetAsync($"{UserSharesPath}?recordType=matter&recordId={matterId}");
+
+        share.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(share)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+        list.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(list)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+        _fixture.RecordShares.Writes.Should().HaveCount(writesBefore, "a denied request never reaches the handler");
+    }
+
+    /// <summary>
+    /// The Assigned-To routes split (task 179): the Manage Access list and Dismiss (a decision about who gets access) take
+    /// the full rule, while <c>/sync</c> keeps Write — it applies the record's own Assigned-To columns, which the app-only
+    /// reconciliation job applies anyway, and the post-save script calls it on every save. Each pair differs only in the
+    /// route, so a <c>WriteSuffices</c> leaking to the list or dismiss, or Share leaking onto sync, turns one of them red.
+    /// </summary>
+    [Fact]
+    public async Task AssignedAccessRoutes_ForCallerWithWriteButNoShare_SyncPassesTheGate_ListAndDismissAreDenied()
+    {
+        var matterId = Guid.NewGuid();
+        var syncedMatterId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(WriteWithoutShare);
+
+        var sync = await client.PostAsJsonAsync("/api/v1/external-access/assigned-access/sync",
+            new { recordType = "matter", recordId = syncedMatterId });
+        var list = await client.GetAsync($"/api/v1/external-access/assigned-access?recordType=matter&recordId={matterId}");
+        var dismiss = await client.PostAsJsonAsync("/api/v1/external-access/assigned-access/dismiss",
+            new { recordType = "matter", recordId = matterId, entryId = Guid.NewGuid() });
+
+        _fixture.ProbedTargets.Should().Contain(("sprk_matters", syncedMatterId),
+            "the filter ran on the sync request, so the absence of its deny code below is its verdict");
+        (await ReasonCodeOf(sync) ?? string.Empty).Should().NotStartWith("sdap.access.deny.delegation",
+            "sync keeps Write: it changes nothing a Write-holder could not cause by saving the record");
+        list.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(list)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+        dismiss.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(dismiss)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+    }
+
+    /// <summary>
+    /// <c>/sync</c> still requires Write: Share alone (every right except Write) is refused with the Write code. Without
+    /// this, an exception written as "skip the rights check" would pass the test above.
+    /// </summary>
+    [Fact]
+    public async Task AssignedAccessSync_ForCallerWithoutWrite_IsStillDenied()
+    {
+        using var client = _fixture.CreateClientWithRights(EveryRightExceptWrite);
+
+        var response = await client.PostAsJsonAsync("/api/v1/external-access/assigned-access/sync",
+            new { recordType = "matter", recordId = Guid.NewGuid() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +424,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task PostRevoke_ForAnAccessRecordThatDoesNotExist_IsDeniedNotDisclosed()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync("/api/v1/external-access/revoke", new
         {
@@ -331,7 +444,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task PostGrant_WithNoResolvableGrantRoot_IsDeniedByAuthorizationNotValidation()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync("/api/v1/external-access/grant", new
         {
@@ -393,7 +506,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [InlineData("/api/v1/external-access/invite-and-grant")]
     public async Task ExternalAccessMutation_WithAPastExpiryAndWriteOnTarget_PassesTheGateAndIsRefusedByTheHandler(string path)
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync(path, PastExpiryBody(Guid.NewGuid()));
 
@@ -461,7 +574,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task PostSetRecordShareExpiry_WithWriteOnTheRecord_PassesTheGateAndIsRefusedByTheHandler()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, new
         {
@@ -481,7 +594,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task PostSetRecordShareExpiry_WithOnlyALegacyProjectId_IsDeniedByAuthorization()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, new
         {
@@ -549,7 +662,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task GetUserShares_WithWriteOnTheRecord_IsAnsweredByTheHandler()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.GetAsync($"{UserSharesPath}?recordType=matter&recordId={Guid.NewGuid()}");
 
@@ -567,7 +680,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [InlineData(UnshareUserPath)]
     public async Task PostShareRoutes_WithOnlyALegacyProjectId_AreDeniedByAuthorization(string path)
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.PostAsJsonAsync(path, new
         {
@@ -583,7 +696,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Fact]
     public async Task GetUserShares_WithNoRecord_IsDeniedByAuthorization()
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.GetAsync(UserSharesPath);
 

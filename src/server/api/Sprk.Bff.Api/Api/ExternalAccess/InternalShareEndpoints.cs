@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// </summary>
 /// <remarks>
 /// <para><b>Route placement.</b> These routes join the existing <c>/api/v1/external-access</c> management group
-/// rather than a sibling group. That group already carries <see cref="DelegationRuleFilter"/> — Write on the record,
+/// rather than a sibling group. That group already carries <see cref="DelegationRuleFilter"/> — Write and Share on the record (Share since round 89),
 /// evaluated as the CALLER over OBO (owner decision B-14) — and the filter denies any request whose record it cannot
 /// identify, so the routes are gated from their first request. A sibling group would repeat that wiring, and a
 /// repeat is a second place to forget it. "External" in the path names the surface (Manage Access), not the
@@ -221,7 +221,7 @@ public static class InternalShareEndpoints
             .WithSummary("Share a record with an internal user at one access level")
             .WithDescription(
                 "Creates or changes a system user's POA share on the record so it carries exactly the level's rights " +
-                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write on the record.")
+                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write and Share on the record.")
             .Produces<ShareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -237,7 +237,7 @@ public static class InternalShareEndpoints
             .WithSummary("Remove an internal user's share on a record")
             .WithDescription(
                 "Revokes a system user's POA share on the record and confirms it is gone. A user with no share is " +
-                "answered removed = false without a write, so repeating the call is safe. Requires Write on the record.")
+                "answered removed = false without a write, so repeating the call is safe. Requires Write and Share on the record.")
             .Produces<UnshareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -252,7 +252,7 @@ public static class InternalShareEndpoints
             .WithSummary("List the internal users holding a share on a record")
             .WithDescription(
                 "Returns every system user with a direct POA share on the record, with the stored rights mask and the " +
-                "matching level (null when the rights match no level). Requires Write on the record.")
+                "matching level (null when the rights match no level). Requires Write and Share on the record.")
             .Produces<RecordUserSharesResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

@@ -875,7 +875,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * WHAT IT ASKS. `GET /api/v1/external-access/can-manage-access?recordType=&recordId=`. That route sits
    * on the `/api/v1/external-access` group behind `DelegationRuleFilter`, so its 200 is not a second
    * opinion about the rule — it is the OUTCOME of the rule, produced by the one implementation of it
-   * (`CallerRecordAccessProbe` over OBO: Write on THIS record, evaluated as the caller). A client gate
+   * (`CallerRecordAccessProbe` over OBO: Write AND Share on THIS record, evaluated as the caller; Share since owner
+   * round 89, task 179). A client gate
    * built on a re-implementation of a server rule drifts; this one cannot, because it never re-implements
    * anything.
    *

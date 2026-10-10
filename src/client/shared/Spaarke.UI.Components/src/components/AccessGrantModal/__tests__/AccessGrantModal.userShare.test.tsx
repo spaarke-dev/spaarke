@@ -511,9 +511,9 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
 
-      expect(await screen.findByText('Write access required')).toBeInTheDocument();
+      expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
       expect(
-        screen.getByText('You need Write access on this record to change who else can access it.')
+        screen.getByText('To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).')
       ).toBeInTheDocument();
 
       // Actions are now disabled — server truth, not a client-side pre-check.
@@ -546,7 +546,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
-      expect(await screen.findByText('Write access required')).toBeInTheDocument();
+      expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
       // Existing grant list still loads (host-context read, unaffected) — the
       // deny is scoped to the BFF share surface, not the whole modal.
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
@@ -570,7 +570,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
-      expect(await screen.findByText('Write access required')).toBeInTheDocument();
+      expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Revoke' })).toBeDisabled();
     });
 
@@ -821,7 +821,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
 
-      expect(await screen.findByText('Write access required')).toBeInTheDocument();
+      expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
 
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();

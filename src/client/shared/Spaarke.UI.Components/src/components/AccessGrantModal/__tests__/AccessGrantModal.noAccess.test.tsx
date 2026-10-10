@@ -342,7 +342,7 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
     expect(within(section).getByText('No Access List unavailable')).toBeInTheDocument();
     expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
     // Not the delegation banner, and the rest of the modal still loads.
-    expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
     expect(screen.getByText('Walter Walled')).toBeInTheDocument();
     expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('active');
   });
