@@ -42,8 +42,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly DataverseEnvCreationOptions _options;
+    private readonly DataverseEnvAdoptionOptions _options;
     private readonly ILogger<DataverseWebApiHealthProbe> _logger;
+    private readonly Func<string, TokenCredential> _credentialFor;
 
     /// <summary>Named HttpClient for outbound Dataverse Web API calls.</summary>
     public const string HttpClientName = "H5.DataverseWebApiHealthProbe";
@@ -51,15 +52,31 @@ public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
     /// <summary>Constructs the probe bound to the named HttpClient + per-request timeout.</summary>
     public DataverseWebApiHealthProbe(
         IHttpClientFactory httpClientFactory,
-        IOptions<DataverseEnvCreationOptions> options,
+        IOptions<DataverseEnvAdoptionOptions> options,
         ILogger<DataverseWebApiHealthProbe> logger)
+        : this(httpClientFactory, options, logger,
+            tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>
+    /// Test seam (T228): the credential per tenant, so the status-code mapping (incl. 401/403 → AccessDenied) is tested
+    /// over real HTTP without Entra. Production always uses DefaultAzureCredential with the explicit tenant (§4D I1).
+    /// </summary>
+    internal DataverseWebApiHealthProbe(
+        IHttpClientFactory httpClientFactory,
+        IOptions<DataverseEnvAdoptionOptions> options,
+        ILogger<DataverseWebApiHealthProbe> logger,
+        Func<string, TokenCredential> credentialFor)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFor);
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+        _credentialFor = credentialFor;
     }
 
     /// <inheritdoc/>
@@ -81,8 +98,7 @@ public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
         // token scope. §4D I1: tenantId flows through explicitly.
         var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
         var scope = $"{scopeBase}/.default";
-        var credential = new DefaultAzureCredential(
-            new DefaultAzureCredentialOptions { TenantId = tenantId });
+        var credential = _credentialFor(tenantId);
 
         AccessToken token;
         try
@@ -153,6 +169,13 @@ public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
                 }
                 return new DataverseHealthProbeResult.InProgress(
                     $"WhoAmI returned {(int)response.StatusCode} {response.StatusCode}. Body: {bodyPreview}");
+            }
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                // T228: the environment answers; the Worker identity is not an application user of it.
+                return new DataverseHealthProbeResult.AccessDenied(
+                    $"WhoAmI returned {(int)response.StatusCode} {response.StatusCode}");
             }
 
             return new DataverseHealthProbeResult.Unreachable(

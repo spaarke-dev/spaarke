@@ -28,7 +28,7 @@
  *   Original location becomes a re-export shim.
  */
 
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure } from '@spaarke/auth';
 import type { ChannelFetchResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -274,6 +274,17 @@ function buildRequest(channels: ChannelFetchResult[]): DailyBriefingSummaryReque
 // ---------------------------------------------------------------------------
 
 /**
+ * The HTTP status of a failure `authenticatedFetch` threw: `ApiError.status`, or 401 for an
+ * `AuthError` (what a 401 becomes once its retries are spent). `ApiError` carries `status`, not
+ * `statusCode` — reading `statusCode` sent every 503/429/401/403 to the generic error state.
+ */
+function httpStatusOf(err: unknown): number | undefined {
+  if (isApiError(err)) return err.status;
+  if (isAuthFailure(err)) return 401;
+  return undefined;
+}
+
+/**
  * Fetch an AI-generated briefing summary from the BFF endpoint.
  *
  * Returns a BriefingResult discriminated union:
@@ -302,7 +313,7 @@ export async function fetchAiBriefing(channels: ChannelFetchResult[]): Promise<B
     return { status: 'success', data };
   } catch (err: unknown) {
     // authenticatedFetch throws ApiError for non-2xx responses
-    const error = err as { statusCode?: number; message?: string };
+    const error = { statusCode: httpStatusOf(err), message: err instanceof Error ? err.message : undefined };
 
     // 503 = AI service unavailable (circuit breaker open)
     // 429 = rate limited
@@ -454,7 +465,7 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
     return { status: 'success', data };
   } catch (err: unknown) {
     // authenticatedFetch throws ApiError for non-2xx responses
-    const error = err as { statusCode?: number; message?: string };
+    const error = { statusCode: httpStatusOf(err), message: err instanceof Error ? err.message : undefined };
 
     // 503 = AI service unavailable (circuit breaker open)
     // 429 = rate limited
@@ -533,7 +544,7 @@ export async function fetchBriefingLive(windows?: BriefingWindowParams): Promise
     }
     return { status: 'success', data };
   } catch (err: unknown) {
-    const error = err as { statusCode?: number; message?: string };
+    const error = { statusCode: httpStatusOf(err), message: err instanceof Error ? err.message : undefined };
 
     if (error.statusCode === 503 || error.statusCode === 429) {
       return {
@@ -582,7 +593,7 @@ export async function emailBriefingToColleague(recipientEmail: string): Promise<
     });
     return { status: 'success' };
   } catch (err: unknown) {
-    const error = err as { statusCode?: number; message?: string };
+    const error = { statusCode: httpStatusOf(err), message: err instanceof Error ? err.message : undefined };
     if (error.statusCode === 400) {
       return {
         status: 'error',

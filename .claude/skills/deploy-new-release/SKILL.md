@@ -215,7 +215,7 @@ DEPLOYMENT PLAN
   Phases:
     Phase 1: Build all client components
     Phase 2: Deploy BFF API (per environment)
-    Phase 3: Import Dataverse solutions (per environment)
+    Phase 3: Import SpaarkeMaster — the CI-published package, typed per environment (none on dev)
     Phase 4: Deploy web resources (per environment)
     Phase 5: Validate deployment (per environment)
     Phase 6: Tag release v1.1.0
@@ -298,7 +298,7 @@ If `Deploy-Release.ps1` reports a failure:
 |-------------|-------------------|
 | Phase 1 (Build) | No rollback needed — nothing was deployed. Fix the build error and re-run. |
 | Phase 2 (BFF API) | If `-UseSlotDeploy` was used, the script auto-rolls back. Otherwise: `az webapp deployment slot swap` to swap back. |
-| Phase 3 (Solutions) | Re-import previous solution version from last git tag. See `docs/procedures/production-release.md` Rollback section. |
+| Phase 3 (Solutions) | SpaarkeMaster is never downgraded — roll forward (fix in dev, higher version, export, CI publish, re-run). A **refused** import (type switch / downgrade) changed nothing. See `docs/procedures/production-release.md` "Dataverse Solution Rollback". |
 | Phase 4 (Web Resources) | Re-deploy from previous tag: `git checkout <tag> -- src/solutions/*/dist/` then re-run web resource scripts. |
 | Phase 5 (Validation) | Validation failure means something is misconfigured. Check the validation output for specifics. Do NOT tag the release. |
 
@@ -377,7 +377,7 @@ Is this a full production release to existing environments?
 | `-SkipPhase` | string[] | none | `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation` |
 | `-SkipBuild` | switch | $false | Shortcut for `-SkipPhase Build` |
 | `-StopOnFailure` | bool | $true | Stop remaining environments on failure |
-| `-ClientSecret` | string | (none — uses Managed Identity by default per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md)) | Service principal secret for Dataverse — **only required when MI is not configured** for the target environment (local dev fallback). On Azure-hosted environments with `Graph__ManagedIdentity__Enabled=true`, the BFF MI is the Dataverse Application User. See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §6. |
+| `-ClientSecret` | string | (none) | **Ignored since T218f (2026-10-08)** — prints a warning. Phase 3 imports SpaarkeMaster with the operator's own az/pac sign-in; no service principal secret is used anywhere in the release. Kept so older invocations do not break. |
 | `-WhatIf` | switch | $false | Preview without executing |
 
 ---
@@ -417,7 +417,7 @@ Environments are defined in `config/environments.json`:
 | Pre-flight: BFF URL ends with `/api` | Misconfigured registry | Edit `config/environments.json` to remove `/api` suffix |
 | Build fails | Missing dependencies or compilation error | Check build output; run `npm ci` in affected directory |
 | BFF deploy fails | App Service not found or auth issue | Verify `appServiceName` in environments.json matches Azure |
-| Solution import fails | Missing dependency or auth | Check import order; verify service principal has permissions |
+| SpaarkeMaster import refused or fails | Type switch / downgrade refused; no published package; no access | The message names the refusal. "no solutions.SpaarkeMaster entry" = nothing published yet (run `publish-dataverse-solutions-manifest.yml`); a refusal = fix `solutionPackageType` or publish a higher version; access = Storage Blob Data Reader on `sprkcpartifacts{env}` and pac signed in to the target (your own identity — no service principal) |
 | Web resource deploy fails | Auth token expired or wrong URL | Re-run `az login`; verify `dataverseUrl` |
 | Validation fails | Environment variables misconfigured | Check 7 required Dataverse env vars (see production-release.md Phase 5) |
 | Tag creation fails | Tag already exists | Delete existing tag: `git tag -d <tag>; git push origin :refs/tags/<tag>` |

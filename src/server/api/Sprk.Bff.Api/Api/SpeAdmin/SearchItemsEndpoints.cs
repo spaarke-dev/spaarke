@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -42,10 +43,36 @@ public static class SearchItemsEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status501NotImplemented);
 
         return group;
     }
+
+    /// <summary>Stable error code of the 501 returned when the BFF identity cannot run an app-only content search.</summary>
+    public const string RequiresDelegatedErrorCode = "spe-search-requires-delegated";
+
+    /// <summary>
+    /// Task 261 (G31): this route searches with the BFF's APP identity (<c>POST /search/query</c>, entityTypes driveItem).
+    /// Microsoft documents SharePoint Embedded content search as delegated-only, and a stamp identity holds only
+    /// <c>FileStorageContainer.Selected</c> (no <c>Files.Read.All</c>: that role would let every stamp search ALL of
+    /// Spaarke's SharePoint). Graph therefore refuses with 401/403; the caller gets this defined 501 instead of a raw
+    /// Graph error or an empty list. Returns null for any other failure.
+    /// </summary>
+    internal static IResult? NotSupportedForIdentity(SpaarkeStorageException ex, string traceId)
+        => ex.StatusCode is 401 or 403
+            ? Results.Problem(
+                title: "Not Implemented",
+                detail: "Searching SharePoint Embedded content needs the signed-in user's rights (delegated), which this " +
+                        "route does not use; this BFF's own identity is not permitted to run the search. Use the container " +
+                        "item listing, or search from the user's own session.",
+                statusCode: StatusCodes.Status501NotImplemented,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = RequiresDelegatedErrorCode,
+                    ["traceId"] = traceId,
+                })
+            : null;
 
     // =========================================================================
     // Handler
@@ -184,6 +211,13 @@ public static class SearchItemsEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
+        catch (SpaarkeStorageException ex) when (NotSupportedForIdentity(ex, context.TraceIdentifier) is not null)
+        {
+            logger.LogWarning(
+                ex, "SearchItems: app-only search refused by Graph ({Status}); returning {Code}, configId={ConfigId}, TraceId={TraceId}",
+                ex.StatusCode, RequiresDelegatedErrorCode, configGuid, context.TraceIdentifier);
+            return NotSupportedForIdentity(ex, context.TraceIdentifier)!;
+        }
         catch (SpaarkeStorageException ex)
         {
             logger.LogError(
@@ -198,7 +232,7 @@ public static class SearchItemsEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "SearchItems: unexpected error for configId {ConfigId}, TraceId={TraceId}",

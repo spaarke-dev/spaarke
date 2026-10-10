@@ -16,6 +16,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import type { ICreateMatterFormState } from '../../components/CreateMatterWizard/formTypes';
 import type { ICreateProjectFormState } from '../../components/CreateProjectWizard/projectFormTypes';
 import type { ICreateWorkAssignmentFormState } from '../../components/CreateWorkAssignmentWizard/formTypes';
+import { apiErrorFor } from '../../__tests__/helpers/authenticatedFetchDouble';
 
 const BFF = 'https://bff.example.test';
 const SYNC_URL = `${BFF}${ASSIGNED_ACCESS_SYNC_PATH}`;
@@ -67,12 +68,13 @@ describe('syncAssignedAccess', () => {
     expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'matter', recordId: CREATED } }]);
   });
 
-  it('never rejects: a server refusal is returned with its reason code and logged', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 403,
-      json: async () => ({ reasonCode: 'sdap.access.delegation.write_required' }),
-    } as unknown as Response);
+  it('never rejects: a server refusal (authenticatedFetch throws ApiError 403) is returned with its status and reason code, and logged', async () => {
+    // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(
+        apiErrorFor(403, { title: 'Forbidden', reasonCode: 'sdap.access.delegation.write_required' })
+      );
 
     const result = await syncAssignedAccess(fetchMock, BFF, 'project', CREATED);
 

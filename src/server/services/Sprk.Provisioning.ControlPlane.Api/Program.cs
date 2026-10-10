@@ -37,6 +37,7 @@
 
 using Sprk.Provisioning.ControlPlane.Api;
 using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -108,6 +109,11 @@ builder.Services.AddCustomerRunGuard(builder.Configuration);
 // gracefully because the endpoint catches lookup faults + proceeds without
 // the strict check (REG-07 fault-tolerance branch).
 builder.Services.AddDataverseEnvironmentRegistry(builder.Configuration);
+
+// T255 (INCOMING-141): the tenants that are never a customer's workforce tenant (Spaarke's own + the CIAM
+// tenant[s]) — POST /api/runs refuses them in customerWorkforceTenantIds with the rule H4b and H13 apply
+// (CustomerWorkforceTenantsRule). Dual-hosted: the Worker registers the same options. ValidateOnStart.
+builder.Services.AddReservedTenants(builder.Configuration);
 
 builder.Services.AddRollbackModule();
 

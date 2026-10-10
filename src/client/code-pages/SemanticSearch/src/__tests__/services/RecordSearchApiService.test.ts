@@ -10,7 +10,8 @@
  * @see RecordSearchApiService.ts
  */
 
-import type { RecordSearchRequest, RecordSearchResponse, ApiError } from '../../types';
+import type { ApiError } from '@spaarke/auth';
+import type { RecordSearchRequest, RecordSearchResponse } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -22,13 +23,18 @@ jest.mock('../../services/authInit', () => ({
   getAuthHeader: mockGetAuthHeader,
 }));
 
-jest.mock('@spaarke/auth', () => ({
-  resolveRuntimeConfig: jest.fn().mockResolvedValue({
-    bffBaseUrl: 'https://test-bff-api.example.com',
-    bffOAuthScope: 'api://test-app-id/user_impersonation',
-    msalClientId: 'test-client-id',
-  }),
-}));
+jest.mock('@spaarke/auth', () => {
+  // authenticatedFetch throws ApiError on non-2xx, exactly like the real helper (see helpers/authenticatedFetchMock).
+  const { createAuthenticatedFetchMock } = jest.requireActual('../helpers/authenticatedFetchMock');
+  return {
+    ...createAuthenticatedFetchMock(() => mockGetAuthHeader()),
+    resolveRuntimeConfig: jest.fn().mockResolvedValue({
+      bffBaseUrl: 'https://test-bff-api.example.com',
+      bffOAuthScope: 'api://test-app-id/user_impersonation',
+      msalClientId: 'test-client-id',
+    }),
+  };
+});
 
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
@@ -389,20 +395,20 @@ describe('RecordSearchApiService', () => {
 
         expect(thrownError).toBeDefined();
         expect(thrownError!.status).toBe(400);
-        expect(thrownError!.title).toBe('Validation Error');
-        expect(thrownError!.detail).toBe('recordTypes must contain at least one value.');
-        expect(thrownError!.errors).toEqual({
+        expect(thrownError!.problemDetails?.title).toBe('Validation Error');
+        expect(thrownError!.problemDetails?.detail).toBe('recordTypes must contain at least one value.');
+        expect(thrownError!.problemDetails?.errors).toEqual({
           recordTypes: ['At least one record type is required.'],
         });
       });
 
-      it('should throw ApiError with status 401 on unauthorized', async () => {
+      it('should throw AuthError (auth_exhausted, no status) on 401 like authenticatedFetch', async () => {
         mockFetch.mockResolvedValue(createErrorResponse(401, { title: 'Unauthorized' }, 'Unauthorized'));
 
-        await expect(search(sampleRequest)).rejects.toMatchObject({
-          status: 401,
-          title: 'Unauthorized',
-        });
+        const thrown = await search(sampleRequest).catch((e: unknown) => e);
+
+        expect(thrown).toMatchObject({ name: 'AuthError', code: 'auth_exhausted' });
+        expect(thrown).not.toHaveProperty('status');
       });
 
       it('should throw ApiError with status 403 on forbidden', async () => {
@@ -419,8 +425,7 @@ describe('RecordSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 403,
-          title: 'Forbidden',
-          detail: 'Insufficient permissions for record search.',
+          problemDetails: { title: 'Forbidden', detail: 'Insufficient permissions for record search.' },
         });
       });
 
@@ -431,7 +436,7 @@ describe('RecordSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 429,
-          title: 'Too Many Requests',
+          problemDetails: { title: 'Too Many Requests' },
         });
       });
 
@@ -449,17 +454,17 @@ describe('RecordSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 500,
-          title: 'Internal Server Error',
-          detail: 'Database connection timeout.',
+          problemDetails: { title: 'Internal Server Error', detail: 'Database connection timeout.' },
         });
       });
 
-      it('should throw ApiError with statusText when body is not JSON', async () => {
+      it('should throw ApiError with an HTTP-n message (no problemDetails) when body is not JSON', async () => {
         mockFetch.mockResolvedValue(createNetworkErrorResponse(502, 'Bad Gateway'));
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 502,
-          title: 'Bad Gateway',
+          problemDetails: null,
+          message: 'HTTP 502',
         });
       });
 
@@ -468,7 +473,8 @@ describe('RecordSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 503,
-          title: 'Service Unavailable',
+          problemDetails: null,
+          message: 'HTTP 503',
         });
       });
     });

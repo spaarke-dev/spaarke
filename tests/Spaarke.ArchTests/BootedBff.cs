@@ -37,7 +37,8 @@ namespace Spaarke.ArchTests;
 ///   <item>Configuration is the fake values every BFF test host uses, plus what Production's fail-fast validators
 ///   demand (an HTTPS CORS origin, a customer id, the public config, the onboarding HMAC key, an Application Insights
 ///   connection string pointed at a closed loopback port). Every feature gate that decides whether a route group is
-///   MAPPED is ON (<c>DocumentIntelligence:Enabled</c>, <c>Analysis:Enabled</c>, <c>RecordMatchingEnabled</c>), so the
+///   MAPPED is ON (<c>DocumentIntelligence:Enabled</c>, <c>Analysis:Enabled</c>, <c>RecordMatchingEnabled</c>,
+///   <c>Onboarding:Enabled</c>, <c>DemoProvisioning:AccountDomain</c>), so the
 ///   endpoint table is the largest the configuration allows.</item>
 /// </list>
 ///
@@ -75,11 +76,11 @@ public sealed class BootedApp : IDisposable
     private readonly BffFactory _factory;
     private readonly HandshakeOnlyRedis? _redis;
 
-    internal BootedApp(string environment)
+    internal BootedApp(string environment, IReadOnlyDictionary<string, string?>? settingOverrides = null, bool validateOnBuild = false)
     {
         Environment = environment;
         _redis = environment == Environments.Development ? null : new HandshakeOnlyRedis();
-        _factory = new BffFactory(environment, _redis?.Endpoint);
+        _factory = new BffFactory(environment, _redis?.Endpoint, settingOverrides, validateOnBuild);
         if (_redis is not null)
         {
             // Master T242: a Production BFF reaches Redis ONLY by its managed identity over TLS (no connection string outside
@@ -138,17 +139,21 @@ public sealed class BootedApp : IDisposable
     {
         private readonly string _environment;
         private readonly string? _redisConnectionString;
+        private readonly IReadOnlyDictionary<string, string?>? _overrides;
+        private readonly bool _validateOnBuild;
 
-        public BffFactory(string environment, string? redisConnectionString)
+        public BffFactory(string environment, string? redisConnectionString, IReadOnlyDictionary<string, string?>? overrides, bool validateOnBuild)
         {
             _environment = environment;
             _redisConnectionString = redisConnectionString;
+            _overrides = overrides;
+            _validateOnBuild = validateOnBuild;
         }
 
         protected override IHost CreateHost(IHostBuilder builder)
         {
             // Host configuration: visible while Program.cs registers its modules (the same mechanism every BFF test host uses).
-            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(Settings(_redisConnectionString)));
+            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(WithOverrides(Settings(_redisConnectionString))));
             return base.CreateHost(builder);
         }
 
@@ -160,14 +165,35 @@ public sealed class BootedApp : IDisposable
             builder.UseDefaultServiceProvider(options =>
             {
                 options.ValidateScopes = false;
-                options.ValidateOnBuild = false;
+                options.ValidateOnBuild = _validateOnBuild;
             });
 
             builder.ConfigureTestServices(services =>
             {
                 services.UseStubTokenCredential();
+                if (_validateOnBuild)
+                {
+                    // The validating boot proves every registration is constructible, hosted services included. Their
+                    // IHostedService registrations are removed below (they would connect out), which would also drop
+                    // them from validation — so re-register each hosted type as a plain singleton: validated, never started.
+                    foreach (var hosted in services.Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType is not null).Select(d => d.ImplementationType!).Distinct().ToList())
+                    {
+                        services.TryAddSingleton(hosted);
+                    }
+                }
+
                 services.RemoveAll<IHostedService>();
             });
+        }
+
+        private Dictionary<string, string?> WithOverrides(Dictionary<string, string?> settings)
+        {
+            if (_overrides is not null)
+            {
+                foreach (var (key, value) in _overrides) settings[key] = value;
+            }
+
+            return settings;
         }
 
         private static Dictionary<string, string?> Settings(string? redisConnectionString)
@@ -177,6 +203,9 @@ public sealed class BootedApp : IDisposable
                 ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://archtests.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
                 ["ServiceBus:ConnectionString"] = "Endpoint=sb://archtests.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
                 ["ServiceBus:QueueName"] = "sdap-jobs",
+                // customer-provisioning-orchestration-r1 T246: outside Development/Testing the BFF refuses to start without a
+                // Content Safety endpoint (keyless, UAMI) — a placeholder is enough for a boot that makes no AI call.
+                ["AiSafety:ContentSafety:Endpoint"] = "https://archtests.cognitiveservices.azure.com/",
 
                 ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
 
@@ -216,6 +245,14 @@ public sealed class BootedApp : IDisposable
                 ["DocumentIntelligence:Enabled"] = "true",
                 ["Analysis:Enabled"] = "true",
                 ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
+                ["Onboarding:Enabled"] = "true",   // task 258: maps the H0.5 consent callback (off on every customer stamp)
+                // task 261: maps /api/registration/* — platform BFF only, off on every stamp. The gate needs the COMPLETE set.
+                ["DemoProvisioning:AccountDomain"] = "archtests.example",
+                ["DemoProvisioning:DemoUsersGroupId"] = "00000000-0000-0000-0000-0000000000d1",
+                ["DemoProvisioning:Licenses:PowerAppsPlan2TrialSkuId"] = "00000000-0000-0000-0000-0000000000d2",
+                ["DemoProvisioning:Licenses:FabricFreeSkuId"] = "00000000-0000-0000-0000-0000000000d3",
+                ["DemoProvisioning:Licenses:PowerAutomateFreeSkuId"] = "00000000-0000-0000-0000-0000000000d4",
+                ["DemoProvisioning:AdminNotificationEmails:0"] = "admin@archtests.example",
                 ["DocumentIntelligence:OpenAiEndpoint"] = "https://archtests.openai.azure.com/",
                 ["DocumentIntelligence:OpenAiKey"] = "archtests-key",
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",

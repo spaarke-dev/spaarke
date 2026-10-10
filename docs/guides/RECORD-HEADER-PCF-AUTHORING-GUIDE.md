@@ -232,8 +232,7 @@ Importing the wrong one is the easiest mistake in this area. See [`inline-lookup
 
 Per [`/pcf-deploy`](../../.claude/skills/pcf-deploy/SKILL.md): bump 5 locations → `npm run build:prod`
 → copy `out/controls/control/{bundle.js,ControlManifest.xml}` into
-`Solution/Controls/sprk_Spaarke.Records.RecordHeader/` → `pack.ps1` → `pac solution import
---publish-changes` → hard-refresh (Ctrl+Shift+R) and check the version footer.
+`Solution/Controls/sprk_Spaarke.Records.RecordHeader/` → `pack.ps1` → `scripts/Import-SolutionScoped.ps1` (import, then a scoped publish) → hard-refresh (Ctrl+Shift+R) and check the version footer.
 
 ---
 

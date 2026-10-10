@@ -1024,6 +1024,18 @@ public sealed class SecureChildShareSynchronizer
         var rootRow = (await _dataverse.RetrieveMultipleAsync(rootQuery, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         var isRestricted = rootRow?.GetAttributeValue<OptionSetValue>(AccessPermissionColumn)?.Value
                            == ExternalParticipationService.AccessPermissionRestricted;
+
+        // #1478 (task 175): Restricted THROUGH a parent counts (task 174's effective rule), so the mirror never shares a
+        // child of a Restricted matter with a person flagged external while the child's own column catches up. A chain that
+        // cannot be read throws (this method's contract: a fault is never "nobody is barred").
+        if (!isRestricted && rootRow is not null)
+        {
+            isRestricted = await Sprk.Bff.Api.Infrastructure.ExternalAccess.EffectiveRootFlags
+                .RestrictedThroughFilingAsync(_dataverse, _logger, rootTable, rootId, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"Whether {rootTable} {rootId:D} is Restricted through what it is filed under could not be read.");
+        }
+
         if (!isRestricted)
             return RestrictedPrincipalsAnswer.NotRestricted;
 

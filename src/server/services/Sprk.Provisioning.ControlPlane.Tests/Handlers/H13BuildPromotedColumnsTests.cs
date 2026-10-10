@@ -10,8 +10,9 @@
 // omit-when-absent contract for optional columns + the source of each column
 // (task 245a, G25): resource group / App Service / customer Key Vault from
 // InterStepState (H2a outputs); containerTypeId from the intake parameter only.
-// Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← the
-// fingerprint of H6's ImportedSolutions, sprk_clientcachebusttoken ← the run id.
+// Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← H6's
+// SpaarkeMaster record as "SpaarkeMaster {version} ({type})" (T218b),
+// sprk_clientcachebusttoken ← the run id. T257: sprk_bffappid ← H3's BffAppRegId (the Copilot agent render reads it).
 // -----------------------------------------------------------------------------
 
 using System;
@@ -70,6 +71,7 @@ public class H13BuildPromotedColumnsTests
         columns.Should().NotContainKey("sprk_solutionversion");
         columns.Should().NotContainKey("sprk_containertypeid");
         columns.Should().NotContainKey("sprk_azuresubscriptionid");
+        columns.Should().NotContainKey("sprk_bffappid");
     }
 
     [Fact]
@@ -92,8 +94,9 @@ public class H13BuildPromotedColumnsTests
                 ResourceGroupName = "rg-spaarke-cust1-prod",
                 AppServiceName = "sprk-cust1-prod-api",
                 KeyVaultName = "kv-sprk-cust1",
+                BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 BffBuildId = "2026.09.30-123",
-                ImportedSolutions = Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.7.0")),
+                ImportedSolutions = Solutions(("SpaarkeMaster", "1.4.2.0", true)),
             },
         };
 
@@ -111,26 +114,30 @@ public class H13BuildPromotedColumnsTests
         columns.Should().ContainKey("sprk_containertypeid")
             .WhoseValue.Should().Be("e2e-container-type-guid");
         columns.Should().ContainKey("sprk_clientcachebusttoken").WhoseValue.Should().Be("run-1");
+        columns.Should().ContainKey("sprk_bffappid").WhoseValue.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "T257: the Copilot agent package is rendered from the registry row, and the BFF app id lives only in the run");
+        columns.Should().HaveCount(10, "every promoted column is asserted above — a new one needs its registry column too");
     }
 
     [Fact]
-    public void SolutionSetVersion_IgnoresOrderAndSolutionIds_ChangesWithAnyVersion_FitsTheColumn()
+    public void SolutionVersion_IsThePackageVersionAndType_FitsTheColumn()
     {
-        var a = ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.7.0")));
-        var reordered = ImportedSolutionSet.ComputeVersion(Solutions(("LegalWorkspace", "1.0.7.0"), ("SpaarkeCore", "1.4.2.0")));
-        var bumped = ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.8.0")));
+        // Pinned vectors — the /provision-environment Step 6a registry fallback builds the same string in PowerShell.
+        ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "1.4.2.0", true)))
+            .Should().Be("SpaarkeMaster 1.4.2.0 (managed)");
+        ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", " 1.4.2.0 ", false)))
+            .Should().Be("SpaarkeMaster 1.4.2.0 (unmanaged)", "the package type is recorded on the registry row (owner D8)");
+        ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "65535.65535.65535.65535", false)))!
+            .Length.Should().BeLessThanOrEqualTo(50, "sprk_solutionversion is String(50)");
 
-        reordered.Should().Be(a, "the same solution set in another environment (other solution ids, other order)");
-        bumped.Should().NotBe(a);
-        a!.Length.Should().BeLessThanOrEqualTo(50, "sprk_solutionversion is String(50)");
         ImportedSolutionSet.ComputeVersion([]).Should().BeNull();
-        // Pinned vector — the /provision-environment Step 6a registry fallback recomputes this in PowerShell
-        // (ordinal sort, newline join, SHA-256, first 32 hex); both must agree on this exact value.
-        a.Should().Be("a7baceac031eba50d19c7e5344061969");
+        ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeCore", "1.1.0.0", false)))
+            .Should().BeNull("a record from before T218b (no SpaarkeMaster) writes nothing rather than a wrong value");
+        ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeMaster", "", true))).Should().BeNull();
     }
 
-    private static List<ImportedSolutionRecord> Solutions(params (string Name, string Version)[] solutions)
-        => solutions.Select((s, i) => new ImportedSolutionRecord(s.Name, s.Version, Guid.NewGuid().ToString("D"), i + 1)).ToList();
+    private static List<ImportedSolutionRecord> Solutions(params (string Name, string Version, bool IsManaged)[] solutions)
+        => solutions.Select(s => new ImportedSolutionRecord(s.Name, s.Version, Guid.NewGuid().ToString("D"), s.IsManaged)).ToList();
 
     [Fact]
     public void BuildPromotedColumnsForReady_ContainerTypeId_Reads_Intake_Parameter_Not_InterStepState()
@@ -245,7 +252,7 @@ public class H13BuildPromotedColumnsTests
                 AppServiceName = "app",
                 KeyVaultName = "kv",
                 BffBuildId = "2026.09.30-1",
-                ImportedSolutions = Solutions(("SpaarkeCore", "1.0.0.0")),
+                ImportedSolutions = Solutions(("SpaarkeMaster", "1.0.0.0", true)),
             },
         };
 

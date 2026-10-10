@@ -631,6 +631,7 @@ public class MembershipPagingCharacterizationTests
             NeverDeniesReader(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
@@ -668,7 +669,8 @@ public class MembershipPagingCharacterizationTests
     {
         public NoGrantsParticipationService()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                   filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

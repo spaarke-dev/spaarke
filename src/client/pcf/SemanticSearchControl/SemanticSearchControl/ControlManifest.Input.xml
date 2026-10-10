@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.81"
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.85"
            display-name-key="Semantic Search Control"
-           description-key="PCF control for semantic document search with natural language queries (v1.1.81)"
+           description-key="PCF control for semantic document search with natural language queries (v1.1.85)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
@@ -26,8 +26,9 @@
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction"
               of-type="SingleLine.Text" usage="input" required="false" />
 
-    <!-- Input: Application Insights instrumentation key for client telemetry (FR-TEL-01) -->
-    <property name="appInsightsKey" display-name-key="App Insights Key" description-key="Application Insights instrumentation key for browser telemetry (direct SDK, not BFF-proxied)"
+    <!-- DEPRECATED (v1.1.85, #1537) and IGNORED: telemetry now takes the environment's App Insights connection
+         string from the BFF at runtime. Kept optional so forms that still bind a value stay valid. -->
+    <property name="appInsightsKey" display-name-key="App Insights Key (ignored)" description-key="Deprecated and ignored: browser telemetry uses the App Insights connection string of this environment, from the BFF, at runtime. Leave empty."
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- Input: Search scope mode (all, entity, custom) -->

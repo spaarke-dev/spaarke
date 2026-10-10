@@ -233,7 +233,13 @@ public class SecureChildNewCommandAgreementTests
 
         var reaching = pacCalls.Where(c => !local.Any(p => c.StartsWith(p, StringComparison.Ordinal))).ToList();
 
-        Assert.Contains(reaching, c => c.StartsWith("pac solution import ", StringComparison.Ordinal));
-        Assert.All(reaching, c => Assert.Matches(@"(--environment|-env)\s+\$EnvironmentUrl(\s|$)", c));
+        // Task 130 (D-83): the import goes through the shared scoped-import function, which runs pac with
+        // --environment <EnvironmentUrl> itself and then publishes only the solution's components. The script must name
+        // -EnvironmentUrl on that call, and must not run a bare `pac ... import` of its own.
+        Assert.Empty(reaching);
+        var script = File.ReadAllText(DeployFile);
+        Assert.Matches(@"Invoke-ScopedSolutionImport\s+-EnvironmentUrl\s+\$EnvironmentUrl\s", script);
+        var module = File.ReadAllText(Path.Combine(Root, "scripts", "lib", "Publish-SolutionComponents.ps1"));
+        Assert.Matches(@"solution import --environment \$EnvironmentUrl\s", module);
     }
 }

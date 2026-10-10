@@ -1,0 +1,14 @@
+{
+  "buildId": "2026.10.08-1",
+  "sha": "0000000000000000000000000000000000000000",
+  "publishedAt": "2026-10-08T00:00:00Z",
+  "solutions": {
+    "SpaarkeMaster": {
+      "version": "1.2.0.0",
+      "managedBlobName": "dataverse-solution-SpaarkeMaster-1.2.0.0-managed.zip",
+      "unmanagedBlobName": "dataverse-solution-SpaarkeMaster-1.2.0.0-unmanaged.zip",
+      "managedSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "unmanagedSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

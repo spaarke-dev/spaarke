@@ -111,10 +111,14 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -370,6 +374,7 @@ public static class RunsEndpoints
         IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
         Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient registryClient,
+        IOptions<ReservedTenantsOptions> reservedTenants,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
@@ -378,6 +383,7 @@ public static class RunsEndpoints
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(runGuard);
         ArgumentNullException.ThrowIfNull(registryClient);
+        ArgumentNullException.ThrowIfNull(reservedTenants);
 
         if (request is null)
         {
@@ -474,6 +480,24 @@ public static class RunsEndpoints
                     $"allowed values are {string.Join(" | ", IntakeParameterCatalog.AllowedEnvironmentNames.Order(StringComparer.Ordinal))} " +
                     $"(customer.bicep environmentName). Omit it for '{IntakeParameterCatalog.DefaultEnvironmentName}'.");
             }
+
+            // T218b: managed by default, unmanaged only on explicit instruction (ADR-027 §3, owner D8).
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SolutionPackageType, out var packageTypeValue)
+                && !IntakeParameterCatalog.AllowedSolutionPackageTypes.Contains(packageTypeValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidSolutionPackageType,
+                    $"nonSecretParameters['{IntakeParameterCatalog.SolutionPackageType}'] is '{packageTypeValue}'; " +
+                    $"allowed values are {IntakeParameterCatalog.ManagedSolutionPackage} | {IntakeParameterCatalog.UnmanagedSolutionPackage} " +
+                    $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
+            }
+
+            // T256: H7b's dry-run flag — the handler's own rule (SecureRecordSetupIntake) and its own rejection code.
+            if (!SecureRecordSetupIntake.TryReadDryRun(request.NonSecretParameters, out _))
+            {
+                return BadRequest(httpContext, SecureRecordSetupRejectionCodes.DryRunInvalid,
+                    $"nonSecretParameters['{IntakeParameterCatalog.SecureRecordSetupDryRun}'] must be 'true' or 'false' " +
+                    "(exact, lower case). Omit it to apply the Secure Record setup (H7b).");
+            }
         }
 
         // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
@@ -495,45 +519,65 @@ public static class RunsEndpoints
                 "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
         }
 
-        // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
-        // 2026-08-27): for Model2 runs, subscriptionId MUST be present
-        // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
-        // intake.schema.json Model2 allOf). The handlers that read it are
-        // declared in Reconciler/HandlerRunInputs.cs; they hard-stop on absence —
-        // H1 typically fails within ~20s with MissingSubscriptionId, and the
-        // operator has no post-CreateRun add-nonSecret endpoint to recover.
-        //
-        // Model1 is EXEMPT — the skill's Step 4.0 auto-injects the Spaarke
-        // shared subscription id for Model 1 flows (documented in
-        // intake.schema.json subscriptionId description) so intake need not
-        // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
-        // in RunsEndpointsTests.
-        // Task 223 (D-12): the parse succeeds by construction — ValidateTenancyProfilePair above
-        // already TryParsed request.TenancyModel. Comparing against KnownTenancyModels.Model2
-        // via case-INsensitive string.Equals used to permit "model2dedicated" past this guard while
-        // downstream handlers require exact case; the enum comparison keeps H1's / H12c's strict
-        // literal contract in force at the HTTP edge.
-        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var m2Check)
-            && m2Check == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2
-            && (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
-                || string.IsNullOrWhiteSpace(subscriptionIdValue)))
+        // T228 (owner D4 / Q1; ADR-027 one subscription per customer): the operator creates the customer's subscription
+        // and Dataverse environment; L2 creates neither and defaults neither — for EVERY tenancy model. (ISH-02 used to
+        // exempt Model 1, and the skill then sent the operator's current `az account` subscription.) Intake is fixed here
+        // (there is no add-parameter endpoint), so each value is checked now, before the run guard, the registry lookup,
+        // any Cosmos write or enqueue.
+        if (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
+            || !Guid.TryParse(subscriptionIdValue, out var subscriptionGuid) || subscriptionGuid == Guid.Empty)
         {
             return BadRequest(httpContext, ControlPlaneErrorCodes.SubscriptionIdRequired,
-                "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2' " +
-                "(ADR-027 D4 subscription-per-customer). H1 onward target the customer's own subscription; " +
-                "a missing value would fail H1 subscription-readiness with MissingSubscriptionId within ~20s " +
-                "and leave the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
-                "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
+                "nonSecretParameters['subscriptionId'] is required and must be the GUID of the customer's own Azure " +
+                "subscription, created by the operator (ADR-027: one subscription per customer; T228). No subscription " +
+                "is defaulted or shared for any tenancy model.");
+        }
+
+        // G19: H0, H4b and H8 each need the container type and would otherwise fail one by one deep in the DAG.
+        if (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeIdValue)
+            || !Guid.TryParse(containerTypeIdValue, out var containerTypeGuid) || containerTypeGuid == Guid.Empty)
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ContainerTypeIdRequired,
+                "nonSecretParameters['containerTypeId'] is required and must be the GUID of the model's SPE container type " +
+                "(spaarke-constants.yaml) — H0, H4b and H8 read it (G19).");
+        }
+
+        // The environment the operator created — and only one named for THIS customer (DataverseEnvironmentUrlRule:
+        // all Model 1 environments share Spaarke's tenant, so a typo could otherwise name another customer's).
+        request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.DataverseEnvUrl, out var dataverseEnvUrlValue);
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule.TryNormalize(
+                dataverseEnvUrlValue,
+                request.CustomerId,
+                IntakeParameterCatalog.ResolveEnvironmentName(request.NonSecretParameters),
+                out var normalizedDataverseEnvUrl,
+                out var dataverseEnvUrlError))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.DataverseEnvUrlInvalid,
+                $"nonSecretParameters['{IntakeParameterCatalog.DataverseEnvUrl}'] {dataverseEnvUrlError}");
         }
 
         // Task 245c (G25): the operator-owned values H11, H14 and H4 need, checked with the handlers' own rules.
         // Intake is fixed here (there is no add-parameter endpoint), so a value a handler would refuse must be
         // refused now — before the run guard, the registry lookup, any Cosmos write or enqueue — not after
         // H0–H10 have built the stamp.
-        if (ValidateOperatorIntake(request.NonSecretParameters) is { } intakeViolation)
+        if (ValidateOperatorIntake(request.TenancyModel, request.NonSecretParameters) is { } intakeViolation)
         {
             return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
         }
+
+        // T255 (INCOMING-141): the customer's workforce tenant list — the rule H4b and H13 apply
+        // (CustomerWorkforceTenantsRule): required for every model, never a CIAM tenant, never Spaarke's own tenant
+        // (nor, on Model 1, the run's tenantId). The stamp BFF refuses to start on a CIAM tenant and would admit
+        // Spaarke's staff on Spaarke's — so both are refused here, before anything is written.
+        request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var workforceTenantsValue);
+        var workforceTenants = CustomerWorkforceTenantsRule.Validate(
+            request.TenancyModel, tenantIdValue, workforceTenantsValue, reservedTenants.Value.Parsed());
+        if (workforceTenants is CustomerWorkforceTenantsOutcome.Invalid workforceTenantsViolation)
+        {
+            return BadRequest(httpContext, workforceTenantsViolation.RejectionCode,
+                $"nonSecretParameters: {workforceTenantsViolation.Diagnostic}");
+        }
+        var canonicalWorkforceTenants = ((CustomerWorkforceTenantsOutcome.Valid)workforceTenants).CanonicalValue;
 
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
@@ -696,6 +740,21 @@ public static class RunsEndpoints
         {
             run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
         }
+
+        // T218b: store the package type actually used, so H6 and the registry row (H13) agree with the intake.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.SolutionPackageType))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = IntakeParameterCatalog.ManagedSolutionPackage;
+        }
+
+        // T228: canonical forms — the URL H5 compares against and hands on (https://{host}/), and the two GUIDs in the
+        // bare lowercase "D" form ARM resource ids and the ContainerTypeOwners lookup expect (ADR-044). Guid.TryParse
+        // above also accepts braced / N-format / padded spellings.
+        run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = normalizedDataverseEnvUrl;
+        run.Parameters.NonSecret[IntakeParameterCatalog.SubscriptionId] = subscriptionGuid.ToString("D");
+        run.Parameters.NonSecret[IntakeParameterCatalog.ContainerTypeId] = containerTypeGuid.ToString("D");
+        // T255: the canonical workforce tenant list (lowercase "D" GUIDs, JSON array) — what H4b writes and H13 expects.
+        run.Parameters.NonSecret[IntakeParameterCatalog.CustomerWorkforceTenantIds] = canonicalWorkforceTenants;
 
         try
         {
@@ -1214,14 +1273,19 @@ public static class RunsEndpoints
 
     /// <summary>
     /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
-    /// runs), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
-    /// H4's Communication default mailbox. <c>null</c> when the values are usable.
+    /// runs; T232: Model1 takes only B2BGuest, and B2BGuest needs the environment security group), H14a's Exchange scope group (its rule and code), and
+    /// H4's Communication default mailbox, (task 229) H0's cost tier + estimate (<see cref="CostEnvelopeIntake"/>), and
+    /// (T259) the customer's display name H10 names its business unit with (<see cref="CustomerBusinessUnitIntake"/>).
+    /// <c>null</c> when the values are usable.
     /// </summary>
-    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(IDictionary<string, string> parameters)
+    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(
+        string? tenancyModel, IDictionary<string, string> parameters)
     {
         parameters.TryGetValue(IntakeParameterCatalog.IdentityPreset, out var identityPreset);
         parameters.TryGetValue(IntakeParameterCatalog.UsersJson, out var usersJson);
-        if (UserProvisioningIntake.Validate(identityPreset, usersJson) is UserProvisioningIntakeOutcome.Invalid users)
+        parameters.TryGetValue(IntakeParameterCatalog.EnvironmentSecurityGroupId, out var securityGroupId);
+        if (UserProvisioningIntake.Validate(tenancyModel, identityPreset, usersJson, securityGroupId)
+            is UserProvisioningIntakeOutcome.Invalid users)
         {
             return (users.RejectionCode, $"nonSecretParameters: {users.Diagnostic}");
         }
@@ -1230,17 +1294,9 @@ public static class RunsEndpoints
         {
             return (H14aRejections.MissingPolicyScopeGroupId,
                 $"nonSecretParameters['{IntakeParameterCatalog.ExchangePolicyScopeGroupId}'] is required — the " +
-                "mail-enabled security group that scopes the Exchange ApplicationAccessPolicy H14a creates. The " +
+                "mail-enabled security group that scopes the Exchange RBAC for Applications role assignments H14a creates. The " +
                 "Exchange admin of the stamp's tenant (the customer's for Model 2, Spaarke's for Model 1) creates it " +
                 "before the run (prerequisite PRQ-C-08).");
-        }
-
-        if (IsBlank(parameters, IntakeParameterCatalog.CommunicationGraphResource)
-            && IsBlank(parameters, IntakeParameterCatalog.EmailGraphResource))
-        {
-            return (H14bRejections.NoWebhookTargetsConfigured,
-                $"nonSecretParameters needs at least one of '{IntakeParameterCatalog.CommunicationGraphResource}' " +
-                $"and '{IntakeParameterCatalog.EmailGraphResource}' — the Graph subscription resources H14b subscribes to.");
         }
 
         parameters.TryGetValue(IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailbox);
@@ -1250,6 +1306,30 @@ public static class RunsEndpoints
                 $"nonSecretParameters['{IntakeParameterCatalog.CommunicationDefaultMailbox}'] is required and must be " +
                 $"a mailbox address (local@domain.tld, at most {IntakeParameterCatalog.MaxMailboxAddressLength} characters) — " +
                 "H4 writes it to the customer vault as Communication-DefaultMailbox.");
+        }
+
+        // T259 (ISS-010): the customer's display name names its business unit (H10) — H10's own rule and codes.
+        if (CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName)
+            is CustomerBusinessUnitIntakeOutcome.Invalid customerName)
+        {
+            return (customerName.RejectionCode, $"nonSecretParameters: {customerName.Diagnostic}");
+        }
+
+        // T229: H0's cost-envelope inputs, same rules as H0 (CostEnvelopeIntake) — required for every model.
+        parameters.TryGetValue(CostEnvelopeIntake.TierParameterKey, out var tier);
+        parameters.TryGetValue(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey, out var estimatedMonthlyUsd);
+        if (CostEnvelopeIntake.Validate(tier, estimatedMonthlyUsd) is CostEnvelopeIntakeOutcome.Invalid cost)
+        {
+            return (cost.RejectionCode, $"nonSecretParameters: {cost.Diagnostic}");
+        }
+
+        // T254: the OPTIONAL OpenAI spend limit (G37) — absent = no limit; present must be a usable limit, because H4b
+        // writes it verbatim and the BFF would read a bad value as no limit.
+        parameters.TryGetValue(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, out var openAiLimit);
+        if (Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule.Validate(openAiLimit)
+            is Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitOutcome.Invalid limit)
+        {
+            return (limit.RejectionCode, $"nonSecretParameters: {limit.Diagnostic}");
         }
 
         return null;
@@ -1305,8 +1385,8 @@ public static class RunsEndpoints
 
         /// <summary>
         /// Intake values for the run — keys must be in <see cref="IntakeParameterCatalog"/> (closed set,
-        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c> is required;
-        /// <c>subscriptionId</c> is required for Model 2.
+        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c>, <c>subscriptionId</c>,
+        /// <c>containerTypeId</c> and <c>dataverseEnvUrl</c> are required for every model (T228).
         /// </summary>
         [JsonPropertyName("nonSecretParameters")]
         public IDictionary<string, string>? NonSecretParameters { get; init; }

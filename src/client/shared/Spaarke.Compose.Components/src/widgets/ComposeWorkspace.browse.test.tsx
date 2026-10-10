@@ -34,6 +34,9 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 // ── Fetch boundary (ADR-028) — must NOT be called for a Browse transient mount ──
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // The REAL error class (pure, no MSAL): ComposeWorkspace branches on `err instanceof ApiError`, so the
+  // thrown failures in this suite must be instances of the class the component imports.
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -116,6 +119,7 @@ jest.mock('./ComposeEditor', () => {
 // Import AFTER mocks are registered.
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
+import { httpError } from '../__tests__/helpers/httpError';
 
 function renderWorkspace(
   props: Partial<React.ComponentProps<typeof ComposeWorkspace>> = {},
@@ -142,12 +146,7 @@ beforeEach(() => {
   // that session (harmless — nothing is in the ledger yet). Default the fetch boundary to a
   // 404 so the probe early-returns without throwing. Persistence routes (create-on-save /
   // save / upload / persist) must STILL never be called on a transient mount — asserted below.
-  authenticatedFetchMock.mockResolvedValue({
-    ok: false,
-    status: 404,
-    json: async () => [],
-    text: async () => '',
-  });
+  authenticatedFetchMock.mockRejectedValue(httpError(404));
   editorDocxBytes.current = undefined;
   editorSessionId.current = undefined;
   editorCanSave.current = undefined;
@@ -266,7 +265,7 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
         };
       }
       // Any other call (e.g. the FR-04 compose-outputs durability probe) — benign 404 default.
-      return { ok: false, status: 404, json: async () => [], text: async () => '' };
+      throw httpError(404);
     });
 
     renderWorkspace();
@@ -301,7 +300,7 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
       if (String(url).includes('/api/compose/project')) {
         throw new Error('network unreachable');
       }
-      return { ok: false, status: 404, json: async () => [], text: async () => '' };
+      throw httpError(404);
     });
 
     renderWorkspace();

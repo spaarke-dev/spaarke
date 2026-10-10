@@ -1,21 +1,14 @@
 // -----------------------------------------------------------------------------
 // IDataverseHealthProbe.cs
 //
-// L2 abstraction over the Dataverse Web API health check that H5 performs
-// after env creation reports success. Production impl
+// L2 abstraction over the Dataverse Web API check H5 performs on the environment the operator created (T228: H5
+// adopts, never creates). Production impl
 // (<see cref="DataverseWebApiHealthProbe"/>) issues an HTTP GET
 // <c>{envUrl}/api/data/v9.2/WhoAmI</c> with a DefaultAzureCredential bearer
 // token; unit tests inject stubs to avoid HTTP + auth.
 //
-// WHY A SEPARATE PROBE (not folded into IDataverseEnvCreator):
-//   - The pac CLI's own success signal is that the env row exists in the
-//     tenant — it does NOT verify Web API reachability from the L2 App
-//     Service's network posture. Post-create env may still be replicating +
-//     not yet WhoAmI-queryable.
-//   - Splitting the seams matches the H2a pattern (IBicepDeployRunner ≠
-//     IArmKeyVaultRefProbe). Each seam owns exactly one concern.
-//   - Failure classification is different: env-creation timeout vs
-//     health-check failure are distinct operator diagnoses.
+// WHAT IT PROVES: the environment answers its Web API AND the L2 Worker identity may use it — 401/403 is its own
+// result (AccessDenied), because the fix is an operator step (add the Worker as an application user), not a wait.
 //
 // SEAM JUSTIFICATION (ADR-010): ≥2 impls (production HTTP + test stubs).
 // -----------------------------------------------------------------------------
@@ -23,10 +16,7 @@
 namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 
 /// <summary>
-/// Verifies Web API reachability of a freshly-created Dataverse environment.
-/// H5 calls this AFTER <see cref="IDataverseEnvCreator"/> reports success to
-/// gate the run's advance on the env actually being usable (POML acceptance
-/// criterion #3 — GET /WhoAmI returns 200).
+/// Verifies the Dataverse environment H5 adopts answers <c>GET /WhoAmI</c> for the L2 Worker identity.
 /// </summary>
 public interface IDataverseHealthProbe
 {
@@ -38,7 +28,7 @@ public interface IDataverseHealthProbe
     /// reports the env is still replicating (retryable). Domain failures do
     /// NOT throw; infrastructure faults (e.g. auth chain broken) MAY throw.
     /// </summary>
-    /// <param name="environmentUrl">Base URL from <see cref="DataverseEnvCreationOutcome.Success.EnvironmentUrl"/>.</param>
+    /// <param name="environmentUrl">The environment's canonical URL (intake <c>dataverseEnvUrl</c>).</param>
     /// <param name="tenantId">Entra tenant id for token acquisition scope (§4D I1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<DataverseHealthProbeResult> CheckHealthAsync(
@@ -49,7 +39,7 @@ public interface IDataverseHealthProbe
 
 /// <summary>
 /// Discriminated result of <see cref="IDataverseHealthProbe.CheckHealthAsync"/>.
-/// Exhaustive: <see cref="Reachable"/> | <see cref="InProgress"/> |
+/// Exhaustive: <see cref="Reachable"/> | <see cref="InProgress"/> | <see cref="AccessDenied"/> |
 /// <see cref="Unreachable"/>.
 /// </summary>
 public abstract record DataverseHealthProbeResult
@@ -67,9 +57,14 @@ public abstract record DataverseHealthProbeResult
     public sealed record InProgress(string Diagnostic) : DataverseHealthProbeResult;
 
     /// <summary>
-    /// WhoAmI returned a terminal failure (401/403/500-class or connection
-    /// error). Handler maps to
-    /// <see cref="DataverseEnvCreationRejectionCodes.EnvHealthCheckFailed"/>.
+    /// WhoAmI returned 401 or 403: the environment answers, but the calling identity is not an application user of it.
+    /// Handler maps to <see cref="DataverseEnvAdoptionRejectionCodes.WorkerNotAppUser"/> (T228).
+    /// </summary>
+    public sealed record AccessDenied(string Diagnostic) : DataverseHealthProbeResult;
+
+    /// <summary>
+    /// WhoAmI returned another terminal failure (500-class or connection error). Handler maps to
+    /// <see cref="DataverseEnvAdoptionRejectionCodes.EnvHealthCheckFailed"/>.
     /// </summary>
     public sealed record Unreachable(string Diagnostic) : DataverseHealthProbeResult;
 }

@@ -24,6 +24,7 @@
 import { bffChildWriteFetch } from '../../__mocks__/bffChildWriteFake';
 import { EntityCreationService, type ISpeFileMetadata, type AuthenticatedFetchFn } from '../EntityCreationService';
 import type { IWebApiWithCreate } from '../../types/WebApiLike';
+import { throwingAuthenticatedFetch } from '../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -240,7 +241,8 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
     const webApi = makeWebApi(['doc-guid-1']);
     const deleteRecord = jest.fn().mockResolvedValue(undefined);
     (webApi as unknown as { deleteRecord: jest.Mock }).deleteRecord = deleteRecord;
-    const authFetch = jest.fn().mockImplementation(async (url: string) =>
+    // authenticatedFetch THROWS ApiError for a non-2xx: the double turns the refused attach into that failure.
+    const authFetch = throwingAuthenticatedFetch(async (url: string) =>
       String(url).endsWith('/file')
         ? ({
             ok: false,

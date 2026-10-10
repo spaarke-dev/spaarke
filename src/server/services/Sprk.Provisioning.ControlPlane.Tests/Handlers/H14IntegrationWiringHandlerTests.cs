@@ -1,40 +1,27 @@
 // -----------------------------------------------------------------------------
 // H14IntegrationWiringHandlerTests.cs
 //
-// Unit tests over H14IntegrationWiringHandler — the H14 parent that dispatches
-// H14a/H14b/H14c in parallel via Task.WhenAll (task 073 — wave C4 Batch 3F).
+// Unit tests over H14IntegrationWiringHandler -- the H14 parent that dispatches
+// the single in-process H14a Exchange sub-step (task 073 -- wave C4 Batch 3F;
+// H14b/H14c and their tests removed under ISS-019 / #1560).
 //
-// ADR-038 CATEGORY: Path #1 — pure C# unit test. Constructs REAL sub-handler
-// instances (H14aExchangePolicySubHandler / H14bGraphWebhookSubHandler /
-// H14cDataverseWebhookSubHandler are sealed concrete types, not fakeable via
-// an interface) wired with FAKE seam collaborators — this genuinely exercises
-// the parent's dispatch + aggregation + partial-completion-skip + idempotency
-// orchestration through the real sub-handler code, which is the right level
-// of test for THIS handler's behavior (the per-substep business logic is
-// covered by the sibling H14a/b/c*Tests.cs files).
+// ADR-038 CATEGORY: Path #1 -- pure C# unit test. Constructs the REAL H14a
+// sub-handler (a sealed concrete type) wired with a FAKE applier seam -- this
+// exercises the parent's dispatch + idempotency + failure classification
+// through the real sub-handler code.
 //
-// COVERAGE (task POML acceptance criteria):
-//   AC-1  Happy path — all 3 sub-steps dispatched in parallel + succeed;
-//         CompletedPhases gains 4 entries (H14a, H14b, H14c, H14); Success.
-//   AC-2  Missing tenantId — Resumable, BEFORE any sub-handler seam invoked.
-//   AC-3  Missing InterStepState.miObjectId (H14a registers the stamp identity in Exchange by it) — Resumable, seams never invoked.
-//   AC-3b Missing InterStepState.keyVaultName (H2a output, task 245a) —
-//         Resumable + MissingKeyVaultName, seams never invoked.
-//   AC-3c A run-parameter keyVaultName (platform vault) does NOT satisfy it.
-//   AC-3d H14b/H14c signing-key reads target the InterStepState customer vault.
-//   AC-4  Partial failure — H14a drifts (QuarantineRequired) while H14b/H14c
-//         succeed; overall Failure is QuarantineRequired (worst); H14b + H14c
-//         CompletedPhase entries ARE persisted (partial success), H14a + the
-//         H14 parent entry are NOT.
-//   AC-5  Full idempotency — CompletedPhases already has "H14" — Success
+// COVERAGE:
+//   AC-1  Happy path -- H14a succeeds; CompletedPhases gains H14a + H14; Success.
+//   AC-2  Missing tenantId -- Resumable, BEFORE the applier is invoked.
+//   AC-3  Missing InterStepState.miObjectId -- Resumable, applier never invoked.
+//   AC-3e H14 no longer requires BffApiUrl / keyVaultName / dataverseEnvUrl /
+//         subscriptionId / Graph resources (only H14b/H14c used them).
+//   AC-4  H14a drifts -- QuarantineRequired; neither H14a nor H14 is recorded.
+//   AC-5  Full idempotency -- CompletedPhases already has "H14" -- Success
 //         no-op; repository ReplaceRunAsync never called.
-//   AC-6  Partial-resume idempotency — CompletedPhases already has H14a's
-//         expected key recorded — H14a's applier is NEVER invoked on
-//         re-dispatch (parent-level skip), H14b/H14c seams ARE invoked.
-//   AC-7  H14b no-targets-configured — overall failure includes H14b's
-//         diagnostic; H14a + H14c still succeed + persist.
-//   AC-8  Handler-id mismatch — throws.
-//   AC-9  ExpectedSubStepCount invariant is exactly 3 (no S2S 4th sub-step).
+//   AC-6  Resume -- H14a's expected key already recorded -- applier NEVER invoked.
+//   AC-8  Handler-id mismatch -- throws.
+//   AC-9  ExpectedSubStepCount invariant is exactly 1 (no S2S sub-step).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -55,42 +42,27 @@ public sealed class H14IntegrationWiringHandlerTests
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-h14-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
-    private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiObjectId = "99999999-8888-7777-6666-555555555555";
     private const string UamiClientId = "11111111-2222-3333-4444-555555555555";
-    private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com";
-    private const string KeyVaultName = "sprk-acme-prod-kv";
-    private const string SubscriptionId = "22222222-3333-4444-5555-666666666666";
     private const string PolicyScopeGroupId = "77777777-8888-9999-0000-111111111111";
-    private const string NotificationBaseUrl = "https://sprk-acme-prod.azurewebsites.net";
-    private const string CommunicationResource = "communications/callRecords";
-    private const string EmailResource = "users/mailbox-guid/messages";
-    private const string SigningKey = "super-secret-hmac-key";
 
     // ---------- AC-1 happy path ----------
 
     [Fact]
-    public async Task AC1_HappyPath_AllThreeSucceed_PersistsFourCompletedPhases()
+    public async Task AC1_HappyPath_H14aSucceeds_PersistsH14aAndH14()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-1");
         var applier = FakeApplier.Applied(2);
-        var reader = FakeReader.Success(SigningKey);
-        var graphCreator = FakeGraphCreator.Success();
-        var dvRegistrar = FakeDvRegistrar.Created();
-        var handler = BuildHandler(repo, applier, reader, graphCreator, dvRegistrar);
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
         repo.LastWrittenRun.Should().NotBeNull();
-        repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).Should().BeEquivalentTo(new[] { "H14a", "H14b", "H14c", "H14" });
+        repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).Should().BeEquivalentTo(new[] { "H14a", "H14" });
         repo.LastWrittenRun.Status.Should().Be(RunStatus.Running);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H14Gates.ExchangePolicyApplied);
-        repo.LastWrittenRun.GateStates.Should().ContainKey(H14Gates.GraphWebhooksWired);
-        repo.LastWrittenRun.GateStates.Should().ContainKey(H14Gates.DataverseWebhookWired);
         applier.CallCount.Should().Be(1);
-        graphCreator.CallCount.Should().Be(2, "Communication + Email targets both configured");
-        dvRegistrar.CallCount.Should().Be(1);
     }
 
     // ---------- AC-2 missing tenantId ----------
@@ -98,11 +70,9 @@ public sealed class H14IntegrationWiringHandlerTests
     [Fact]
     public async Task AC2_MissingTenantId_FailsResumable_NoSeamInvoked()
     {
-        var run = BuildRun(includeTenantId: false);
-        var repo = new FakeRepository(run, etag: "etag-2");
+        var repo = new FakeRepository(BuildRun(includeTenantId: false), etag: "etag-2");
         var applier = FakeApplier.Applied(2);
-        var graphCreator = FakeGraphCreator.Success();
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), graphCreator, FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -110,30 +80,9 @@ public sealed class H14IntegrationWiringHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(H14Rejections.MissingTenantId);
         applier.CallCount.Should().Be(0);
-        graphCreator.CallCount.Should().Be(0);
     }
 
     // ---------- AC-3 missing InterStepState.miObjectId ----------
-
-    [Fact]
-    public async Task AC3a_MissingBffApiUrl_H9NotComplete_FailsResumable_NoSeamInvoked()
-    {
-        // Task 245b: the webhook receivers live on the stamp's BFF — H9's InterStepState.BffApiUrl.
-        var run = BuildRun();
-        run.InterStepState.BffApiUrl = null;
-        var repo = new FakeRepository(run, etag: "etag-3a-bffurl");
-        var applier = FakeApplier.Applied(2);
-        var graphCreator = FakeGraphCreator.Success();
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), graphCreator, FakeDvRegistrar.Created());
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H14Rejections.MissingWebhookNotificationBaseUrl);
-        applier.CallCount.Should().Be(0);
-        graphCreator.CallCount.Should().Be(0);
-    }
 
     [Fact]
     public async Task AC3_MissingUamiObjectId_FailsResumable()
@@ -142,7 +91,7 @@ public sealed class H14IntegrationWiringHandlerTests
         run.InterStepState.MiObjectId = null;
         var repo = new FakeRepository(run, etag: "etag-3");
         var applier = FakeApplier.Applied(2);
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -151,79 +100,36 @@ public sealed class H14IntegrationWiringHandlerTests
         applier.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-3b missing InterStepState.keyVaultName (task 245a, G25) ----------
+    // ---------- AC-3e H14b/H14c-only inputs are no longer required ----------
 
     [Fact]
-    public async Task AC3b_MissingInterStepStateKeyVaultName_FailsResumable_NoSeamInvoked()
+    public async Task AC3e_WebhookOnlyInputs_AreNotRequired()
     {
+        // BffApiUrl (H9), keyVaultName (H2a), dataverseEnvUrl and subscriptionId were read only to
+        // wire the webhooks H14b/H14c registered; H14a needs none of them.
         var run = BuildRun();
+        run.InterStepState.BffApiUrl = null;
         run.InterStepState.KeyVaultName = null;
-        var repo = new FakeRepository(run, etag: "etag-3b");
+        run.InterStepState.DataverseEnvUrl = null;
+        run.Parameters.NonSecret.Remove("subscriptionId");
+        var repo = new FakeRepository(run, etag: "etag-3e");
         var applier = FakeApplier.Applied(2);
-        var reader = FakeReader.Success(SigningKey);
-        var graphCreator = FakeGraphCreator.Success();
-        var dvRegistrar = FakeDvRegistrar.Created();
-        var handler = BuildHandler(repo, applier, reader, graphCreator, dvRegistrar);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H14Rejections.MissingKeyVaultName);
-        failure.Diagnostic.Should().Contain("InterStepState.keyVaultName").And.Contain("H2a",
-            "the diagnostic must name the producing handler");
-        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
-        applier.CallCount.Should().Be(0);
-        reader.VaultNames.Should().BeEmpty();
-        graphCreator.CallCount.Should().Be(0);
-        dvRegistrar.CallCount.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task AC3c_KeyVaultNameOnlyAsRunParameter_IsNotRead_FailsResumable()
-    {
-        // Intake "keyVaultName" is the Spaarke PLATFORM vault — it must never stand in
-        // for the customer vault H14b/H14c read the HMAC signing key from.
-        var run = BuildRun();
-        run.InterStepState.KeyVaultName = null;
-        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
-        var repo = new FakeRepository(run, etag: "etag-3c");
-        var reader = FakeReader.Success(SigningKey);
-        var handler = BuildHandler(repo, FakeApplier.Applied(2), reader, FakeGraphCreator.Success(), FakeDvRegistrar.Created());
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H14Rejections.MissingKeyVaultName);
-        reader.VaultNames.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task AC3d_SigningKeyReads_UseInterStepStateCustomerVault()
-    {
-        var run = BuildRun();
-        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
-        var repo = new FakeRepository(run, etag: "etag-3d");
-        var reader = FakeReader.Success(SigningKey);
-        var handler = BuildHandler(repo, FakeApplier.Applied(2), reader, FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        reader.VaultNames.Should().NotBeEmpty("H14b and H14c both read the HMAC signing key");
-        reader.VaultNames.Should().OnlyContain(v => v == KeyVaultName,
-            "the signing key lives in the CUSTOMER vault (InterStepState.KeyVaultName, H2a output)");
+        applier.CallCount.Should().Be(1);
     }
 
-    // ---------- AC-4 partial failure (H14a drifts) ----------
+    // ---------- AC-4 H14a drifts ----------
 
     [Fact]
-    public async Task AC4_H14aDrifts_OverallQuarantineRequired_H14bH14cPersistedDespiteH14aFailure()
+    public async Task AC4_H14aDrifts_QuarantineRequired_NothingRecordedAsComplete()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-4");
         var applier = FakeApplier.Drift(new[] { "Assignment 'Spaarke-acme-MailSend' is scoped to 'other-group'." });
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -233,9 +139,7 @@ public sealed class H14IntegrationWiringHandlerTests
         failure.Diagnostic.Should().Contain("H14a");
 
         repo.LastWrittenRun.Should().NotBeNull();
-        var phases = repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).ToList();
-        phases.Should().Contain("H14b").And.Contain("H14c");
-        phases.Should().NotContain("H14a").And.NotContain("H14");
+        repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).Should().NotContain("H14a").And.NotContain("H14");
         repo.LastWrittenRun.Status.Should().Be(RunStatus.Quarantined);
         repo.LastWrittenRun.Quarantine.Should().NotBeNull();
     }
@@ -257,7 +161,7 @@ public sealed class H14IntegrationWiringHandlerTests
         });
         var repo = new FakeRepository(run, etag: "etag-5");
         var applier = FakeApplier.Applied(2);
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -266,10 +170,10 @@ public sealed class H14IntegrationWiringHandlerTests
         applier.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-6 partial-resume idempotency ----------
+    // ---------- AC-6 resume idempotency ----------
 
     [Fact]
-    public async Task AC6_PartialResume_H14aAlreadyCompleted_SkipsH14aSeam_InvokesH14bH14c()
+    public async Task AC6_Resume_H14aAlreadyCompleted_SkipsH14aSeam_RecordsParent()
     {
         var run = BuildRun();
         var expectedH14aKey = new H14aExchangePolicySubHandler(FakeApplier.Applied(0), new L2GraphAppRolesRegistry(), NullLogger<H14aExchangePolicySubHandler>.Instance)
@@ -284,39 +188,16 @@ public sealed class H14IntegrationWiringHandlerTests
         });
         var repo = new FakeRepository(run, etag: "etag-6");
         var applier = FakeApplier.Applied(2);
-        var graphCreator = FakeGraphCreator.Success();
-        var dvRegistrar = FakeDvRegistrar.Created();
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), graphCreator, dvRegistrar);
+        var handler = BuildHandler(repo, applier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        applier.CallCount.Should().Be(0, "H14a's expected key already matches a recorded CompletedPhase — parent skips re-invoking it");
-        graphCreator.CallCount.Should().Be(2);
-        dvRegistrar.CallCount.Should().Be(1);
+        applier.CallCount.Should().Be(0, "H14a's expected key already matches a recorded CompletedPhase -- parent skips re-invoking it");
 
         var phases = repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).ToList();
-        phases.Should().Contain("H14a").And.Contain("H14b").And.Contain("H14c").And.Contain("H14");
+        phases.Should().Contain("H14a").And.Contain("H14");
         phases.Count(p => p == "H14a").Should().Be(1, "the pre-existing H14a entry must not be duplicated");
-    }
-
-    // ---------- AC-7 H14b no targets configured ----------
-
-    [Fact]
-    public async Task AC7_H14bNoTargetsConfigured_OverallFailureIncludesH14bDiagnostic_H14aH14cStillPersist()
-    {
-        var run = BuildRun(includeGraphResources: false);
-        var repo = new FakeRepository(run, etag: "etag-7");
-        var applier = FakeApplier.Applied(2);
-        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Diagnostic.Should().Contain("H14b").And.Contain(H14bRejections.NoWebhookTargetsConfigured);
-
-        var phases = repo.LastWrittenRun!.CompletedPhases.Select(cp => cp.Phase).ToList();
-        phases.Should().Contain("H14a").And.Contain("H14c").And.NotContain("H14b").And.NotContain("H14");
     }
 
     // ---------- AC-8 handler-id mismatch ----------
@@ -325,7 +206,7 @@ public sealed class H14IntegrationWiringHandlerTests
     public async Task AC8_HandlerIdMismatch_Throws()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-8");
-        var handler = BuildHandler(repo, FakeApplier.Applied(2), FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+        var handler = BuildHandler(repo, FakeApplier.Applied(2));
         var wrongEnvelope = new HandlerEnvelope
         {
             HandlerId = "H0",
@@ -339,26 +220,23 @@ public sealed class H14IntegrationWiringHandlerTests
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*mismatched HandlerId*");
     }
 
-    // ---------- AC-9 no S2S 4th sub-step ----------
+    // ---------- AC-9 exactly one sub-step ----------
 
     [Fact]
-    public void AC9_ExpectedSubStepCount_IsExactlyThree_NoS2SFourthSubStep()
+    public void AC9_ExpectedSubStepCount_IsExactlyOne_NoS2SSubStep()
     {
-        H14IntegrationWiringHandler.ExpectedSubStepCount.Should().Be(3);
+        H14IntegrationWiringHandler.ExpectedSubStepCount.Should().Be(1);
         var act = () => H14IntegrationWiringHandler.AssertNoS2SSubStep();
         act.Should().NotThrow();
     }
 
     // ---------- helpers ----------
 
-    private static H14IntegrationWiringHandler BuildHandler(
-        FakeRepository repo, FakeApplier applier, FakeReader reader, FakeGraphCreator graphCreator, FakeDvRegistrar dvRegistrar)
+    private static H14IntegrationWiringHandler BuildHandler(FakeRepository repo, FakeApplier applier)
     {
         var options = Options.Create(new IntegrationWiringOptions());
         var h14a = new H14aExchangePolicySubHandler(applier, new L2GraphAppRolesRegistry(), NullLogger<H14aExchangePolicySubHandler>.Instance);
-        var h14b = new H14bGraphWebhookSubHandler(reader, graphCreator, NullLogger<H14bGraphWebhookSubHandler>.Instance);
-        var h14c = new H14cDataverseWebhookSubHandler(reader, dvRegistrar, options, NullLogger<H14cDataverseWebhookSubHandler>.Instance);
-        return new H14IntegrationWiringHandler(repo, h14a, h14b, h14c, options, NullLogger<H14IntegrationWiringHandler>.Instance);
+        return new H14IntegrationWiringHandler(repo, h14a, options, NullLogger<H14IntegrationWiringHandler>.Instance);
     }
 
     private static HandlerEnvelope BuildEnvelope() => new()
@@ -370,7 +248,7 @@ public sealed class H14IntegrationWiringHandlerTests
         EnqueuedAt = DateTimeOffset.UtcNow,
     };
 
-    private static ProvisioningRun BuildRun(bool includeTenantId = true, bool includeGraphResources = true)
+    private static ProvisioningRun BuildRun(bool includeTenantId = true)
     {
         var run = new ProvisioningRun
         {
@@ -385,24 +263,17 @@ public sealed class H14IntegrationWiringHandlerTests
         {
             run.Parameters.NonSecret[H14IntegrationWiringHandler.TenantIdParameterKey] = TenantId;
         }
-        run.Parameters.NonSecret[H14IntegrationWiringHandler.SubscriptionIdParameterKey] = SubscriptionId;
+        run.Parameters.NonSecret["subscriptionId"] = "22222222-3333-4444-5555-666666666666";
         run.Parameters.NonSecret[H14IntegrationWiringHandler.ExchangePolicyScopeGroupIdParameterKey] = PolicyScopeGroupId;
-        if (includeGraphResources)
-        {
-            run.Parameters.NonSecret[H14IntegrationWiringHandler.CommunicationGraphResourceParameterKey] = CommunicationResource;
-            run.Parameters.NonSecret[H14IntegrationWiringHandler.EmailGraphResourceParameterKey] = EmailResource;
-        }
-        run.InterStepState.BffAppRegId = BffAppRegId;
-        run.InterStepState.BffApiUrl = NotificationBaseUrl;   // H9 output (task 245b) — the webhook receiver base
         run.InterStepState.MiClientId = UamiClientId;
         run.InterStepState.MiObjectId = UamiObjectId;
-        run.InterStepState.DataverseEnvUrl = DataverseEnvUrl;
-        // The CUSTOMER vault is an H2a output (task 245a, G25) — not a run parameter.
-        run.InterStepState.KeyVaultName = KeyVaultName;
+        run.InterStepState.BffApiUrl = "https://sprk-acme-prod.azurewebsites.net";
+        run.InterStepState.DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com";
+        run.InterStepState.KeyVaultName = "sprk-acme-prod-kv";
         return run;
     }
 
-    /// <summary>Repository fake — records last written run + replace call count.</summary>
+    /// <summary>Repository fake -- records last written run + replace call count.</summary>
     private sealed class FakeRepository : IProvisioningRunRepository
     {
         private ProvisioningRun? _run;
@@ -448,47 +319,6 @@ public sealed class H14IntegrationWiringHandlerTests
         {
             CallCount++;
             return Task.FromResult(_outcome);
-        }
-    }
-
-    private sealed class FakeReader : IKvSecretReader
-    {
-        private readonly KvSecretReadResult _result;
-        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _vaultNames = new();
-        private FakeReader(KvSecretReadResult result) => _result = result;
-        public static FakeReader Success(string value) => new(new KvSecretReadResult.Success(value));
-
-        /// <summary>Vault names H14b/H14c read from (H14b + H14c run in parallel — thread-safe capture).</summary>
-        public IReadOnlyCollection<string> VaultNames => _vaultNames.ToArray();
-
-        public Task<KvSecretReadResult> ReadSecretAsync(string vaultName, string subscriptionId, string secretName, CancellationToken ct)
-        {
-            _vaultNames.Enqueue(vaultName);
-            return Task.FromResult(_result);
-        }
-    }
-
-    private sealed class FakeGraphCreator : IGraphSubscriptionCreator
-    {
-        public int CallCount { get; private set; }
-        public static FakeGraphCreator Success() => new();
-
-        public Task<GraphSubscriptionOutcome> CreateOrUpdateAsync(GraphSubscriptionRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            return Task.FromResult<GraphSubscriptionOutcome>(new GraphSubscriptionOutcome.Created($"sub-{request.ModuleName}"));
-        }
-    }
-
-    private sealed class FakeDvRegistrar : IServiceEndpointWebhookRegistrar
-    {
-        public int CallCount { get; private set; }
-        public static FakeDvRegistrar Created() => new();
-
-        public Task<ServiceEndpointWebhookOutcome> RegisterAsync(ServiceEndpointWebhookRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            return Task.FromResult<ServiceEndpointWebhookOutcome>(new ServiceEndpointWebhookOutcome.Created("se-1"));
         }
     }
 }

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Live test (owner-approved 2026-10-07): a work-account B2B guest gets a Spaarke-tenant token for the dev BFF in Outlook/Word (NAA, desktop + web)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D11 "spike first")</phase>
+    <gate>after 240a can run in parallel; needs a guest account + spaarkeai-word-add-in-r1</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>A live test with recorded results; any code is a dev-only test build owned by spaarkeai-word-add-in-r1.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The outcome decides the T240 client design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Needs the owner at the keyboard (sign-in) and another project's add-in.</parallel-reason>
+    <tags>auth, m365-clients, spike, model1-dedicated</tags>
+    <deps>233</deps>
+  </metadata>
+
+  <prompt>Prove (or disprove) that a B2B guest can use the shared add-in and Teams clients against Spaarke's tenant.</prompt>
+
+  <goal>Recorded answers to S1–S3 in `notes/t240-plan.md`, each with the account type, client (Outlook/Word desktop, web, Teams), authority, scope and result.</goal>
+
+  <context>
+    <background>
+      `notes/t240-plan.md`. The add-in signs in through `@spaarke/auth` OfficeNaaStrategy and may not construct MSAL itself
+      (spaarkeai-word-add-in-r1 binding rule). Its authority is already Spaarke's tenant (t240-plan F4). The only guest in
+      Spaarke's tenant is a personal Microsoft account; the test needs a work account from another Entra tenant (owner to
+      provide), invited as a guest. Membership discovery moved to a server-side directory (240c), so the guest's own
+      directory reads are no longer tested. Teams moved to spaarke-SPA-external-access-platform-r3 (t240-plan F12).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Live actions (inviting the test guest, group membership, a dev test build) each need the owner's OK; record each in this POML.</constraint>
+    <constraint source="coordination">Add-in and Teams client changes are spaarkeai-word-add-in-r1's; request them through the owner's relay or that project directly.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Test organization (owner 2026-10-07: none exists). Owner creates a workforce tenant "Spaarke Test Partner" (Entra admin center, portal-only) and starts a Microsoft 365 Business Standard trial there (desktop + web Outlook/Word/Teams). Then, each a live action with owner OK: create 1-2 licensed test users in it (Graph); invite one as a guest to Spaarke's tenant; install word-add-in-r1's dev diagnostics manifest in the test tenant (Integrated apps) — the same step a real customer's admin performs in its own tenant, since a Model 1 user's Outlook lives in their home tenant.</step>
+    <step order="2">S1: with word-add-in-r1's dev diagnostics build, acquire `api://{devBffAppId}/user_impersonation` through NAA in Outlook desktop + web and Word desktop + web; record the token's `tid`, `oid`, `acct`, `idp`, `iss`, `aud`, and that a BFF call succeeds.</step>
+    <step order="3">Write the results and the design consequence into `notes/t240-plan.md`; update 240c.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">S1 has a recorded result for each of the four clients, with the token claims that prove it (`tid` = Spaarke's tenant, `acct` = 1).</criterion>
+    <criterion testable="true">`notes/t240-plan.md` states the confirmed or changed discovery design.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-07">Test organization ready: Dewey Cheatham &amp; Howe PC (deweycheatham.onmicrosoft.com, tenant bc3aa7f4-…); guest ralph@deweycheatham.onmicrosoft.com Accepted in Spaarke's tenant (federated/ExternalAzureAD) and added to dev Dataverse by the owner. Remaining: Business Standard for desktop Outlook/Word; word-add-in-r1's diagnostics build; installing that manifest in the Dewey Cheatham tenant (Integrated apps). Details: notes/t240-plan.md "Test organization".</note>
+  </notes>
+</task>

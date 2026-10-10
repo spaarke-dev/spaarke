@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Telemetry;
 ///   - <c>ai_safety_groundedness_latency_ms</c>       Histogram — P50/P95/P99 latency per call.
 ///
 /// Labels on latency histogram:
-///   - <c>outcome</c>: <c>grounded</c> | <c>ungrounded</c> | <c>skipped</c> | <c>fail_open</c>
+///   - <c>outcome</c>: <c>grounded</c> | <c>ungrounded</c> | <c>skipped</c> | <c>fail_open</c> | <c>fail_open_auth</c>
 /// </summary>
 public sealed class GroundednessCheckTelemetry : IDisposable
 {
@@ -50,7 +50,7 @@ public sealed class GroundednessCheckTelemetry : IDisposable
     /// </param>
     /// <param name="latencyMs">Round-trip latency in milliseconds.</param>
     /// <param name="outcome">
-    /// <c>grounded</c>, <c>ungrounded</c>, <c>skipped</c>, or <c>fail_open</c>.
+    /// <c>grounded</c>, <c>ungrounded</c>, <c>skipped</c>, <c>fail_open</c> or <c>fail_open_auth</c>.
     /// </param>
     public void RecordCheck(bool isGrounded, int ungroundedSegmentCount, double latencyMs, string outcome)
     {
@@ -74,6 +74,12 @@ public sealed class GroundednessCheckTelemetry : IDisposable
 
     /// <summary>Outcome label when the service is unavailable and fail-open is applied.</summary>
     public const string OutcomeFailOpen = "fail_open";
+
+    /// <summary>
+    /// Outcome label when Content Safety refused the BFF identity (HTTP 401/403) or no token could be acquired and
+    /// fail-open is applied. Not transient — task 230b.
+    /// </summary>
+    public const string OutcomeFailOpenAuth = "fail_open_auth";
 
     /// <inheritdoc/>
     public void Dispose() => _meter.Dispose();

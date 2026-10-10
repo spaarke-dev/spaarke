@@ -71,15 +71,10 @@ jest.mock('@spaarke/ai-widgets', () => {
     ...actual,
     useAiSession: () => ({
       isAuthenticated: true,
-      // Always return 404 so the tab-restore effect's `if (response.status
-      // === 404) return;` path triggers (treats as "no tabs to restore" —
-      // benign). Without this default response shape, the restore effect
-      // throws and logs telemetry, which is fine but noisy in test output.
-      authenticatedFetch: jest.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: async () => ({}),
-      } as Partial<Response> as Response),
+      // Always reject with a 404 ApiError (what authenticatedFetch throws) so the tab-restore effect's
+      // `isApiError(err, 404)` path triggers (treated as "no tabs to restore" - benign). Without a default,
+      // the restore effect throws and logs telemetry, which is fine but noisy in test output.
+      authenticatedFetch: jest.fn().mockRejectedValue(httpError(404)),
       getAccessToken: jest.fn().mockResolvedValue('test-token'),
       bffBaseUrl: 'https://test-bff.example.com',
       tenantId: 'test-tenant',
@@ -164,6 +159,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks so module resolution picks them up.
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Helpers

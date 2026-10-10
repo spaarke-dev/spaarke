@@ -96,10 +96,16 @@ public record RecordUserSharesResponse(
 /// (<c>sprk_isexternal = true</c>) — Manage Access shows "External user — no access" until the share is removed (the
 /// record's next save or the 5-minute job). Additive: <c>false</c> on every other share.
 /// </param>
+/// <param name="InheritedFrom">
+/// Task 175 (owner round 84; task 067's amendment): the secure matter or project that passed this share on to the record
+/// (task 158's inherited-share provenance, still in force), or <c>null</c> for a direct share. Manage Access shows such a row
+/// read-only ("Inherited from the {matter}"). Additive; <c>Name</c> is not read (the record's own lookup names its parent).
+/// </param>
 public record RecordUserShare(
     Guid SystemUserId,
     string? FullName,
     int AccessRightsMask,
     ExternalAccessLevel? AccessLevel,
     DateTimeOffset ModifiedOn,
-    bool ExternalNoAccess = false);
+    bool ExternalNoAccess = false,
+    RecordAccessParent? InheritedFrom = null);

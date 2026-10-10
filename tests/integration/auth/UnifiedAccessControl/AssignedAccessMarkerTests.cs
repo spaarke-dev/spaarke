@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -47,7 +48,7 @@ public class AssignedAccessMarkerTests
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(accessRecordId, Guid.Empty, Guid.Empty),
             _h.Grants,
-            new SpeContainerMembershipService(Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+            new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             _h.Participations,
             _h.Materializer,
             // Task 166: the container is derived from the grant's root. Here the matter's derived container is the shared

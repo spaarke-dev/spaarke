@@ -165,16 +165,17 @@ public sealed record NoAccessCoverage(IReadOnlyList<NoAccessCoveringEntry> Entri
 /// never exceeds the root's shares and never gives a walled user anything (it asks the same guard before any grant); a fan-out
 /// that could not finish is reported as a failure (<c>children-incomplete</c>), and the 2-minute reconcile completes it.</para>
 ///
-/// <para><b>The secure records filed under it follow</b> (task 158 final round — main-session round 58 item 1). A secure
-/// work assignment or project FILED UNDER a secure matter or project honours that parent's No Access list for every share
-/// (round 39 item 2), so an entry the enforcer applies to a covered matter or project also removes the walled person's DIRECT
-/// share on each secure work assignment and project filed under it — found through the ONE child-direction walk
-/// (<c>SecureRootInheritance.ListFiledRootsAsync</c>),
-/// one level, as the share-time check reads one level of parents, and removed by the same per-record steps as any covered
-/// record: the author's Write on that record (N5), the record lock, never its last reader (S5), the read-back, its own
-/// children after a removal. Only after the author passed N5 on the parent. A filed record not flagged secure yet is not the
-/// wall's to remove (Q4; the inheritance job secures it and the next enforcement reaches it). Anything that could not be
-/// listed or finished there is reported as <c>children-incomplete</c> on the parent — never "complete".</para>
+/// <para><b>The records filed under it follow</b> (task 158 final round — main-session round 58 item 1; round 61 item 1;
+/// owner round 82). A work assignment or project FILED UNDER a secure matter or project honours that parent's No Access list
+/// for every share (round 39 item 2), so an entry the enforcer applies to a covered matter or project also removes the walled
+/// person's DIRECT share on each work assignment and project filed BELOW it, at any depth — found through the ONE
+/// child-direction walk (<c>SecureRootInheritance.ListFiledRootsBelowAsync</c>, bounded and cycle-safe, as the share-time
+/// check climbs every secure ancestor) — and removed by the same per-record steps as any covered record: the author's Write
+/// on that record (N5), the record lock, never its last reader (S5), the read-back, its own children after a removal. Only
+/// after the author passed N5 on the parent. A CONFIRMED filed record is enforced whatever its own flag reads — secure, not
+/// secure yet, or left unsecured by a Refused or Failed inheritance ("the parent permissions control", owner round 82,
+/// GitHub #1410); a filing whose type could not be confirmed is left alone. Anything that could not be listed, confirmed or
+/// finished there is reported as <c>children-incomplete</c> on the parent — never "complete".</para>
 /// </remarks>
 public sealed class NoAccessShareEnforcer
 {
@@ -328,8 +329,9 @@ public sealed class NoAccessShareEnforcer
                     }
                 }
 
-                // Task 158 final round (round 58 item 1): the secure records filed under each covered matter or project the
-                // author may act on. One level; a record already covered, or filed under two covered parents, once.
+                // Task 158 final round (round 58 item 1; round 61 item 1; round 82): the records filed below each covered
+                // matter or project the author may act on, at any depth, secure or not yet; a record already covered, or
+                // filed under two covered parents, once.
                 var reached = new HashSet<(string, Guid)>(records);
                 foreach (var parent in authorised.Where(r => SecureRootInheritance.IsParent(r.LogicalName)))
                 {
@@ -504,6 +506,34 @@ public sealed class NoAccessShareEnforcer
                         .FindSecureRootsReferencingOrganizationAsync(type, orgId, MaxCoveredRecords, ct).ConfigureAwait(false);
                     run.Truncated |= truncated;
                     records.AddRange(ids.Select(id => (type, id)));
+
+                    // Task 174 (owner rounds 82/84; verifier pass 2 F1): a work assignment or project that references the
+                    // organization and is NOT flagged secure (yet — or left so by a Refused or Failed inheritance) is secure
+                    // through what it is filed under, so the wall covers it too. ONE batched walk over those candidates; an
+                    // ancestry that cannot be decided is a failure on that record (nothing removed on a guess).
+                    if (SecureRootInheritance.Inherits(type))
+                    {
+                        var (unflagged, moreUnflagged) = await _participations
+                            .FindUnflaggedRootsReferencingOrganizationAsync(type, orgId, MaxCoveredRecords, ct).ConfigureAwait(false);
+                        run.Truncated |= moreUnflagged;
+                        var ancestry = await EffectiveRootFlags
+                            .ReadAncestryAsync(_dataverse, _logger, type, unflagged, ct).ConfigureAwait(false);
+                        foreach (var id in unflagged.Distinct())
+                        {
+                            if (ancestry is null || !ancestry.TryGetValue(id, out var answer) || !answer.IsKnown)
+                            {
+                                run.Fail(type, id, null, "covered-records-unreadable",
+                                    "What this record is filed under could not be read, so whether this entry covers it is " +
+                                    "unknown and nothing was enforced on it. Try again.");
+                                continue;
+                            }
+
+                            if (answer.HasSecureParent)
+                            {
+                                records.Add((type, id));
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
@@ -565,6 +595,18 @@ public sealed class NoAccessShareEnforcer
             _logger.LogError(ex, "[NO-ACCESS-ENFORCE] Entry {EntryId}: flags of {Type} {RecordId} unreadable.",
                 run.EntryId, logicalName, recordId);
             flags = new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        // Task 174 (owner rounds 82/84: Q4's "secure" means the record or any filing ancestor): a work assignment or project
+        // whose own flag is not set yet but which is filed under a secure matter or project IS secure for the entry on it.
+        // Only then is the single-record walk read; an undecidable filing is unreadable (nothing enforced, reported).
+        if (flags.TryGetValue(recordId, out var own) && !own.IsUnreadable && !own.IsSecure)
+        {
+            flags = new Dictionary<Guid, RootRecordFlags>
+            {
+                [recordId] = await EffectiveRootFlags.FoldOneAsync(_dataverse, _logger, logicalName, recordId, own, ct)
+                    .ConfigureAwait(false),
+            };
         }
 
         if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
@@ -771,13 +813,16 @@ public sealed class NoAccessShareEnforcer
     }
 
     /// <summary>
-    /// Task 158 final round (main-session round 58 item 1): the walled users' DIRECT shares on the secure work assignments and
+    /// Task 158 final round (main-session round 58 item 1): the walled users' DIRECT shares on the work assignments and
     /// projects FILED UNDER a covered matter or project the author holds Write on — each removed exactly as on a covered record
     /// (<see cref="EnforceOnRecordAsync"/>: N5 on that record, the lock, S5, the read-back, its children). The filed records
     /// come from the ONE child-direction walk (<c>SecureRootInheritance.ListFiledRootsAsync</c>).
-    /// A record not flagged secure yet is reported <see cref="NoAccessEnforcementReason.NotSecure"/> (the inheritance job
-    /// secures it; the next enforcement reaches it). Anything not finished — the walk could not be read, a record whose filing
-    /// type could not be read, a failure on a filed record — is a <c>children-incomplete</c> failure naming the parent.
+    /// GitHub #1410 / owner round 82 ("the parent permissions control"): a CONFIRMED filed record is enforced whatever its own
+    /// <c>sprk_issecure</c> reads — secure, not secure yet (inheritance pending), or left unsecured because inheritance ended
+    /// Refused or Failed, when "the next enforcement reaches it" would never come. Before, such a record was reported
+    /// <see cref="NoAccessEnforcementReason.NotSecure"/> and kept the walled user's share. Anything not finished — the walk
+    /// could not be read, a record whose filing type could not be read, a failure on a filed record — is a
+    /// <c>children-incomplete</c> failure naming the parent.
     /// </summary>
     private async Task EnforceOnFiledRecordsAsync(
         (string LogicalName, Guid Id) parent,
@@ -816,12 +861,6 @@ public sealed class NoAccessShareEnforcer
             if (!root.Confirmed)
             {
                 undecided++; // whether it is filed under this record could not be read: nothing removed on a guess
-                continue;
-            }
-
-            if (!root.FlaggedSecure)
-            {
-                run.NotEnforced.Add(new NoAccessNotEnforced(root.Table, root.Id, null, NoAccessEnforcementReason.NotSecure));
                 continue;
             }
 

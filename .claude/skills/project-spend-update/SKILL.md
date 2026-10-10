@@ -1,5 +1,5 @@
 ---
-description: Manually refresh the AI Spend (est.) / AI Calls / AI Spend As Of fields on the portfolio board for one, several, or all projects
+description: Manually refresh the AI Spend (est.) / AI Calls / AI Spend As Of fields on the portfolio board for one, several, or all projects, and produce the on-demand AI spend report / HTML dashboard (by day, project, model, main vs sub-agent)
 tags: [devops, portfolio, cost, gh-cli]
 techStack: [gh-cli, python]
 appliesTo: ["/project-spend-update", "update project spend", "refresh AI cost", "sync project cost"]
@@ -34,6 +34,7 @@ Recompute estimated AI spend from local Claude Code transcripts and push it to t
 | `/project-spend-update` (no args) | Refresh every `Type=Project` item on the board |
 | `/project-spend-update {slug} [{slug} ...]` | Refresh just the named project(s) |
 | "update project spend" / "refresh AI cost" / "what's the current spend on {project}" | Same, scoped to what was asked |
+| "spend report", "cost dashboard", "spend by day", "where is the AI spend going" | Step 4 only (report/dashboard); no board writes |
 
 Not auto-triggered by anything — including `task-execute`, `devops-project-sync`, or project completion. If you want it current, run it.
 
@@ -60,6 +61,30 @@ Print the script's own summary line (`N updated, M skipped (no local data), K fa
 
 If reporting a dashboard or total that includes this field elsewhere (e.g. via `/devops-portfolio-status`), check each project's `AI Spend As Of` date first. A project not refreshed by this skill since its last heavy work session will under-report — say so rather than presenting the total as current.
 
+
+### Step 4: Spend report and dashboard (on request, or after Step 2 when asked "where is it going")
+
+```bash
+python scripts/ai-cost/spend-report.py --days 14                      # text tables + "Biggest drivers"
+python scripts/ai-cost/spend-report.py --days 30 --format html --open # dashboard (charts, project filter) in %TEMP%
+python scripts/ai-cost/spend-report.py --project unified-access-control-r2 --days 7
+python scripts/ai-cost/spend-report.py --since 2026-10-01 --format csv --out spend.csv
+```
+
+One pass over the local transcripts (~30–100 s), grouped by day (UTC), project, model and main vs sub-agent, with the cost split into cache read / cache write / input / output. Relay the "Biggest drivers" lines and the per-day table; for the dashboard give the file path. Read the drivers against `.claude/constraints/agent-cost.md` (sub-agent share, model mix, context size, cache-write share). Same pricing and dedup as `get-project-cost.py`; estimates at list price from this machine's transcripts only — not an invoice. The HTML stays outside the repo (it carries project costs).
+
+
+### Step 5: Refresh the Spaarke Dev Metrics page (when asked, or after Step 1 when the owner wants the page current)
+
+The private dashboard https://claude.ai/artifact/R4J6P8Adsk12XhJV8ypxjR reads one attached file, dataset `spend`. Refresh it:
+
+1. `python scripts/ai-cost/spend-report.py --days 60 --format csv --out <scratchpad>/ai-spend-daily.csv`
+2. Upload it: Artifact `publish` with `url` = the page, `file_path` = the CSV, `asset: true`. Note the returned `/_blob/<id>` url.
+3. `ArtifactData` `get` `datasets/spend`, then `update` it, pinned with `if_version`, setting `source.url` to the new url, `source.name` to `ai-spend-daily.csv` and `updated` to `{at: <ISO now>, by: "Claude (spend-report.py)"}`.
+4. Delete the previous asset (Artifact `delete` with `path` = its id) once nothing references it.
+
+The page's calculations (`summary`, `daily`, `by_model`) recompute from the file, so no page edit is needed. The data covers this machine's transcripts only, at list price.
+
 ## Outputs
 
 - Up to 3 GitHub Project field mutations per project touched
@@ -80,5 +105,6 @@ If reporting a dashboard or total that includes this field elsewhere (e.g. via `
 
 ## Reference
 
+- Report/dashboard: `scripts/ai-cost/spend-report.py` (see `scripts/ai-cost/README.md`)
 - Script: `scripts/ai-cost/get-project-cost.py` (per-project cost computation) + `scripts/ai-cost/update-board-spend.py` (board iteration + field writes)
 - Board field IDs documented inline in `update-board-spend.py` (re-derive via `gh project field-list 2 --owner spaarke-dev --format json` if the board is ever rebuilt)

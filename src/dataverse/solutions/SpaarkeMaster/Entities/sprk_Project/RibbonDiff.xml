@@ -1,0 +1,399 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Access.sprk_project.Form.CustomAction" Location="Mscrm.Form.sprk_project.MainTab.Actions.Controls._children" Sequence="905">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.Access.sprk_project.Form.Flyout" Command="sprk.Access.sprk_project.Menu.Command" LabelText="$LocLabels:sprk.Access.sprk_project.Menu.LabelText" Alt="$LocLabels:sprk.Access.sprk_project.Menu.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_project.Menu.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_project.Menu.ToolTipDescription" ModernImage="Permissions" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.Access.sprk_project.Form.Menu">
+            <MenuSection Id="sprk.Access.sprk_project.Form.Section" Title="Access" Sequence="10">
+              <Controls Id="sprk.Access.sprk_project.Form.Controls">
+                <Button Id="sprk.Access.sprk_project.Form.UpdateAccess" Command="sprk.Access.sprk_project.UpdateAccess.Command" LabelText="$LocLabels:sprk.Access.sprk_project.UpdateAccess.LabelText" Alt="$LocLabels:sprk.Access.sprk_project.UpdateAccess.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_project.UpdateAccess.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_project.UpdateAccess.ToolTipDescription" ModernImage="Refresh" Sequence="10" />
+                <Button Id="sprk.Access.sprk_project.Form.MakeSecure" Command="sprk.Access.sprk_project.MakeSecure.Command" LabelText="$LocLabels:sprk.Access.sprk_project.MakeSecure.LabelText" Alt="$LocLabels:sprk.Access.sprk_project.MakeSecure.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_project.MakeSecure.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_project.MakeSecure.LabelText" ModernImage="Permissions" Sequence="20" />
+                <Button Id="sprk.Access.sprk_project.Form.RemoveSecure" Command="sprk.Access.sprk_project.RemoveSecure.Command" LabelText="$LocLabels:sprk.Access.sprk_project.RemoveSecure.LabelText" Alt="$LocLabels:sprk.Access.sprk_project.RemoveSecure.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_project.RemoveSecure.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_project.RemoveSecure.LabelText" ModernImage="Cancel" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_project.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_project.NewRecord" />
+    <CustomAction Id="sprk.Navigator.Project.Form.Button.CustomAction" Location="Mscrm.Form.sprk_project.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Project.Form.Button" Command="sprk.Navigator.Project.Open.Command" LabelText="$LocLabels:sprk.Navigator.Project.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Project.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Project.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Project.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Navigator.Project.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_project.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Project.Grid.Button" Command="sprk.Navigator.Project.Open.Command" LabelText="$LocLabels:sprk.Navigator.Project.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Project.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Project.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Project.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.project.fieldmapping.push.CustomAction" Location="Mscrm.Form.sprk_project.MainTab.Actions.Controls._children" Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="sprk.project.fieldmapping.push.Button" Command="sprk.project.fieldmapping.push.Command" LabelText="$LocLabels:sprk.project.fieldmapping.push.LabelText" Alt="$LocLabels:sprk.project.fieldmapping.push.Alt" ToolTipTitle="$LocLabels:sprk.project.fieldmapping.push.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.project.fieldmapping.push.ToolTipDescription" TemplateAlias="o1" ModernImage="Sync" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Project.NewWizard.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_project.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Project.NewWizard.Grid.Button.Alt" Command="sprk.Project.NewWizard.Grid.Command" Id="sprk.Project.NewWizard.Grid.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Project.NewWizard.Grid.Button.LabelText" Sequence="1" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Project.NewWizard.Grid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Project.NewWizard.Grid.Button.ToolTipDescription" ModernImage="CommandBarNewIcon" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Project.CustomAction" Location="Mscrm.HomepageGrid.sprk_project.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Project.Flyout" Command="sprk.ThemeMenu.Project.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Project.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Project.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Project.Controls">
+                <Button Id="sprk.ThemeMenu.Project.Auto" Command="sprk.ThemeMenu.Project.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Project.Light" Command="sprk.ThemeMenu.Project.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Project.Dark" Command="sprk.ThemeMenu.Project.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Project.Form.CustomAction" Location="Mscrm.Form.sprk_project.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Project.Form.Flyout" Command="sprk.ThemeMenu.Project.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Project.Form.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Project.Form.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Project.Form.Controls">
+                <Button Id="sprk.ThemeMenu.Project.Form.Auto" Command="sprk.ThemeMenu.Project.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Project.Form.Light" Command="sprk.ThemeMenu.Project.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Project.Form.Dark" Command="sprk.ThemeMenu.Project.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.SharePrimaryRecord">
+      <EnableRules>
+        <EnableRule Id="Mscrm.FormStateNotNew" />
+        <EnableRule Id="Mscrm.SharePrimaryPermission" />
+        <EnableRule Id="Mscrm.NotOffline" />
+        <EnableRule Id="Mscrm.ShowOnNonModernAndModernIfAllowed" />
+        <EnableRule Id="sprk.Access.sprk_project.ShareAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.SharePrimaryPermission" />
+        <DisplayRule Id="Mscrm.HybridDialogShareEnabled" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Common.onActionMenuClick" Library="$webresource:Main_system_library.js">
+          <StringParameter Value="share" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Mscrm.SharePrimaryRecordRefresh">
+      <EnableRules>
+        <EnableRule Id="Mscrm.FormStateNotNew" />
+        <EnableRule Id="Mscrm.SharePrimaryPermission" />
+        <EnableRule Id="Mscrm.NotOffline" />
+        <EnableRule Id="Mscrm.ShowOnNonModernAndModernIfAllowed" />
+        <EnableRule Id="Mscrm.CollabNotEnabled" />
+        <EnableRule Id="sprk.Access.sprk_project.ShareAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.SharePrimaryPermission" />
+        <DisplayRule Id="Mscrm.HybridDialogShareEnabled" />
+        <DisplayRule Id="Mscrm.HideInLegacyRibbon" />
+        <DisplayRule Id="Mscrm.OutlookRenderTypeWeb" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Common.onActionMenuClick" Library="$webresource:Main_system_library.js">
+          <StringParameter Value="share" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Mscrm.ShareSelectedRecord">
+      <EnableRules>
+        <EnableRule Id="Mscrm.NotOffline" />
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+        <EnableRule Id="Mscrm.VisualizationPaneNotMaximized" />
+        <EnableRule Id="Mscrm.ShareValid" />
+        <EnableRule Id="Mscrm.IsValidForHierarchyView" />
+        <EnableRule Id="Mscrm.ShowOnNonModernAndModernIfAllowed" />
+        <EnableRule Id="sprk.Access.sprk_project.ShareAllowedSelection.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShareSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.HybridDialogShareEnabled" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Share.shareSelectedRecords" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedControl" />
+          <CrmParameter Value="SelectedControlSelectedItemReferences" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.sprk_project.MakeSecure.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.sprk_project.MakeSecure.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.makeSecure">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.sprk_project.Menu.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.sprk_project.MenuVisible.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.sprk_project.RemoveSecure.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.sprk_project.RemoveSecure.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.removeSecure">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.sprk_project.UpdateAccess.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.sprk_project.CanUpdateAccess.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.updateAccess">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Navigator.Project.Open.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Navigator.Project.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.project.fieldmapping.push.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.project.fieldmapping.push.hasSourceProfile.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_fieldmapping_push" FunctionName="Spaarke.FieldMapping.Push.pushUpdates">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Project.NewWizard.Grid.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateProjectStandalone" Library="$webresource:sprk_wizard_commands" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Project.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.Project.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Project.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Project.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Project.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_project" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="sprk.Access.sprk_project.CanUpdateAccess.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.canUpdateAccess" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_project.MakeSecure.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.canMakeSecure" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_project.MenuVisible.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.isAccessMenuVisible" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_project.RemoveSecure.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.canRemoveSecure" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_project.ShareAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.isShareAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_project.ShareAllowedSelection.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.isShareAllowedForSelection" Default="false">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.Navigator.Project.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.project.fieldmapping.push.hasSourceProfile.EnableRule">
+        <CustomRule Library="$webresource:sprk_fieldmapping_push" FunctionName="Spaarke.FieldMapping.Push.hasSourceProfile" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.Project.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.Access.sprk_project.MakeSecure.LabelText">
+      <Titles>
+        <Title description="Make Secure" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.sprk_project.Menu.LabelText">
+      <Titles>
+        <Title description="Access" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.sprk_project.Menu.ToolTipDescription">
+      <Titles>
+        <Title description="Access commands for this record" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.sprk_project.RemoveSecure.LabelText">
+      <Titles>
+        <Title description="Remove Secure" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.sprk_project.UpdateAccess.LabelText">
+      <Titles>
+        <Title description="Update Access" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.sprk_project.UpdateAccess.ToolTipDescription">
+      <Titles>
+        <Title description="Give this record's assigned people their access now and re-apply its No Access list" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Project.Button.Alt">
+      <Titles>
+        <Title description="Open the Navigator side pane" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Project.Button.LabelText">
+      <Titles>
+        <Title description="Navigator" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Project.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open or focus the Navigator (Recent, Bookmarks, Monitored, Views). Its enable rule also registers the pane on load." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.Alt">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.LabelText">
+      <Titles>
+        <Title description="Push Updates" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.ToolTipDescription">
+      <Titles>
+        <Title description="Cascade field updates from this Project to related records defined by active field-mapping profiles." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.ToolTipTitle">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Project.NewWizard.Grid.Button.Alt">
+      <Titles>
+        <Title description="+New Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Project.NewWizard.Grid.Button.LabelText">
+      <Titles>
+        <Title description="+New Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Project.NewWizard.Grid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open Create New Project wizard" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Project.NewWizard.Grid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="New Project" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

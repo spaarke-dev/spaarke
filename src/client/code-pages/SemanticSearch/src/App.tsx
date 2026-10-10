@@ -18,7 +18,16 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  MessageBar,
+  MessageBarBody,
+  MessageBarActions,
+  Button,
+} from '@fluentui/react-components';
+import { Dismiss16Regular } from '@fluentui/react-icons';
 import type {
   SearchDomain,
   SearchFilters,
@@ -367,9 +376,12 @@ export const App: React.FC<AppProps> = ({
   // --- Document Actions ---
   // Hook lives in @spaarke/document-operations (moved by task 031, consumed
   // directly here by task 032 — local shim deleted, no behavior change).
-  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex } = useDocumentActions({
-    bffBaseUrl: getBffBaseUrl(),
-  });
+  // `actionError` ("Couldn't delete the document: <reason>") is shown in the main area's error bar below —
+  // without it a failed open / download / delete / email-link / send-to-index showed the user nothing.
+  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex, actionError } =
+    useDocumentActions({
+      bffBaseUrl: getBffBaseUrl(),
+    });
 
   // --- Active Domain Derivation ---
   const isDocDomain = activeDomain === 'documents';
@@ -407,6 +419,19 @@ export const App: React.FC<AppProps> = ({
   const activeErrorMessage = isDocDomain ? docErrorMessage : recordErrorMessage;
   const activeSearchTime = isDocDomain ? docSearchTime : recordSearchTime;
   const isSearching = activeSearchState === 'loading';
+
+  // Document-action error bar: dismissable; a NEW error re-shows it, and a new search or a domain
+  // switch hides it (the failure belonged to the previous results). Effect order matters: reset first.
+  const [actionErrorDismissed, setActionErrorDismissed] = useState(false);
+  useEffect(() => {
+    setActionErrorDismissed(false);
+  }, [actionError]);
+  useEffect(() => {
+    if (isSearching) setActionErrorDismissed(true);
+  }, [isSearching]);
+  useEffect(() => {
+    setActionErrorDismissed(true);
+  }, [activeDomain]);
   const isLoadingMore = activeSearchState === 'loadingMore';
 
   // Detect validation-type errors (empty query) vs real errors
@@ -876,6 +901,27 @@ export const App: React.FC<AppProps> = ({
 
         {/* Main area: grid or graph results */}
         <div className={styles.mainArea}>
+          {/* Document-action failure (open / download / delete / email link / send to index). Clears when
+              the next action starts. */}
+          {actionError && !actionErrorDismissed && (
+            <div className={styles.errorBar}>
+              <MessageBar intent="error" layout="multiline" data-testid="document-action-error">
+                <MessageBarBody>{actionError}</MessageBarBody>
+                <MessageBarActions
+                  containerAction={
+                    <Button
+                      appearance="transparent"
+                      aria-label="Dismiss"
+                      icon={<Dismiss16Regular />}
+                      data-testid="document-action-error-dismiss"
+                      onClick={() => setActionErrorDismissed(true)}
+                    />
+                  }
+                />
+              </MessageBar>
+            </div>
+          )}
+
           {/* Error / info message bar */}
           {activeErrorMessage && (
             <div className={styles.errorBar}>

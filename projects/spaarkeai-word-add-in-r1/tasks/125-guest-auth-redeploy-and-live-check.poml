@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="125" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Rebuild and redeploy the guest-auth fix to dev; guest + member live check</title>
+    <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployments of many PCFs/code pages to a shared environment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Many deploys with ordering and verification.</model-tier-reason>
+    <effort>high</effort>
+    <deps>122, 123, 124</deps>
+    <tags>deploy, pcf, code-page, auth</tags>
+  </metadata>
+  <prompt>After 122-124 merge: rebuild every surface that bundles @spaarke/auth and deploy the affected ones to spaarkedev1. Each Dataverse deploy needs the owner's go (ask once with the full list).</prompt>
+  <goal>All surfaces in `notes/122-guest-signin-review.md` "fail for a guest" are redeployed from master; the owner's guest and a member both open a matter and a document without a sign-in error.</goal>
+  <constraints>
+    <constraint>Owner go before any deploy; deploy from a fresh short-path worktree of origin/master; check for concurrent deploys of the same controls by other sessions first.</constraint>
+    <constraint>Build @spaarke/auth first (PCFs consume its dist); PCFs with `npm run build:prod` through scripts/Invoke-PcfBuildProd.ps1 (judge from output); solution import per the pcf-deploy skill; code pages via their Deploy-*.ps1.</constraint>
+  </constraints>
+  <steps mode="prescriptive">
+    <step>List the surfaces, versions and deploy commands; get the owner's go.</step>
+    <step>Build and deploy; verify each deployed version.</step>
+    <step>Read-only checks: the SPA redirect URIs for the MSAL client(s) include the Dataverse origin; the test guest's systemuser exists, is enabled and licensed (no writes).</step>
+    <step>Owner live check: guest and member open a matter and a document (preview, related documents, communications, tracking), Daily Briefing, Email page; no AADSTS error, no 401.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Every listed surface deployed from a master SHA, version recorded.</criterion>
+    <criterion testable="true">Owner confirms guest and member live checks.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>Existing deploy scripts.</existing>
+    <extension>n/a — deployment.</extension>
+    <cost-of-doing-nothing>The fix never reaches users (the library is bundled into each surface).</cost-of-doing-nothing>
+  </justification>
+</task>

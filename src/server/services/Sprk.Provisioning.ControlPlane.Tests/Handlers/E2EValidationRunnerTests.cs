@@ -9,33 +9,23 @@
 // ADR-038 path #1 + KEEP-path rules per .claude/constraints/testing.md section
 // MUST NOT B1).
 //
-// PATH: tests/CLAUDE.md 7 KEEP paths -- this file is a component-scoped unit
+// PATH: ADR-038 KEEP paths (eight, incl. Amendment A1) -- this file is a component-scoped unit
 // test of the runner class (a pure L2 seam with no BFF wiring). It exercises
 // behavior through the runner's PUBLIC RunAsync surface. It lives in the
 // existing Tests project alongside the sibling H13 real-probe test files
-// (AiSearchTenantFilterInvariantProbeTests, SpeContainerResolverInvariantProbeTests,
-// NamingConformanceCheckerTests, ArmCostEnvelopeCheckerTests). Path is not
+// (AiSearchTenantFilterInvariantProbeTests, SpeContainerTenantDerivationInvariantProbeTests,
+// ArmCostEnvelopeCheckerTests). Path is not
 // under tests/integration/** because the runner is not itself an integration
 // boundary -- the LIVE-run integration lands in Phase F rerun (task 186).
 //
-// COVERAGE (task 181 POML acceptance criteria + G-8 Batch 11 dispatch brief):
-//   AC-1 (grep 0 ProcessStartInfo | pac auth):
-//        SourceFile_ContainsNoProcessStartInfoOrShellOutInCode.
-//   AC-2 (all effect probes independently testable against fakes):
-//        Health/ping/CORS probes each have Pass + fail-status + timeout +
-//        transport-throw coverage; the 4 SC #5 sample-workload checks (G-8
-//        Batch 11) each have Pass + graceful-skip (404 / 401 / 403 / token
-//        failure) + Fail (bad payload / empty payload / timeout) coverage;
-//        the 2 Dataverse-auth-gated probes remain surfaced as Skipped and
-//        pinned by RunAsync_HappyPath_EmitsInterimSkippedListVerbatim.
-//   AC-3 (no duplicate HTTP-probing helper):
-//        SourceFile_ReusesIHttpClientFactoryConventionOfSiblingProbes.
-//   AC-4 (build + test green): covered by CI.
-//
-// CONVERGENCE-BONUS DEFENSE:
-//   Tests pin the ALWAYS-skipped ChecksSkipped list verbatim (now 3 names --
-//   the four sample rows GRADUATED in G-8 Batch 11) so a future task that
-//   graduates a remaining Skipped row MUST also update the test.
+// COVERAGE:
+//   task 181: health / ping / CORS each Pass + fail-status + transport-throw; parameter guards; the source-file
+//        forcing functions (no shell-out, named-client convention, module registration).
+//   task 230b (keyless proof — replaced the four G-8 Batch 11 sample-workload checks): token audience
+//        api://{BffAppRegId}; the BFF refusing the L2 identity (401/403), the route missing (404), no token, a bad
+//        BffAppRegId → Failure, NEVER a skip; each service's outcome → its own check (proved passes; refused /
+//        key-credential / not-configured / failed / unknown / missing fail; unreachable is Inconclusive); a failure
+//        wins over an inconclusive; transient call faults retry once, then Inconclusive.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -45,6 +35,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Spaarke.Contracts.Provisioning;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Xunit;
 
@@ -57,24 +48,24 @@ public sealed class E2EValidationRunnerTests
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
     private const string BffApiUrl = "https://bff-acme.azurewebsites.net";
     private const string TargetSlot = "production";
+    private const string BffAppRegId = "2f3a9c1e-7b44-4d2e-9a10-5c6d7e8f9a0b";
 
-    private static readonly string[] AllSevenCheckNames =
-    {
-        E2EValidationRunner.CheckBffHealthz,
-        E2EValidationRunner.CheckBffPing,
-        E2EValidationRunner.CheckCorsDataverseOrigin,
-        E2EValidationRunner.CheckSampleAiAnalysis,
-        E2EValidationRunner.CheckSampleDocUploadIndex,
-        E2EValidationRunner.CheckSampleWorkspaceLayoutRender,
-        E2EValidationRunner.CheckSampleWizardFieldMap,
-    };
+    private static readonly string[] AllCheckNames = new[]
+        {
+            E2EValidationRunner.CheckBffHealthz,
+            E2EValidationRunner.CheckBffPing,
+            E2EValidationRunner.CheckCorsDataverseOrigin,
+            E2EValidationRunner.CheckKeylessProof,
+        }
+        .Concat(KeylessProofContract.Services.All.Select(svc => E2EValidationRunner.KeylessProofCheckPrefix + svc))
+        .ToArray();
 
     // -----------------------------------------------------------------------
     // AC-2: happy path -- all seven real checks Pass, Skipped list stable.
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task RunAsync_HappyPath_ReturnsSuccessWithAllSevenChecksPassed()
+    public async Task RunAsync_HappyPath_ReturnsSuccessWithEveryCheckPassed()
     {
         var handler = new FakeBffHttpMessageHandler(HappyResponder);
         var runner = BuildRunner(handler);
@@ -82,31 +73,28 @@ public sealed class E2EValidationRunnerTests
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
         var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().BeEquivalentTo(AllSevenCheckNames);
+        success.ChecksPassed.Should().BeEquivalentTo(AllCheckNames);
         handler.RequestedUrls.Should().Contain(u => u.EndsWith("/healthz", StringComparison.Ordinal));
         handler.RequestedUrls.Should().Contain(u => u.EndsWith("/ping", StringComparison.Ordinal));
-        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.AgentMessagePath, StringComparison.Ordinal));
-        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.SemanticSearchCountPath, StringComparison.Ordinal));
-        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.WorkspaceLayoutsPath, StringComparison.Ordinal));
-        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.FieldMappingProfilesPath, StringComparison.Ordinal));
+        handler.RequestedUrls.Should().Contain(u => u.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
         handler.RequestedMethods.Should().Contain(HttpMethod.Options);
     }
 
     [Fact]
-    public async Task RunAsync_HappyPath_SampleChecksCarryBearerToken()
+    public async Task RunAsync_KeylessProof_IsAnAuthenticatedPost_ForTheBffAppRegistrationAudience()
     {
-        // G-8 Batch 11: the four sample checks MUST be authenticated (live
-        // token against the customer BFF authority) -- never anonymous.
+        // Task 230b: the BFF validates api://{appId}; a token for the host name (the pre-230b scope) is not its audience.
+        var credential = new FakeTokenCredential();
         var handler = new FakeBffHttpMessageHandler(HappyResponder);
-        var runner = BuildRunner(handler);
+        var runner = BuildRunner(handler, credential);
 
         await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
-        var sampleRequests = handler.Requests
-            .Where(r => r.Url.Contains("/api/", StringComparison.Ordinal))
-            .ToList();
-        sampleRequests.Should().HaveCount(4);
-        sampleRequests.Should().OnlyContain(r => r.AuthorizationScheme == "Bearer" && r.AuthorizationParameter == FakeTokenCredential.TokenValue);
+        credential.RequestedScopes.Should().Equal($"api://{BffAppRegId}/.default");
+        var proof = handler.Requests.Single(r => r.Url.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
+        proof.Method.Should().Be(HttpMethod.Post);
+        proof.AuthorizationScheme.Should().Be("Bearer");
+        proof.AuthorizationParameter.Should().Be(FakeTokenCredential.TokenValue);
     }
 
     [Fact]
@@ -260,244 +248,496 @@ public sealed class E2EValidationRunnerTests
     }
 
     // -----------------------------------------------------------------------
-    // G-8 Batch 11: SC #5 sample-workload checks -- pass paths.
+    // Task 230b: the keyless proof — an auth failure is a FAILURE, never a skip.
     // -----------------------------------------------------------------------
 
-    [Fact]
-    public async Task RunAsync_WizardProfilesEmptyItemsArray_StillPasses()
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task RunAsync_BffRefusesTheL2Identity_IsAFailure_NeverASkip(HttpStatusCode status)
     {
-        // Capability-diagnostic contract: an EMPTY items array passes -- the
-        // profile-resolution path is deployed + wired; seeding mapping profiles
-        // is customer configuration, not a provisioning invariant.
         var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.FieldMappingProfilesPath))
-            {
-                return Json("{\"items\":[],\"totalCount\":0}");
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+            IsKeylessProof(req) ? new HttpResponseMessage(status) : HappyResponder(req));
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
 
-        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().Contain(E2EValidationRunner.CheckSampleWizardFieldMap);
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        failure.Diagnostic.Should().Contain(KeylessProofContract.AppRoleValue).And.Contain("H3");
     }
 
     [Fact]
-    public async Task RunAsync_SearchCountTransient503ThenOk_RetriesOnceAndPasses()
-    {
-        var countCalls = 0;
-        var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
-            {
-                countCalls++;
-                return countCalls == 1
-                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-                    : Json("{\"count\":0}");
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
-
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
-
-        countCalls.Should().Be(2, "a single transient 503 must be retried once");
-        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().Contain(E2EValidationRunner.CheckSampleDocUploadIndex);
-    }
-
-    // -----------------------------------------------------------------------
-    // G-8 Batch 11: graceful-degradation contract -- 404 / 401 / 403 / token
-    // failure land in ChecksSkipped with an explicit reason suffix, NOT in
-    // ChecksFailed (endpoint-not-deployed / RBAC gaps are infra postures,
-    // parity with the I4 probe's InfraFault discipline).
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task RunAsync_AgentMessageReturns404_SkipsWithEndpointNotDeployedReason()
+    public async Task RunAsync_BffBuildWithoutTheRoute_404_IsInconclusive_RedeployThenResume()
     {
         var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+            IsKeylessProof(req) ? new HttpResponseMessage(HttpStatusCode.NotFound) : HappyResponder(req));
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
 
-        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().NotContain(E2EValidationRunner.CheckSampleAiAnalysis);
-        success.ChecksSkipped.Should().Contain(
-            E2EValidationRunner.CheckSampleAiAnalysis + "-skipped-endpoint-not-deployed-http-404");
+        outcome.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("404").And.Contain("230b");
     }
 
     [Fact]
-    public async Task RunAsync_LayoutsReturns403_SkipsWithAuthNotGrantedReason()
+    public async Task RunAsync_ABffError500_IsAFailure_NotTransient()
     {
         var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
-            {
-                return new HttpResponseMessage(HttpStatusCode.Forbidden);
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+            IsKeylessProof(req) ? new HttpResponseMessage(HttpStatusCode.InternalServerError) : HappyResponder(req));
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
 
-        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksSkipped.Should().Contain(
-            E2EValidationRunner.CheckSampleWorkspaceLayoutRender
-            + "-skipped-auth-http-403-l2-identity-not-granted-on-bff");
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
     }
 
     [Fact]
-    public async Task RunAsync_TokenAcquisitionThrows_SkipsAllFourSampleChecks()
+    public async Task RunAsync_PlainHttpBff_NeverSendsTheToken_AndFails()
     {
+        var credential = new FakeTokenCredential();
         var handler = new FakeBffHttpMessageHandler(HappyResponder);
-        var runner = BuildRunner(handler, new ThrowingTokenCredential(
-            new InvalidOperationException("no managed identity endpoint")));
+
+        var outcome = await BuildRunner(handler, credential).RunAsync(BuildRequest(bffApiUrl: "http://bff-acme.azurewebsites.net"), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.RequestedUrls.Should().NotContain(u => u.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATokenWithoutTheRole_FailsWithTheTokenCacheDiagnostic_WithoutCallingTheBff()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"aud\":\"api://x\",\"roles\":[\"Other.Role\"]}") + ".";
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
+
+        var outcome = await BuildRunner(handler, new FakeTokenCredential(jwt)).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("carries no").And.Contain("24 hours").And.Contain("Other.Role");
+        handler.RequestedUrls.Should().NotContain(u => u.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATokenCarryingTheRole_IsSent()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"roles\":[\"" + KeylessProofContract.AppRoleValue + "\"]}") + ".";
+
+        var outcome = await BuildRunner(new FakeBffHttpMessageHandler(HappyResponder), new FakeTokenCredential(jwt))
+            .RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Success>();
+    }
+
+    [Fact]
+    public async Task RunAsync_AStatusNumberThatIsNotAnInt_IsDropped_TheOutcomeStillDecides()
+    {
+        var body = KeylessBody().Replace("\"statusCode\":200", "\"statusCode\":1e100", StringComparison.Ordinal);
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json(body) : HappyResponder(req));
+
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Success>();
+    }
+
+    [Fact]
+    public async Task RunAsync_AnUnreachableThenARefusedDuplicate_TheRefusalWins()
+    {
+        var body = KeylessBody((KeylessProofContract.Services.Cosmos, KeylessProofContract.Outcomes.Unreachable, "timeout"))
+            .Replace("]}", ",{\"service\":\"cosmos\",\"outcome\":\"refused\",\"code\":\"http-403\"}]}", StringComparison.Ordinal);
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json(body) : HappyResponder(req));
+
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Cosmos);
+    }
+
+    private static string Base64Url(string json)
+        => Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    [Fact]
+    public async Task RunAsync_NoTokenForTheBff_IsAFailure()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+            IsKeylessProof(req) ? throw new InvalidOperationException("must not be called without a token") : HappyResponder(req));
+        var runner = BuildRunner(handler, new ThrowingTokenCredential(new Azure.Identity.CredentialUnavailableException("AADSTS500011")));
 
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
-        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().BeEquivalentTo(new[]
-        {
-            E2EValidationRunner.CheckBffHealthz,
-            E2EValidationRunner.CheckBffPing,
-            E2EValidationRunner.CheckCorsDataverseOrigin,
-        });
-        success.ChecksSkipped.Should().Contain(new[]
-        {
-            E2EValidationRunner.CheckSampleAiAnalysis + "-skipped-token-acquisition-failed",
-            E2EValidationRunner.CheckSampleDocUploadIndex + "-skipped-token-acquisition-failed",
-            E2EValidationRunner.CheckSampleWorkspaceLayoutRender + "-skipped-token-acquisition-failed",
-            E2EValidationRunner.CheckSampleWizardFieldMap + "-skipped-token-acquisition-failed",
-        });
-        // No authenticated call may be attempted without a token.
-        handler.RequestedUrls.Should().NotContain(u => u.Contains("/api/", StringComparison.Ordinal));
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        failure.Diagnostic.Should().Contain("AADSTS500011");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task RunAsync_BffAppRegIdNotAnAppId_IsAFailure_AndNoTokenIsRequested(string bffAppRegId)
+    {
+        var credential = new FakeTokenCredential();
+        var runner = BuildRunner(new FakeBffHttpMessageHandler(HappyResponder), credential);
+
+        var outcome = await runner.RunAsync(BuildRequest(bffAppRegId: bffAppRegId), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        credential.RequestedScopes.Should().BeEmpty();
     }
 
     // -----------------------------------------------------------------------
-    // G-8 Batch 11: sample-workload failure paths.
+    // Task 260 (ISS-014): the secure-record isolation census — same identity and call path as the keyless proof; only
+    // `isolated` passes.
     // -----------------------------------------------------------------------
 
+    private static bool IsCensus(HttpRequestMessage req) => PathIs(req, KeylessProofContract.SecureRecordIsolationCensus.Route);
+
+    private static FakeBffHttpMessageHandler CensusAnswers(string body)
+        => new(req => IsCensus(req) ? Json(body) : throw new InvalidOperationException($"unexpected call {req.RequestUri}"));
+
     [Fact]
-    public async Task RunAsync_AgentMessageEmptyResponseText_ReturnsFailureCitingSampleAiAnalysis()
+    public async Task Census_Isolated_IsIsolated_AndIsAnAuthenticatedPostForTheBffAudience()
     {
-        var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
-            {
-                return Json("{\"responseText\":\"\"}");
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+        var credential = new FakeTokenCredential();
+        var handler = CensusAnswers("{\"status\":\"isolated\",\"verdict\":\"Isolated\",\"findings\":[]}");
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler, credential).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
 
-        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleAiAnalysis);
-        failure.Diagnostic.Should().Contain("responseText");
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Isolated>();
+        credential.RequestedScopes.Should().Equal($"api://{BffAppRegId}/.default");
+        var call = handler.Requests.Single();
+        call.Url.Should().Be(BffApiUrl + KeylessProofContract.SecureRecordIsolationCensus.Route);
+        call.Method.Should().Be(HttpMethod.Post);
+        call.AuthorizationScheme.Should().Be("Bearer");
+        call.AuthorizationParameter.Should().Be(FakeTokenCredential.TokenValue);
     }
 
     [Fact]
-    public async Task RunAsync_LayoutsEmptyArray_ReturnsFailureCitingH12bSeeding()
+    public async Task Census_Findings_IsNotIsolated_CarryingEachFinding()
     {
-        var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
-            {
-                return Json("[]");
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+        var handler = CensusAnswers(
+            "{\"status\":\"findings\",\"verdict\":\"SecureBusinessUnitHasUsers\",\"findings\":["
+            + "{\"verdict\":\"SecureBusinessUnitHasUsers\",\"message\":\"'Moved Attorney' sits in the Secure Record unit.\"},"
+            + "{\"verdict\":\"HumanPrincipalReachesSecureBusinessUnit\",\"message\":\"'Root Paralegal' holds Deep.\"}]}");
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
 
-        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleWorkspaceLayoutRender);
-        failure.Diagnostic.Should().Contain("H12b");
+        var notIsolated = outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>().Subject;
+        notIsolated.Status.Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Findings);
+        notIsolated.Verdict.Should().Be("SecureBusinessUnitHasUsers");
+        notIsolated.Findings.Should().Equal(
+            "SecureBusinessUnitHasUsers: 'Moved Attorney' sits in the Secure Record unit.",
+            "HumanPrincipalReachesSecureBusinessUnit: 'Root Paralegal' holds Deep.");
     }
 
     [Fact]
-    public async Task RunAsync_SearchCountReturnsNonJson_ReturnsFailure()
+    public async Task Census_Inert_IsNotIsolated_NeverAPass()
     {
-        var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("<html>gateway error</html>", Encoding.UTF8, "text/html"),
-                };
-            }
-            return HappyResponder(req);
-        });
-        var runner = BuildRunner(handler);
+        var handler = CensusAnswers(
+            "{\"status\":\"inert\",\"verdict\":\"SecureBusinessUnitNotFound\",\"findings\":[{\"verdict\":\"SecureBusinessUnitNotFound\",\"message\":\"Secure Record BU not found\"}]}");
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
 
-        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleDocUploadIndex);
-        failure.Diagnostic.Should().Contain("not parseable JSON");
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>()
+            .Which.Status.Should().Be(KeylessProofContract.SecureRecordIsolationCensus.Inert);
     }
 
     [Fact]
-    public async Task RunAsync_SampleCheckTimesOut_ReturnsFailureCitingTimeout()
+    public async Task Census_Error_IsInconclusive()
     {
+        var handler = CensusAnswers("{\"status\":\"error\",\"verdict\":\"unknown\",\"findings\":[]}");
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("isolation is unknown");
+    }
+
+    [Theory]
+    [InlineData("{\"status\":\"clean\",\"findings\":[]}")]                                        // unknown status
+    [InlineData("{\"verdict\":\"Isolated\",\"findings\":[]}")]                                    // no status
+    [InlineData("{\"status\":\"isolated\"}")]                                                     // isolated, no findings array
+    [InlineData("{\"status\":\"isolated\",\"findings\":\"none\"}")]                               // findings not an array
+    [InlineData("<html>gateway</html>")]                                                         // not JSON
+    [InlineData("{\"status\":\"isolated\",\"findings\":[{\"verdict\":\"X\",\"message\":\"y\"}]}")] // isolated WITH findings
+    [InlineData("{\"status\":\"ISOLATED\",\"findings\":[]}")]                                     // statuses are exact
+    [InlineData("{\"status\":\" isolated\",\"findings\":[]}")]                                    // padded
+    [InlineData("{\"status\":\"isolated!\",\"findings\":[]}")]                                    // decorated
+    [InlineData("{\"status\":\"isolated\\u200b\",\"findings\":[]}")]                              // zero-width suffix
+    public async Task Census_AnAnswerThisBuildCannotRead_FailsClosed(string body)
+    {
+        var outcome = await BuildRunner(CensusAnswers(body)).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Census_BffRefusesTheL2Identity_Fails_NeverASkip(HttpStatusCode status)
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(status));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain(KeylessProofContract.AppRoleValue).And.Contain(E2EValidationRunner.CheckSecureIsolationCensus);
+    }
+
+    [Fact]
+    public async Task Census_ABffBuildWithoutTheRoute_404_IsInconclusive_NamingTask260()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("404").And.Contain("260");
+    }
+
+    [Fact]
+    public async Task Census_ABffError500_Fails()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+    }
+
+    [Fact]
+    public async Task Census_Transient503ThenIsolated_RetriesOnce()
+    {
+        var calls = 0;
+        var handler = new FakeBffHttpMessageHandler(_ => ++calls == 1
+            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            : Json("{\"status\":\"isolated\",\"verdict\":\"Isolated\",\"findings\":[]}"));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Isolated>();
+        calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Census_TransientTwice_IsInconclusive()
+    {
+        var handler = new FakeBffHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.GatewayTimeout));
+
+        var outcome = await BuildRunner(handler).RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Inconclusive>();
+    }
+
+    [Fact]
+    public async Task Census_PlainHttpBff_NeverSendsTheToken_AndFails()
+    {
+        var credential = new FakeTokenCredential();
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, credential)
+            .RunSecureIsolationCensusAsync(BuildRequest(bffApiUrl: "http://bff-acme.azurewebsites.net"), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>().Which.Diagnostic.Should().Contain("not https");
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task Census_BffAppRegIdNotAnAppId_Fails_AndNoTokenIsRequested(string bffAppRegId)
+    {
+        var credential = new FakeTokenCredential();
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, credential)
+            .RunSecureIsolationCensusAsync(BuildRequest(bffAppRegId: bffAppRegId), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>();
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Census_ATokenWithoutTheRole_Fails_WithoutCallingTheBff()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"roles\":[\"Other.Role\"]}") + ".";
+        var handler = new FakeBffHttpMessageHandler(_ => throw new InvalidOperationException("must not be called"));
+
+        var outcome = await BuildRunner(handler, new FakeTokenCredential(jwt))
+            .RunSecureIsolationCensusAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SecureIsolationCensusOutcome.Failed>().Which.Diagnostic.Should().Contain("carries no");
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseCensus_ControlCharactersAreNeutralised_LongMessagesCapped_AndExtraFindingsCounted()
+    {
+        var findings = Enumerable.Range(1, E2EValidationRunner.MaxReportedFindings + 3)
+            .Select(i => $"{{\"verdict\":\"SecureBusinessUnitHasUsers\",\"message\":\"user {i}\\r\\nInjected: line{new string('x', 600)}\"}}");
+        var body = "{\"status\":\"findings\",\"verdict\":\"SecureBusinessUnitHasUsers\",\"findings\":[" + string.Join(",", findings) + "]}";
+
+        var outcome = E2EValidationRunner.ParseCensus(body);
+
+        var notIsolated = outcome.Should().BeOfType<SecureIsolationCensusOutcome.NotIsolated>().Subject;
+        notIsolated.Findings.Should().HaveCount(E2EValidationRunner.MaxReportedFindings + 1);
+        notIsolated.Findings.Take(E2EValidationRunner.MaxReportedFindings).Should().OnlyContain(f =>
+            !f.Any(char.IsControl) && f.Length <= "SecureBusinessUnitHasUsers: ".Length + E2EValidationRunner.MaxReportedFindingLength + 3);
+        notIsolated.Findings.Last().Should().Contain("+3 more");
+    }
+
+    [Theory]
+    [InlineData("refused", "http-403")]
+    [InlineData("key-credential", "key-configured:AzureOpenAI:ApiKey")]
+    [InlineData("not-configured", "setting-missing:AzureOpenAI:Endpoint")]
+    [InlineData("failed", "http-404")]
+    [InlineData("healthy", "ok")] // an outcome this L2 build does not know is never a pass
+    public async Task RunAsync_AServiceNotProved_FailsThatServiceCheck(string outcome, string code)
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.OpenAiChat, outcome, code)))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.OpenAiChat);
+        failure.Diagnostic.Should().Contain(outcome).And.Contain(code);
+    }
+
+    [Fact]
+    public async Task RunAsync_BlobNotInUseByDesign_Passes()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.BlobStorage, KeylessProofContract.Outcomes.NotInUse, "store-disabled:SessionFileStore:BlobEndpoint")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Success>()
+            .Which.ChecksPassed.Should().Contain(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.BlobStorage + "-not-in-use");
+    }
+
+    [Fact]
+    public async Task RunAsync_NotInUseForAServiceEveryStampUses_Fails()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.OpenAiChat, KeylessProofContract.Outcomes.NotInUse, "store-disabled:x")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.OpenAiChat);
+    }
+
+    [Fact]
+    public async Task RunAsync_AServiceMissingFromTheAnswer_Fails()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody(omit: KeylessProofContract.Services.Redis))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Redis);
+    }
+
+    [Fact]
+    public async Task RunAsync_ADuplicateEntry_CannotHideARefusal()
+    {
+        var body = KeylessBody((KeylessProofContract.Services.Cosmos, KeylessProofContract.Outcomes.Refused, "http-403"))
+            .Replace("\"services\":[", "\"services\":[{\"service\":\"cosmos\",\"outcome\":\"proved\",\"code\":\"ok\"},", StringComparison.Ordinal);
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json(body) : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Cosmos);
+    }
+
+    [Fact]
+    public async Task RunAsync_AServiceUnreachable_IsInconclusive_NotAFailure()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.Redis, KeylessProofContract.Outcomes.Unreachable, "redis-connection")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.ChecksInconclusive.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Redis);
+    }
+
+    [Fact]
+    public async Task RunAsync_AFailureWinsOverAnInconclusive()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody(
+                (KeylessProofContract.Services.Redis, KeylessProofContract.Outcomes.Unreachable, "timeout"),
+                (KeylessProofContract.Services.Cosmos, KeylessProofContract.Outcomes.Refused, "http-403")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Cosmos);
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofTransient503ThenOk_RetriesOnceAndPasses()
+    {
+        var calls = 0;
         var handler = new FakeBffHttpMessageHandler(req =>
         {
-            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+            if (IsKeylessProof(req))
             {
-                // Simulates the linked-CTS timeout firing mid-call.
-                throw new OperationCanceledException("simulated per-check timeout");
+                return ++calls == 1 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : Json(KeylessBody());
             }
             return HappyResponder(req);
         });
-        var runner = BuildRunner(handler);
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
 
-        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleAiAnalysis);
-        failure.Diagnostic.Should().Contain("timed out");
-        failure.Diagnostic.Should().Contain("SampleWorkloadCheckTimeout");
+        result.Should().BeOfType<E2EValidationOutcome.Success>();
+        calls.Should().Be(2);
     }
 
-    // -----------------------------------------------------------------------
-    // Aggregate-behavior tests: every check runs even if an earlier one fails
-    // (parity with the .ps1's continue-on-fail Add-TestResult pattern) --
-    // proves the runner assembles a COMPREHENSIVE snapshot for the operator,
-    // not a first-failure short-circuit.
-    // -----------------------------------------------------------------------
-
     [Fact]
-    public async Task RunAsync_MultipleFailures_AggregatesEveryFailedCheck()
+    public async Task RunAsync_KeylessProofTransientTwice_IsInconclusive()
     {
         var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (req.Method == HttpMethod.Options)
-            {
-                return new HttpResponseMessage(HttpStatusCode.BadRequest); // no CORS header
-            }
-            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
-        });
+            IsKeylessProof(req) ? new HttpResponseMessage(HttpStatusCode.BadGateway) : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.ChecksInconclusive.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofTimesOut_IsInconclusive()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? throw new TaskCanceledException("simulated HttpClient timeout")
+            : HappyResponder(req));
         var runner = BuildRunner(handler);
 
-        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+        var result = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
-        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().BeEquivalentTo(AllSevenCheckNames);
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("KeylessProofTimeout");
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofUnparseableAnswer_IsAFailure()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json("<html>gateway</html>") : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
     }
 
     // -----------------------------------------------------------------------
@@ -515,7 +755,7 @@ public sealed class E2EValidationRunnerTests
         var outcome = await runner.RunAsync(BuildRequest(bffApiUrl: ""), CancellationToken.None);
 
         var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().BeEquivalentTo(AllSevenCheckNames);
+        failure.ChecksFailed.Should().BeEquivalentTo(AllCheckNames);
         failure.Diagnostic.Should().Contain("BffApiUrl parameter is empty");
     }
 
@@ -548,7 +788,7 @@ public sealed class E2EValidationRunnerTests
     [Fact]
     public async Task RunAsync_BlankDataverseUrl_ReturnsFailureCitingCorsOnly()
     {
-        // Health + Ping + the four sample checks still run against the BFF;
+        // Health + Ping + the keyless proof still run against the BFF;
         // CORS is Failed because we won't send an ambiguous Origin header.
         var handler = new FakeBffHttpMessageHandler(req =>
         {
@@ -621,14 +861,14 @@ public sealed class E2EValidationRunnerTests
     }
 
     [Fact]
-    public void AllBffDependentCheckNames_ContainsSevenPinnedNames()
+    public void AllBffDependentCheckNames_AreTheBffChecksAndOnePerKeylessService()
     {
-        E2EValidationRunner.AllBffDependentCheckNames().Should().BeEquivalentTo(AllSevenCheckNames);
+        E2EValidationRunner.AllBffDependentCheckNames().Should().BeEquivalentTo(AllCheckNames);
     }
 
     // -----------------------------------------------------------------------
-    // AC-1 + AC-3 forcing functions -- source-file scans (parity with task 182
-    // NamingConformanceCheckerTests.SourceFile_ContainsNoProcessStartInfoOrShellOutInCode).
+    // AC-1 + AC-3 forcing functions -- source-file scans (parity with task 182's
+    // NamingConformanceCheckerTests source scan; that test was deleted by task 230a).
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -723,7 +963,7 @@ public sealed class E2EValidationRunnerTests
             credential ?? new FakeTokenCredential(),
             Options.Create(new H13AcceptanceOptions
             {
-                SampleWorkloadCheckTimeout = TimeSpan.FromSeconds(30),
+                KeylessProofTimeout = TimeSpan.FromSeconds(30),
             }),
             NullLogger<E2EValidationRunner>.Instance);
         runner.TransientRetryDelay = TimeSpan.Zero; // no real sleeping in unit tests
@@ -732,13 +972,38 @@ public sealed class E2EValidationRunnerTests
 
     private static E2EValidationRequest BuildRequest(
         string bffApiUrl = BffApiUrl,
-        string dataverseUrl = DataverseUrl)
+        string dataverseUrl = DataverseUrl,
+        string bffAppRegId = BffAppRegId)
         => new(
             CustomerId: CustomerId,
             RunId: RunId,
             DataverseUrl: dataverseUrl,
             BffApiUrl: bffApiUrl,
-            TargetSlotName: TargetSlot);
+            TargetSlotName: TargetSlot,
+            BffAppRegId: bffAppRegId);
+
+    private static bool IsKeylessProof(HttpRequestMessage req) => PathIs(req, KeylessProofContract.Route);
+
+    /// <summary>
+    /// The BFF's keyless-proof answer: every service proved, except the given overrides; <paramref name="omit"/> drops a
+    /// service from the answer.
+    /// </summary>
+    private static string KeylessBody(params (string Service, string Outcome, string Code)[] overrides)
+        => KeylessBody(null, overrides);
+
+    private static string KeylessBody(string? omit, params (string Service, string Outcome, string Code)[] overrides)
+    {
+        var entries = KeylessProofContract.Services.All
+            .Where(svc => svc != omit)
+            .Select(svc =>
+            {
+                var o = overrides.FirstOrDefault(x => x.Service == svc);
+                var outcome = o.Service is null ? KeylessProofContract.Outcomes.Proved : o.Outcome;
+                var code = o.Service is null ? "ok" : o.Code;
+                return $"{{\"service\":\"{svc}\",\"outcome\":\"{outcome}\",\"statusCode\":200,\"elapsedMs\":5,\"code\":\"{code}\"}}";
+            });
+        return "{\"services\":[" + string.Join(",", entries) + "]}";
+    }
 
     private static bool PathIs(HttpRequestMessage req, string path)
         => string.Equals(req.RequestUri?.AbsolutePath, path, StringComparison.Ordinal);
@@ -754,21 +1019,9 @@ public sealed class E2EValidationRunnerTests
         {
             return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
         }
-        if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+        if (IsKeylessProof(req))
         {
-            return Json("{\"responseText\":\"The assistant for this project is operational.\"}");
-        }
-        if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
-        {
-            return Json("{\"count\":0,\"appliedFilters\":null}");
-        }
-        if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
-        {
-            return Json("[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"Daily Briefing\",\"isSystem\":true}]");
-        }
-        if (PathIs(req, E2EValidationRunner.FieldMappingProfilesPath))
-        {
-            return Json("{\"items\":[{\"name\":\"matter-to-todo\"}],\"totalCount\":1}");
+            return Json(KeylessBody());
         }
         // /healthz + /ping (and any other anonymous probe target).
         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -842,10 +1095,19 @@ public sealed class E2EValidationRunnerTests
 
     private sealed class FakeTokenCredential : TokenCredential
     {
-        public const string TokenValue = "fake-sc5-sample-check-token";
+        public const string TokenValue = "fake-keyless-proof-token";
+
+        private readonly string _token;
+
+        public FakeTokenCredential(string token = TokenValue) => _token = token;
+
+        public List<string> RequestedScopes { get; } = new();
 
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
-            => new(TokenValue, DateTimeOffset.UtcNow.AddHours(1));
+        {
+            RequestedScopes.AddRange(requestContext.Scopes);
+            return new(_token, DateTimeOffset.UtcNow.AddHours(1));
+        }
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new(GetToken(requestContext, cancellationToken));

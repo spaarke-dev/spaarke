@@ -7,16 +7,16 @@
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live pwsh / az CLI / Graph / Dataverse.
-//   Fakes replace the repository + 6 collaborator seams + registry lookup
+//   Fakes replace the repository + 5 collaborator seams + registry lookup
 //   client so the handler orchestration + §4C rollback classification + all
 //   green/red branches are exercised in isolation. Live-Azure coverage
 //   belongs to the Phase F acceptance suite (task 089) per POML mandatory
 //   pre-work #escalation.
 //
 // COVERAGE (POML acceptance criteria mapped to test cases):
-//   AC-1   Happy path — all 6 gates green → Success + Cosmos state Completed +
-//          registry Ready transition + all 6 H13 gates Verified.
-//   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
+//   AC-1   Happy path — all 5 gates green → Success + Cosmos state Completed +
+//          registry Ready transition + all 5 H13 gates Verified.
+//   AC-2a  Missing tenantId → Resumable + MissingTenantId.
 //   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
 //   AC-2c  Missing InterStepState.BffBuildId (H9 output, task 245b) → Resumable + MissingBuildId.
 //   AC-2d  Missing InterStepState.BffApiUrl (H9 output, task 245b) → Resumable + MissingBffApiUrl.
@@ -30,12 +30,19 @@
 //   AC-3   Extended validate script Failure (SC #5) → QuarantineRequired +
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
+//   AC-22..27 (task 230b) missing BffAppRegId → Resumable; the ARM keyless check Failed → QuarantineRequired
+//          StampKeyAuthEnabled, InfraFault / throw → Resumable StampKeylessInfraFault; an Inconclusive validation →
+//          Resumable ExtendedValidationInconclusive; BffAppRegId and the stamp coordinates reach the collaborators.
+//   AC-28..35 (task 260, ISS-014) the secure-record isolation census: isolated → Ready + gate h13-secure-isolation;
+//          findings / inert / a failed call → QuarantineRequired with distinct codes and never Ready; inconclusive or a
+//          throw → Resumable; a census verdict outranks an inconclusive live check; a trap failure still outranks it.
 //   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
-//   AC-6a..e Each of 5 I1–I5 invariant fail branches → QuarantineRequired + distinct code.
+//   AC-6a..d Each of 4 runtime I2–I5 invariant fail branches → QuarantineRequired + distinct code
+//          (task 230a: I1 is build-time — the I1 ArchTest — not a runtime invariant).
 //   AC-7   Trap verifier InfraFault (no failed traps) → Resumable + TrapVerifierInfraFault.
 //   AC-8   Invariant verifier InfraFault (no failed invariants) → Resumable + InvariantVerifierInfraFault.
-//   AC-9   Naming-conformance FAILED (SC #17) → QuarantineRequired + NamingConformanceFailed.
-//   AC-10  Naming-conformance infra fault → Resumable + NamingConformanceInfraFault.
+//   AC-9/AC-10 (naming-conformance FAILED / infra fault) DELETED by task 230a with H13's naming
+//          step — naming conformance is a repo lint enforced once in CI.
 //   AC-11a Cost drift > threshold + CostDriftFailsRun=false (default) → SUCCESS
 //          with advisory-warn on the run.
 //   AC-11b Cost drift > threshold + CostDriftFailsRun=true → QuarantineRequired +
@@ -49,7 +56,7 @@
 //   AC-17  Run not found → Resumable + RunNotFound.
 //   AC-18  HandlerId mismatch → throws InvalidOperationException.
 //   AC-19a..g Trap rejection code mapping table — each TrapKind maps to distinct code.
-//   AC-20a..e Invariant rejection code mapping table — each InvariantKind maps to distinct code.
+//   AC-20a..d Invariant rejection code mapping table — each InvariantKind maps to distinct code.
 //   AC-21  All infra faults present at once — first-in-priority (extended-validate
 //          infra fault) wins the diagnostic; still Resumable.
 //   AC-22  Trap Failed short-circuits over invariant Failed (both present) —
@@ -103,9 +110,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H13");
 
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.ExtendedValidationVerified);
+        repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.StampKeylessVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.TrapCatalogVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.InvariantCatalogVerified);
-        repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.NamingConformanceVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.CostEnvelopeVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.RegistryReadyTransitioned);
         repo.LastWrittenRun.GateStates[H13Gates.TrapCatalogVerified].Status.Should().Be(GateState.Verified);
@@ -113,7 +120,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(1);
         seams.Traps.CallCount.Should().Be(1);
         seams.Invariants.CallCount.Should().Be(1);
-        seams.Naming.CallCount.Should().Be(1);
         seams.Cost.CallCount.Should().Be(1);
         seams.Registry.CallCount.Should().Be(1);
     }
@@ -221,7 +227,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(0);
         seams.Traps.CallCount.Should().Be(0);
         seams.Invariants.CallCount.Should().Be(0);
-        seams.Naming.CallCount.Should().Be(0);
         seams.Cost.CallCount.Should().Be(0);
         seams.Registry.CallCount.Should().Be(0);
         seams.RegistryClient.UpdateColumnsCallCount.Should().Be(0);
@@ -263,6 +268,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         trapRequest.AppServiceName.Should().Be(AppServiceName);
         trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
         trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
+        seams.Invariants.LastRequest!.ContainerTypeId.Should().Be("ct-from-intake", "I4 compares the BFF's container type with the run's (task 227c)");
+        seams.Invariants.LastRequest.SpeContainerId.Should().Be(run.InterStepState.SpeContainerId ?? string.Empty,
+            "I4 compares the BFF's container settings with H8's container (task 227c)");
         seams.Cost.LastRequest!.ResourceGroupName.Should().Be(ResourceGroupName);
 
         var columns = seams.RegistryClient.LastColumns!;
@@ -344,10 +352,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Registry.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-6 invariant fail branches (5 tests) ----------
+    // ---------- AC-6 invariant fail branches (4 tests) ----------
 
     [Theory]
-    [InlineData(InvariantKind.I1NoHardcodedTenant, H13Rejections.InvariantI1Failed)]
     [InlineData(InvariantKind.I2AiSearchTenantFilter, H13Rejections.InvariantI2Failed)]
     [InlineData(InvariantKind.I3CosmosPartitionKey, H13Rejections.InvariantI3Failed)]
     [InlineData(InvariantKind.I4SpeContainerResolver, H13Rejections.InvariantI4Failed)]
@@ -398,40 +405,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(H13Rejections.InvariantVerifierInfraFault);
-    }
-
-    // ---------- AC-9 naming-conformance FAILED ----------
-
-    [Fact]
-    public async Task AC9_NamingConformanceFailed_FailsQuarantine()
-    {
-        var repo = new FakeRepository(BuildRun(), etag: "etag-9");
-        var handler = BuildHandler(repo, out _,
-            configureSeams: s => s.Naming = FakeNamingChecker.Failure(1, "R1: SPRK-DEV-DATAVERSE-URL contains env token DEV"));
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(H13Rejections.NamingConformanceFailed);
-        failure.Diagnostic.Should().Contain("SPRK-DEV-DATAVERSE-URL");
-        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
-    }
-
-    // ---------- AC-10 naming-conformance infra fault ----------
-
-    [Fact]
-    public async Task AC10_NamingConformanceInfraFault_FailsResumable()
-    {
-        var repo = new FakeRepository(BuildRun(), etag: "etag-10");
-        var handler = BuildHandler(repo, out _,
-            configureSeams: s => s.Naming = FakeNamingChecker.Throws(new FileNotFoundException("script missing")));
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H13Rejections.NamingConformanceInfraFault);
     }
 
     // ---------- AC-11a cost drift advisory-warn (default) ----------
@@ -630,9 +603,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(0);
         seams.Traps.CallCount.Should().Be(0);
         seams.Invariants.CallCount.Should().Be(0);
-        seams.Naming.CallCount.Should().Be(0);
         seams.Cost.CallCount.Should().Be(0);
         seams.Registry.CallCount.Should().Be(0);
+        seams.Validator.CensusCallCount.Should().Be(0, "a completed run is a no-op — the census is not re-run");
     }
 
     // ---------- AC-16 idempotency-key format determinism ----------
@@ -703,7 +676,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     // ---------- AC-20 invariant rejection code mapping ----------
 
     [Theory]
-    [InlineData(InvariantKind.I1NoHardcodedTenant, H13Rejections.InvariantI1Failed)]
     [InlineData(InvariantKind.I2AiSearchTenantFilter, H13Rejections.InvariantI2Failed)]
     [InlineData(InvariantKind.I3CosmosPartitionKey, H13Rejections.InvariantI3Failed)]
     [InlineData(InvariantKind.I4SpeContainerResolver, H13Rejections.InvariantI4Failed)]
@@ -732,6 +704,262 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         failure.RejectionCode.Should().Be(H13Rejections.TrapT1Failed, "trap failure has higher priority in aggregation");
     }
 
+    // ---------- AC-22..27 keyless (task 230b) ----------
+
+    [Fact]
+    public async Task AC22_MissingBffAppRegId_FailsResumable_NoSeamInvoked()
+    {
+        var run = BuildRun();
+        run.InterStepState.BffAppRegId = null;
+        var repo = new FakeRepository(run, etag: "etag-22");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.MissingBffAppRegId);
+        failure.Diagnostic.Should().Contain("H3").And.Contain("api://");
+        seams.Validator.CallCount.Should().Be(0);
+        seams.Keyless.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC22b_CompletedRun_MissingBffAppRegId_StaysANoOp()
+    {
+        // The BffAppRegId guard runs after the level-3 idempotency short-circuit: a completed run is never re-judged.
+        var run = BuildRun();
+        run.InterStepState.BffAppRegId = null;
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = H13E2EAcceptanceGateHandler.HandlerIdentifier,
+            IdempotencyKey = H13E2EAcceptanceGateHandler.BuildIdempotencyKey(CustomerId, BuildId),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+        var repo = new FakeRepository(run, etag: "etag-22b");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seams.Validator.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC23_StampAcceptsKeys_FailsQuarantine_NamingTheViolations()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-23");
+        var handler = BuildHandler(repo, out var seams,
+            configureSeams: s => s.Keyless = FakeKeyless.Of(new StampKeylessOutcome.Failed(new[]
+            {
+                "Microsoft.Storage/storageAccounts 'sprkacmesa': allowSharedKeyAccess is not false",
+                "App Service 'acme-bff' slot 'staging': app setting 'AzureOpenAI__ApiKey' is a key",
+            })));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.StampKeyAuthEnabled);
+        failure.Diagnostic.Should().Contain("allowSharedKeyAccess").And.Contain("AzureOpenAI__ApiKey");
+        seams.Registry.CallCount.Should().Be(0, "a stamp that accepts keys never reaches Ready");
+    }
+
+    [Fact]
+    public async Task AC24_KeylessInfraFault_FailsResumable()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-24");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Keyless = FakeKeyless.Of(new StampKeylessOutcome.InfraFault("ARM GET returned HTTP 429")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.StampKeylessInfraFault);
+    }
+
+    [Fact]
+    public async Task AC25_KeylessVerifierThrows_IsAnInfraFault_FailsResumable()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-25");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Keyless = FakeKeyless.Throws(new HttpRequestException("socket closed")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.StampKeylessInfraFault);
+    }
+
+    [Fact]
+    public async Task AC26_ValidationInconclusive_FailsResumable_NotQuarantine()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-26");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Validator = FakeValidator.Inconclusive(new[] { "keyless-proof-redis" }, "keyless-proof-redis: unreachable (redis-connection)"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable, "no check failed — a transient fault reaches no verdict");
+        failure.RejectionCode.Should().Be(H13Rejections.ExtendedValidationInconclusive);
+        failure.Diagnostic.Should().Contain("keyless-proof-redis");
+    }
+
+    [Fact]
+    public async Task AC27_BffAppRegIdAndStampCoordinates_ReachTheCollaborators()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-27");
+        var handler = BuildHandler(repo, out var seams);
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        seams.Validator.LastRequest!.BffAppRegId.Should().Be(run.InterStepState.BffAppRegId,
+            "the keyless proof's token audience is H3's app registration");
+        seams.Keyless.LastRequest.Should().BeEquivalentTo(new
+        {
+            ResourceGroupName = run.InterStepState.ResourceGroupName,
+            AppServiceName = run.InterStepState.AppServiceName,
+        }, o => o.ExcludingMissingMembers());
+    }
+
+    // ---------- AC-28..35 (task 260, ISS-014): the secure-record isolation census gates Ready ----------
+
+    [Fact]
+    public async Task AC28_CensusIsolated_IsCalledOnceWithTheStampCoordinates_AndItsGateIsVerified()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-28");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seams.Validator.CensusCallCount.Should().Be(1);
+        seams.Validator.LastCensusRequest!.BffAppRegId.Should().Be(run.InterStepState.BffAppRegId);
+        seams.Validator.LastCensusRequest.BffApiUrl.Should().Be(BffApiUrl);
+        repo.LastWrittenRun!.GateStates[H13Gates.SecureIsolationVerified].Status.Should().Be(GateState.Verified);
+        seams.Registry.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AC29_CensusFindings_Quarantines_WithTheFindings_AndNeverReachesReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-29");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.NotIsolated("findings", "SecureBusinessUnitHasUsers",
+                new[] { "SecureBusinessUnitHasUsers: 'Moved Attorney' sits in the Secure Record unit." }));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationNotIsolated);
+        failure.Diagnostic.Should().Contain("Moved Attorney").And.Contain("SecureBusinessUnitHasUsers");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        seams.Registry.CallCount.Should().Be(0, "a run whose census is not isolated never reaches Ready");
+    }
+
+    [Fact]
+    public async Task AC30_CensusInert_Quarantines_InertIsNeverAPass()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-30");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.NotIsolated("inert", "SecureBusinessUnitNotFound",
+                new[] { "SecureBusinessUnitNotFound: Secure Record BU not found" }));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInert);
+        failure.Diagnostic.Should().Contain("H7b");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC31_CensusCallFailed_Quarantines()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-31");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.Failed("secure-isolation-census: the customer BFF refused the L2 identity (HTTP 403)."));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationCensusFailed);
+        failure.Diagnostic.Should().Contain("HTTP 403");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC32_CensusInconclusive_IsResumable_AndNeverReachesReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-32");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.Inconclusive("secure-isolation-census: the BFF could not read the census (status 'error')"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInconclusive);
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC33_CensusCallThrows_IsResumable_NeverReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-33");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            throw new HttpRequestException("socket closed"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInconclusive);
+        failure.Diagnostic.Should().Contain("socket closed");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC34_CensusNotIsolated_WinsOverAnInconclusiveLiveCheck()
+    {
+        // A verdict against the stamp outranks a transient fault elsewhere: resuming would not clear it.
+        var repo = new FakeRepository(BuildRun(), etag: "etag-34");
+        var handler = BuildHandler(repo, out _, configureSeams: s =>
+        {
+            s.Validator = FakeValidator.Inconclusive(new[] { "keyless-proof-redis" }, "keyless-proof-redis: unreachable");
+            ((FakeValidator)s.Validator).Census = () =>
+                new SecureIsolationCensusOutcome.NotIsolated("findings", "OwnerTeamHasMembers", new[] { "OwnerTeamHasMembers: x" });
+        });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.SecureIsolationNotIsolated);
+    }
+
+    [Fact]
+    public async Task AC35_ATrapFailure_StillOutranksTheCensus()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-35");
+        var handler = BuildHandler(repo, out _, configureSeams: s =>
+        {
+            s.Traps = FakeTrapVerifier.WithFailure(TrapKind.T2DataverseAppUser, "missing app user");
+            ((FakeValidator)s.Validator).Census = () =>
+                new SecureIsolationCensusOutcome.NotIsolated("findings", "OwnerTeamHasMembers", new[] { "OwnerTeamHasMembers: x" });
+        });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.TrapT2Failed);
+    }
+
     // ---------- helpers ----------
 
     private sealed class Seams
@@ -739,14 +967,14 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public IE2EValidationRunner Validator { get; set; } = FakeValidator.Success();
         public IE2ETrapVerifier Traps { get; set; } = FakeTrapVerifier.AllPassed();
         public IE2EInvariantVerifier Invariants { get; set; } = FakeInvariantVerifier.AllPassed();
-        public INamingConformanceChecker Naming { get; set; } = FakeNamingChecker.Success();
+        public IStampKeylessVerifier Keyless { get; set; } = FakeKeyless.Of(new StampKeylessOutcome.Passed(new[] { "acme-search" }));
         public ICostEnvelopeChecker Cost { get; set; } = FakeCostChecker.WithinBudget();
         public IRegistrySetupStatusUpdater Registry { get; set; } = FakeRegistryUpdater.Success();
 
         public FakeValidator ValidatorFake => (FakeValidator)Validator;
         public FakeTrapVerifier TrapsFake => (FakeTrapVerifier)Traps;
         public FakeInvariantVerifier InvariantsFake => (FakeInvariantVerifier)Invariants;
-        public FakeNamingChecker NamingFake => (FakeNamingChecker)Naming;
+        public FakeKeyless KeylessFake => (FakeKeyless)Keyless;
         public FakeCostChecker CostFake => (FakeCostChecker)Cost;
         public FakeRegistryUpdater RegistryFake => (FakeRegistryUpdater)Registry;
 
@@ -758,7 +986,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public required FakeValidator Validator { get; init; }
         public required FakeTrapVerifier Traps { get; init; }
         public required FakeInvariantVerifier Invariants { get; init; }
-        public required FakeNamingChecker Naming { get; init; }
+        public required FakeKeyless Keyless { get; init; }
         public required FakeCostChecker Cost { get; init; }
         public required FakeRegistryUpdater Registry { get; init; }
         // MED#10 SESSION-19: expose the wire-registry-client so tests can
@@ -788,15 +1016,15 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             Validator = seams.ValidatorFake,
             Traps = seams.TrapsFake,
             Invariants = seams.InvariantsFake,
-            Naming = seams.NamingFake,
+            Keyless = seams.KeylessFake,
             Cost = seams.CostFake,
             Registry = seams.RegistryFake,
             RegistryClient = registryClient,
         };
 
         return new H13E2EAcceptanceGateHandler(
-            repo, seams.Validator, seams.Traps, seams.Invariants,
-            seams.Naming, seams.Cost, seams.Registry,
+            repo, seams.Validator, seams.Traps, seams.Invariants, seams.Keyless,
+            seams.Cost, seams.Registry,
             registryClient, Options.Create(options),
             NullLogger<H13E2EAcceptanceGateHandler>.Instance);
     }
@@ -931,11 +1159,33 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         }
     }
 
+    private sealed class FakeKeyless : IStampKeylessVerifier
+    {
+        private readonly Func<StampKeylessOutcome> _verify;
+        public int CallCount { get; private set; }
+        public StampKeylessRequest? LastRequest { get; private set; }
+        private FakeKeyless(Func<StampKeylessOutcome> verify) { _verify = verify; }
+
+        public static FakeKeyless Of(StampKeylessOutcome outcome) => new(() => outcome);
+        public static FakeKeyless Throws(Exception ex) => new(() => throw ex);
+
+        public Task<StampKeylessOutcome> VerifyAsync(StampKeylessRequest request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_verify());
+        }
+    }
+
     private sealed class FakeValidator : IE2EValidationRunner
     {
         private readonly Func<Task<E2EValidationOutcome>> _run;
         public int CallCount { get; private set; }
+        public E2EValidationRequest? LastRequest { get; private set; }
         private FakeValidator(Func<Task<E2EValidationOutcome>> run) { _run = run; }
+
+        public static FakeValidator Inconclusive(IReadOnlyList<string> checks, string diag) =>
+            new(() => Task.FromResult<E2EValidationOutcome>(new E2EValidationOutcome.Inconclusive(checks, diag)));
 
         public static FakeValidator Success() =>
             new(() => Task.FromResult<E2EValidationOutcome>(new E2EValidationOutcome.Success(
@@ -947,7 +1197,20 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public Task<E2EValidationOutcome> RunAsync(E2EValidationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return _run();
+        }
+
+        // Task 260: the secure-record isolation census — `isolated` unless a test says otherwise.
+        public Func<SecureIsolationCensusOutcome> Census { get; set; } = () => new SecureIsolationCensusOutcome.Isolated();
+        public int CensusCallCount { get; private set; }
+        public E2EValidationRequest? LastCensusRequest { get; private set; }
+
+        public Task<SecureIsolationCensusOutcome> RunSecureIsolationCensusAsync(E2EValidationRequest request, CancellationToken ct)
+        {
+            CensusCallCount++;
+            LastCensusRequest = request;
+            return Task.FromResult(Census());
         }
     }
 
@@ -1032,29 +1295,13 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             return new FakeInvariantVerifier(new InvariantCatalogVerificationResult(outcomes));
         }
 
+        public InvariantVerificationRequest? LastRequest { get; private set; }
+
         public Task<InvariantCatalogVerificationResult> VerifyAllAsync(InvariantVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return Task.FromResult(_result);
-        }
-    }
-
-    private sealed class FakeNamingChecker : INamingConformanceChecker
-    {
-        private readonly Func<Task<NamingConformanceOutcome>> _check;
-        public int CallCount { get; private set; }
-        private FakeNamingChecker(Func<Task<NamingConformanceOutcome>> check) { _check = check; }
-
-        public static FakeNamingChecker Success() =>
-            new(() => Task.FromResult<NamingConformanceOutcome>(new NamingConformanceOutcome.Success()));
-        public static FakeNamingChecker Failure(int exit, string diag) =>
-            new(() => Task.FromResult<NamingConformanceOutcome>(new NamingConformanceOutcome.Failure(exit, diag)));
-        public static FakeNamingChecker Throws(Exception ex) => new(() => throw ex);
-
-        public Task<NamingConformanceOutcome> CheckAsync(NamingConformanceRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            return _check();
         }
     }
 

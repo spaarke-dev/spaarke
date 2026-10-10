@@ -144,12 +144,13 @@ None of these is a required check. Full per-workflow detail: [`docs/procedures/c
 | Workflow | Purpose | Triggers |
 |----------|---------|----------|
 | `workflows-validate.yml` (actionlint) | Lints every workflow YAML file | Every PR |
-| `provisioning-prereqs-validate.yml` | `prereqs.yaml` + `intake.schema.json` shape and parser parity | PR, push to master, merge_group |
+| `ci-router.yml` job `prereqs` (was `provisioning-prereqs-validate.yml`, retired 2026-10-09) | `prereqs.yaml` + `intake.schema.json` shape and parser parity — BLOCKING via `CI / Router` | PR, push to master, merge_group — when `scripts/provisioning-prereqs/**`, `.claude/skills/provision-environment/**` or `ci-router.yml` changes (docs-only diffs included) |
 | `css-reset-gate.yml` | Code Page `index.html` box-sizing reset | PR/push on Code Page `index.html` paths |
 | `office-addins-tests.yml` | Office add-in jest ratchet, typecheck, server suites, ESLint | PR/push on office-addins + related paths |
 | `build-provisioning-sidecar.yml` | Build + Trivy-scan the provisioning sidecar image (push leg publishes it) | PR/push on sidecar paths, manual |
 | `publish-provisioning-arm-artifacts.yml` | Compile the customer Bicep to ARM JSON for H2a | Push to master on Bicep paths, manual |
-| `publish-dataverse-solutions-manifest.yml` | Publish the managed-solution manifest H6 reads | Manual (release-time) |
+| `publish-dataverse-solutions-manifest.yml` | Publish the managed-solution manifest H6 reads | Manual (release-time); PR dry run on the SpaarkeMaster source |
+| `publish-copilot-agent-template.yml` | Build + publish the per-customer Copilot agent template (sample render validated against Microsoft's schemas) | Manual (release-time); PR dry run on the agent source |
 | `nightly-health.yml` | Flake hunt, bundle-size drift, vuln + Trivy scans, integration suite, coverage observation | Daily 06:00 UTC, manual |
 | `client-tests.yml` | Nightly jest baseline across client packages | Nightly 07:00 UTC, manual |
 | `report-workflow-health.yml` | Weekly per-workflow success-rate report | Weekly, manual |

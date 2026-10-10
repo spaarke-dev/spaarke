@@ -52,12 +52,25 @@
 
 import {
   buildBffApiUrl,
-  type AuthenticatedFetchFn,
+  isApiError,
+  isAuthFailure,
+  type ResponseFetchFn,
 } from '@spaarke/auth';
 import type { PaneEventBus } from '@spaarke/ai-widgets/events';
 
 import type { Intent } from './CommandRouter';
 import { HardSlashes } from './CommandRouter';
+
+/**
+ * The HTTP status of a failure the injected `authenticatedFetch` THREW (it never returns a non-OK
+ * Response): `ApiError.status`, 401 for an exhausted sign-in (`AuthError`), or `null` for a genuine
+ * network failure. Lets the catch report "(HTTP n)" / `http-n` as the `!response.ok` branch does.
+ */
+function thrownHttpStatus(err: unknown): number | null {
+  if (isApiError(err)) return err.status;
+  if (isAuthFailure(err)) return 401;
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Telemetry event-name constants (ADR-015 — name + decision + timestamp only)
@@ -207,8 +220,12 @@ export type OpenLibraryModalFn = () => void;
 export interface ExecutorContext {
   /** BFF base URL — from `useAiSession()` in the host. */
   bffBaseUrl: string;
-  /** Auth-tagged fetch from `useAiSession()` (ADR-028 §H-4). */
-  authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * Auth-tagged fetch from `useAiSession()` (ADR-028 §H-4). Typed as the either-shape
+   * `ResponseFetchFn`: the host passes `@spaarke/auth`'s throwing fetch, but the executor still
+   * handles a RETURNED non-2xx as well (pinned by its "returned non-2xx" test controls).
+   */
+  authenticatedFetch: ResponseFetchFn;
   /** Current chat session id (null when no session has been created yet). */
   sessionId: string | null;
   /** PaneEventBus instance for dispatching workspace events. */
@@ -502,7 +519,17 @@ async function execSaveToMatter(
         matterId,
       }),
     });
-  } catch {
+  } catch (err) {
+    const status = thrownHttpStatus(err);
+    if (status !== null) {
+      emitFailed(ctx.telemetry, '/save-to-matter', `http-${status}`);
+      emitInvoked(ctx.telemetry, '/save-to-matter', 'failed-network');
+      return {
+        outcome: 'failed-network',
+        message: `Could not save to matter (HTTP ${status}).`,
+        errorCode: `http-${status}`,
+      };
+    }
     emitFailed(ctx.telemetry, '/save-to-matter', 'network');
     emitInvoked(ctx.telemetry, '/save-to-matter', 'failed-network');
     return {
@@ -581,7 +608,17 @@ async function execPin(ctx: ExecutorContext): Promise<ExecutorResult> {
         tabs: [{ tabId, isPinned: true }],
       }),
     });
-  } catch {
+  } catch (err) {
+    const status = thrownHttpStatus(err);
+    if (status !== null) {
+      emitFailed(ctx.telemetry, '/pin', `http-${status}`);
+      emitInvoked(ctx.telemetry, '/pin', 'failed-network');
+      return {
+        outcome: 'failed-network',
+        message: `Could not pin the tab (HTTP ${status}).`,
+        errorCode: `http-${status}`,
+      };
+    }
     emitFailed(ctx.telemetry, '/pin', 'network');
     emitInvoked(ctx.telemetry, '/pin', 'failed-network');
     return {

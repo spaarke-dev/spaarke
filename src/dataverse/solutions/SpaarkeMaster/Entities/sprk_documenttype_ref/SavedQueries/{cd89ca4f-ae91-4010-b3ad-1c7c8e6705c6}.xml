@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{cd89ca4f-ae91-4010-b3ad-1c7c8e6705c6}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_documenttypename" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_documenttype_refid">
+          <cell name="sprk_documenttypename" width="300" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>1</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_documenttype_ref">
+          <attribute name="sprk_documenttype_refid" />
+          <attribute name="sprk_documenttypename" />
+          <attribute name="createdon" />
+          <order attribute="sprk_documenttypename" descending="false" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Document Type (Ref) Advanced Find View" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

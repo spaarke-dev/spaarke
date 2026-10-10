@@ -676,7 +676,8 @@ public sealed class AccessCacheFaultCachingTests
                 ServiceUrlConfig(),
                 new StaticTokenCredential(),
                 RequestWithTenant(),
-                NullLogger<ExternalParticipationService>.Instance);
+                NullLogger<ExternalParticipationService>.Instance,
+                filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
             return new GrantWorld(dataverse, cache, service);
         }
 
@@ -1298,6 +1299,7 @@ public sealed class AccessCacheFaultCachingTests
                 // Batch 4 integration (task 143): the identity store the secure-record veto reads status-first.
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                 NullLogger<AccessibleRecordSetService>.Instance);
         }
     }
@@ -1308,7 +1310,8 @@ public sealed class AccessCacheFaultCachingTests
     {
         public QuietParticipations()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
-                httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+                httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance,
+                filing: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities())
         {
         }
 

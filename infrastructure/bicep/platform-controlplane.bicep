@@ -65,12 +65,11 @@
 //                       defects #4+#10) -- hosts the task 114/115 Exchange
 //                       sidecar image; AcrPull to the shared UAMI, AcrPush
 //                       to the CI OIDC principal.
-//   11. Subscription RBAC: Contributor for the shared UAMI at the deploying
-//                       subscription's scope (Wave G-8 Batch 2 / audit
-//                       defect #2) -- H2a's ArmDeploymentRunner needs it for
-//                       customer RG-ensure + subscription-scope ARM deploys
-//                       (via modules/controlplane-subscription-rbac.bicep;
-//                       BCP120 forces the module split -- see its header).
+//   11. (Removed by T228) Subscription RBAC on THIS subscription: stamps never
+//                       deploy here (D-12, ADR-027). The L2 UAMI's Owner grant
+//                       on each CUSTOMER subscription is an operator prerequisite
+//                       (PRQ-S-04: modules/controlplane-subscription-rbac.bicep,
+//                       deployed at that subscription).
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -157,12 +156,14 @@ param serviceBusResourceGroupName string = 'SharePointEmbedded'
 // (DataverseEnvironmentRegistryClient via DefaultAzureCredential pinned to the
 // UAMI); FR-38's acceptance criterion explicitly requires the Bicep residue's
 // absence. The `Dataverse-ClientSecret` KV SECRET itself is untouched
-// (BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml).
+// (BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml)
+// and, since task 252, no longer seeded by Seed-PlatformKeyVault.ps1 --
+// nothing on the control plane references it.
 
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table -- passed through to modules/controlplane-worker-app-service.bicep as DataverseEnvironmentRegistry__AdminEnvironmentUrl (task 122 / task 112 Path X MI-native client). REQUIRED: DataverseEnvironmentRegistryOptions.Validate() fails fast at Worker boot (NFR-05) if this is missing -- no default is supplied here deliberately (dev/staging/prod each target a distinct admin Dataverse environment; a default would risk silently pointing a non-dev deploy at the dev org).')
 param adminDataverseEnvironmentUrl string
 
-@description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
+@description('LEGACY credential chain only (requireSecretFreeIdentity=false). Name of the platform Key Vault secret the Worker EnvVarValues__ClientSecret and SolutionImportOptions__ClientSecret Key Vault references resolve -- passed through to modules/controlplane-worker-app-service.bicep. NOT referenced when requireSecretFreeIdentity=true (the default since task 252). H6, H7 and H7b sign in as the per-customer BFF app registration H3 creates (D-13), so one shared platform secret cannot authenticate as it; the legacy chain survives only for the ADR-028 A4 prong-3 exception (sunset 2026-11-23). Never create, seed or restore this secret in a secret-free environment (provisioning.md KV credential lifecycle rule 1).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
 
@@ -185,12 +186,24 @@ param redisEndpoint string
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
 
+@description('Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c).')
+param preAuthorizedClientAppIds array = [
+  '1958aec2-0218-495e-8e3c-37133e9b8357'
+]
+
+@description('Client id of the shared Spaarke Copilot Agent app (T257): a secret-free public client in Spaarke tenant (PKCE, redirect https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect) that each customer Copilot agent auth config signs users in with. Threaded to modules/controlplane-worker-app-service.bicep, which adds it to the PreAuthorizedClientAppIds list, so H3 pre-authorizes it on every customer BFF app (user_impersonation) and no user sees a consent prompt. Empty (default) until the operator creates the app (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); H3 then pre-authorizes only preAuthorizedClientAppIds.')
+param copilotAgentClientAppId string = ''
+
+
+@description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts (config/spaarke-resources.yaml external_identity.ciam_tenant) -- threaded to BOTH control-plane modules as ReservedTenants__CiamTenantIds__N, next to ReservedTenants__SpaarkeTenantId (the deployment tenant). Task 255 (INCOMING-141): POST /api/runs, H4b and H13 refuse either as a customer workforce tenant -- a stamp BFF refuses to start with its CIAM tenant listed, and the Spaarke tenant would bind Spaarke staff into a customer environment. REQUIRED, no default: ReservedTenantsOptions.Validate() fails Api and Worker startup without it.')
+@minLength(1)
+param ciamTenantIds array
 
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
 
-@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record).')
-param requireSecretFreeIdentity bool = false
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H6, H7 and H7b then authenticate via the Worker UAMI federated assertion. Default TRUE since task 252 (2026-10-09): a new control-plane environment is secret-free, so it never references a secret the binding rule forbids creating. FALSE is a prong-3 opt-in for an unmigrated environment only (SS6.5 resolution record).')
+param requireSecretFreeIdentity bool = true
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -433,6 +446,8 @@ module appService 'modules/controlplane-app-service.bicep' = {
     // Task 242b: the Api host needs the registry URL (REG-07) and the SAME guard switch as the Worker.
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     customerRunGuardEnabled: customerRunGuardEnabled
+    // Task 255: the CIAM tenant(s) POST /api/runs refuses as a customer workforce tenant (same list as the Worker).
+    ciamTenantIds: ciamTenantIds
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
@@ -487,16 +502,22 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
     controlPlanePrincipalId: uami.outputs.principalId
     speContainerTypeOwners: speContainerTypeOwners
+    preAuthorizedClientAppIds: preAuthorizedClientAppIds
+    // T257: the shared Copilot agent client joins the pre-authorized list when set.
+    copilotAgentClientAppId: copilotAgentClientAppId
+    // Task 255: the CIAM tenant(s) H4b and H13 refuse as a customer workforce tenant (same list as the Api).
+    ciamTenantIds: ciamTenantIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
-    // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
-    // adminDataverseEnvironmentUrl (target) + bffApiClientSecretName (secret);
-    // adds tenantId + clientId + kill-switch here. Enabled=false by default
-    // per ADR-032 null-object kill-switch (see worker module param docstring).
+    // guard config. Signs in as the control-plane UAMI against
+    // adminDataverseEnvironmentUrl (no client secret since 2026-08-27);
+    // tenantId is diagnostics-only. Enabled=false by default per ADR-032
+    // null-object kill-switch (see worker module param docstring).
     customerRunGuardTenantId: effectiveJwtTenantId
     customerRunGuardEnabled: customerRunGuardEnabled
-    // A44.5 (task 205i; restored by task 245b): secret-free identity mode -- omits the
-    // BFF-API-ClientSecret KV-refs + emits the FR-39 chain settings instead.
+    // A44.5 (task 205i; restored by task 245b; default true since task 252):
+    // secret-free identity mode -- omits the BFF-API-ClientSecret KV-refs +
+    // emits the FR-39 chain settings instead.
     requireSecretFreeIdentity: requireSecretFreeIdentity
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
@@ -678,29 +699,6 @@ module acr 'modules/controlplane-acr.bicep' = {
 }
 
 // ============================================================================
-// 11. SUBSCRIPTION-SCOPE RBAC -- Contributor for the shared control-plane
-//     UAMI (Wave G-8 Batch 2 / audit defect #2)
-//
-//    H2a's ArmDeploymentRunner requires Contributor at subscription scope
-//    for customer RG-ensure + subscription-scope ARM deployments (its own
-//    error guidance, ArmDeploymentRunner.cs:162, says to verify exactly this
-//    grant -- but nothing ever made it). Declared via a dedicated
-//    subscription-scope module rather than inline because the role
-//    assignment's guid() NAME must be calculable at deployment start and the
-//    UAMI principalId is a runtime module output here (BCP120) -- inside the
-//    module it is a param, which is legal. Covers the DEPLOYING subscription;
-//    Model 2 stamps in foreign customer subscriptions need their own grant
-//    (see module header).
-// ============================================================================
-
-module subscriptionRbac 'modules/controlplane-subscription-rbac.bicep' = {
-  name: 'controlplane-subscription-rbac'
-  params: {
-    principalId: uami.outputs.principalId
-  }
-}
-
-// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -788,8 +786,3 @@ output artifactsBlobUri string = artifactsStorage.outputs.blobUri
 output acrName string = acr.outputs.acrName
 output acrId string = acr.outputs.resourceId
 output acrLoginServer string = acr.outputs.loginServer
-
-// Subscription-scope Contributor for the control-plane UAMI (Wave G-8
-// Batch 2 / audit defect #2) -- consumed by deploy-script post-deploy
-// `az role assignment list` verification.
-output subscriptionContributorRoleAssignmentName string = subscriptionRbac.outputs.contributorRoleAssignmentName

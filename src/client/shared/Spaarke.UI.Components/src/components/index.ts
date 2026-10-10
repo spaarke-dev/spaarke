@@ -50,6 +50,16 @@ export * from './Playbook';
 
 // Wizard - Multi-step dialog shell and infrastructure
 export * from './Wizard';
+// InAppWizardHost (task 112, D-26) — exported here, not from the domain-free Wizard barrel,
+// because it mounts the five Create wizards.
+export { InAppWizardHost } from './Wizard/InAppWizardHost';
+export type {
+  IInAppWizardHostProps,
+  IInAppWizardRenderContext,
+  InAppHostedWizardName,
+  InAppWizardRenderer,
+  InAppWizardRenderers,
+} from './Wizard/InAppWizardHost';
 
 // FileUpload - Generic drag-and-drop file upload components
 export * from './FileUpload';

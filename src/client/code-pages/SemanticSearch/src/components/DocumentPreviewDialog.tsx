@@ -29,7 +29,7 @@ import {
 } from '@fluentui/react-components';
 import { Dismiss24Regular, Open20Regular, DocumentRegular, SearchRegular } from '@fluentui/react-icons';
 import type { DocumentSearchResult } from '../types';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import { getBffBaseUrl } from '../services/apiBase';
 import { openEntityRecord } from './EntityRecordDialog';
 
@@ -145,11 +145,47 @@ interface PreviewUrlResponse {
 async function fetchPreviewUrl(documentId: string): Promise<PreviewUrlResponse> {
   const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}/preview-url`);
 
+  // Only a fetch that returns failures reaches this; `@spaarke/auth` throws them (see previewErrorMessage).
   if (!response.ok) {
-    throw new Error(`Failed to load preview: ${response.status}`);
+    throw new Error(`Failed to load preview (HTTP ${response.status}).`);
   }
 
   return response.json() as Promise<PreviewUrlResponse>;
+}
+
+/** The sentence for an HTTP failure the server did not explain (no ProblemDetails `detail`). */
+function previewStatusSentence(status: number): string | null {
+  if (status === 401) return 'Your sign-in has expired. Refresh the page to sign in again.';
+  if (status === 403) return 'You do not have permission to view this document.';
+  if (status === 404) return 'The document was not found.';
+  if (status === 429) return 'Too many requests. Wait a moment and try again.';
+  if (status >= 500) return 'The preview service is temporarily unavailable. Try again in a few minutes.';
+  return null;
+}
+
+/**
+ * The line under "Preview unavailable". `authenticatedFetch` never returns a non-2xx Response — it throws
+ * `ApiError` (status + ProblemDetails) or, once its 401 retries are spent, `AuthError` — so the reason is read
+ * from the thrown error: the server's `detail`, else a sentence for the status, else its `title`. Never the bare
+ * `ApiError` message ("HTTP 500") or the browser's "Failed to fetch".
+ */
+function previewErrorMessage(err: unknown): string {
+  if (isApiError(err)) {
+    const problem = problemOf(err);
+    const detail = typeof problem?.detail === 'string' ? problem.detail.trim() : '';
+    const title = typeof problem?.title === 'string' ? problem.title.trim() : '';
+    const reason = detail || previewStatusSentence(err.status) || title || `HTTP ${err.status}.`;
+    return `Failed to load preview: ${reason}`;
+  }
+  if (isAuthFailure(err)) {
+    return 'Failed to load preview: Your sign-in has expired. Refresh the page to sign in again.';
+  }
+  if (err instanceof TypeError) {
+    return 'Failed to load preview: The Spaarke server could not be reached. Check your connection.';
+  }
+  return err instanceof Error && err.message.startsWith('Failed to load preview')
+    ? err.message
+    : 'Failed to load preview.';
 }
 
 // =============================================
@@ -232,7 +268,7 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
       })
       .catch(err => {
         if (!cancelled) {
-          setPreviewError(err instanceof Error ? err.message : 'Failed to load preview');
+          setPreviewError(previewErrorMessage(err));
         }
       })
       .finally(() => {

@@ -36,7 +36,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
     recordedPatches.push(JSON.parse(String(init?.body)) as RecordedPatch);
     return { ok: true, status: 204, json: async () => ({}) } as Partial<Response> as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}) } as Partial<Response> as Response;
+  throw httpError(404);
 });
 
 jest.mock('@spaarke/ai-widgets', () => {
@@ -118,6 +118,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // eslint-disable-next-line import/first
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 function renderPane(): { bus: PaneEventBus } {
   const bus = new PaneEventBus();

@@ -1,0 +1,28 @@
+<form>
+  <tabs>
+    <tab name="hidden" id="{22222222-0000-0000-0000-000000000009}" IsUserDefined="0" visible="false">
+      <labels><label description="Hidden" languagecode="1033" /></labels>
+      <columns><column width="100%"><sections /></column></columns>
+    </tab>
+    <tab name="message" id="{22222222-0000-0000-0000-000000000001}" IsUserDefined="0" visible="false">
+      <labels><label description="Message" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section name="body" id="{22222222-0000-0000-0000-000000000002}" IsUserDefined="0" columns="1">
+              <labels><label description="Body" languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{22222222-0000-0000-0000-000000000003}">
+                    <labels><label description="Subject" languagecode="1033" /></labels>
+                    <control id="sprk_subject" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_subject" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+</form>

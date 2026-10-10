@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{1487543c-9265-4255-b766-f86c65f9768a}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_noaccessentryid">
+          <cell name="sprk_name" width="250" />
+          <cell name="sprk_subjectcontact" width="150" />
+          <cell name="sprk_subjectorganization" width="150" />
+          <cell name="sprk_subjectsystemuser" width="150" />
+          <cell name="sprk_objectorganization" width="150" />
+          <cell name="sprk_objectrecordtype" width="150" />
+          <cell name="sprk_objectrecordid" width="150" />
+          <cell name="createdby" width="150" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_noaccessentry">
+          <attribute name="sprk_noaccessentryid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_subjectcontact" />
+          <attribute name="sprk_subjectorganization" />
+          <attribute name="sprk_subjectsystemuser" />
+          <attribute name="sprk_objectorganization" />
+          <attribute name="sprk_objectrecordtype" />
+          <attribute name="sprk_objectrecordid" />
+          <attribute name="createdby" />
+          <attribute name="createdon" />
+          <order attribute="createdon" descending="true" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active No Access Entries" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

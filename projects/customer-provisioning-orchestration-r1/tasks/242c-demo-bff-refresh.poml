@@ -4,7 +4,7 @@
     <title>Demo BFF refresh — .NET 10 runtime, settings parity, start and /healthz 200 (found by T242b)</title>
     <phase>Model 1 dedicated-stamp remediation — follow-on of plan §7 T242 (filed 2026-10-04, owner: "file a demo-refresh task")</phase>
     <gate>T242b merged to master (a master build is T242+); every live step needs owner confirmation</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live configuration of an App Service in its own subscription; the setting values decide which resources the demo BFF talks to.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -92,10 +92,22 @@
     <criterion testable="true">The app's final run state is the one the owner chose; every live step and its approval is logged in current-task.md.</criterion>
   </acceptance-criteria>
 
-  <notes>Filed 2026-10-04 (session 36) from T242b step 5 at the owner's request ("Stop it; file a demo-refresh task"). Not a prerequisite of T186. OWNER DECISION 2026-10-05 (D27): demo is the next environment used to test the provisioning orchestration — this answers the escalation question above (rebuild through L2 rather than hand-maintain). Re-scope before executing: provision demo with the orchestration instead of hand-refreshing spaarke-bff-demo; confirm the scope with the owner first. Facts read 2026-10-05: rg-spaarke-demo has no AI Search service (spaarke-search-demo absent); spaarke-bff-demo has no deployment slot; config/environments.json + spaarke-resources.yaml corrected.</notes>
+  <notes>Filed 2026-10-04 (session 36) from T242b step 5 at the owner's request ("Stop it; file a demo-refresh task"). Not a prerequisite of T186. OWNER DECISION 2026-10-05 (D27): demo is the next environment used to test the provisioning orchestration — this answers the escalation question above (rebuild through L2 rather than hand-maintain). Re-scope before executing: provision demo with the orchestration instead of hand-refreshing spaarke-bff-demo; confirm the scope with the owner first. Facts read 2026-10-05: rg-spaarke-demo has no AI Search service (spaarke-search-demo absent); spaarke-bff-demo has no deployment slot; config/environments.json + spaarke-resources.yaml corrected. ADDED BY T246 (2026-10-06): spaarke-bff-demo has NO AiSafety__ContentSafety__Endpoint setting (read 2026-10-06), and since T246 the BFF refuses to start outside Development/Testing without it — whatever demo path is chosen must set it (a stamp provisioned through L2 gets it from customer.bicep + H4b; a hand-refresh must point it at a Content Safety account demo can reach with its managed identity, which needs Cognitive Services User there).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>FULL rigor; prescriptive steps; owner confirmation before every live step.</protocol>
   </execution>
+  <notes>
+    <note date="2026-10-09">Step 1 done (read-only; master BFF booted locally as Production against demo's 157 settings).
+    Demo app: Stopped, DOTNETCORE|8.0, B1, no slots; all 38 KV references Resolved. Startup blockers: runtime 10.0;
+    APPLICATIONINSIGHTS_CONNECTION_STRING (demo has only the retired ApplicationInsights__ConnectionString);
+    AiSafety__ContentSafety__Endpoint — NO Content Safety account exists in the demo subscription (new resource);
+    PublicConfig__BffUrl / MsalClientId (da03fe1a…) / TenantId. Degraded even after: no AI Search (spaarke-search-demo
+    missing), no FIC on the demo app reg, no membership topic, no Compose/Email webhook secrets, ~40 settings master no
+    longer reads (incl. plaintext BuilderAdmin__ApiKey, Email__WebhookSecret, Rag__ApiKey, PowerBi__ClientSecret).
+    Recommendation (D27): rebuild demo as a provisioned stamp rather than hand-refresh; the hand-refresh needs a new
+    Content Safety resource (POML escalation). Open: the fate of the unmanaged spaarke-demo Dataverse environment.
+    Exact hand-refresh commands kept in the session report should the owner choose it. Owner decision pending.</note>
+  </notes>
 </task>

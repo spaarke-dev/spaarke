@@ -15,7 +15,7 @@
    2. Export the solution.
    3. Merge the <RibbonDiffXml> below into the solution's customizations.xml
       <RibbonDiffXml> for entity 'sprk_event'.
-   4. Re-pack and import via 'pac solution import --publish-changes'.
+   4. Re-pack and import with scripts/Import-SolutionScoped.ps1 (imports, then publishes only this solution's components).
 
   Prerequisite (already met):
     sprk_wizard_commands.js web resource is deployed and exposes
@@ -53,6 +53,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Event.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -67,6 +68,9 @@
           <DisplayRules>
             <DisplayRule Id="sprk.Wizard.Event.Form.DisplayRule">
               <FormStateRule State="Existing" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_todo" PrivilegeType="Create" PrivilegeDepth="Basic" />
             </DisplayRule>
           </DisplayRules>
           <EnableRules>

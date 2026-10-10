@@ -51,7 +51,7 @@ public interface IAiSearchIndexVerifier
 /// <summary>
 /// Inputs to a single verifier invocation.
 /// </summary>
-/// <param name="SearchEndpoint">Target AI Search endpoint URI (Model 2: customer-dedicated; Model 1: shared platform).</param>
+/// <param name="SearchEndpoint">Target AI Search endpoint URI — the stamp's own dedicated search service in both models (D-12; the Model 1 shared-platform target is retired).</param>
 /// <param name="ExpectedIndexNames">Canonical 7 by default; H2b passes the FULL canonical set for both branches.</param>
 public sealed record AiSearchIndexVerifyRequest(
     string SearchEndpoint,

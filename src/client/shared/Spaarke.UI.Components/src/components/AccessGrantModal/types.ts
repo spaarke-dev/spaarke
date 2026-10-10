@@ -69,7 +69,13 @@ export interface IAccessGrantRecord {
    * owner round 59) adds no provenance of its own: a row the record's policy
    * cancels, or a No Access entry walls off, is marked from this value plus
    * the record's state (`noAccess.ts`). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share';
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share' | 'inherited';
+  /**
+   * `'inherited'` rows only (unified-access-control-r2 task 175, owner round 84): the secure parent that passed this user
+   * share on to the record (`inheritedFrom` on a `/user-shares` item, task 158's provenance). Such a row is read-only
+   * here: it is changed on the parent. `recordType` is `'matter'` or `'project'` per the BFF contract.
+   */
+  inheritedFrom?: { recordType: string; recordId: string };
   /**
    * Share rows only (unified-access-control-r2 task 114, owner round 67 amendment 4(c)): the record is Restricted and
    * this user is flagged external (`externalNoAccess` from `/user-shares`). Rendered as "External user — no access"
@@ -381,6 +387,49 @@ export interface IAccessGrantModalProps {
     contactIds: string[],
     organizationIds: string[]
   ) => Promise<IContactOrganizationMembership[]>;
+  /**
+   * The section to bring into view when the modal opens (task 153): `'noAccess'` scrolls to and focuses the No Access
+   * List once this open's load has finished (the TrackingFieldTrio access-status indicator asks for it when a No
+   * Access restriction applies). Omit for the top (Current Access). Ignored when the section is not shown (the caller
+   * lacks Write, `notShown`).
+   */
+  initialSection?: 'noAccess';
+  /**
+   * The record's DIRECT filing parents (unified-access-control-r2 task 175; owner round 87, refining round 84), as the
+   * host read them from `GET /api/v1/external-access/can-manage-access` (`followsParents`). Non-empty: the parents set
+   * this record's MINIMUM Secure and Access Permission (the floor) — it can be made stricter, never looser. The modal
+   * then shows an info bar naming the first parent (a link with {@link onOpenParent}) next to the usual Access
+   * Permission bar. Grants and shares are unaffected: every grant affordance stays available. Omitted or empty (a
+   * parentless record, a matter, or an older BFF): no parent bar.
+   */
+  followsParents?: IFollowsParent[];
+  /** Opens a parent record (task 175) — the host navigates to its form. Omit and the banner names the parent as text. */
+  onOpenParent?: (parent: IFollowsParent) => void;
+  /** The floor the parents set (task 175, round 87; `can-manage-access`). With {@link recordAccessPermission}, the
+   * parent bar says whether each effective value is inherited or set on this record. Omit: no such annotation. */
+  accessFloor?: IAccessFloor;
+  /** The record's OWN Access Permission, not folded with Secure (unlike {@link accessPermissionState}) — the host maps
+   * its stored value. Used only for the parent bar's "Access Permission: … (inherited from …)" line. */
+  recordAccessPermission?: AccessPermissionState;
+}
+
+/** A direct filing parent of a record (task 175; `followsParents` on `can-manage-access`). */
+export interface IFollowsParent {
+  recordType: 'matter' | 'project';
+  recordId: string;
+  name: string | null;
+}
+
+/**
+ * The minimum a record's parents set (task 175, owner round 87; `can-manage-access`): the most restrictive Secure and
+ * Access Permission across its parents and their chain. Both are `null` on a parentless record, from an older BFF, and
+ * when `parentUnverifiable` (what the record is filed under could not be read; the host then makes the Access Permission
+ * pill read-only — fail closed).
+ */
+export interface IAccessFloor {
+  floorSecure: boolean | null;
+  floorAccessPermission: AccessPermissionState | null;
+  parentUnverifiable: boolean;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

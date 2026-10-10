@@ -267,7 +267,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(state.DataverseEnvUrl))
         {
             return await FailMissingUpstreamAsync(run, etag, "dataverseEnvUrl",
-                "InterStepState.dataverseEnvUrl not present. H5 (Dataverse env creation) MUST complete before " +
+                "InterStepState.dataverseEnvUrl not present. H5 (Dataverse env adoption) MUST complete before " +
                 "H7 dispatches — H7 has no target environment to write to.", cancellationToken).ConfigureAwait(false);
         }
         if (string.IsNullOrWhiteSpace(state.OpenAiEndpoint))
@@ -302,6 +302,16 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 "stamp's own BFF URL and the source for sprk_BffApiBaseUrl (task 245b; there is no platform default).",
                 cancellationToken).ConfigureAwait(false);
         }
+        // T259 (ISS-010): the customer's business unit (H10) — every user lives there, so its records are owned there and
+        // the BFF resolves their container from it; H7 links it to H8's container right after the root.
+        if (!Guid.TryParse(state.CustomerBusinessUnitId, out var customerBusinessUnitId) || customerBusinessUnitId == Guid.Empty)
+        {
+            return await FailMissingUpstreamAsync(run, etag, "customerBusinessUnitId",
+                "InterStepState.customerBusinessUnitId (H10's customer business unit) is not a GUID. H7 links it to H8's " +
+                "container: every user owns its records there, and the BFF resolves a non-secure record's container from its " +
+                "owning unit (T259). A run whose H10 completed without it (before T259) needs a new run.",
+                cancellationToken).ConfigureAwait(false);
+        }
         // A44.5 (task 205i): chain-aware secret guard. The secret is REQUIRED
         // only when the FR-39 ordered credential chain's primary is
         // ClientSecret (legacy/unconfigured default — prong-3 unmigrated env,
@@ -316,8 +326,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             var diagnostic =
                 "EnvVarValuesOptions:ClientSecret is not populated and the FR-39 credential chain requires it " +
                 "(primary = ClientSecret — the legacy/unconfigured default). H7 authenticates to the target Dataverse " +
-                "env via confidential-client credentials against the BFF app-reg (same pattern H6 uses) — the " +
-                "MI-Dataverse App User (H10) does not exist yet at H7's point in the DAG. Wave C5 wires this to " +
+                "env via confidential-client credentials against the BFF app-reg (same pattern H6 uses), which H10 " +
+                "registered as an application user before H6 (T228). Wave C5 wires this to " +
                 "a Key Vault reference; wave C4 requires operator to set the app-setting explicitly. " +
                 "Secret-free environments instead configure EnvVarValues:Credentials:Order:0=ManagedIdentityFederated " +
                 "(A44.5). Handler did NOT invoke the writer.";
@@ -373,7 +383,11 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             // FR-39 factory (WorkerDataverseCredentialFactory) selects MI-FIC
             // from the configured chain; empty is the signal, never a sentinel.
             ClientSecret: _options.ClientSecret,
-            Values: values);
+            Values: values,
+            // Task 227g: the root business unit's container is H8's — uac-r2 task 076's non-secure default.
+            RootBusinessUnitContainerId: state.SpeContainerId,
+            // T259: and the customer's own unit, where every user — and so every record they own — lives.
+            CustomerBusinessUnitId: customerBusinessUnitId);
 
         EnvVarValuesWriteOutcome writeOutcome;
         try
@@ -408,8 +422,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
 
         var success = (EnvVarValuesWriteOutcome.Success)writeOutcome;
 
-        // (7) All post-conditions cleared — advance Cosmos state. Reconciler
-        // (Wave C5) fans out to H10.
+        // (7) All post-conditions cleared — advance Cosmos state. The reconciler
+        // fans out to H7's successors (H11 — DagAdvancer.HandlerDependencies).
         stopwatch.Stop();
         _logger.LogInformation(
             "H7 Dataverse env-var values succeeded: runId={RunId} customerId={CustomerId} " +
@@ -417,8 +431,9 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             envelope.RunId, envelope.CustomerId, success.WrittenVariables.Count, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, configVer, success.WrittenVariables, envelope, cancellationToken)
-            .ConfigureAwait(false);
+            run, etag, idempotencyKey, configVer, success.WrittenVariables, success.LinkedRootBusinessUnitId,
+            success.LinkedCustomerBusinessUnitId, envelope,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -440,6 +455,9 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
     /// parameter changed) produces a different hash. Exposed internal for
     /// direct testing. Parity with H6's CatalogHash / H4's secretsVer shape.
     /// </summary>
+    /// <summary>Task 227g: the root-business-unit link's version in <see cref="ComputeConfigVer"/>.</summary>
+    internal const string RootBusinessUnitLinkVersion = "root-business-unit-link=1;customer-business-unit-link=1";   // T259: + the customer unit
+
     internal static string ComputeConfigVer(IReadOnlyList<KeyValuePair<string, string>> values)
     {
         var sb = new StringBuilder();
@@ -447,6 +465,9 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         {
             sb.Append(schemaName).Append('=').Append(value).Append('|');
         }
+        // Task 227g: H7 also links the root business unit to the container. Part of the step's end state, so part of its
+        // key — an H7 completed before the link existed does not short-circuit past it.
+        sb.Append(RootBusinessUnitLinkVersion);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
@@ -468,6 +489,14 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 (EnvVarValuesRejectionCodes.EnvVarDefinitionNotFound, FailureClass.Resumable),
             EnvVarValuesWriteFailureKind.UnknownInvocationFailure =>
                 (EnvVarValuesRejectionCodes.WriterInvocationFailed, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.RootBusinessUnitUnresolved =>
+                (EnvVarValuesRejectionCodes.RootBusinessUnitUnresolved, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.RootBusinessUnitContainerConflict =>
+                (EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.CustomerBusinessUnitUnresolved =>
+                (EnvVarValuesRejectionCodes.CustomerBusinessUnitUnresolved, FailureClass.Resumable),
+            EnvVarValuesWriteFailureKind.CustomerBusinessUnitContainerConflict =>
+                (EnvVarValuesRejectionCodes.CustomerBusinessUnitContainerConflict, FailureClass.Resumable),
             _ =>
                 (EnvVarValuesRejectionCodes.WriterInvocationFailed, FailureClass.Resumable),
         };
@@ -554,6 +583,8 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         string idempotencyKey,
         string configVer,
         IReadOnlyList<KeyValuePair<string, string>> writtenVariables,
+        Guid? linkedRootBusinessUnitId,
+        Guid? linkedCustomerBusinessUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -581,6 +612,10 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         {
             configVer,
             schemaNames = writtenVariables.Select(kv => kv.Key).ToArray(),
+            // Task 227g: the root business unit whose sprk_containerid names H8's container.
+            rootBusinessUnitLinked = linkedRootBusinessUnitId,
+            // T259: the customer's own unit, linked to the same container.
+            customerBusinessUnitLinked = linkedCustomerBusinessUnitId,
         };
         var evidence = JsonDocument.Parse(JsonSerializer.Serialize(evidencePayload)).RootElement.Clone();
         run.GateStates[EnvVarsSetGateId] = new GateEntry

@@ -12,6 +12,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type {
   IAccessGrantModalProps,
   IAccessGrantRecord,
@@ -20,7 +21,15 @@ import type {
   IUserPick,
   IRecordNoAccessEntry,
 } from '../types';
-import { parseNoAccessResponse, describeCoverage, suppressionFor, vetoFor, buildVetoIndex } from '../noAccess';
+import {
+  parseNoAccessResponse,
+  parseEffectiveAccess,
+  effectiveAccessState,
+  describeCoverage,
+  suppressionFor,
+  vetoFor,
+  buildVetoIndex,
+} from '../noAccess';
 
 const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
 const CONTACT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
@@ -93,7 +102,8 @@ function noAccessBody(entries: IRecordNoAccessEntry[] | null, entriesState = 'co
   return {
     recordType: 'sprk_matter',
     recordId,
-    secure: 'applies',
+    // Task 174: `secure` is the record's EFFECTIVE flag, which the dialog folds in; the fixture's matter is not secure.
+    secure: 'doesNotApply',
     noAccess: entries?.some(e => e.inForce === true) ? 'applies' : 'doesNotApply',
     entriesState,
     entries,
@@ -106,11 +116,15 @@ interface ISetup {
   standing?: IAccessGrantRecord[];
   shares?: Array<{ systemUserId: string; fullName: string; accessLevel: number }>;
   overrides?: Partial<IAccessGrantModalProps>;
+  /** Control: a host whose fetch RETURNS a non-2xx response instead of throwing (the modal accepts both). */
+  returning?: boolean;
 }
 
 function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
   const noAccess = setup.noAccess ?? (async () => jsonResponse(noAccessBody([])));
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  // Production shape by default: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+  const fetchFactory = setup.returning ? jest.fn : throwingAuthenticatedFetch;
+  const authenticatedFetch = fetchFactory(async (url: string) => {
     if (url.includes('/no-access')) return noAccess();
     if (url.includes('/user-shares')) return jsonResponse({ shares: setup.shares ?? [] });
     if (url.includes('/assigned-access')) return jsonResponse({ entries: [] });
@@ -300,9 +314,9 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
   });
 
   const failures: Array<[string, () => Promise<Response>]> = [
-    ['a 404 (the route’s uniform refusal)', async () => jsonResponse({ reasonCode: 'x' }, 404)],
-    ['a 403', async () => jsonResponse({ reasonCode: 'sdap.access.deny.delegation_write_required' }, 403)],
-    ['a 500', async () => jsonResponse({}, 500)],
+    ['a 404 (the route’s uniform refusal)', async () => jsonResponse({ status: 404, reasonCode: 'x' }, 404)],
+    ['a 403', async () => jsonResponse({ status: 403, reasonCode: 'sdap.access.deny.delegation_write_required' }, 403)],
+    ['a 500', async () => jsonResponse({ status: 500 }, 500)],
     ['entriesState unavailable', async () => jsonResponse(noAccessBody(null, 'unavailable'))],
     ['an unknown entriesState', async () => jsonResponse(noAccessBody([], 'someday'))],
     ['an answer about another record', async () => jsonResponse(noAccessBody([], 'complete', PARENT_MATTER_ID))],
@@ -336,6 +350,13 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
     expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
     expect(screen.getByText('Walter Walled')).toBeInTheDocument();
     expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('active');
+  });
+
+  it.each([404, 403, 500])('control: a host that RETURNS the %s response gets the same error state', async status => {
+    renderModal(makeProps({ returning: true, noAccess: async () => jsonResponse({ status }, status) }));
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access List unavailable')).toBeInTheDocument();
+    expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
   });
 });
 
@@ -541,6 +562,80 @@ describe('AccessGrantModal — rows the record policy cancels (task 066, folded 
   });
 });
 
+describe('AccessGrantModal — cancellation follows the parent (task 174, owner round 84)', () => {
+  const allRows = (server: Record<string, unknown>) =>
+    makeProps({
+      grants: [CONTACT_GRANT, ORG_GRANT],
+      standing: [STANDING_ROW],
+      noAccess: async () => jsonResponse({ ...noAccessBody([]), ...server }),
+    });
+
+  it('a record whose own values are Standard, under a secure matter: organization and standing rows have no effect', async () => {
+    renderModal(
+      allRows({
+        secure: 'applies',
+        accessPermission: 'standard',
+        inheritedFrom: { recordType: 'sprk_matter', recordId: PARENT_MATTER_ID, name: 'Parent Matter' },
+      })
+    );
+    await noAccessSection();
+    expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('active');
+    expect(
+      within(currentAccessRow('All contacts at Acme LLP')).getByText(
+        'No effect: this record is secure, so organization-wide grants give no access.'
+      )
+    ).toBeInTheDocument();
+    expect(
+      within(currentAccessRow('Sam Standing')).getByText(
+        'No effect: this record is secure, so standing grants give no access.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByText(/It follows the matter it is filed under: Parent Matter\./)).toBeInTheDocument();
+  });
+
+  it('under a Restricted matter: every contact-based row has no effect', async () => {
+    renderModal(allRows({ secure: 'doesNotApply', accessPermission: 'restricted' }));
+    await noAccessSection();
+    for (const name of ['Walter Walled', 'All contacts at Acme LLP', 'Sam Standing']) {
+      expect(
+        within(currentAccessRow(name)).getByText('No effect: this record is Restricted, so contacts get no access.')
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("never less strict than the record's own values: a Restricted host stays Restricted on a Standard answer", async () => {
+    renderModal({
+      ...allRows({ secure: 'doesNotApply', accessPermission: 'standard' }),
+      accessPermissionState: 'restricted',
+    });
+    await noAccessSection();
+    expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('suppressed');
+  });
+
+  it('an answer without accessPermission (an older BFF) on a non-secure record cancels nothing', async () => {
+    renderModal(allRows({ secure: 'doesNotApply' }));
+    await noAccessSection();
+    for (const name of ['Walter Walled', 'All contacts at Acme LLP', 'Sam Standing']) {
+      expect(currentAccessRow(name).getAttribute('data-access-state')).toBe('active');
+    }
+  });
+
+  it('helpers: parse reads the effective fields; unknown folds in as Limited; another record is not trusted', () => {
+    const parsed = parseEffectiveAccess(
+      { recordId: RECORD_ID, secure: 'unknown', accessPermission: 'unknown', inheritedFrom: null },
+      RECORD_ID
+    );
+    expect(parsed).toEqual({ isSecure: null, accessPermission: null, inheritedFrom: null });
+    expect(effectiveAccessState('standard', false, parsed)).toEqual({ state: 'limited', isSecure: false });
+    expect(effectiveAccessState('standard', false, null)).toEqual({ state: 'standard', isSecure: false });
+    expect(
+      effectiveAccessState('limited', false, { isSecure: false, accessPermission: 'restricted', inheritedFrom: null })
+    ).toEqual({ state: 'restricted', isSecure: false });
+    expect(parseEffectiveAccess({ recordId: CONTACT_ID, secure: 'applies' }, RECORD_ID)).toBeNull();
+    expect(parseEffectiveAccess({ recordId: RECORD_ID }, RECORD_ID)).toBeNull();
+  });
+});
+
 describe('AccessGrantModal — "No Access" is a veto, never a level (spec FR-23)', () => {
   it('no level dropdown offers "No Access" (contact, organization and user rows)', async () => {
     const props = makeProps({
@@ -643,7 +738,7 @@ describe('AccessGrantModal — overlapping loads never show another record (veri
     const grantsA = deferred<IAccessGrantRecord[]>();
     const grantsB = deferred<IAccessGrantRecord[]>();
     let current = RECORD_A;
-    const authenticatedFetch = jest.fn(async (url: string) => {
+    const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
       if (url.includes(`/${RECORD_A}/no-access`)) return noAccessA.promise;
       if (url.includes(`/${RECORD_B}/no-access`)) return noAccessB.promise;
       if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
@@ -765,7 +860,7 @@ describe('AccessGrantModal — a write that finishes after a rebind never shows 
   it("a revoke on A answering after the host rebinds to B reloads nothing of A's and shows no notice about A", async () => {
     let current = A;
     const revokePost = deferred<Response>();
-    const fetchFn = jest.fn(async (url: string) => {
+    const fetchFn = throwingAuthenticatedFetch(async (url: string) => {
       if (url.includes('/revoke')) return revokePost.promise;
       const rec = url.includes(A) ? 'A' : url.includes(B) ? 'B' : '?';
       if (url.includes('/user-shares')) {

@@ -22,6 +22,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
@@ -62,7 +63,8 @@ function jsonResponse(body: unknown, ok = true): Response {
   return {
     ok,
     status: ok ? 200 : 500,
-    json: async () => body,
+    // A BFF ProblemDetails always carries `status`.
+    json: async () => (ok ? body : { status: 500, ...(body as Record<string, unknown>) }),
   } as unknown as Response;
 }
 
@@ -71,7 +73,7 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   const fetchExistingGrants = jest.fn(async () => [EXISTING_GRANT]);
   const searchContacts = jest.fn(async (): Promise<IContactSearchResult[]> => []);
   const isInternalContact = jest.fn(async (contactId: string) => contactId === CANDIDATE_INTERNAL.contactId);
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/invite-and-grant')) {
       return jsonResponse({
         contactId: CANDIDATE_EXTERNAL.contactId,

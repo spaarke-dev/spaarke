@@ -1,8 +1,18 @@
 // Types
-export type { IAuthConfig, IProblemDetails, TokenResult, AuthenticatedFetchFn } from './types';
+export type {
+  IAuthConfig,
+  IProblemDetails,
+  TokenResult,
+  AuthenticatedFetchFn,
+  ResponseFetchFn,
+  OkResponse,
+  OkStatus,
+} from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';
+// Guards for what authenticatedFetch THROWS (it never returns a non-2xx Response)
+export { isApiError, problemOf, isAuthFailure } from './errorGuards';
 
 // Config
 export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
@@ -13,6 +23,10 @@ export { VERSION } from './version';
 // Runtime config (Dataverse environment variable resolution)
 export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
 export type { IRuntimeConfig } from './resolveRuntimeConfig';
+
+// Browser telemetry connection string for this environment (#1537) — from the BFF's
+// cached /api/config/client; '' when unavailable. Feed it to AppInsightsService.initializeFromRuntime().
+export { getTelemetryConnectionString } from './bffClientConfig';
 
 // Pluggable auth strategy (v2 — task 010)
 export type { AuthStrategy } from './strategies/AuthStrategy';
@@ -41,6 +55,9 @@ export type { UseAuthResult } from './useAuth';
 
 // Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
 export { resolveTenantIdSync } from './resolveTenantIdSync';
+
+// Tenant validation (#1453) — the same check the library applies before building an authority
+export { isValidTenant } from './tenant';
 
 // Code Page auth initializer factory (FR-20a / ADR-028) — canonical consumption
 // pattern that replaces the 3 byte-similar solution-local `authInit.ts` copies.

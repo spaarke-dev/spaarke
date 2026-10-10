@@ -24,6 +24,9 @@
     - Location: Mscrm.Form.<entity>.MainTab.Actions.Controls._children
     - Sequence: 220 (matches Matter pattern)
     - Display only on existing (saved) records (FormStateRule State="Existing").
+    - Display only to a user holding the Create privilege on sprk_todo (any depth):
+        sprk.CreatePrivilege.sprk_todo.DisplayRule (unified-access-control-r2 task 180,
+        owner round 89 item 2; infrastructure/dataverse/ribbon/CreatePrivilegeRibbons/).
 
     Deployment of these fragments is a follow-up step per the ribbon-edit skill:
     each entity needs a dedicated unmanaged solution containing only its entity
@@ -82,7 +85,7 @@ function New-CreateTodoRibbonDiffXml {
    2. Export the solution.
    3. Merge the <RibbonDiffXml> below into the solution's customizations.xml
       <RibbonDiffXml> for entity '$Entity'.
-   4. Re-pack and import via 'pac solution import --publish-changes'.
+   4. Re-pack and import with scripts/Import-SolutionScoped.ps1 (imports, then publishes only this solution's components).
 
   Prerequisite (already met):
     sprk_wizard_commands.js web resource is deployed and exposes
@@ -120,6 +123,7 @@ function New-CreateTodoRibbonDiffXml {
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.$DisplayName.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="`$webresource:sprk_wizard_commands.js"
@@ -134,6 +138,9 @@ function New-CreateTodoRibbonDiffXml {
           <DisplayRules>
             <DisplayRule Id="sprk.Wizard.$DisplayName.Form.DisplayRule">
               <FormStateRule State="Existing" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_todo" PrivilegeType="Create" PrivilegeDepth="Basic" />
             </DisplayRule>
           </DisplayRules>
           <EnableRules>

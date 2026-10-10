@@ -42,6 +42,7 @@ ribbon/
 │   │   ├── Customizations.xml
 │   │   └── Solution.xml
 │   └── customizations.xml             # Wizard launcher buttons (UDSS-041)
+├── CreatePrivilegeRibbons/            # Create-privilege rule on every create/wizard button (task 180)
 ├── ProjectRibbons/                    # sprk_project entity ribbons
 │   └── customizations.xml             # Wizard launcher buttons (UDSS-042)
 └── ThemeMenuRibbons/                  # Theme menu solution package
@@ -83,6 +84,15 @@ The `customizations.xml` files in MatterRibbons, ProjectRibbons, and EventRibbon
 All wizard buttons use these rules:
 - **DisplayRule**: `FormStateRule State="Existing"` -- buttons only appear on saved records (not new/create forms)
 - **EnableRule**: `FormStateRule State="Existing"` -- buttons are enabled only on existing records
+
+Every button that creates a record or opens a create wizard (Create Project / Event / To Do, Upload Documents, Playbook
+Library, the grid "New ..." wizards, Add Multiple, New Analysis, Save to Document) ALSO carries
+`sprk.CreatePrivilege.<table>.DisplayRule` (`EntityPrivilegeRule` Create, depth Basic, on the table it creates), so a user
+without the Create privilege does not see it (unified-access-control-r2 task 180, owner round 89 item 2). Summarize Files
+and Find Similar create nothing and are not ruled. See [`CreatePrivilegeRibbons/`](CreatePrivilegeRibbons/README.md):
+`create-launchers.json` (launcher function -> table), `Merge-CreatePrivilegeRule.ps1`, and
+`Set-CreatePrivilegeRibbon.ps1` (dry run / -Apply / -Verify). A new create button calling a launcher listed there is ruled
+by the merge; a new launcher is added to that file.
 
 ### Naming Convention
 
@@ -128,7 +138,7 @@ The Theme Menu adds a flyout submenu to the command bar allowing users to switch
 
 1. Package the ribbon folder contents as an unmanaged solution ZIP
 2. Import via **Settings > Solutions > Import**
-3. Publish all customizations
+3. Publish only the imported components (`scripts/Import-SolutionScoped.ps1` does this)
 
 ### Using ribbon-edit Skill
 

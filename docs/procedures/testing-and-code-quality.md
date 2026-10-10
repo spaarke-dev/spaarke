@@ -637,6 +637,43 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
 ---
 
+## Client type-aware lint ratchet (`client-lint`)
+
+One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
+
+- **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DocumentOperations, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
+
+### Run it
+
+```bash
+# once: toolchain, then the covered packages' dependencies (slow; ~7 min with 4-way parallel npm on a dev box)
+npm install --legacy-peer-deps --no-audit --no-fund --prefix scripts/quality/client-lint
+node scripts/quality/client-lint/client-lint.mjs install
+
+node scripts/quality/client-lint/client-lint.mjs check                          # all packages; exit 0 = no new violations
+node scripts/quality/client-lint/client-lint.mjs check --package spaarkeai      # one package (ids: see eslint.client.config.mjs)
+node scripts/quality/client-lint/client-lint.mjs controls                       # must-fire / must-not-fire fixtures
+```
+
+`check` takes about 1 minute for all ten packages on a warm dev box (UI.Components is the longest at 10-65 s depending on machine load). CI runs `controls` then `check` in the standalone workflow `.github/workflows/client-lint.yml` (check `Client lint (type-aware ratchet)`, on PRs and master pushes that touch the covered packages). It is kept out of the router/tier files so the CI shadow window's comparison is untouched, and is not yet a required check: make it required in the master ruleset once it has run green and the shadow window has closed.
+
+### How suppressions work
+
+Today's violations are recorded per file and rule in `scripts/quality/client-lint/eslint-suppressions.json` (ESLint bulk suppressions, ESLint 9.24+). A violation not covered by it fails the run. A suppression whose violation is gone **also fails** ("unused suppressions") so the file can only shrink.
+
+- **You fixed existing debt:** `node scripts/quality/client-lint/client-lint.mjs prune`, then commit the smaller `eslint-suppressions.json` with the fix.
+- **You added a violation:** fix it. If the condition is genuinely defensive (for example a dual-shape fetch), narrow the type or use `// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- <reason>`. Do not hand-edit the JSON to add entries.
+- **After moving or renaming a file with recorded findings:** run `client-lint.mjs baseline --package <id>` (re-records only that package, merging into the JSON and pruning the old path), then explain the diff in the PR.
+- **Lockfiles:** on a dev box, `install` can rewrite a stale tracked `package-lock.json`; commit the regenerated lock (CI fails on a stale one: `npm install --package-lock-only --legacy-peer-deps` in that dir).
+- **Re-baselining everything** (`client-lint.mjs baseline`) is rare and reviewed in the PR; the diff must be explained.
+- **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not). If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
+
+### Pre-commit
+
+`.lintstagedrc.mjs` does **not** run this on commit: a typed program for even one file builds the whole package program (10-65 s for UI.Components alone), far over the pre-commit budget. Use `npm run lint:client` (or `check --package <id>`) before pushing changes to a covered package.
+
 ## PR Quality Gates (sdap-ci.yml)
 
 The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All jobs must pass before a PR can merge.
@@ -996,7 +1033,7 @@ This section defines **which tests to run when you modify code in a specific mod
 
 | Test Project | Path | Framework | Covers |
 |-------------|------|-----------|--------|
-| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
+| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
 | **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
 | **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
 | **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |

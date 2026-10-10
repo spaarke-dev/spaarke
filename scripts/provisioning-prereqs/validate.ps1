@@ -202,6 +202,95 @@ if ($contextDefaultsByEnv.ContainsKey('dev') -and $m -and $m.prereqs) {
   }
 }
 
+# --- 7. Recipe lints (T206 + T207) --------------------------------------------------------------
+# These check what a recipe WOULD do at Step 0.5b / the customer pass, without running it:
+#   a. token availability   - a {token} must resolve at the step that runs the recipe's scope
+#   b. undefined shell vars - the recipe runs in a fresh `bash -c` with no variables defined
+#   c. recipe contract      - an explicit `exit 1`; no PowerShell cmdlets under bash
+#   d. Windows az.cmd       - a parenthesis in a double-quoted argument of an `az` call breaks az.cmd
+#   e. grep -i with -F      - aborts (exit 134) in the grep that ships with Git for Windows
+# Retired entries carry no recipe and are skipped.
+$scopeRank = @{ once_per_tenant = 0; once_per_subscription = 0; once_per_env = 1; once_per_customer = 2 }
+$availRank = @{ always = 0; env = 1; customer = 2 }
+$tokenAvail = @{}
+if ($contextDefaultsByEnv.ContainsKey('dev')) {
+  foreach ($prop in $contextDefaultsByEnv['dev'].tokenMap.PSObject.Properties) {
+    $tokenAvail[$prop.Name] = [string]$prop.Value.availability
+  }
+}
+$failBeforeLints = $fail.Count
+$availReported = @{}
+if ($m -and $m.prereqs) {
+  foreach ($p in $m.prereqs) {
+    if (-not $p.check_recipe -or -not $p.check_recipe.cli) { continue }
+    $id = [string]$p.id
+    $cli = [string]$p.check_recipe.cli
+    $scope = [string]$p.scope
+
+    # a. token availability
+    foreach ($mm in [regex]::Matches($cli, '\{([a-zA-Z_][a-zA-Z0-9_]*)\}')) {
+      $t = $mm.Groups[1].Value
+      if (-not $tokenAvail.ContainsKey($t)) { continue }   # undocumented tokens are reported by check 6
+      if (-not $availRank.ContainsKey($tokenAvail[$t])) {
+        $bad = "availability:$t"
+        if (-not $availReported.ContainsKey($bad)) { $availReported[$bad] = $true; $fail += "context-defaults.dev.json tokenMap '$t': availability '$($tokenAvail[$t])' is not one of always | env | customer." }
+        continue
+      }
+      if ($scopeRank.ContainsKey($scope) -and $availRank[$tokenAvail[$t]] -gt $scopeRank[$scope]) {
+        $fail += "${id}: recipe uses {$t}, which resolves only from the '$($tokenAvail[$t])' pass, but the prereq is scope '$scope' - the step that runs this scope cannot resolve it. Re-scope the prereq or derive the value inside the recipe."
+      }
+    }
+
+    # b. undefined shell variables
+    $noSingle = [regex]::Replace($cli, "'[^'\r\n]*'", "''")                  # single-quoted text is never expanded
+    $noComment = [regex]::Replace($noSingle, '(?m)(^|\s)#.*$', '$1')
+    $defined = @{}
+    foreach ($d in [regex]::Matches($noComment, '(?m)(?:^|[\s;{(&|])([A-Za-z_][A-Za-z0-9_]*)=')) { $defined[$d.Groups[1].Value] = $true }
+    foreach ($d in [regex]::Matches($noComment, '\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b')) { $defined[$d.Groups[1].Value] = $true }
+    foreach ($d in [regex]::Matches($noComment, '\bread\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)')) { $defined[$d.Groups[1].Value] = $true }
+    foreach ($v in [regex]::Matches($noComment, '(?<!\\)\$\{?([A-Za-z_][A-Za-z0-9_]*)')) {
+      $name = $v.Groups[1].Value
+      if (-not $defined.ContainsKey($name)) {
+        $fail += "${id}: recipe references `$$name but never defines it - bash -c starts with no variables, so it expands to empty. Define it in the recipe, or escape it with a backslash when it is a URL/OData parameter."
+        $defined[$name] = $true   # report once per recipe
+      }
+    }
+
+    # c. recipe contract
+    if ($cli -notmatch '\bexit\s+1\b') {
+      $fail += "${id}: recipe has no explicit 'exit 1' - SKILL Step 0.5b trusts the exit code, so a failure condition must exit 1 itself."
+    }
+    foreach ($line in ($cli -split "`n")) {
+      if ($line -match '\bpwsh\b') { continue }   # PowerShell inside `pwsh -Command` is intended
+      if ($line -cmatch '\b(Select-String|Where-Object|ForEach-Object|Out-String|Write-Host|Get-[A-Z][A-Za-z]+)\b') {
+        $fail += "${id}: recipe runs under bash -c but uses the PowerShell cmdlet '$($Matches[1])' (command not found, exit 127, silently)."
+        break
+      }
+    }
+
+    # e. GNU grep 3.0 as shipped in Git for Windows aborts (exit 134) on -i combined with -F
+    if ($cli -match '\bgrep\s+-[a-zA-Z]*(i[a-zA-Z]*F|F[a-zA-Z]*i)') {
+      $fail += "${id}: recipe uses 'grep' with both -i and -F - the grep in Git for Windows aborts (exit 134) on that combination. Use a regex (-i without -F) or drop -i."
+    }
+
+    # d. Windows az.cmd breaks on a parenthesis inside an argument
+    foreach ($line in ($cli -split "`n")) {
+      if ($line -notmatch '(^|[\s(`])az\s') { continue }
+      foreach ($q in [regex]::Matches($line, '--[a-z][a-z-]*\s+"([^"]*)"')) {
+        $seg = $q.Groups[1].Value
+        $segNoSubst = [regex]::Replace($seg, '\$\([^)]*\)', '')
+        if ($segNoSubst -match '[()]') {
+          $fail += "${id}: an az argument contains a parenthesis ($($q.Value)) - the Windows az.cmd wrapper breaks on it. Filter in bash instead of JMESPath functions, or call the REST endpoint with curl."
+          break
+        }
+      }
+    }
+  }
+  if ($fail.Count -eq $failBeforeLints) {
+    Write-Host "  [PASS] Recipe lints (token availability, undefined shell vars, exit-1 contract, no PowerShell under bash, no parenthesis in az args)" -ForegroundColor Green
+  }
+}
+
 # --- Report ---
 if ($fail.Count -gt 0) {
   Write-Host "`nprereqs.yaml validation FAILED ($($fail.Count) issue$(if($fail.Count -ne 1){'s'})):`n" -ForegroundColor Red

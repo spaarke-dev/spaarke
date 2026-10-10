@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Extends the sprk_dataverseenvironment entity with 13 new columns for
-    customer-provisioning-orchestration-r1 (registry schema v3.3 + T225b).
+    Extends the sprk_dataverseenvironment entity with 15 new columns for
+    customer-provisioning-orchestration-r1 (registry schema v3.3 + T225b + T257).
 
 .DESCRIPTION
     Additive-only extension of the v2 baseline entity (16 columns) created by
@@ -29,7 +29,7 @@
 
     3 v3 additions (per design.md §6.1 rows 528-530):
       7. sprk_currentrunid          String(40),  Optional  (§4D I5 concurrency guard; ADR-044 canonical string form)
-      8. sprk_tenancymodel          Choice,      Optional  (§3A A1 Model1Shared=0 / Model2Dedicated=1)
+      8. sprk_tenancymodel          Choice,      Optional  (§3A A1 Model1=0 / Model2=1; labels renamed from Model1Shared / Model2Dedicated by T224, values kept)
       9. sprk_tenantid              String(40),  Optional  (D18 Entra tenant; ADR-044 canonical string form)
 
     3 v3.3 additions (per design.md §14A):
@@ -41,6 +41,13 @@
      13. sprk_credentialmode        String(50),  Optional  (A38a secret-free marker — H4 writes "secret-free"; every new
                                                             stamp is secret-free by default since T225b, so H4 fails
                                                             Resumable after writing the vault if this column is missing)
+
+    2 T257 additions (2026-10-09, the per-customer Copilot agent; design note t257-copilot-agent-design.md §5.3):
+     14. sprk_bffappid              String(40),  Optional  (the customer BFF app registration id; H13 promotes it from
+                                                            H3's BffAppRegId. Missing column = H13's promoted-columns PATCH
+                                                            is rejected and the registry goes stale — PRQ-E-14 checks it)
+     15. sprk_copilotauthconfigid   String(500), Optional  (the customer's Copilot agent OAuth auth config id; written by
+                                                            the operator at the /provision-environment post-Ready gate)
 
     ADR-044 note: GUID-shaped columns (sprk_currentrunid, sprk_tenantid,
     sprk_azuresubscriptionid) are stored as String attributes; canonicalization
@@ -114,9 +121,9 @@ try {
 }
 
 # ============================================================================
-# Step 1: String columns (11 of 13 — 5 v2 + 5 v3/v3.3 + 1 T225b)
+# Step 1: String columns (13 of 15 — 5 v2 + 5 v3/v3.3 + 1 T225b + 2 T257)
 # ============================================================================
-Write-Host "`nStep 1: String columns (v2 + v3 + v3.3)" -ForegroundColor Cyan
+Write-Host "`nStep 1: String columns (v2 + v3 + v3.3 + T225b + T257)" -ForegroundColor Cyan
 
 $stringCols = @(
     # ---- v2 additions (5 String; sprk_provisionedon handled in Step 2) ----
@@ -156,7 +163,7 @@ $stringCols = @(
     },
     @{
         N    = "sprk_solutionversion"; D = "Dataverse Solution Version"; L = 50; R = "None"
-        Desc = "32-hex fingerprint of the Dataverse solution set H6 imported (owner D17, version-compatibility-matrix.md v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
+        Desc = "The Dataverse package H6 installed: SpaarkeMaster {version} ({managed|unmanaged}) (T218b, version-compatibility-matrix.md v3; was a 32-hex set fingerprint, owner D17 v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
     },
     @{
         # PascalCase schema name is intentional per project convention — see design.md §7.9
@@ -168,6 +175,15 @@ $stringCols = @(
     @{
         N    = "sprk_credentialmode"; D = "Credential Mode"; L = 50; R = "None"
         Desc = "A38a positive secret-free migration marker: H4 writes 'secret-free' when the stamp's BFF runs MI-FIC with no client secret (KvSecretsPopulationOptions.RequireSecretFreeIdentity, the default since task 225b). Added 2026-10-02 (plan G21)."
+    },
+    # ---- T257 additions (2 String) ----
+    @{
+        N    = "sprk_bffappid"; D = "BFF App Registration ID"; L = 40; R = "None"
+        Desc = "Application (client) id of this customer's BFF app registration (D-13, one per customer). H13 promotes it from H3's BffAppRegId at Ready. Read by the Copilot agent render (scope api://{id}/user_impersonation) and by decommission. Added 2026-10-09 (T257). ADR-044: bare lowercase GUID."
+    },
+    @{
+        N    = "sprk_copilotauthconfigid"; D = "Copilot Agent Auth Config ID"; L = 500; R = "None"
+        Desc = "OAuth auth config (registration) id of this customer's Microsoft Copilot agent - the plugin auth.reference_id. Written by the operator at the /provision-environment post-Ready Copilot gate; read by scripts/copilot-agent/Render-CopilotAgentPackage.ps1 for every re-render and by decommission (delete in the Teams developer portal). Not a secret. Added 2026-10-09 (T257)."
     }
 )
 
@@ -247,4 +263,4 @@ $r = Invoke-DV -Ep "PublishXml" -Method "POST" -Body @{
 if ($r.Success) { Write-Host "  Published" -ForegroundColor Green }
 else            { Write-Host "  Publish failed: $($r.Error)" -ForegroundColor Red }
 
-Write-Host "`nDONE - sprk_dataverseenvironment carries the 13 extension columns (v3.3 + T225b) in $EnvironmentDomain (existing columns skipped, never modified)" -ForegroundColor Green
+Write-Host "`nDONE - sprk_dataverseenvironment carries the 15 extension columns (v3.3 + T225b + T257) in $EnvironmentDomain (existing columns skipped, never modified)" -ForegroundColor Green

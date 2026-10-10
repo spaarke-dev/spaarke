@@ -70,7 +70,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Dispatch;
 /// Build-time completeness gate over the keyed <see cref="IProvisioningHandler"/>
 /// resolution surface: every <see cref="HandlerIds.Dispatchable"/> id MUST
 /// resolve to a handler whose <see cref="IProvisioningHandler.HandlerId"/>
-/// equals the key, and the three in-process H14 sub-steps (H14a/b/c) MUST
+/// equals the key, and the in-process H14 sub-step (H14a) MUST
 /// NOT be keyed-registered.
 /// </summary>
 public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerTestFactory>
@@ -83,7 +83,7 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
     }
 
     [Fact]
-    public void Dispatchable_ContainsExactlyTwentyIds()
+    public void Dispatchable_ContainsExactlyTwentyOneIds()
     {
         // Task 200 bumped 19 → 20 (added H4Shared for F19 automation —
         // shared-tier KV secrets population via source-service SDK extraction).
@@ -91,7 +91,8 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
         // BulkAppSettings thin wrapper around task 084's Configure script).
         // T226 (2026-09-30) dropped 21 → 20 (retired H4Shared — every customer
         // secret now comes from the customer's own resources).
-        HandlerIds.Dispatchable.Should().HaveCount(20);
+        // T256 (2026-10-08) bumped 20 → 21 (added H7b — the per-environment Secure Record setup, INCOMING-145).
+        HandlerIds.Dispatchable.Should().HaveCount(21);
     }
 
     [Theory]
@@ -114,8 +115,6 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
 
     [Theory]
     [InlineData(HandlerIds.H14a)]
-    [InlineData(HandlerIds.H14b)]
-    [InlineData(HandlerIds.H14c)]
     public void H14SubStepId_IsNotKeyedRegistered(string subStepHandlerId)
     {
         using var scope = _factory.Services.CreateScope();
@@ -213,6 +212,9 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // principal (the identity H4 grants Secrets Officer on customer vaults and H2a sends to
         // customer.bicep); syntactically-valid placeholder, nothing is invoked here.
         builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
+        // T255: ReservedTenantsOptions is ValidateOnStart on both hosts (Spaarke's tenant + the CIAM tenant[s]).
+        builder.UseSetting("ReservedTenants:SpaarkeTenantId", "5a5a5a5a-0000-4000-8000-000000000001");
+        builder.UseSetting("ReservedTenants:CiamTenantIds:0", "c1a0c1a0-0000-4000-8000-000000000002");
 
         // Task 142 — EnvVarValuesOptions.Validate() (H7) fails fast at boot on
         // a missing ClientSecret (NFR-05), same convention as the other

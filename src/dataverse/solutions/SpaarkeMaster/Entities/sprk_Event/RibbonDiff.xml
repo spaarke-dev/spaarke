@@ -1,0 +1,229 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Event.NewWizard.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:sprk.Event.NewWizard.Grid.Button.Alt" Command="sprk.Event.NewWizard.Grid.Command" Id="sprk.Event.NewWizard.Grid.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Event.NewWizard.Grid.Button.LabelText" Sequence="1" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Event.NewWizard.Grid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Event.NewWizard.Grid.Button.ToolTipDescription" ModernImage="CommandBarNewIcon" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_event.NewRecord" />
+    <CustomAction Id="sprk.Navigator.Event.Form.Button.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Event.Form.Button" Command="sprk.Navigator.Event.Open.Command" LabelText="$LocLabels:sprk.Navigator.Event.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Event.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Event.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Event.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.Navigator.Event.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.Navigator.Event.Grid.Button" Command="sprk.Navigator.Event.Open.Command" LabelText="$LocLabels:sprk.Navigator.Event.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Event.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Event.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Event.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.SecureChild.sprk_event.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_event.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_event.SubGrid.New" Command="sprk.SecureChild.sprk_event.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_event.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Event.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Event.Flyout" Command="sprk.ThemeMenu.Event.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Event.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Event.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Event.Controls">
+                <Button Id="sprk.ThemeMenu.Event.Auto" Command="sprk.ThemeMenu.Event.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Event.Light" Command="sprk.ThemeMenu.Event.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Event.Dark" Command="sprk.ThemeMenu.Event.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.Event.Form.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.Event.Form.Flyout" Command="sprk.ThemeMenu.Event.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Event.Form.Menu">
+            <MenuSection Id="sprk.ThemeMenu.Event.Form.Section" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Event.Form.Controls">
+                <Button Id="sprk.ThemeMenu.Event.Form.Auto" Command="sprk.ThemeMenu.Event.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Event.Form.Light" Command="sprk.ThemeMenu.Event.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Event.Form.Dark" Command="sprk.ThemeMenu.Event.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.AddNewRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="sprk.SecureChild.sprk_event.NativeNewAllowed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.HideAddNewForChildEntities" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Open.addNewFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+          <CrmParameter Value="FirstPrimaryItemId" />
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Event.NewWizard.Grid.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventStandalone" Library="$webresource:sprk_wizard_commands" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Navigator.Event.Open.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Navigator.Event.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_event.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_event.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_event" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Event.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.Event.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Event.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Event.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.Event.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_event" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="sprk.Navigator.Event.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_event.NativeNewAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.SecureChild.sprk_event.NewAvailable.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.Event.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.Event.NewWizard.Grid.Button.Alt">
+      <Titles>
+        <Title description="+New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Event.NewWizard.Grid.Button.LabelText">
+      <Titles>
+        <Title description="+New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Event.NewWizard.Grid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open Create New Event wizard" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Event.NewWizard.Grid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Event.Button.Alt">
+      <Titles>
+        <Title description="Open the Navigator side pane" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Event.Button.LabelText">
+      <Titles>
+        <Title description="Navigator" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Navigator.Event.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Open or focus the Navigator (Recent, Bookmarks, Monitored, Views). Its enable rule also registers the pane on load." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_event.New.LabelText">
+      <Titles>
+        <Title description="New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_event.New.ToolTipDescription">
+      <Titles>
+        <Title description="Add a Event to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

@@ -536,7 +536,7 @@ r1 Task 043 closed Phase 4 with a **documented P1 gap**: there is **no IIFE bund
 **Until the IIFE bundle ships**, the card is **NOT visibly rendered** on the host form:
 - The pre-warm OnLoad (#1) fires; the POST happens; the envelope persists.
 - The mount glue OnLoad (#2) loads; `_resolveHost()` emits the warning `[Matter Insight Card] host element 'spaarke-matter-insight-card-host' not found on form. FormXml patch may not be deployed (Task 043).` This is the **expected Phase 4 staging signal** — it proves the script loaded and resolved the subject.
-- The HTML host (#3) is deployed but the FormXml WebResource control (#5) is **not yet** wired to `tab_report card_section_3` because the Web API `PATCH systemforms` rejects `$webresource:` deps with `PrimaryNameLookup` failure even after `PublishAllXml + 10s sleep`. The canonical resolution is `pac solution import` of a packed ZIP (per `dataverse-deploy` skill Scenario 1d).
+- The HTML host (#3) is deployed but the FormXml WebResource control (#5) is **not yet** wired to `tab_report card_section_3` because the Web API `PATCH systemforms` rejects `$webresource:` deps with `PrimaryNameLookup` failure even after a publish and a 10s sleep. The canonical resolution is `pac solution import` of a packed ZIP (per `dataverse-deploy` skill Scenario 1d).
 
 **Recovery path** (when funded — r2 or P1 retrofit):
 
@@ -554,7 +554,7 @@ Use `scripts/temp/Deploy-MatterInsightCard.ps1` (or fork it for your new host). 
 - Web resources: PATCH if `name` matches; CREATE otherwise.
 - Solution component add tolerates "already exists".
 - FormXml `<formLibraries>` and `<event name="onload">` are patched only if entries are missing.
-- `PublishAllXml` runs before form patch; `PublishXml(entity=<sprk_host>)` runs after.
+- A scoped `PublishXml` of the web resources runs before the form patch; `PublishXml(entity=<sprk_host>)` runs after. No tenant-wide publish.
 
 **Web resource naming gotchas** (from r1 Task 043 — burned in):
 - Web resource names CANNOT contain forward slashes. Old r1 attempts used `sprk_/scripts/matter_insight_onload.js` (mirroring `sprk_/scripts/` convention from old design docs) and `PrimaryNameLookup` failed every time. Use flat names: `sprk_matter_insight_onload.js`.
@@ -702,7 +702,7 @@ The new identifiers r1 net-authored (`matter-health-synthesis`, `INS-FETCH-KPI`,
 
 ### 7.5 Q: "FormXml `PATCH systemforms` rejects my WebResource control with `PrimaryNameLookup` failure."
 
-**A**: The Web API form-patch path does strict immediate `PrimaryNameLookup` on `$webresource:` deps and rejects unresolvable deps even when the web resource exists, is published, and `PublishAllXml` was run with a 10s sleep. The canonical resolution is `pac solution import` of a packed ZIP (per `dataverse-deploy` skill Scenario 1d). The solution-ZIP path resolves `$webresource:` deps during import.
+**A**: The Web API form-patch path does strict immediate `PrimaryNameLookup` on `$webresource:` deps and rejects unresolvable deps even when the web resource exists, is published, and a publish was run with a 10s sleep. The canonical resolution is `pac solution import` of a packed ZIP (per `dataverse-deploy` skill Scenario 1d). The solution-ZIP path resolves `$webresource:` deps during import.
 
 ### 7.6 Q: "Why does my web resource fail to attach to the form even though it deployed successfully?"
 

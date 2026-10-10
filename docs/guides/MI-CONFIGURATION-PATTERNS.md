@@ -83,6 +83,8 @@ Full Web API walkthrough: `docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md` Applic
 
 ### Pattern 6 — Exchange ApplicationAccessPolicy required for email (×2 policies)
 
+> **Legacy mechanism — check before use.** Environments provisioned by the control plane get mailbox access through Exchange *RBAC for Applications*, granted by handler H14a to the stamp's managed identity only ([`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §4.2.1, §7.9). Microsoft calls Application Access Policies legacy. Under RBAC for Applications the mailbox roles must not also be granted as Entra app roles (§7.7): Exchange adds the two together, so an Entra grant reaches every mailbox. The steps below apply only to an environment set up before 2026-10-04 that still uses a policy.
+
 For ANY env that exercises Mail.Send / Mail.Read app-only Graph (Communication or EmailProcessing modules):
 
 1. Create 2 EXO ApplicationAccessPolicy policies — ONE for the BFF app reg, ONE for the BFF MI. Each scoped to a mail-enabled security group containing the in-scope mailboxes.

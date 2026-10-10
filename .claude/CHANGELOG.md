@@ -7,6 +7,138 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
+
+Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.
+
+- **`scripts/quality/client-lint/`** (new): one shared ESLint 9 toolchain, a type-aware `@typescript-eslint/no-unnecessary-condition` over 10 client packages, an ESLint bulk-suppressions baseline (1,059 existing findings), must-fire/must-not-fire controls and the `install|check|prune|baseline|controls` runner. `npm run lint:client`.
+- **`.github/workflows/client-lint.yml`** (new, standalone): kept out of the router/tier files while the CI shadow window is open. It is not yet a required check.
+- **ADR-028 MUST line and `spaarke-sso-binding.md`:** both now name the lint as the mechanism for `!res.ok`. `docs/procedures/testing-and-code-quality.md` has the how-to.
+
+---
+###### 2026-10-09 — ADR-027 management groups implemented (T262)
+
+`customer-provisioning-orchestration-r1` T262 (G36).
+
+- **ADR-027 concise**: implementation note on "MUST use Azure Management Groups" (`spaarke-environments` →
+  `spaarke-customers`, Audit/DoNotEnforce built-in policy, PRQ-S-06).
+- **`/provision-environment`** Step 0.5b: new `{customerManagementGroupId}` token (must resolve); Step 1e-ter notes
+  PRQ-S-06's read on the management group.
+
+###### 2026-10-09 — provisioning: H3 keeps an L2 Worker FIC on each customer BFF registration (ISS-015)
+
+`customer-provisioning-orchestration-r1` ISS-015 (#1524).
+
+- **`.claude/constraints/provisioning.md`** §Stamp BFF clients: H3 keeps two FICs — `spaarke-uami-trust` (stamp BFF UAMI)
+  and `spaarke-l2-worker` (L2 Worker UAMI principalId) — so H6/H7/H7b sign in as the registration secret-free; adoption
+  accepts exactly those two names.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** FIC cap note: two FICs per Spaarke-tenant customer BFF
+  registration, not one. No secret created, changed or deleted.
+
+###### 2026-10-09 — provisioning: control plane secret-free by default (T252)
+
+`customer-provisioning-orchestration-r1` T252.
+
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle rule 1: the L2 control plane defaults to the
+  secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
+  `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
+
+###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
+
+- **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
+- **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
+
+---
+###### 2026-10-09 — Model choice is deliberate: every agent states its model; no blanket default (model-selection-r1)
+
+Owner direction 2026-10-09: no arbitrary model, and spend what improves the code, nothing more. A session picks the model and effort per piece of work and never asks the user. This replaces the `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default added earlier the same day (#1538).
+
+- **`.claude/constraints/agent-cost.md`:**
+  - Rule 1 now says every agent states its model and effort.
+  - New section "Choosing a model and effort": a work → model → effort → why table, Anthropic's guidance (overthinking at `max`, lower effort scopes to the ask, Opus 5.5 effort), escalation on evidence, no mid-session switches.
+- **`.claude/agents/`:** new `implementer` (sonnet/high), `adversarial-reviewer` (fable/high, read-only) and `code-mapper` (sonnet/low, read-only).
+- **`scripts/quality/require-agent-model.py`:** new `PreToolUse` hook on `Agent|Task|Workflow`.
+  - It denies a launch with no `model` and no definition `model:` (built-ins included; forks and plugin agents allowed), and a workflow script whose `agent()` calls name no model.
+  - The reason goes to Claude, which re-issues the call; the hook fails open.
+  - Tests: `scripts/quality/tests/test_require_agent_model.py`, 5 must-fire and 7 must-not-fire.
+- **`.claude/settings.json`:** `CLAUDE_CODE_SUBAGENT_MODEL` removed; `PreToolUse` hook added.
+- **Root `CLAUDE.md`:** §8.5 and §16 updated.
+- **`FAILURE-MODES.md`:** G-19's enforcement list updated.
+
+---
+###### 2026-10-09 — Agent cost controls: Sonnet sub-agents, concurrency caps, earlier compaction (agent-cost-controls-r1)
+
+Owner direction 2026-10-09 after estimated spend rose to $1–2.5k a day. The number of calls had grown about 20×, 65–92% of them from sub-agents (mostly Opus, inherited from `"model": "opus"`). Windows ran out of memory from the parallelism.
+
+- **`.claude/settings.json`:**
+  - `env` gains `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4` and `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS=4`.
+  - New top-level `workflowSizeGuideline: "small"` and `autoCompactWindow: 400000`.
+  - The main-session `model` is unchanged. A per-call `model` still overrides the sub-agent default, for planning and reviews.
+- **`.claude/constraints/agent-cost.md`** (new, binding), with the evidence table and the settings reference (docs confirmed 2026-10-09). Seven rules:
+  1. sub-agents default to Sonnet;
+  2. one top-tier review per change set;
+  3. small, scoped agents;
+  4. don't resume an idle agent;
+  5. concurrency, including one or two heavy projects per machine;
+  6. earlier compaction;
+  7. research fans out once.
+  Indexed in `.claude/constraints/INDEX.md`.
+- **Root `CLAUDE.md`:**
+  - §8.5 gains an "Agent cost" bullet.
+  - §16 names the new settings.
+- **`.claude/FAILURE-MODES.md`:** G-19.
+
+---
+###### 2026-10-08 — ADR-028 Amendment A6: keyless customer stamps; Secure Record Owner not packaged (T235, T218e)
+
+`customer-provisioning-orchestration-r1` T235 (owner D13) and T218e.
+
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: Amendment **A6** — customer stamps disable key/local auth on
+  every data-plane resource and reach them as the stamp UAMI; a stamp vault holds no credential with a managed-identity
+  alternative; dev/demo keep "key if configured" until the D13 follow-on (named case: the dev Document Intelligence key).
+  The A4 pattern note no longer points at the closed E-3. `INDEX.md` row updated.
+- **`.claude/constraints/provisioning.md`**: the keyless section cites A6.
+- **`.claude/skills/provision-environment/SKILL.md`**: the tenant-id line no longer calls Spaarke's tenant "shared".
+- **`.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`**: Decision 3 (shared-BFF Dataverse routing) marked
+  superseded by D-12.
+- **`.claude/constraints/provisioning.md`** (T218e, earlier the same day — recorded here): the package rule takes
+  roles from the ROOT business unit only; "Secure Record Owner" stays contained in the Secure Record unit and is
+  created per environment by H7b (T256), not packaged.
+- Root `CLAUDE.md` unchanged (its provisioning and auth pointer rows were already correct).
+
+---
+###### 2026-10-07 — Stamp BFF clients: CORS + H3 client access (T240a)
+
+`customer-provisioning-orchestration-r1` T240a (owner 2026-10-07: `addins.spaarke.com`, `external.spaarke.com`).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp BFF clients — CORS + app-registration client
+  access": the manifest's literal CORS origins are the two shared client sites; H3 sets exactly the SPA redirect and the
+  pre-authorized clients on the customer's own registration; `EntraAppRegOptions__SpaarkeTenantId` is required.
+- **`.claude/skills/provision-environment/SKILL.md`**: the handler list's H3 line said "KV secret bootstrap"; it is the
+  per-customer BFF app registration (now with client access). H4b notes the CORS origins.
+
+---
+###### 2026-10-07 — Tenancy wording follows D-12 everywhere (T233)
+
+`customer-provisioning-orchestration-r1` T233 (plan G8).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: the opening line no longer offers a "Model 1 shared trial/SMB" stamp; both models are dedicated stamps.
+- **`.claude/skills/azure-deploy/SKILL.md`**: the retired Model 1 stack row no longer says H2a refuses Model 1 runs (it deploys them with `customer.bicep` since task 228).
+- **`.claude/patterns/provisioning/operator-rbac-bootstrap.md`**: the multiple-vault anti-pattern no longer cites the retired shared tier.
+
+---
+###### 2026-10-07 — Model 1 guests: environment security group + pay-as-you-go (T232)
+
+`customer-provisioning-orchestration-r1` T232 (owner D2; owner 2026-10-07: Spaarke pays guest access pay-as-you-go).
+
+- **`.claude/skills/provision-environment/SKILL.md`** Step 1e-bis: a Model1 run's preset is fixed to `B2BGuest`; new
+  intake `environmentSecurityGroupId` (GUID of `sprk-{customerId}-users`); the step checks PRQ-C-10 (group) and
+  PRQ-C-12 (guest access) as the operator — hard stop — and shows PRQ-C-11 (`pac licensing
+  get-environment-billing-policy`) for confirmation; Step 4.0 sends the group id.
+- **`.claude/constraints/provisioning.md`**: new binding section "Model 1 users — B2B guests, environment security group,
+  pay-as-you-go".
+
+---
 ###### 2026-10-07 — ADR-050 amended: `WizardShell` is the wizard preset, `WizardModal` retired, in-app launch rule (spaarke-ontology-platform-r1 task 110, D-26)
 
 `.claude/adr/ADR-050-canonical-modal-shell.md` (concise; **no full ADR-050 exists under `docs/adr/`**, checked
@@ -26,6 +158,65 @@ and `.claude/patterns/ui/modal-shell.md` (no longer "compose `RecordNavigationMo
 2026-10-07); alternatives A (project exception) and C (build on `WizardModal`, a second engine) rejected. Record:
 `projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md` §6.
 
+---
+###### 2026-10-08 — Enforcement ladder: rules enforced by the build, not prose (enforcement-ladder-r1); root CLAUDE.md about +1.1 KB vs this branch's base (about 17.8 KB injected, under 190 lines)
+
+The common root cause behind the 2026-10 findings (dead `res.ok` branches after `authenticatedFetch`, detached tests, #975's 3-of-47 fix, module CLAUDE.md drift, the shared-stash incident): a rule in prose drifts and competes for attention, while a rule the build enforces reaches the agent at the line it just wrote. This makes that the default.
+
+- **Root §16 "Enforcement ladder"**: for any new rule, use the strongest mechanism that works — type → lint rule (`post-edit-lint.sh` now returns findings to the agent as `additionalContext` after each Edit/Write; before this its stdout reached only the debug log) → ArchTest/guard (`Stop` hook, CI) → hook/permission → prose with a reason. Record "Enforced by: …". New guards carry must-fire/must-not-fire controls and a ratchet baseline. Full checklist: `ai-procedure-maintenance` **Checklist G**; Checklist A (new ADR) gains item 12, Checklist F runs the path check.
+- **`task-execute` Step 9.5 rule 6 "Fix the class, not the instance"**: a pattern defect is searched repo-wide and fixed, guarded or listed.
+- **`code-review` Step 6.55 "Enforcement check"**: flags a new rule with no mechanism, a guard with no must-fire control, and a pattern fix with no class search.
+- **New check `scripts/quality/Test-InstructionPaths.ps1`** (CI Tier 2, advisory; also in `doc-drift-audit`): every backticked path under src/, tests/, docs/, scripts/, .claude/, .github/, infrastructure/ or config/ in every instruction file (and FAILURE-MODES) must be tracked by git — case-sensitive, so it answers the same on Windows and Linux CI. Ratcheted — `scripts/quality/instruction-paths.baseline.txt` records the 39 dead paths found today (deleted PCFs, moved files); a new one fails. Gitignored build output, placeholders and package-relative `src/…` are skipped. Its own must-fire test caught a bug in it (every `src/` path was being skipped).
+- **`post-edit-lint.sh` delivers its findings**: a `PostToolUse` hook's plain stdout goes only to the debug log, so the lint hook never reached the agent. It now emits `hookSpecificOutput.additionalContext` with only real findings (filtered per tool, capped at 3,000 characters), stays silent on a clean file, and its matcher covers `Edit|Write`.
+- **`permissions.ask` on `git stash pop/apply/drop/clear`** (Bash + PowerShell, including `git -C <path> stash …`): the stash stack is shared by every worktree; a pop applied another session's stash on 2026-10-08. New **FAILURE-MODES G-18**.
+
+---
+###### 2026-10-07 — Procedure calibration: guardrails, not caps (procedure-calibration-r1)
+
+The owner's rule: *"we want guardrails but not such strong constraints that we cause problems. A hard limit like 'maximum 2 fixes' or 'maximum 20 KB' limits the judgement that there may be legitimate situations that require the added resources."* An independent review sorted every numeric limit and absolute in the instruction set into platform fact / owner hard stop / trigger-written-as-cap / unbounded / fine. This entry fixes the caps and the open loops; safety rules (secrets and Key Vault, endpoint auth, the no-client-secret guard, tenant isolation, fail-closed, no plugins, "never drop a real defect") stay absolute.
+
+**Caps that blocked legitimate work → signals or triggers:**
+- `code-review`: metric thresholds (> 500 lines, > 20 public methods, > 3 interfaces) were "Critical = must fix before merge", contradicting root §11.5. They are now look-closer signals reported without severity; Smell 5 is Suggestion/Warning, never Critical on a count; the size-only smells are cohesion prompts. Findings are classified F/K per task-execute Step 9.5, and every F-class finding is fixed.
+- `constraints/pcf.md`: "MUST achieve 90%+ coverage on shared components" removed (ADR-038 bans coverage targets).
+- "≤15 DI lines" is the readability target from ADR-010's rationale, not a hard count — in `constraints/api.md`, the ADR-010 and ADR-001 concise files, `.claude/adr/INDEX.md`, `adr-aware`, `adr-check`'s validation rules, `code-review`'s checklist and `mcp-tool-handler`. ADR-012 concise loses its 90% coverage MUST too.
+- Context-percentage stops (60/70/85%) in `task-execute`, `context-handoff`, `project-continue`, `project-pipeline` → event triggers (user/harness reports context high, compaction notice, after a deploy, before a large load). Claude cannot measure its own context (root §5).
+- `task-execute` Step 8.0: "MUST delegate 4+ files" → a judgment call for independent, substantial work, recorded in one line.
+- Verifier passes (root §8.5, task-execute Step 9.5): one by default (two for auth/security/tenant), more when a fix changes the approach, with a one-line reason. Never stops a fix.
+- `adr-check`: check the ADRs that apply to the change — adr-aware Rule 1, code-review's always-check set, and one pass over `.claude/adr/INDEX.md` as the backstop for ADRs the mapping does not reach — listing what was considered; grep-checking every ADR is for full scans and 090 wrap-up. Its index is now `.claude/adr/INDEX.md`.
+- `code-review` metrics: every file over a look-closer value gets a one-line cohesion verdict in the review, so a signal is never silently ignored.
+- `project-pipeline`: the 500-word spec minimum is a prompt to check substance, not a stop; `doc-drift-audit`'s "auto-fix ≥ 50%" target dropped; `task-create`'s /goal turn cap is a raisable default.
+
+**Open loops → stopping conditions:** failed wave tasks are retried only after the cause is named and addressed; an unexplained failure is escalated.
+
+**ADR-038 Amendment A3 (owner-ratified 2026-10-07): orphaned and detached tests.** An orphaned test (its subject was *deleted*, not moved) may be deleted without a same-PR replacement when the PR carries evidence: the deletion named; the behaviour not continuing elsewhere; a retirement test for a removed route or security path; invariants still in force re-targeted; no dependent tests; verified at code-review. A detached test (re-creates the logic in the test file, calls no production code) is rewritten against production code or deleted. Retirement tests and ArchTests are never orphans. Applied in ADR-038 §2/§6, `constraints/testing.md`, `tests/CLAUDE.md`, `task-execute` Step 9.5, `TEST-ARCHITECTURE.md` and `test-diet` (new ORPHAN / DETACHED classes and checks 13–14).
+
+**Hard stops given a reason or an escalation path:** HIGH CVE with no upstream fix (`.claude/rules/bff-hygiene.md` item 5: advisory ID, reachability, follow-up, owner sign-off — the finding stays open until the sign-off exists); Plan Mode in a non-interactive session (Steps 0–1.7 read-only, then stop with a report); the 6-agent cap (API-overload guard); ≥ 60 MB publish size (roll back, extract, or ADR-029 amendment); provisioning Step 0.5 failures (record, remediate, resume).
+
+**One rule, one place:** the publish-size rule was stated six ways across seven files with two stale baselines (49.63 / 44.96 MB) and an uncompressed `du -sh`; `task-execute`, `code-review`, `bff-extensions.md`, `provisioning.md`, `azure-deployment.md` now point to `bff-hygiene.md` item 4. Also fixed: `task-execute` Step 9.5 protected only four of the eight KEEP paths from deletion; `pac pcf push` / "4 version locations" in `task-create` and `task-execute`; Code Pages' location and React version in `constraints/pcf.md`; the skip rule (a reason in the `Skip` string plus `[Trait("status", "real-bug-pending-fix" | "flaky-quarantined")]`; the old `skip-reason` trait was used nowhere); the context-recovery procedure's percentage triggers; ADR-029's 49.63 MB baseline marked historical; remaining "4 locations" / `pac pcf push` release steps; `ThrowIfNull` guidance aligned with code-review; `project-setup`'s obsolete `MAX_THINKING_TOKENS`; `ai-procedure-maintenance` numbering and its "CLAUDE.md ADR table" step.
+
+---
+###### 2026-10-07 — Module CLAUDE.md files corrected against the code: 89,166 → 45,733 bytes (−43,433) across 8 files (module-claude-md-cleanup-r1)
+
+A module `CLAUDE.md` loads whenever an agent reads a file in its folder, and agents treat it as ground truth. Checked line by line against the code, the older files were giving wrong instructions, not just long ones. Originals are archived verbatim at `.claude/archive/2026-10-07/modules/`. Each file now carries maintainer notes in a stripped HTML comment, with a **size target, not a cap**.
+
+**Wrong instructions removed** (each verified against the code; two independent audits):
+- `Sprk.Bff.Api`: described `BFF-API-ClientSecret` as both removed (E-3 closed) and the live OBO fallback; called the managed identity system-assigned (it is user-assigned); 7 wrong paths; two dead links; a retired runbook; a unit-test sample contradicting ADR-038. Mailbox Graph now cites Exchange RBAC for Applications, not the legacy ApplicationAccessPolicy.
+- `pcf`: manifest sample used React 18.2.0 (platform is 16.14.0, ADR-022); deploy workflow still said `npm run build`; 4 version locations (pcf-deploy: 5); the auth sample's BFF scope `SDAP.Access` (PCFs use `user_impersonation`) and a nonexistent helper. Adds: BFF base URL is host only (`getApiBaseUrl()`); shared-library imports are deep `dist/` paths per ADR-012.
+- `server/shared`: `Guard`, `Result<T>`, `QueryExtensions`, `EntityExtensions`, `DataverseService` do not exist; csproj sample showed the dependency direction reversed; test sample used `Mock<IServiceClient>` (banned B2).
+- `client/shared`: `StatusBadge`, `usePagination`, `formatters.ts` do not exist; `workspace:*` (actual: `file:`); covered 1 of 15 packages. Adds ADR-012's new-package rule.
+- `tests`: `dotnet test tests/integration/contract/` cannot work (KEEP folders compile into `tests/unit/Sprk.Bff.Api.Tests`); `appsettings.Test.json` and `Shared/Builders/` do not exist; KEEP count said 6/7 (ADR-038: 8). Adds: scope is .NET xUnit only; `Spaarke.ArchTests` is not in `Spaarke.sln`; never add a second KEEP glob (NETSDK1022). B6–B17 examples → pointer to ADR-038 §7, which holds equivalent or richer pairs (compared ban by ban).
+
+**Moved, not deleted:** version-bump list, Custom Page republish, hard refresh → `pcf-deploy` + `PCF-DEPLOYMENT-GUIDE.md`; settings → `appsettings.template.json`; Kiota history → csproj comment; endpoint/error samples → `.claude/patterns/api/`; auth status → ADR-028 (pointer, not paraphrase). Headings cited elsewhere are unchanged ("Expect to Defend at Project Close", the integration template, "Package Management", "Scrollable Lists").
+
+**Adjacent fixes:** `TEST-ARCHITECTURE.md` §3 listed six KEEP categories and called anything outside them a DELETE candidate — that made every seam test and fitness function a delete target; now eight, illustrative examples labelled. KEEP count also corrected in ADR-038 §2/§3, both ADR indexes, `docs/INDEX.md`, `constraints/testing.md`. `CODE-REVIEW-BY-MODULE.md` stated the Core/Dataverse dependency backwards. `provisioning-runs/_templates/CLAUDE.md`: Key Vault paraphrase → pointer to the live "KV credential lifecycle" rule; root §6.5 escalation fields. `office-addins`: header history trimmed.
+
+**Drift found by the audits and fixed here:**
+- Exchange mailbox access: control-plane stamps use Exchange RBAC for Applications (H14a, owner D26); Application Access Policies are legacy. Legacy-mechanism notes added to `COMMUNICATION-DEPLOYMENT-GUIDE.md`, `MI-CONFIGURATION-PATTERNS.md`, `SPAARKE-SELF-SERVICE-USER-REGISTRATION.md`; `bff-deploy` / `spe-integration` / `azure-deploy` skills, `sdap-auth-patterns.md` (also: MI is user-assigned), `sdap-overview.md`, `docs/architecture/INDEX.md`, `DATAVERSE-AUTHENTICATION-GUIDE.md`, `docs/guides/INDEX.md` stop pointing at the retired `auth-deployment-setup.md` stub; `GraphAppRoles.cs` comment.
+- PCF shared-library imports: `pcf-safe.ts` header, `.claude/constraints/react-versioning.md`, `universal-dataset-grid-architecture.md` no longer say `src/pcf-safe` (ADR-012/022: compiled `dist/` paths). The nine PCFs importing the bare barrel are documented as working only through their per-control webpack stubs (task 092).
+- Stale KEEP counts and cites in test comments/READMEs (`tests/integration/auth/README.md`, `tests/eval/*`, `contract/README.md`, `LayerDependencyTests`, `ComposeEndpointsContractTests`, `FetchXmlGuardSelfJoinTests`, `AnalysisOrchestrationServiceTests`) — comments only.
+- Left to the owning project (its branch is editing these files): `AZURE-SETUP-SELF-SERVICE-REGISTRATION.md`, `PROVISIONING-PREREQUISITES.md`, ControlPlane comments naming ApplicationAccessPolicy, and five ControlPlane test comments citing "7 KEEP paths".
+
+---
 ###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 18,569 bytes (−48,088), 499 → 215 lines; 16.6 KB / 187 lines as injected (claude-md-cleanup-r1)
 
 The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows alone were 30 KB; incident write-ups sat inside rules; nothing limited growth. It now holds only binding every-turn rules, safety guards and one-line triggers, per Anthropic's guidance (< 200 lines per CLAUDE.md). Section numbers are unchanged. The previous file is archived verbatim at `.claude/archive/2026-10-07/CLAUDE.md`.
@@ -73,7 +264,170 @@ Three docs had anchor links to the old §6.5 / §10 headings and were repointed.
 Three files change: `.claude/patterns/auth/spe-writer-identity-matching.md` (marked SUPERSEDED, decision-matrix row marked historical), `.claude/constraints/auth.md` (the SPE File Access section is rewritten: app-only behind a Dataverse decision plus the pointer check; no new `*AsUserAsync` callers; container roles only through `GrantMarkedWriterAsync`) and `.claude/constraints/bff-extensions.md` §D (background SPE reads are app-only after the pointer check). This follows owner rounds 69/70.
 
 ---
+###### 2026-10-06 — Optional per-customer OpenAI spend limit at intake (T254)
 
+`customer-provisioning-orchestration-r1` T254 (owner G37: no cap by default, a per-customer limit if desired).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-quater — OPTIONAL `openAiMonthlyLimitUsd` (empty = no
+  limit; plain number in (0, 1,000,000]); Step 4.0 sends it only when set; on an upgrade run leave it out or send the
+  current value (a re-run re-applies it). Later changes: `scripts/Set-AiSpendLimit.ps1` (guide §3.2b).
+
+---
+###### 2026-10-06 — Keyless proof: H13 proves every stamp service with the BFF's managed identity (T230b)
+
+`customer-provisioning-orchestration-r1` T230b (owner D13).
+
+- **`.claude/constraints/provisioning.md`** ("Stamp resources are keyless"): the per-run proof — H13 calls the stamp BFF's
+  `POST /api/platform/keyless-proof` as the L2 Worker identity (app role `Provisioning.KeylessProof`, assigned by H3); an
+  auth failure is never a skip; ARM keyless check (`ArmStampKeylessVerifier`); new MUST NOT: a key credential in server
+  code needs its `KeyCredentialCensusTests` entry and, for a stamp resource, its `StampKeySettingCatalog` + probe entries.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** E-2: informational note — the stamp measurement mechanism exists;
+  the measurement is pending T186.
+- **`.claude/skills/provision-environment/SKILL.md`**: H13 line names the keyless gate.
+- H13's four user-workflow "sample" checks (agent message, search count, layouts, field mappings) are removed: an app-only
+  token could never pass them and their auth failures were skipped, so they never ran.
+
+---
+###### 2026-10-06 — H13 checks the deployed stamp; naming conformance + I1 are build gates (T230a)
+
+`customer-provisioning-orchestration-r1` T230a (G5).
+
+- **`.claude/constraints/provisioning.md`**: I3 text corrected to spec FR-30 (`/tenantId` on the stamp's containers or the
+  key `cosmos-db.bicep` declares; `/customerId` only on L2's ProvisioningRun); H13 samples I2–I5 on the stamp, I1 is
+  enforced by its ArchTest only (the L2 Worker ships and runs no script — T253).
+- **`.claude/skills/provision-environment/SKILL.md`**: invariants row — I2–I5 at H13, I1 a build gate.
+- Naming conformance (`scripts/naming-conformance-check.ps1`, vault rule now also `sprk-{customerId}-{env}-kv`) runs as a
+  merge-blocking job in `ci-tier1-blocking.yml`; H13's per-run copy (which linted repository files absent from the
+  Worker host) is removed.
+
+###### 2026-10-06 — Cost model for dedicated stamps: one rule set, every model, no waiver (T229)
+
+`customer-provisioning-orchestration-r1` T229 (G4, G13; D-12 — every customer gets a dedicated stamp).
+
+- **`.claude/constraints/provisioning.md`**: new binding section "Cost model — one dedicated stamp per run, both models":
+  no `shared-trial` tier / marginal / shared-floor envelope; `tier` + `estimatedMonthlyUsd` required for every model and
+  validated by `CostEnvelopeIntake` at POST /api/runs and in H0; no `costEnvelopePolicy` / `warnAndProceed`; H13 has one
+  `DedicatedStampEnvelopeUsd` ($400; $337.04 fixed at 2026-10-06 list prices), re-derived when `customer.bicep` SKUs change.
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-ter (tier + estimate, with the empty-stamp floor as
+  guidance); batch loader drops `costEnvelopePolicy` and its Model 2 check; Step 2 BAT-10 overrun is a hard stop in both
+  modes (no interactive "Proceed anyway?"); Step 4.0 requires and sends both values, no `costEnvelopePolicy`.
+
+###### 2026-10-06 — The customer's subscription and Dataverse environment are operator prerequisites (T228)
+
+`customer-provisioning-orchestration-r1` T228 (owner D4 / Q1; L2 identity = Owner per customer subscription, owner
+decision 2026-10-06).
+
+- **`.claude/constraints/provisioning.md`**: new binding section — the operator creates the customer's subscription and
+  Dataverse environment; intake requires `subscriptionId`, `containerTypeId` and `dataverseEnvUrl` for every model (no
+  shared or default subscription); the environment's domain must be `spaarke-{customerId}[-{environmentName}]`
+  (`DataverseEnvironmentUrlRule`); H1 refuses a subscription holding another customer's stamp; H5 adopts and never
+  creates; H10 runs before H6; Owner granted per customer subscription by the operator (PRQ-S-04).
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 1b-bis (subscriptionId + dataverseEnvUrl), the Step 1e
+  Model 1 hard stop removed, Step 1f records the real environment URL, Step 4.0 sends `dataverseEnvUrl` and never falls
+  back to `az account show`.
+
+###### 2026-10-06 — One ROOT container per customer; H7 links the root business unit; secure-record setup is a runbook phase (T227g)
+
+`customer-provisioning-orchestration-r1` T227g (owner question: how do the Secure Record containers fit?).
+
+- **`.claude/constraints/provisioning.md`** (SPE section): "one container per customer" corrected to one ROOT container —
+  secure-record containers (one per secure project / matter / work assignment) and further business-unit containers are
+  the BFF's, at runtime, bound and marked. New binding bullet: H7 sets the root business unit's `sprk_containerid` to H8's
+  container (unified-access-control-r2 task 076's non-secure default), never overwriting another container (Resumable
+  `root-business-unit-container-conflict`); every script-created container carries the `spaarkeCustomerId` marker.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 6d — the secure-record environment setup
+  (`SECURE-PROJECT-ENVIRONMENT-SETUP.md`, gated by its §7 checklist) before the customer is told the environment is ready.
+
+###### 2026-10-06 — One definition of the stamp's containers; the I4 resolver diagnostic retired (T227f)
+
+`customer-provisioning-orchestration-r1` T227f.
+
+- **`.claude/constraints/provisioning.md`** I4: container ids come from the record or the stamp's settings and every
+  app-only SPE call passes `SpeContainerOwnershipGuard`; the unused `ITenantContainerResolver` (and its diagnostic route)
+  and `SharePointEmbedded:StagingContainerId` were removed.
+- **`.claude/skills/provision-environment/SKILL.md`**: the I4 checklist line names what H13 actually checks.
+
+###### 2026-10-06 — H8 reuses the customer's container; unread SPE-ContainerTypeId retired (T227e)
+
+`customer-provisioning-orchestration-r1` T227e.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): one container per customer, ever — on top of
+  unified-access-control-r2 task 165's per-run creation record, a LATER run reuses the container the environment records
+  (`sprk_SharePointEmbeddedContainerId`, written by H7); the record and the environment disagreeing stops the run naming
+  both; a reused container is never removed by a failed bind; H8 writes the `spaarkeCustomerId` marker after the bind.
+  The marker name is one source-linked constant (`src/server/shared/Contracts/SpeContainerCustomerMarker.cs`).
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-topology-constants` retired with its only
+  entry (`SPE-ContainerTypeId`, unread); the reader now refuses it.
+- **`.claude/skills/provision-environment/SKILL.md`**: the `containerTypeId` comment names its real readers (H4b setting, H8).
+
+###### 2026-10-06 — App-only SPE calls go through the ownership guard (T227d, owner D28/D29)
+
+`customer-provisioning-orchestration-r1` T227d.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): app-only SPE Graph clients come only from
+  `SpeContainerOwnershipGuard`; "own" = a configured stamp container or the `spaarkeCustomerId` marker; SPE Admin on a
+  stamp is confined to own containers (owner D29); enforced by ArchTest `SpeAppOnlyContainerGuardTests`.
+
+###### 2026-10-06 — Non-secret values from later handlers are settings, not vault secrets (T227c, plan G18)
+
+`customer-provisioning-orchestration-r1` T227c.
+
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`** rule 4: a non-secret value a later handler
+  produces goes in `per_env_settings` with a `from-{handler}-output` source and an H4b ← handler DAG edge (the SPE
+  container id moved there), not in the vault.
+
+###### 2026-10-06 — SPE app-only isolation is in code (T227b, owner D28)
+
+`customer-provisioning-orchestration-r1` T227b.
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section — one container type per model, one container per
+  customer; an app-only grant reaches every container of the type, so app-only SPE calls must target only the stamp's
+  own container(s), enforced in code (T227d). A container type per customer was rejected by the owner.
+
+###### 2026-10-06 — No shared BFF app registration in the provisioning skill (T227a, plan G2)
+
+`customer-provisioning-orchestration-r1` T227a.
+
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 0.5b no longer derives `{bffAppServiceId}` / `{bffAppId}`;
+  Step 0.5c no longer hard-stops on a null `bffApiAppId` or checks a shared BFF app and its grant (each customer's
+  BFF app is created by H3; H8 grants it — T227b); Step 5a (Model 2) no longer reads removed constants.
+
+###### 2026-10-06 — One OpenAI deployment set for stamps; no recompose (T247, plan G27)
+
+`customer-provisioning-orchestration-r1` T247.
+
+- **`.claude/patterns/provisioning/openai-quota-region-composition.md`**: rewritten. The stamp set is fixed (the BFF calls
+  deployments by name), mirrored by `PinnedModelCatalog.cs` and pinned by a forcing test; DataZoneStandard; OpenAI in
+  `openAiLocation`; no support case. The old gpt-5 tiers, support-ticket quota bumps and "MVP fallback" are gone.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 2.5 F5 no longer auto-recomposes the deployment set (a
+  shortfall HALTs at H0); F8/F9 support-ticket steps marked not used; `sharedOpenAiLocation` → `openAiLocation`.
+
+###### 2026-10-06 — Customer stamps get their own keyless Content Safety (T246, plan G26)
+
+`customer-provisioning-orchestration-r1` T246.
+
+- **`.claude/constraints/provisioning.md`**: the keyless-stamp rule now lists Content Safety, and states that its
+  endpoint is a plain app setting the BFF requires outside Development/Testing — never a fallback to a shared or dev
+  account (the BFF used to default to a non-existent dev endpoint and fail open).
+
+###### 2026-10-06 — Customer stamps are keyless (T244, owner D13)
+
+`customer-provisioning-orchestration-r1` T244 (plan G16).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp resources are keyless" — local auth disabled on
+  AI Search (no `authOptions`), OpenAI, Document Intelligence and Service Bus; Storage shared key off; no key-listing
+  call, SAS rule or key/connection-string output in any stamp module; callers get roles (L2 now holds Search Service
+  Contributor for H2b + Search Index Data Reader for the H13 probe); Event Grid dead-letters with the system topic's identity.
+  Forcing function: `tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs` over the compiled `customer.json`.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: informational note under E-2 (no rule change) — E-2 covers the
+  shared dev `AIServices` account only; stamps are `kind: OpenAI` with local auth disabled, so the key fallback cannot
+  apply there; a 401 at T230 would be an E-2 scope extension needing an owner decision. Cosmos DB and SignalR are in
+  the keyless rule too (owner added Cosmos 2026-10-06).
+- **`.claude/constraints/azure-deployment.md`**: the Service Bus row listed a Key Vault-referenced
+  `ConnectionStrings__ServiceBus`; the supported path is `ServiceBus__FullyQualifiedNamespace` + managed identity
+  (`ServiceBusClientFactory`), and the startup-failure line now says so.
+
+---
 ###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
 
 `.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.
@@ -124,6 +478,7 @@ skipped all of Tier 1 including the Xrm capability guard.
 
 `.claude/FAILURE-MODES.md` G-13: a lookup in a `$filter` must be `_<name>_value`. The section now records the No Access reader defect (every deny-list read was a 400 on dev and failed closed, which blocked secure provisioning) and the provisioning seeder case (#1318). It also records the lesson: a test double that matches on query text can't catch a wrong query, because it copies the same mistake.
 
+---
 ###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
 
 `.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to

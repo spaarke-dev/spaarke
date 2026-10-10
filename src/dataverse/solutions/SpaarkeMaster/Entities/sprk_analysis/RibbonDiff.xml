@@ -1,0 +1,98 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Charts.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Charts" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Deactivate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.DocumentTemplate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.DocumentTemplate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.ExportSelectedToExcel.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.ExportSelectedToExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.ExportToExcel.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.ExportToExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Flows.RefreshCommandBar.Flows.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Flows.RefreshCommandBar.Flows" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Flows.RefreshCommandBar.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Import.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Import" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.ImportDataFromExcel.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.ImportDataFromExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.MainTab.QuickPowerBI.Button.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.MainTab.QuickPowerBI.Button" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.RunReport.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.RunReport" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.WordTemplate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.WordTemplate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Activate.Hide" Location="Mscrm.SubGrid.sprk_analysis.Activate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.AddExistingAssoc.Hide" Location="Mscrm.SubGrid.sprk_analysis.AddExistingAssoc" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.AddExistingStandard.Hide" Location="Mscrm.SubGrid.sprk_analysis.AddExistingStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.AddNewStandard.Hide" Location="Mscrm.SubGrid.sprk_analysis.AddNewStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Charts.Hide" Location="Mscrm.SubGrid.sprk_analysis.Charts" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Deactivate.Hide" Location="Mscrm.SubGrid.sprk_analysis.Deactivate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.DocumentTemplate.Hide" Location="Mscrm.SubGrid.sprk_analysis.DocumentTemplate" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Edit.Hide" Location="Mscrm.SubGrid.sprk_analysis.Edit" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.ExportSelectedToExcel.Hide" Location="Mscrm.SubGrid.sprk_analysis.ExportSelectedToExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.ExportToExcel.Hide" Location="Mscrm.SubGrid.sprk_analysis.ExportToExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.ExportToExcel.MenuSection.Hide" Location="Mscrm.SubGrid.sprk_analysis.ExportToExcel.MenuSection" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Flows.RefreshCommandBar.Hide" Location="Mscrm.SubGrid.sprk_analysis.Flows.RefreshCommandBar" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.NewRecord.Hide" Location="Mscrm.SubGrid.sprk_analysis.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.OpenAssociatedGridViewStandard.Hide" Location="Mscrm.SubGrid.sprk_analysis.OpenAssociatedGridViewStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.RunReport.Hide" Location="Mscrm.SubGrid.sprk_analysis.RunReport" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.WordTemplate.Hide" Location="Mscrm.SubGrid.sprk_analysis.WordTemplate" />
+    <CustomAction Id="sprk.Spaarke.Analysis.NewAnalysisSubgrid.Button.CustomAction" Location="Mscrm.SubGrid.sprk_analysis.MainTab.Management.Controls._children" Sequence="5">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.Alt" Command="Spaarke.Analysis.NewAnalysisSubgrid.Command" Id="Spaarke.Analysis.NewAnalysisSubgrid.Button" Image32by32="/_imgs/ribbon/entity32_add.png" Image16by16="/_imgs/ribbon/AddNew_16.png" LabelText="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipDescription" ModernImage="Add" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Spaarke.Analysis.NewAnalysisSubgrid.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule" />
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_NewAnalysisFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule">
+        <CrmClientTypeRule Type="Web" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_analysis" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule">
+        <CustomRule FunctionName="Spaarke_EnableNewAnalysisSubgrid" Library="$webresource:sprk_analysis_commands.js" Default="false">
+          <CrmParameter Value="SelectedControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysisSubgrid.Button.Alt">
+      <Titles>
+        <Title description="New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysisSubgrid.Button.LabelText">
+      <Titles>
+        <Title description="New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new AI-powered analysis for this document. Configure actions, skills, and output options." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Create New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

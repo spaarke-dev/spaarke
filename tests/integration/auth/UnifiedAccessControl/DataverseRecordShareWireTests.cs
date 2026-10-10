@@ -446,7 +446,7 @@ public class DataverseRecordShareWireTests
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("systemuser", UserId) { ["isdisabled"] = false });
 
         var membership = new Moq.Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService>(
-            Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
             NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService>.Instance);
         membership.Setup(m => m.ReadMarkersAsync(container, Moq.It.IsAny<CancellationToken>())).ReturnsAsync(markers);
         membership.Setup(m => m.ReadAccessAsync(container, Moq.It.IsAny<CancellationToken>()))

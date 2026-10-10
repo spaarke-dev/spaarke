@@ -55,6 +55,7 @@ import {
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
+import { archiveFailureMessage } from './archiveFailure';
 // Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
 // lives in `@spaarke/communication-components` — the local `./composerPrefill`,
 // `./attachmentsSource`, and `./launchCreate` copies are deleted
@@ -66,7 +67,7 @@ import {
   launchCreate,
   type CreateKind,
 } from '@spaarke/communication-components/logic/actions';
-import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
@@ -300,7 +301,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           }
           return;
         }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
         if (cancelled) return;
         setBffBaseUrl(baseUrl);
         setAuthReady(true);
@@ -503,6 +504,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       try {
         // Relative path — the @spaarke/auth resolver prepends /api/.
         const resp = await authenticatedFetch(`/communications/${communicationId}/archive`, { method: 'POST' });
+        // Only a fetch that returns failures reaches this; `@spaarke/auth` throws them (see the catch).
         if (!resp.ok) {
           setError(`Save to SharePoint failed (${resp.status}).`);
           return;
@@ -515,7 +517,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         );
         await refreshHostForm();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save to SharePoint failed.');
+        setError(archiveFailureMessage(err));
       } finally {
         setBusy(false);
       }

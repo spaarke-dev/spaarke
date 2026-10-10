@@ -62,6 +62,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -79,8 +80,8 @@ public static class HandlerDispatchRegistrationModule
 {
     /// <summary>
     /// Adds one <c>AddKeyedScoped&lt;IProvisioningHandler&gt;</c> factory
-    /// per dispatchable <see cref="HandlerIds"/> constant (H14a/H14b/H14c
-    /// are deliberately absent -- see file header; total count is asserted
+    /// per dispatchable <see cref="HandlerIds"/> constant (H14a
+    /// is deliberately absent -- see file header; total count is asserted
     /// by <c>HandlerRegistrationCompletenessTests</c>). Safe to call
     /// regardless of registration order relative to the concrete handler
     /// types: the factory lambda only executes when the keyed service is
@@ -108,16 +109,19 @@ public static class HandlerDispatchRegistrationModule
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4, (sp, _) => sp.GetRequiredService<H4KvSecretsPopulationHandler>());
         // Task 201: H4b (F20/F20a automation) — BulkAppSettings handler.
-        // Thin wrapper around task 084's Configure-AppServiceSettings.generated.ps1
-        // (extended with per_env_settings). Runs AFTER H4, BEFORE H9. (H4-shared retired T226, 2026-09-30.)
+        // Writes the manifest's KV refs + per_env_settings through the ARM SDK (task 253).
+        // Runs AFTER H4, BEFORE H9. (H4-shared retired T226, 2026-09-30.)
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4b, (sp, _) => sp.GetRequiredService<H4bBulkAppSettingsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
-            HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvCreationHandler>());
+            HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvAdoptionHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H6, (sp, _) => sp.GetRequiredService<H6SolutionImportHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H7, (sp, _) => sp.GetRequiredService<H7DataverseEnvVarValuesHandler>());
+        // T256: H7b — the per-environment Secure Record setup (SecureRecordSetupModule registers the concrete type).
+        services.AddKeyedScoped<IProvisioningHandler>(
+            HandlerIds.H7b, (sp, _) => sp.GetRequiredService<H7bSecureRecordSetupHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

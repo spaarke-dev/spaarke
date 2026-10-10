@@ -189,7 +189,7 @@ Result: a control that should be 400–600 KB ships as 6–10 MB.
 | PCF | bundle.js | ZIP |
 |---|---|---|
 | SpeDocumentViewer | 440 KB | 111 KB |
-| SemanticSearchControl | 539 KB | ~140 KB |
+| SemanticSearchControl | ~770 KB (539 KB in May 2026; 1.1.84 is 788 KB, Oct 2026) | ~220 KB |
 | RelatedDocumentCount | 433 KB | ~110 KB |
 
 If a fresh build comes out >1 MB, the `build:prod` script is almost certainly misconfigured or `npm run build` was used. Verify with:
@@ -237,6 +237,15 @@ Before building, update the version in all 5 files. The build propagates the ver
 ### Step 1.5: Compile Shared Library (if modified)
 
 If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, compile `dist/` BEFORE the PCF build. See "Shared Library Dependency" section above for commands.
+
+**In a FRESH worktree** (the recommended deploy source — a short-path worktree of master), the shared libraries have no `node_modules` or `dist/` yet. Build them in this order before the first PCF build, each with `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` (found 2026-10-09, task 125):
+1. `src/client/shared/Spaarke.Auth` — every PCF consumes its `dist/`.
+2. `src/client/shared/Spaarke.SdapClient` (`@spaarke/sdap-client`) — `Spaarke.UI.Components` does not compile without it.
+3. `src/client/shared/Spaarke.UI.Components` — or let the PCF's `prebuild:prod` hook build it once 1–2 exist.
+4. `src/client/shared/Spaarke.Communication.Components` — `npm install` only, for the Communication* PCFs.
+5. `src/client/shared/Spaarke.Visuals` — `npm install` only, for VisualHost, which bundles its source; without it the build fails with `Can't resolve '@fluentui/react-icons'` (found 2026-10-10, task 127).
+
+**Run `pack.ps1` from inside the `Solution` folder** (`cd Solution; pwsh -File pack.ps1`): several pack scripts build the ZIP path relative to the process's working directory, not the script's, and fail when started from elsewhere.
 
 ### Step 2: Build Fresh
 
@@ -295,13 +304,23 @@ Controls/sprk_Spaarke.Controls.{ControlName}/css/*.css  (if applicable)
 # Disable CPM if needed
 mv /c/code_files/{worktree}/Directory.Packages.props{,.disabled}
 
-pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
 
 # Restore CPM
 mv /c/code_files/{worktree}/Directory.Packages.props{.disabled,}
 ```
 
 ### Step 6: Verify
+
+🚨 **`pac solution import` exits 0 when the import FAILS**, so `Import-SolutionScoped.ps1` can print "Imported and scoped-published" for an import that did nothing, then publish the OLD bundle (#1591, found 2026-10-10). Until #1591 is fixed, confirm every import from Dataverse:
+
+```powershell
+# The solution version must equal the ZIP's <Version>; if not, read the newest importjob's data for the error
+GET {org}/api/data/v9.2/solutions?$select=uniquename,version,modifiedon&$filter=uniquename eq '{SolutionName}'
+GET {org}/api/data/v9.2/importjobs?$select=solutionname,progress,data&$filter=solutionname eq '{SolutionName}'&$orderby=createdon desc&$top=1
+```
+
+A `progress` below 100 means the import failed; the `data` XML holds the `result="failure"` text.
 
 ```bash
 pac solution list | grep -i "{SolutionName}"
@@ -388,7 +407,8 @@ When the user wants to deploy manually for fastest iteration:
    cp out/controls/SemanticSearchControl/ControlManifest.xml Solution/Controls/sprk_Sprk.SemanticSearchControl/
    ```
 3. **Pack**: `cd Solution && powershell -File pack.ps1`
-4. **Import**: `pac solution import --path "Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip" --publish-changes`
+4. **Import**: `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath "Solution/bin/SpaarkeSemanticSearch_v{X.Y.Z}.zip" -SolutionUniqueName SpaarkeSemanticSearch`
+   **PCF publish:** an imported PCF build is NOT served until its bundle web resources (`cc_<Namespace>.<Control>/bundle.js` and `styles.css`) are published (task 129, 2026-10-08: the import rewrote bundle.js but the published copy stayed old; a `PublishXml` of `<webresources>` served the new bundle). The script does that. `customcontrols.version` can keep reading the old version after that publish; do not treat it as a failed deploy. Always bump the `ControlManifest.Input.xml` version: model-driven apps invalidate their cache on a version bump.
 5. **Verify**: Hard refresh browser (`Ctrl+Shift+R`), check version footer
 
 ### When the User Says "I'll deploy manually"
@@ -449,7 +469,7 @@ When the user wants to deploy manually for fastest iteration:
 | Bundle deployed but React not initializing | `ControlManifest.Input.xml` `<platform-library>` for React 16 not declared correctly | Per ADR-022, PCF declares React 16 via `<platform-library name="React" version="16.x.x" />`. Without this, ReactDOM doesn't bootstrap. |
 | Multiple PCFs in one solution but only one deploys | Solution XML missing entries for second PCF | Each PCF needs its own `<RootComponent>` in `solution.xml` + matching directory structure. Don't try to deploy 2 controls from 1 solution unless explicitly set up. |
 | `pac solution import` fails with cryptic XML errors | XML templates in this skill body need updating OR solution.xml structure drifted from PAC CLI expectations | The XML templates in this skill body are kept inline (not extracted to references/) per Phase 2b Wave 2d dereferencing-reliability concern. If templates drift from current PAC CLI behavior, update them here in-place. |
-| `pac solution import` fails with `The 'description-key' attribute is invalid - The value '...' is invalid according to its datatype 'noAposStringType' - The Pattern constraint failed.` | Apostrophe (`'`) in any `description-key` attribute value in `ControlManifest.Input.xml`. Dataverse PCF XSD validation rejects literal single quotes in description-key attributes — `noAposStringType` is a regex pattern that excludes them. The XML attribute itself can be single-quoted (parses fine), but the *value content* must not contain apostrophes. | **Remove all apostrophes from description-key values** in `ControlManifest.Input.xml`. Common cases: possessives (`entity's` → `host entity`), inline examples (`'sprk_todo'` → `sprk_todo`). Apostrophes in XML *comments* are fine (XSD skips comments). Discovered 2026-06-25 during RegardingResolver v1.2.0 deploy. |
+| `pac solution import` fails with `The 'description-key' attribute is invalid - The value '...' is invalid according to its datatype 'noAposStringType' - The Pattern constraint failed.` | Apostrophe (`'`) in any `description-key` attribute value in `ControlManifest.Input.xml`. Dataverse PCF XSD validation rejects literal single quotes in description-key attributes — `noAposStringType` is a regex pattern that excludes them. The XML attribute itself can be single-quoted (parses fine), but the *value content* must not contain apostrophes. | **Remove all apostrophes from description-key values** in `ControlManifest.Input.xml`. Common cases: possessives (`entity's` → `host entity`), inline examples (`'sprk_todo'` → `sprk_todo`). Apostrophes in XML *comments* are fine (XSD skips comments). Discovered 2026-06-25 during RegardingResolver v1.2.0 deploy; recurred 2026-10-10 (task 127, SemanticSearchControl 1.1.85 + VisualHost 1.4.40), where pac still exited 0 (#1591). **Enforced by** `tests/Spaarke.ArchTests/PcfManifestKeyAttributeGuardTests.cs` (Tier 1, blocking). |
 
 ---
 

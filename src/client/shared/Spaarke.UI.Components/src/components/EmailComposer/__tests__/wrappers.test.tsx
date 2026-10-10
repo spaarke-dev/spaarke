@@ -10,6 +10,7 @@
  *   - SendEmailPane  → mount='inline' with its own Send, no chrome, forwards sendMode/onSent/onError (task 096)
  */
 import * as React from 'react';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SendEmailStep } from '../wrappers/SendEmailStep';
@@ -209,6 +210,27 @@ describe('SendEmailPane (spaarkeai-word-add-in-r1 task 096 — a chromeless side
   });
 
   it('forwards onError with the server reason on a refused send', async () => {
+    // Production shape: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+    const fetchFn = throwingAuthenticatedFetch(async () => jsonResponse(403, { status: 403, detail: 'Not allowed' }));
+    const onError = jest.fn();
+    renderWithProviders(
+      <SendEmailPane
+        authenticatedFetch={fetchFn as unknown as AuthenticatedFetchFn}
+        bffBaseUrl={BFF}
+        initialTo={['a@example.com']}
+        initialSubject="Hi"
+        initialBody="<p>Body</p>"
+        onError={onError}
+      />
+    );
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'From' })).getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onError.mock.calls[0][0]).toMatchObject({ status: 403, detail: 'Not allowed' });
+  });
+
+  it('control: a host whose fetch RETURNS the 403 still forwards onError with the server reason', async () => {
     const fetchFn = jest.fn().mockResolvedValue(jsonResponse(403, { detail: 'Not allowed' }));
     const onError = jest.fn();
     renderWithProviders(

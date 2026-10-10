@@ -78,7 +78,7 @@ where they will fail.
 **Why this exists.** `CreateRunRequest.Profile` is a free-form string
 validated only as non-empty. The reconciler's `DagAdvancer.HandlerDependencies`
 map is profile-agnostic — every handler runs for every profile unless
-individual handlers branch on `TenancyModel` (Model1Shared vs Model2Dedicated).
+individual handlers branch on `TenancyModel` (`Model1` vs `Model2`; `Model1Shared` / `Model2Dedicated` before T224).
 Two silent-fail vectors exist:
 
 1. **Unknown profile string** — CreateRun accepts it, run starts, first
@@ -317,8 +317,9 @@ handler has run, so the cost overrun has already been incurred.
 
 An H0-side cost check would need to:
 1. Query current subscription MTD cost — cheap.
-2. Estimate the incremental cost of the run (Model 1 Shared: ~$0/customer
-   marginal; Model 2 Dedicated: $200-500/month per stamp).
+2. Estimate the incremental cost of the run (since D-12 every run is a
+   dedicated stamp in both models; T229 set one envelope per stamp —
+   `.claude/constraints/provisioning.md` "Cost model").
 3. Enforce a hard ceiling per `costEnvelopePolicy` (batch-mode:
    `abort-on-overrun` default proposed).
 
