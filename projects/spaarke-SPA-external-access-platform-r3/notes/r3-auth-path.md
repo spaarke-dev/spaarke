@@ -57,18 +57,29 @@ The production CIAM SPA client (redirect `https://external.spaarke.com`) is crea
 
 | # | Change | Why R3 needs it | Owner | Issue |
 |---|---|---|---|---|
-| D1 | Member test admits a guest of the stamp tenant whose home tenant (`idp`) is on the customer list | Licence-free customer staff (U3) | UAC-r2 / word-add-in task 126 | #1563 |
-| D2 | Define module app roles on the BFF registration (H3), assign them to the customer's user group, and seed `sprk_approlemodulemap` | Workforce users otherwise see no gated modules (Front Door wizards, widgets) | provisioning + R3 | #1568 |
+| D1 | **Self-registration service** (§5 decision 2): verify the home tenant is on the customer's allow-list, invite the B2B guest, add the guest to `sprk-{customerId}-users`, create or bind the contact with the **guest** `oid`. A pre-bound guest already resolves (`ContactIdentityBinder.ResolveWorkforceCallerAsync`: "everyone else resolves only through an existing oid binding"), so the member-test change becomes optional | Licence-free customer staff (U3) | owner to assign (shared directory service T240c is the natural home for the invite step; the stamp BFF writes the contact) | #1563 |
+| D2 | **Default modules by user type** (§5 decision 3, option b): change `ModuleEntitlementResolver` so a workforce caller (systemuser or workforce contact) gets `legal-front-door` + `policy-library`, and a CIAM partner keeps `assigned-work`. The app-role map stays only for optional extras. No Entra app roles and no per-user setup | Workforce users otherwise see no gated modules | R3 (small BFF change on the external surface) | #1568 |
 | D3 | T240c directory (workforce lookup + CIAM lookup) | Run-time server selection in production | provisioning | — (task 240c) |
 | D4 | T240d: per-customer CIAM audience, keyless provisioner, default-scheme CIAM-token guard | Partner plane on stamps | provisioning (+ R3 for the audience forms and the guard, if the owner agrees) | — (task 240d) |
 | D5 | Fix the SPA's out-of-plane pages and the production mock identity | Upload and playbook pages fail today | **R3** | #1566 |
 | D6 | ADR-028 A5 (impersonated record set) | Direct shares are invisible to system users in the SPA/Teams | UAC-r2 task 036 | #1567 |
 
-## 5. Owner decisions needed
+## 5. Owner decisions (2026-10-09)
 
-1. **Confirm `user_impersonation`** for the Teams tab and the browser work-account plane (no `access_as_user` on stamps).
-2. **Licence-free customer staff are invited as B2B guests** in Spaarke's tenant (no licence). Who invites them: H11 at provisioning time, or an in-product invite? Use the `idp` claim as the trusted home-tenant source.
-3. **Module access for workforce users:** define app roles on the BFF registration and assign them to the customer group, versus another rule.
+1. **Scope — DECIDED: standardise on `user_impersonation`** for every client (Teams tab, browser work account, Copilot, CIAM plane). No `access_as_user` on stamps. Nothing blocks it: the BFF never checks the scope value (`CallerIdentity.cs:113,248`), and every stamp app already exposes the scope. One-time dev housekeeping: the dev BFF app's hand-made Teams/broker pre-authorizations are attached to `access_as_user`, so they are re-added on `user_impersonation` when the client changes.
+2. **Licence-free customer staff — DECIDED: self-registration through a link the customer shares.** They become B2B guests in Spaarke's tenant (no licence). Nobody creates them in advance. Proposed flow (not yet built; design open for the owner):
+   1. The customer shares a join link: `https://external.spaarke.com/join?customer={key}`.
+   2. The employee signs in with their **own company account** in their home tenant. This step needs a small registration-only client that reads nothing but their profile.
+   3. Spaarke checks that their company tenant is on that customer's allowed list (the existing `CustomerTenantIds` setting, which provisioning already writes) and that they are a **member** of it (`acct = 0`, not someone else's guest).
+   4. Spaarke invites them as a guest (Graph invitations, no email), adds them to `sprk-{customerId}-users`, and creates their contact in the customer's Dataverse, bound to the guest `oid`.
+   5. The SPA then signs them in normally against Spaarke's tenant.
+
+   Open sub-decisions:
+   - automatic approval (company on the allow-list) versus customer-admin approval;
+   - which service holds the invite permission (recommendation: the shared directory service, not every stamp);
+   - a spike comparing this with Entra's built-in B2B self-service sign-up user flow;
+   - whether the customer's IT cross-tenant access settings allow B2B collaboration.
+3. **Modules — DECIDED: option (b), default modules by user type.** Workforce users (licensed staff and workforce contacts) get the Legal Front Door (`legal-front-door`) and the Policy Library (`policy-library`). Partners keep Assigned Work (`assigned-work`). Default sets to confirm with the owner: whether licensed staff need anything more, and whether partners need anything more.
 
 ## 6. ADR consequence
 
@@ -80,4 +91,5 @@ The design can go to `/design-to-spec` with §2–§3 as the auth design; the au
 
 - R3's own client work (§2.1–2.5, §3, D5) can start immediately against dev.
 - Production needs D3 and D4.
-- Licence-free staff need D1.
+- Licence-free staff need D1 (the self-registration service).
+- Module defaults (D2) are a small change R3 can make now.
