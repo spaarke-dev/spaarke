@@ -4,7 +4,7 @@
     <title>Spike: Entra built-in B2B self-service sign-up vs custom join flow (FR-12)</title>
     <phase>0 Governance and inputs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Research spike producing a decision document; no production code</rigor-reason>
     <model-tier>opus</model-tier>

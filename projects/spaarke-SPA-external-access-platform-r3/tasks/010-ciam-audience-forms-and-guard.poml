@@ -4,7 +4,7 @@
     <title>Ciam scheme audience forms + default-scheme CIAM-token guard (FR-22, FR-23)</title>
     <phase>1 BFF auth and entitlement</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth code in the BFF JwtBearer configuration (tags auth, bff-api)</rigor-reason>
     <model-tier>opus</model-tier>
