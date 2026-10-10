@@ -3,7 +3,8 @@
 # Enforces @typescript-eslint/no-unnecessary-condition on non-test src/** of the client packages that use
 # @spaarke/auth's AuthenticatedFetchFn (returns OkResponse since #1541): a `!res.ok` / status check after
 # it is dead code. Today's violations are recorded in scripts/quality/client-lint/eslint-suppressions.json
-# (ESLint bulk suppressions). A NEW violation fails this check; so does a suppression that no longer occurs
+# (ESLint bulk suppressions). It also enforces the catch policy (no empty / console-only / telemetry-only /
+# logger-only catch; a disable needs a reason) -- see the docs below. A NEW violation fails this check; so does a suppression that no longer occurs
 # (run `node scripts/quality/client-lint/client-lint.mjs prune` and commit).
 #
 # Standalone on purpose: it changes no file of the CI router/tier1/tier2 set, so the CI shadow window's

@@ -668,7 +668,25 @@ Today's violations are recorded per file and rule in `scripts/quality/client-lin
 - **After moving or renaming a file with recorded findings:** run `client-lint.mjs baseline --package <id>` (re-records only that package, merging into the JSON and pruning the old path), then explain the diff in the PR.
 - **Lockfiles:** on a dev box, `install` can rewrite a stale tracked `package-lock.json`; commit the regenerated lock (CI fails on a stale one: `npm install --package-lock-only --legacy-peer-deps` in that dir).
 - **Re-baselining everything** (`client-lint.mjs baseline`) is rare and reviewed in the PR; the diff must be explained.
-- **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not). If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
+- **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not).
+
+#### Catch policy
+
+Besides `no-unnecessary-condition`, the same ratchet enforces that a `catch` handles the error, surfaces it to the user, or rethrows. Rules (all `error`, same baseline mechanism):
+
+- `no-restricted-syntax` (selectors in `eslint.client.config.mjs`): an **empty or comment-only** catch; a catch whose **only statement is a `console.*` call**; a catch whose only statement is a **telemetry call** (`logTelemetryError`, `reportClientError`, `trackException`); a catch whose only statement is a **logger call** (`logger.*` / `this.logger.*` with `logError`, `logWarn`, `error`, `warn`). Telemetry-only and logger-only count as swallowing: the failure is recorded but the user and the caller never learn of it.
+- `spaarke-client/catch-disable-needs-reason`: an `eslint-disable*` directive naming `no-restricted-syntax` must carry a reason.
+
+**A flagged catch:** (1) handle it (fall back, retry, return an error result); (2) surface it (error state, toast, message bar) in addition to logging; or (3) rethrow / return a failure the caller checks. Logging plus real handling (e.g. `console.error(...)` then `return null`) is fine: only a catch that does nothing else is flagged.
+
+**A deliberate swallow** (best-effort cache warm, optional telemetry, cleanup) needs a reasoned disable on the line above:
+
+```ts
+// eslint-disable-next-line no-restricted-syntax -- best-effort cache warm; failure is harmless
+try { await warmCache(); } catch { /* intentionally ignored */ }
+```
+
+A disable without ` -- <reason>` fails `catch-disable-needs-reason`. Existing violations are baselined in `eslint-suppressions.json`; fixing one means `prune`. `controls` asserts exact must-fire counts per rule (`EXPECTED_FIRE` in `client-lint.mjs`), so adding or removing a catch-policy fixture means updating that table. If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
 
 ### Pre-commit
 
