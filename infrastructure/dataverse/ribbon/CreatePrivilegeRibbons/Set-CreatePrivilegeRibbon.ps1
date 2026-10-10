@@ -238,7 +238,9 @@ function Test-LiveTable([string] $table, [xml] $ribbon, [string[]] $before) {
         # The DEFINITION (under RuleDefinitions), not a command's reference to it.
         $rule = $ribbon.SelectSingleNode(
             "//*[local-name()='RuleDefinitions']/*[local-name()='DisplayRules']/*[local-name()='DisplayRule' and @Id='$($c.RuleId)']")
-        $privilege = if ($rule) { @($rule.ChildNodes | Where-Object { $_.NodeType -eq 'Element' }) } else { @() }
+        # @(if ...) - never `x = if (...) { @(...) }`: PowerShell unrolls a one-element array returned by an if, and an
+        # XmlElement then has no usable .Count or [0] (the XML adapter), so a correct rule read as 'not exactly'.
+        $privilege = @(if ($rule) { $rule.ChildNodes | Where-Object { $_.NodeType -eq 'Element' } })
         if ($privilege.Count -ne 1 -or $privilege[0].LocalName -ne 'EntityPrivilegeRule' -or
             $privilege[0].GetAttribute('EntityName') -ne $c.Table -or $privilege[0].GetAttribute('PrivilegeType') -ne 'Create' -or
             $privilege[0].GetAttribute('PrivilegeDepth') -ne 'Basic' -or $privilege[0].HasAttribute('InvertResult')) {
@@ -255,7 +257,7 @@ function Invoke-Verify([System.Collections.IDictionary] $beforeByTable) {
     $token = Get-DvToken
     $failed = 0
     foreach ($table in $hosts) {
-        $before = if ($beforeByTable -and $beforeByTable.Contains($table)) { @($beforeByTable[$table]) } else { @() }
+        $before = @(if ($beforeByTable -and $beforeByTable.Contains($table)) { $beforeByTable[$table] })
         $result = Test-LiveTable $table (Get-LiveRibbon $table $token) $before
         if ($result.Failures.Count -eq 0) {
             $names = ($result.Creates | ForEach-Object { "$($_.Command) -> $($_.Table)" }) -join '; '
@@ -366,7 +368,7 @@ foreach ($solution in $Solutions) {
     $unpackedBySolution[$solution] = $unpacked
 
     $entitiesDir = Join-Path $unpacked 'Entities'
-    $ribbonDiffs = if (Test-Path -LiteralPath $entitiesDir) { @(Get-ChildItem -LiteralPath $entitiesDir -Recurse -Filter 'RibbonDiff.xml') } else { @() }
+    $ribbonDiffs = @(if (Test-Path -LiteralPath $entitiesDir) { Get-ChildItem -LiteralPath $entitiesDir -Recurse -Filter 'RibbonDiff.xml' })
     $lost = @(& (Join-Path (Split-Path -Parent $PSScriptRoot) 'Test-RibbonExportCurrent.ps1') -EnvironmentUrl $EnvironmentUrl `
         -Token $token -UnpackedDir $unpacked)
     if ($lost.Count -gt 0) {
