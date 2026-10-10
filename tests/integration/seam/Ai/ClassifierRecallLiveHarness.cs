@@ -93,6 +93,11 @@ public sealed class ClassifierRecallLiveHarness
         {
             var action = await preScope.ServiceProvider.GetRequiredService<IActionResolver>()
                 .ResolveAsync(ConsumerTypes.EmailTriage, CancellationToken.None);
+            // Resolve the whole per-item graph BEFORE the first model call, so a wiring error costs nothing.
+            preScope.ServiceProvider.GetRequiredService<ICommunicationTriageAi>();
+            preScope.ServiceProvider.GetRequiredService<ICommunicationClassificationAi>();
+            root.GetRequiredService<AiClassificationRung>();
+            root.GetRequiredService<AssociationStatusMapper>();
             var choices = await preScope.ServiceProvider.GetRequiredService<LookupChoicesResolver>()
                 .ResolveFromJpsAsync(action.SystemPrompt, CancellationToken.None);
             const string choicesRef = "lookup:sprk_triagecategory.sprk_name";
@@ -261,6 +266,11 @@ public sealed class ClassifierRecallLiveHarness
         services.AddSingleton<IPlaybookService, NullPlaybookService>(); // ScopeResolverService ctor dep; unused on this path
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddSingleton<IRagService, NullRagService>(); // never called: MatterId is null
+        // CommunicationTriageAi ctor dep (uac-r2 task 176). Only the grounding branch uses it, which needs a MatterId;
+        // the user client is a STRICT mock, so any call would throw and fail the run rather than pass silently.
+        services.AddHttpContextAccessor();
+        services.AddSingleton(new Moq.Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(Moq.MockBehavior.Strict).Object);
+        services.AddScoped<IRetrievalAccessTrim, RetrievalAccessTrim>();
         services.AddScoped<ICommunicationClassificationAi, CommunicationClassificationAi>();
         services.AddScoped<ICommunicationTriageAi, CommunicationTriageAi>();
 
@@ -282,7 +292,7 @@ public sealed class ClassifierRecallLiveHarness
         services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<AiClassificationRung>();
 
-        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
     }
 
     private sealed class HarnessHostEnvironment(string name) : IHostEnvironment
