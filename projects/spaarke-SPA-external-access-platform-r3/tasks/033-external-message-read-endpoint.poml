@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>External-plane message read endpoint (FR-04)</title>
+    <phase>3 BFF features</phase>
+    <gate>after 011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New Tier-2-checked read endpoint (tags bff-api, auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New authorization boundary over shared Communication data</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>endpoint-registration chain in ExternalAccessEndpoints.cs: 033 → 035 → 037; new file reused by 034</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api, auth, testing, regarding</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add GET /api/v1/external/{root}/{id}/messages that returns the communication thread regarding a record the caller can access, hiding internal-only messages from non-systemuser callers.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core and Dataverse developer. Follow ADRs strictly.</role>
+  <goal>A new ExternalMessageEndpoints.cs maps the read route in the external group; it checks the record against the accessible set (or, for service requests, the requester scope), reads app-only, returns the thread newest-last, and excludes sprk_isinternalonly = true for every caller that is not a systemuser.</goal>
+
+  <context>
+    <background>C1 needs messages in the detail view; the existing thread reads are internal-plane (CommunicationEndpoints.cs:193 GET /threads → CommunicationThreadReadService.ListThreadsAsync :342). sprk_communication has sprk_isinternalonly (CommunicationThreadReadService.cs:75; docs/data-model/sprk_communication.md:71) and per-type regarding lookups (RegardingLookupMap in CommunicationService; service requests: sprk_regardingservicerequest). Spec: also covers the caller's own service requests so a submitter reads questions asked on their request.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
+      <file role="new-artifact">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalMessageEndpointsTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">Supported roots: projects, matters, workassignments, invoices, documents (where the accessible set covers them) and servicerequests (requester scope only). Any other root returns 404.</constraint>
+    <constraint source="project">Internal-only messages (sprk_isinternalonly = true) are returned only to systemuser principals; workforce contacts and CIAM contacts never receive them (fail-closed).</constraint>
+    <constraint source="project">Reuse CommunicationThreadReadService query/mapping code where it can run app-only; do not copy it. If it can only run impersonated, extend it with an app-only overload rather than forking.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external message read</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read CommunicationThreadReadService (query shape, DTO, internal-only handling) and how ExternalModuleDataEndpoints checks a record against the accessible set.</step>
+    <step order="2">Create ExternalMessageEndpoints.cs with a Map method called from ExternalAccessEndpoints.cs inside the external group.</step>
+    <step order="3">Handler: resolve root type → regarding lookup column; check accessibility (IAccessibleRecordSetService, or requester scope for service requests); read communications regarding the record app-only; filter internal-only by principal type; return DTOs (id, subject, body text, sender display name, created on, direction).</step>
+    <step order="4">Tests: accessible record → thread; inaccessible → 403; CIAM caller and workforce-contact caller never get internal-only rows; systemuser caller does; own service request → thread; someone else's service request → 403; unknown root → 404.</step>
+    <step order="5">Seeding proof on the internal-only filter: remove it, confirm the CIAM test fails, restore.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-033-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reading communications app-only would expose rows the composed accessible set does not cover (e.g. messages regarding a child record of an accessible root), STOP and escalate with the exact gap.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Internal thread read: CommunicationEndpoints.cs:193 + CommunicationThreadReadService.ListThreadsAsync (:342), impersonated as a systemuser on the internal plane.</existing>
+    <extension>Partly: the read service is reused (or given an app-only overload); a new external-plane entry point is required because contacts have no systemuser and the external plane forbids OBO.</extension>
+    <cost-of-doing-nothing>The C1 detail view cannot show a record's messages to partners or workforce contacts (G1), and submitters cannot read questions on their requests.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalMessageEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/v1/external/{root}/{id}/messages on an accessible record returns that record's communications.</criterion>
+    <criterion testable="true">The same request on a record outside the accessible set returns 403.</criterion>
+    <criterion testable="true">A CIAM caller never receives a message with sprk_isinternalonly = true; nor does a workforce-contact caller.</criterion>
+    <criterion testable="true">A systemuser caller receives internal-only messages on an accessible record.</criterion>
+    <criterion testable="true">The requester of a service request reads its thread; any other caller gets 403.</criterion>
+    <criterion testable="true">An unsupported root type returns 404.</criterion>
+    <criterion testable="true">The seeding proof is recorded in the task notes.</criterion>
+    <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04, NFR-01. Rule on internal-only for workforce contacts is the conservative reading of 'callers flagged external'; record it in notes/decisions.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

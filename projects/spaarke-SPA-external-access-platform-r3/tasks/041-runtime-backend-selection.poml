@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Run-time backend selection on both planes (FR-17)</title>
+    <phase>4 SPA auth and platform</phase>
+    <gate>after 040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Token-routing logic (tags auth, frontend)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation-critical client routing (a token must never go to a URL from a link)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies auth/* and config.ts after 040; 042 builds on it</parallel-reason>
+    <deps>040</deps>
+    <tags>auth, frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the baked BFF URL and scope with a run-time selection seam: the SPA resolves {bffBaseUrl, bffScope} for a customer key from Spaarke-owned data (the T240c directory when available, dev config until then), remembers known keys, and shows a picker when there are several.</prompt>
+  <role>SPAARKE platform developer. Frontend identity developer. Follow ADRs strictly.</role>
+  <goal>A backend-selection module returns the active {customerKey, bffBaseUrl, bffScope}; bffApiCall and the token acquirers use it; dev resolves from a configured list; the directory client is an interface with a dev implementation; known keys live in localStorage; ?customer= and invite links only choose among keys the directory/config knows.</goal>
+
+  <context>
+    <background>Owner D-13: each customer has its own backend. T240c (provisioning) provides a workforce lookup (by group membership) and a CIAM lookup (by invite key); it is not built yet, so dev keeps one configured backend (spec FR-17). The seams exist: setActiveBffTokenAcquirer (msal-auth.ts:172), setActiveLoginScope (:196), BFF_API_URL (config.ts:60), MSAL_BFF_SCOPE (:90). T240d: a link carries only the customer key (+ record for C3), never a BFF URL or scope.</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/auth/backend-selection.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/bff-client.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/standalone-plane.ts</file>
+      <file role="modify">src/client/external-spa/src/config.ts</file>
+      <file role="modify">src/client/external-spa/.env.example</file>
+      <file role="new">src/client/external-spa/src/components/auth/CustomerPicker.tsx</file>
+      <file role="new-artifact">src/client/external-spa/tests/backend-selection.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="NFR-02">No token is ever sent to a host, and no scope is ever requested, that came from a URL or query string; the URL may carry only a customer key, which must match an entry returned by Spaarke-owned data (directory or dev config), else it is ignored.</constraint>
+    <constraint source="project">One build serves every backend: no BFF URL or scope is baked at build time except the dev fallback list (VITE_BACKENDS JSON or the existing single VITE_BFF_API_URL as a one-entry list).</constraint>
+    <constraint source="project">localStorage holds only customer keys (no URLs, scopes or tokens); every access is wrapped in try/catch.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>backend selection</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Design the module: interface BackendDirectory { resolveWorkforce(): Promise&lt;Backend[]&gt;; resolveByKey(key): Promise&lt;Backend | null&gt; }; Backend = { customerKey, displayName, bffBaseUrl, bffAppId } with bffScope = api://{bffAppId}/user_impersonation.</step>
+    <step order="2">Implement DevConfigDirectory from VITE config; leave a DirectoryServiceClient stub behind a flag for T240c with a TODO referencing provisioning task 240c.</step>
+    <step order="3">Wire bffApiCall/bffApiBlob and both planes' token acquirers to the active backend; set the login scope from it.</step>
+    <step order="4">Add CustomerPicker (Fluent v9, mirror the RealmChooser look in src/components/auth/RealmChooser.tsx) shown when more than one backend is known and none is active.</step>
+    <step order="5">Handle ?customer={key}: select it only if the directory/config returns it; otherwise ignore it and show the picker or the default.</step>
+    <step order="6">Tests: two configured backends → requests go to the selected one with its scope; a crafted ?customer= value not in config → ignored; a URL-shaped value in any query param never becomes a request host; localStorage throwing → still works.</step>
+    <step order="7">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-041-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a page or library builds BFF URLs outside bff-client.ts (bypassing the seam), list them and fix them in task 042 rather than here, unless the fix is one line.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>BFF URL and scope are build-time constants today (config.ts:60, :90; workflow VITE vars).</existing>
+    <extension>No: the existing seams (setActiveBffTokenAcquirer/setActiveLoginScope) accept a value but nothing chooses it at run time; this module is the chooser.</extension>
+    <cost-of-doing-nothing>One SPA build cannot reach more than one customer backend, so production (one shared origin, many stamps) cannot work (FR-17, D-13).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Picker with two backends">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Configure two dev backends</step><step>Sign in</step><step>Choose the second backend in the picker</step></steps>
+      <expected>Network requests go to the second backend's host with its scope</expected>
+    </test>
+    <test name="Crafted link">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open the SPA with ?customer=unknown-key</step><step>Sign in</step></steps>
+      <expected>The key is ignored; no request goes to an unlisted host</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/auth/backend-selection.ts</output>
+    <output type="code">src/client/external-spa/src/components/auth/CustomerPicker.tsx</output>
+    <output type="test">src/client/external-spa/tests/backend-selection.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With two backends configured, the same build sends requests and token scopes to whichever backend is selected.</criterion>
+    <criterion testable="true">A ?customer= key that the directory/config does not return is ignored.</criterion>
+    <criterion testable="true">No request host or scope is ever derived from a query-string value.</criterion>
+    <criterion testable="true">The picker appears only when more than one backend is known and none is active.</criterion>
+    <criterion testable="true">Known customer keys persist across reloads; with localStorage unavailable the SPA still works.</criterion>
+    <criterion testable="true">The CIAM plane uses the same seam for its backend.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17, NFR-02. Production directory client lands when T240c ships (provisioning).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

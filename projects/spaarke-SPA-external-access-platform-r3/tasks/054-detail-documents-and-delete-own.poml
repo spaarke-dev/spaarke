@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Documents on the detail view + delete-own actions (FR-24, FR-26 client)</title>
+    <phase>5 SPA features</phase>
+    <gate>after 051 and 032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend over new upload/delete endpoints (tags frontend)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend over defined APIs; reuses DocumentLibrary</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies RecordDetailModal; chain 050 → 051 → 054 → 055</parallel-reason>
+    <deps>051, 032</deps>
+    <tags>frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let users list, download and upload documents on every core record's detail view, and show a Delete action only on the documents, to-dos, events and service requests they created.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>The detail view's documents section supports upload (Create rights) and download for Project, Matter, Work Assignment, Invoice and Service Request; rows the caller created show Delete with a confirmation; a 403 on upload or delete shows an error.</goal>
+
+  <context>
+    <background>Server: task 031 routes /api/v1/external/{root}/{id}/documents; task 032 DELETE routes for documents, todos, events, servicerequests (creator-only). Existing component: src/client/external-spa/src/components/DocumentLibrary.tsx. The client shows Delete only as a convenience; the server decides.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="new-artifact">src/client/external-spa/tests/DetailDocumentsDelete.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="project">Delete is shown only when the row's creator stamp matches the signed-in principal (as returned by the read); the confirmation dialog uses the shared modal system (ADR-050). The server remains the authority: a 403 is shown as an error.</constraint>
+    <constraint source="project">No delete action for messages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documents and delete UI</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add list/upload/download/delete calls for all root types in web-api-client.ts.</step>
+    <step order="2">Reuse DocumentLibrary inside the detail view with upload enabled when the caller has Create (hide otherwise).</step>
+    <step order="3">Add Delete on own documents, to-dos, events (in the events/tasks section) and on own service requests (Service Requests detail).</step>
+    <step order="4">Tests: upload visible/hidden by rights; delete visible only on own rows; confirm then delete; 403 error.</step>
+    <step order="5">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-054-notes.md.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Upload and delete own">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open a matter detail</step><step>Upload a document</step><step>Delete it</step></steps>
+      <expected>The document appears, then disappears after confirmation</expected>
+    </test>
+    <test name="No delete on others">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open a record with a document uploaded by someone else</step></steps>
+      <expected>No Delete action on that row</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</output>
+    <output type="code">src/client/external-spa/src/components/DocumentLibrary.tsx</output>
+    <output type="test">src/client/external-spa/tests/DetailDocumentsDelete.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Upload and download work on the detail view for Project, Matter, Work Assignment, Invoice and Service Request.</criterion>
+    <criterion testable="true">A ViewOnly caller sees no upload control; a forced upload shows the server's 403 as an error.</criterion>
+    <criterion testable="true">Delete appears only on documents, to-dos, events and service requests the caller created, and asks for confirmation.</criterion>
+    <criterion testable="true">After a successful delete the row disappears; a 403 shows an error and the row stays.</criterion>
+    <criterion testable="true">No message has a Delete action.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-24, FR-26.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

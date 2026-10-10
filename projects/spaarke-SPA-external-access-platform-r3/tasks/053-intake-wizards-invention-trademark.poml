@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Intake wizards part 2: Invention Submission + Trademark Search (FR-05)</title>
+    <phase>5 SPA features</phase>
+    <gate>after 052</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New frontend wizards (tags frontend)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two more wizards on the pattern built in 052</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>extends intakeRegistry.ts and QuickStartPane.tsx changed by 052</parallel-reason>
+    <deps>052</deps>
+    <tags>frontend, modal, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Invention Submission and Trademark Search wizards on the task-052 registry and wire their cards and More Services entries.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>The invention-submission and trademark-search cards open their wizards, which submit through intake-client and appear in the Service Requests tab.</goal>
+
+  <context>
+    <background>Task 052 created intakeRegistry, intake-client and the first two wizards. invention-submission currently opens widget 'inventions' (QuickStartPane.tsx:108); trademark-search has no target (:111).</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/intake/InventionSubmissionWizard.tsx</file>
+      <file role="new">src/client/external-spa/src/intake/TrademarkSearchWizard.tsx</file>
+      <file role="modify">src/client/external-spa/src/intake/intakeRegistry.ts</file>
+      <file role="modify">src/client/external-spa/src/components/shell/QuickStartPane.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/intake/NdaAssessmentWizard.tsx</file>
+      <file role="modify">src/client/external-spa/tests/IntakeWizards.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="project">Field sets drafted in the task notes for owner approval: Invention Submission (title, inventors, description, first public disclosure date, related project), Trademark Search (mark, classes, jurisdictions, intended use date).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>intake wizards</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Draft and get approval for the two field sets.</step>
+    <step order="2">Build both wizards copying NdaAssessmentWizard's structure.</step>
+    <step order="3">Register them and wire both cards and More Services entries.</step>
+    <step order="4">Extend the wizard tests for both types.</step>
+    <step order="5">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-053-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>NdaAssessmentWizard (task 052) is the pattern; no invention or trademark wizard exists.</existing>
+    <extension>Yes — reuses the 052 registry, client and shell; only the step content is new.</extension>
+    <cost-of-doing-nothing>Two of the four quick-start cards open no wizard (FR-05).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Invention wizard">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Click Invention Submission</step><step>Submit</step></steps>
+      <expected>Success; appears in Service Requests</expected>
+    </test>
+    <test name="Trademark wizard">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Click Trademark Search</step><step>Submit</step></steps>
+      <expected>Success; appears in Service Requests</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/intake/InventionSubmissionWizard.tsx</output>
+    <output type="code">src/client/external-spa/src/intake/TrademarkSearchWizard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both cards and their More Services entries open the right wizard.</criterion>
+    <criterion testable="true">Each wizard validates required fields and submits the right requestType.</criterion>
+    <criterion testable="true">Each submitted request appears in the Service Requests tab.</criterion>
+    <criterion testable="true">All four quick-start cards now open a wizard.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

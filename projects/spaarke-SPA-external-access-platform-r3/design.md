@@ -384,7 +384,7 @@ prereq**: net10 (§4.5). **Multi-backend**: for external contacts these endpoint
 <hot-path-declaration>
   <bff>Y</bff>                 <!-- C3 notify + in-portal read; C1 message read; C6 message send -->
   <spaarke-ai>N</spaarke-ai>   <!-- external-spa, not src/solutions/SpaarkeAi -->
-  <ci-workflows>N</ci-workflows>
+  <ci-workflows>Y</ci-workflows> <!-- FR-20 production build + Teams package (updated 2026-10-10 to match spec.md) -->
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>

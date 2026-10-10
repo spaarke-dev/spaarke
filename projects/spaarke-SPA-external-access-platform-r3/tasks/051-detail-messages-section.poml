@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Messages section in the detail view: read thread + compose/send (FR-04, FR-11 client)</title>
+    <phase>5 SPA features</phase>
+    <gate>after 050 and 034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New frontend surface calling new write endpoint (tags frontend)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend over a defined API with a reference compose component</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies RecordDetailModal created by 050; chain 050 → 051 → 054 → 055</parallel-reason>
+    <deps>050, 034</deps>
+    <tags>frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Messages section to the record detail view that shows the record's thread from GET /api/v1/external/{root}/{id}/messages and lets the user post a message with POST to the same route.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>The detail view shows the thread oldest-to-newest with sender and time, a compose box with Send (disabled while sending, length-capped), the new message appears after a successful send, and a 403 shows an inline error without losing the draft.</goal>
+
+  <context>
+    <background>Owner 2026-10-08: thread post, no email, no attachments. Shared compose components NewThreadModal / EmailComposer are internal-plane and Xrm-bound — mirror their look, do not import Xrm code. Service request details also show the thread (answering questions on own request).</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="new">src/client/external-spa/src/api/messages-client.ts</file>
+      <file role="new-artifact">src/client/external-spa/tests/RecordMessages.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="project">No attachment control; body max 10,000 characters (matches task 034).</constraint>
+    <constraint source="project">Visual anchor: mirror the message list/compose layout of the shared EmailComposer/NewThreadModal in Spaarke.UI.Components (spacing, typography tokens), without their Xrm dependencies.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>messages UI</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Create messages-client.ts (list, send) over bffApiCall.</step>
+    <step order="2">Create RecordMessages with list + compose; add it to RecordDetailModal for every root type the server supports.</step>
+    <step order="3">Tests: list renders; send posts and appends; 403 shows inline error and keeps the draft; empty body cannot be sent.</step>
+    <step order="4">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="6">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-051-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>No message UI exists in external-spa; the shared EmailComposer/NewThreadModal are internal-plane and Xrm-bound.</existing>
+    <extension>No: the shared compose components depend on Xrm and internal-plane endpoints; this component mirrors their look over the external routes (033/034).</extension>
+    <cost-of-doing-nothing>The detail view cannot show or send messages (G1, G6).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Send a message">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open a granted record's detail</step><step>Type a message and press Send</step></steps>
+      <expected>The message appears in the thread with the caller as sender</expected>
+    </test>
+    <test name="Send denied">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Simulate a 403 on send</step></steps>
+      <expected>Inline error; the draft stays in the box</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/RecordMessages.tsx</output>
+    <output type="code">src/client/external-spa/src/api/messages-client.ts</output>
+    <output type="test">src/client/external-spa/tests/RecordMessages.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Messages section lists the record's thread with sender and timestamp.</criterion>
+    <criterion testable="true">Sending a message posts once and shows it in the thread.</criterion>
+    <criterion testable="true">Send is disabled for an empty body and while a send is in flight; bodies over 10,000 characters cannot be sent.</criterion>
+    <criterion testable="true">A 403 on send shows an inline error and keeps the draft.</criterion>
+    <criterion testable="true">There is no attachment control.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04, FR-11.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

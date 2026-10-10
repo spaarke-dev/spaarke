@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Production SPA build + production Teams package in CI (FR-20)</title>
+    <phase>4 SPA auth and platform</phase>
+    <gate>after 040</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>CI workflow and packaging changes with explicit acceptance</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Workflow edits following the existing dev jobs</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>ci-cd, deploy, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make deploy-external-spa.yml able to build and deploy a production build for external.spaarke.com, and make deploy-teams-app.yml produce a separate production Teams package from its own manifest, without changing the dev outputs.</prompt>
+  <role>SPAARKE platform developer. DevOps engineer (GitHub Actions, Azure Static Web Apps, Teams app packaging). Follow ADRs strictly.</role>
+  <goal>Both workflows take an environment input (dev | prod); prod builds use production values from GitHub environment variables (no hard-coded dev values), deploy to swa-spaarke-external-spa-prod, and package a prod manifest (external.spaarke.com origin, prod Teams app id, no webApplicationInfo); dev behaviour is unchanged.</goal>
+
+  <context>
+    <background>deploy-external-spa.yml: workflow_dispatch only (:12), one job, hard-coded dev VITE values (:43-52), deploys with secrets.AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV (:65). deploy-teams-app.yml: zips manifest.json + icons (:110), no env split. Owner 2026-10-08: 'baked dev values CANNOT be part of the package'. Design actions A1 (prod appPackage, own manifest + prod Teams app id), A2 (origins external.spaarke.com, brk-multihub://external.spaarke.com), A4 (deploy to swa-spaarke-external-spa-prod). Production go-live (task 073) is gated; this task only makes the artefacts buildable. Dependabot PR #909 bumps setup-node in both files.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/deploy-external-spa.yml</file>
+      <file role="modify">.github/workflows/deploy-teams-app.yml</file>
+      <file role="new">src/client/external-spa/appPackage/manifest.prod.json</file>
+      <file role="new">src/client/external-spa/appPackage/env.prod.json</file>
+      <file role="modify">src/client/external-spa/.env.production</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No production identifier, URL or scope is hard-coded in a workflow; prod values come from a GitHub 'external-spa-prod' environment's variables, and the SWA token from an environment secret the owner creates.</constraint>
+    <constraint source="project">Prod manifest: own Teams app id (owner supplies), validDomains/staticTabs on external.spaarke.com, no webApplicationInfo.</constraint>
+    <constraint source="project">Coordinate with dependabot PR #909 (setup-node bump in the same files): rebase on it if merged, else keep its change out of this diff.</constraint>
+    <constraint source="project">Run actionlint on both workflows before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI packaging</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read both workflows and PR #909's diff.</step>
+    <step order="2">Add an environment input; move VITE values to environment variables (dev values move to an 'external-spa-dev' environment — list the variables for the owner to create).</step>
+    <step order="3">Add the prod deploy path targeting swa-spaarke-external-spa-prod with the prod environment's token.</step>
+    <step order="4">Create manifest.prod.json and env.prod.json; make the Teams workflow pick the manifest by environment.</step>
+    <step order="5">Run actionlint; run the dev path once (workflow_dispatch, dev) to confirm unchanged output, with owner approval.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not created the GitHub environments/variables or the prod Teams app id, STOP after the code changes and list exactly what the owner must create.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>deploy-external-spa.yml and deploy-teams-app.yml exist but build dev only.</existing>
+    <extension>Yes — both workflows are extended with an environment input; only the prod manifest and env files are new.</extension>
+    <cost-of-doing-nothing>No production SPA or Teams package can be built without baking dev values (owner rule 2026-10-08; FR-20).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/deploy-external-spa.yml</output>
+    <output type="config">.github/workflows/deploy-teams-app.yml</output>
+    <output type="config">src/client/external-spa/appPackage/manifest.prod.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both workflows pass actionlint.</criterion>
+    <criterion testable="true">A dev run produces the same SPA and Teams package as before (same manifest content apart from the removed webApplicationInfo from task 040).</criterion>
+    <criterion testable="true">The prod path builds with values from the prod environment only; a grep of both workflows finds no prod or dev URL, client id or scope literal.</criterion>
+    <criterion testable="true">The prod Teams package contains manifest.prod.json content with external.spaarke.com and no webApplicationInfo.</criterion>
+    <criterion testable="true">The list of GitHub environment variables/secrets the owner must create is in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20; design A1, A2, A4. Production deploy itself is task 073.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

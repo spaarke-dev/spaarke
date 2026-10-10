@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>DELETE your own documents, to-dos, events and service requests (FR-26)</title>
+    <phase>3 BFF features</phase>
+    <gate>after 031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New destructive external routes gated by an authorization rule (tags bff-api, auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive delete authorization (creator stamp + parent Read)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file chain on ExternalProjectDataEndpoints.cs: 030 → 031 → 032</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, auth, spe, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the first DELETE routes on the external plane so a user can hard-delete a document, to-do, event or service request they created, and nobody can delete anyone else's.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core and Dataverse authorization developer. Follow ADRs strictly.</role>
+  <goal>DELETE /api/v1/external/documents/{id}, /todos/{id}, /events/{id} and /servicerequests/{id} succeed only when the caller's stamp matches (sprk_createdbyperson for a systemuser caller, sprk_createdbycontact for a contact caller, sprk_requestedby for service requests) AND the caller still holds Read on the parent; a document delete also removes its SPE file.</goal>
+
+  <context>
+    <background>Owner 2026-10-10: delete is creator-only in the SPA, for records created in error; general delete stays a Dataverse role (Spaarke Core User, Deep) in the model-driven app; messages are not deletable; delete is a hard delete. There is no MapDelete anywhere under Api/ExternalAccess today. Rows created before task 030 have no stamp and are therefore not deletable from the SPA.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="new-artifact">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalDeleteOwnTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeContainerOwnershipGuard.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">One check function decides every delete: caller stamp equals the row's stamp (person for systemuser callers, contact for contact callers, sprk_requestedby for service requests) AND the caller holds Read on the row's parent record (service requests: the requester scope). A missing stamp means not deletable (403).</constraint>
+    <constraint source="project">No grant level (including FullAccess) and no Dataverse role lets a caller delete another person's row through these routes.</constraint>
+    <constraint source="ADR-007">The SPE file is deleted app-only through SpeFileStore after SpeContainerOwnershipGuard confirms the container; if the SPE delete fails the Dataverse row is kept and the route returns an error (no orphan row pointing at a deleted file is created by a later step).</constraint>
+    <constraint source="project">Communications are not deletable: no DELETE route for messages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>delete-own authorization</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Write the shared delete-authorization check in ExternalDataService (stamp match + parent Read).</step>
+    <step order="2">Map DELETE routes for documents, todos, events and servicerequests in the external group.</step>
+    <step order="3">Document delete: resolve the document's parent, run the check, delete the SPE item app-only, then delete the row.</step>
+    <step order="4">Tests: creator deletes own row (each type); a different user with FullAccess on the parent → 403; a creator who lost Read on the parent → 403; unstamped legacy row → 403; contact caller cannot delete a row stamped with a systemuser and vice versa; document delete calls the SPE delete; SPE delete failure leaves the row.</step>
+    <step order="5">Seeding proof on the stamp-match check: invert it, confirm the FullAccess-other-user test fails, restore.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-032-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a service request to be deleted has related records created by someone else (staff messages, staff documents), STOP and ask the owner whether the delete is refused or cascades; do not choose.</trigger>
+    <trigger>If the delete would need to run as the caller (OBO) for any reason, STOP — the external plane is app-only.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No MapDelete exists under Api/ExternalAccess (grep 2026-10-10); internal deletes go through Dataverse roles in the model-driven app.</existing>
+    <extension>No: the external plane has no delete surface to extend; the new routes reuse the existing Tier-2 rights and SpeFileStore.</extension>
+    <cost-of-doing-nothing>A user who uploads the wrong document or creates a to-do in error cannot remove it (owner requirement 2026-10-10).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalDeleteOwnTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The creator of a document, to-do, event or service request deletes it (204), and it is gone from Dataverse.</criterion>
+    <criterion testable="true">Deleting a document also deletes its SPE file.</criterion>
+    <criterion testable="true">A different user, even with FullAccess on the parent, gets 403 and nothing is deleted.</criterion>
+    <criterion testable="true">A creator who no longer holds Read on the parent gets 403.</criterion>
+    <criterion testable="true">A row with no creator stamp gets 403.</criterion>
+    <criterion testable="true">A contact caller cannot delete a row stamped only with sprk_createdbyperson, and a systemuser caller cannot delete a row stamped only with sprk_createdbycontact.</criterion>
+    <criterion testable="true">There is no DELETE route for communications.</criterion>
+    <criterion testable="true">If the SPE delete fails, the document row still exists and the response is an error.</criterion>
+    <criterion testable="true">The seeding proof is recorded in the task notes.</criterion>
+    <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-26. Two adversarial-review passes (auth).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

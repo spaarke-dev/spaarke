@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>ADR-028 amendment for R3 (A2 single-tenant client, A3 modules by user type, A1 workforce-contact clarification)</title>
+    <phase>0 Governance and inputs</phase>
+    <gate>startable — needs owner approval to edit .claude/adr/</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth ADR amendment (tags auth); binding rule change that gates C8 code</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment on auth architecture (security-sensitive, high blast radius)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+    <deps>none</deps>
+    <tags>auth, adr, docs</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-028 (.claude/adr/ADR-028-spaarke-auth-architecture.md) through CLAUDE.md §6.5 path B so the rules match the owner-decided R3 auth path, before or together with the first C8 code task.</prompt>
+  <role>SPAARKE platform developer. Auth architecture author. Follow ADRs strictly.</role>
+  <goal>ADR-028 carries a new dated amendment (A7, 2026-10-xx) that amends A2 :70, A3 :124 and clarifies A1 :55-56 exactly as listed in the steps, with the owner's approval recorded, merged before task 011, 012 or 040 merges.</goal>
+
+  <context>
+    <background>spec.md §ADR Tensions lists three path-B changes. A2 :70 requires Teams auth 'via Teams SSO / NAA against a multitenant app'; R3 uses one single-tenant Spaarke client, Spaarke-tenant authority, NAA then MSAL popup, no webApplicationInfo, no SSO fallback, scope user_impersonation. A3 :124 forbids inferring Tier-1 entitlement from the plane; FR-19 gives default modules by user type. A1 :55 forbids a per-external-user B2B guest; C7 creates one guest per workforce contact (customer staff, not CIAM partners). A1 :52 also says CIAM self-registration uses External ID sign-up user flows; C7 is workforce (B2B) self-registration and must not be confused with it. Sources: notes/r3-auth-path.md, the auth record §12b on branch work/spaarke-auth-system-of-record-r1.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Path B only: the amendment text is proposed to the owner (concise + full rationale) and is written only after the owner approves it. Editing .claude/adr/ needs owner approval (project directive).</constraint>
+    <constraint source="project">Change only the three rules named in spec §ADR Tensions plus a self-registration rule; do not rewrite A1–A6 elsewhere and do not absorb the auth project's §12b items unless the owner says to combine them.</constraint>
+    <constraint source="project">Coordinate with spaarke-auth-system-of-record-r1 (its current-task.md plans an ADR-028 amendment for §12b + R3 decisions): message that session or record in notes/coordination/ which amendment carries which items, so the two never conflict.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth architecture</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read ADR-028 A1–A6 in full and notes/r3-auth-path.md §2–§6.</step>
+    <step order="2">Draft amendment A7 with: (a) A2 :70 replaced for the Model 1 workforce plane — one single-tenant Spaarke client in Spaarke's tenant, authority https://login.microsoftonline.com/{Spaarke tenant}, Teams NAA then MSAL popup, no webApplicationInfo, no Teams-SSO fallback; multitenant revisited only for Model 2. (b) scope: api://{customer BFF app}/user_impersonation on both planes; access_as_user retired. (c) A3 :124 amended: Tier-1 defaults by user type (workforce → legal-front-door + policy-library; CIAM → assigned-work, + legal-front-door when the partner switch is on); sprk_approlemodulemap for extras; unentitled modules still neither shown nor routable. (d) A1 :55 clarified: the rule targets CIAM partners; workforce contacts (customer staff) become B2B guests in Spaarke's tenant via self-registration; A1 :52 (External ID sign-up flows) governs CIAM only. (e) new rule: workforce-contact self-registration — invite only in a shared Spaarke-tenant service, never a stamp identity; automatic approval only for home tenant ∈ CustomerTenantIds and acct = 0.</step>
+    <step order="3">Present the concise + full amendment to the owner with 🔔 ADR Conflict — Resolution Required format; wait for approval.</step>
+    <step order="4">On approval, write the amendment into .claude/adr/ADR-028-spaarke-auth-architecture.md and update .claude/adr/INDEX.md if it lists amendments.</step>
+    <step order="5">Record the coordination outcome with spaarke-auth-system-of-record-r1 in notes/coordination/.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-001-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner does not approve a part of the amendment, STOP: do not write that part, and mark the dependent tasks (011 for A3, 012 for A1, 040 for A2) blocked in TASK-INDEX.md.</trigger>
+    <trigger>If the auth project has already merged an ADR-028 amendment that conflicts with any item here, STOP and escalate rather than editing over it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-028-spaarke-auth-architecture.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/coordination/2026-10-xx-adr-028-amendment.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADR-028 contains a dated amendment covering A2 :70, A3 :124, A1 :55 (with A1 :52 scoped to CIAM) and the self-registration rule, worded as MUST / MUST NOT rules.</criterion>
+    <criterion testable="true">The owner's approval of the amendment text is recorded in the task notes (date + quote).</criterion>
+    <criterion testable="true">No other ADR-028 rule text is changed.</criterion>
+    <criterion testable="true">The coordination note names which project's amendment carries the §12b items.</criterion>
+  </acceptance-criteria>
+
+  <notes>Main-session-only. Spec §ADR Tensions: 'The amendment is merged before or with the first C8 code task.'</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

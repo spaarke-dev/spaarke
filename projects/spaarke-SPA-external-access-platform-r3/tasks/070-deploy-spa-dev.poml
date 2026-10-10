@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Deploy the SPA and the dev Teams package to dev</title>
+    <phase>7 Deploy and verify</phase>
+    <gate>after 038, 042, 043, 053, 055, 056 — owner approval to deploy</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (tags deploy)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment through the existing workflows</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live deployment</parallel-reason>
+    <deps>038, 042, 043, 053, 055, 056</deps>
+    <tags>deploy, ci-cd</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy this branch's SPA to swa-spaarke-external-spa-dev and build the dev Teams package, then smoke-test both hosts.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>The dev SWA serves this branch's build; the dev Teams package is built and installed (owner) in the dev Teams tenant; a smoke test of sign-in, detail view, wizard and bell passes in both hosts.</goal>
+
+  <context>
+    <background>Workflows from task 043 (environment input). The dev Teams app is installed by the owner. The dev BFF already runs the R3 server (task 038).</background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="canonical-reference">.github/workflows/deploy-teams-app.yml</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-070-deploy-record.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Owner approval and a stated rollback (re-run the workflow on the previous commit) before deploying.</constraint>
+    <constraint source="project">Deploy only through the workflows (workflow_dispatch, environment dev); no manual SWA upload.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPA deployment</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm 038 is deployed and /healthz is 200.</step>
+    <step order="2">Get owner approval; state the rollback.</step>
+    <step order="3">Run deploy-external-spa (dev) and deploy-teams-app (dev); download the package and give it to the owner to install/update.</step>
+    <step order="4">Smoke test in the browser and in Teams: workforce sign-in, partner sign-in (browser), open a record, submit one wizard, send one message, bell shows it.</step>
+    <step order="5">Record results in notes/task-070-deploy-record.md.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-070-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sign-in fails in Teams after the client switch, roll back the SPA and continue the investigation in task 071.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-070-deploy-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev SWA serves the branch build (commit sha visible in the build info or recorded from the workflow run).</criterion>
+    <criterion testable="true">The dev Teams package builds and is installed by the owner.</criterion>
+    <criterion testable="true">The smoke test passes in the browser and in Teams, with results recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner-gated live change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

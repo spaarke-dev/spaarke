@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Record detail view: fields, documents/invoices, events/tasks (FR-01–FR-03)</title>
+    <phase>5 SPA features</phase>
+    <gate>startable (events for Matter/WA need 039)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New frontend surface (tags frontend)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend composition of existing shared components and existing reads</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, modal, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make opening a row in any SPA/Teams grid show a read-only detail view in SprkModal + RecordNavigationModalShell with 1-of-N browsing, fields, related documents/invoices and events/tasks, and a denied state for records outside the caller's set.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>A RecordDetailModal opens from GridWidgetBody row-open for Matter, Project, Work Assignment, Document, Invoice and Service Request rows; it shows read-only fields from GET /api/v1/external/api/dataverse/record/{entity}/{id}, the documents/invoices rollup from the existing reads, events/tasks for Project/Matter/Work Assignment, next/previous through the grid rows, and a denied state on 403.</goal>
+
+  <context>
+    <background>R2 UAT 3E: row click does nothing because row-open defaults to Xrm.Navigation.navigateTo (comment at widgets/GridWidgetBody.tsx:19-21). Reuse: SprkModal and RecordNavigationModalShell from @spaarke/ui-components (src/client/shared/Spaarke.UI.Components/src/components/SprkModal, .../RecordNavigationModalShell); field reads via ExternalModuleDataEndpoints GET /record/{entity}/{id} (:139); docs/invoices via the R2 task-028 reads used by DocumentsWidget/InvoicesWidget; events/tasks via the existing EventsCalendar.tsx and SmartTodo.tsx components (events for Matter/WA arrive with task 039). Messages are added by task 051 and documents upload/delete by 054.</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="new">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/widgets/ExternalDataGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/SmartTodo.tsx</file>
+      <file role="new-artifact">src/client/external-spa/tests/RecordDetailModal.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="ADR-050">The detail view uses SprkModal + RecordNavigationModalShell (the canonical modal shell); no hand-rolled dialog.</constraint>
+    <constraint source="project">No new server read for fields, documents or invoices: use the existing external reads only. Read-only: no edit controls on core-record fields.</constraint>
+    <constraint source="project">Events/tasks sections show only for Project, Matter and Work Assignment; Document, Invoice and Service Request details omit them (notes/decisions.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>record detail view</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read GridWidgetBody/ExternalDataGrid row handling, RecordNavigationModalShell's props, and how DocumentsWidget/InvoicesWidget read.</step>
+    <step order="2">Create RecordDetailModal with sections: fields (RecordDetailFields), documents/invoices, events/tasks (reuse EventsCalendar/SmartTodo in compact mode where they support it).</step>
+    <step order="3">Wire row-open in the Xrm-free host to open the modal with the grid's ordered row ids for 1-of-N.</step>
+    <step order="4">Denied state: a 403 from the record read shows 'You don't have access to this record' and hides the sections.</step>
+    <step order="5">Tests: row click opens the modal; next/previous changes the record; 403 shows the denied state; sections render empty states.</step>
+    <step order="6">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-050-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If RecordNavigationModalShell needs a change for the Xrm-free host, make it backwards-compatible and list its other consumers in the notes; if it cannot be, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RecordNavigationModalShell + SprkModal exist in @spaarke/ui-components; no detail surface exists in external-spa (R2 UAT 3E).</existing>
+    <extension>Yes for the shell and reads (reused); the external-host composition component is new because the Xrm-bound record forms cannot run in the SPA.</extension>
+    <cost-of-doing-nothing>Clicking a record in the SPA or Teams does nothing (G1).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Open a record">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Sign in as a partner with a granted matter</step><step>Open the Matters tab</step><step>Click a row</step></steps>
+      <expected>Detail modal opens with read-only fields, documents and events/tasks</expected>
+    </test>
+    <test name="Browse 1 of N">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>With the modal open, click next and previous</step></steps>
+      <expected>The modal shows the next/previous grid row; the counter updates</expected>
+    </test>
+    <test name="Denied record">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open a record id outside the caller's set (e.g. via a stale list)</step></steps>
+      <expected>A denied state is shown; no data from the record appears</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</output>
+    <output type="code">src/client/external-spa/src/widgets/GridWidgetBody.tsx</output>
+    <output type="test">src/client/external-spa/tests/RecordDetailModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Clicking a row in each of the six grids opens the detail modal with read-only fields for that record.</criterion>
+    <criterion testable="true">Next/previous moves through the grid's rows in order and updates the 1-of-N counter.</criterion>
+    <criterion testable="true">Documents/invoices in the modal match the tab rollup for the same record.</criterion>
+    <criterion testable="true">Project, Matter and Work Assignment details show events/tasks (empty state when none); Document, Invoice and Service Request details show no events section.</criterion>
+    <criterion testable="true">A 403 on the record read shows the denied state and no record data.</criterion>
+    <criterion testable="true">The modal works in the browser host and in the Teams host.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01, FR-02, FR-03, FR-10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

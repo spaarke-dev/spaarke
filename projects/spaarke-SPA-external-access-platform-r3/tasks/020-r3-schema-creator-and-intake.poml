@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>R3 schema: sprk_createdbycontact on document/to-do/event/communication + intake columns on sprk_servicerequest (FR-25, FR-05)</title>
+    <phase>2 Schema</phase>
+    <gate>startable — live import needs owner approval</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema change used by authorization (delete-own)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-pattern schema addition mirroring an existing column</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema, fields</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create a sprk_createdbycontact lookup (to contact) on sprk_document, sprk_todo, sprk_event and sprk_communication, mirroring sprk_createdbyperson's configuration, and add sprk_requesttype (choice) and sprk_intakedata (multiline JSON) to sprk_servicerequest — in dev and in the solution source.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema developer. Follow ADRs strictly.</role>
+  <goal>The four tables have sprk_createdbycontact (lookup → contact) with the same field-security posture as sprk_createdbyperson; sprk_servicerequest has sprk_requesttype (NDA Assessment, Invention Submission, Policy Question, Trademark Search) and sprk_intakedata; all present in dev and in src/dataverse/solutions/SpaarkeMaster, and documented.</goal>
+
+  <context>
+    <background>Owner 2026-10-10 named the column. Live read (dev, 2026-10-10): sprk_createdbyperson exists on all four tables (FLS-secured lookup → systemuser); sprk_createdbycontact exists on none. sprk_servicerequest keeps its existing sprk_requestedby as the creator stamp. Live describe (dev, 2026-10-10): sprk_servicerequest has sprk_name (required), sprk_direction (required, Inbound/Outbound), sprk_recordsummary and the regarding family, but no request-type and no intake-answers column; R2 task 030 (intake schema) was never built, so the four C2 wizards have nowhere to record which request type was submitted or the answers. The BFF writes these app-only, so the BFF application user must be able to write the field if it is FLS-secured.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Document/Entity.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Todo/Entity.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Event/Entity.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/Entity.xml</file>
+      <file role="modify">docs/data-model/sprk_servicerequest.md</file>
+      <file role="new-artifact">docs/data-model/sprk_createdbycontact.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">No plugin: the value is written server-side by the BFF only (task 030).</constraint>
+    <constraint source="project">Mirror sprk_createdbyperson exactly for field security: if it is FLS-secured, sprk_createdbycontact is secured by the same field security profile(s), and the BFF application user's profile can create and read it.</constraint>
+    <constraint source="project">Relationship cascade on the new lookup: delete behaviour RemoveLink (deleting a contact must not delete documents or messages).</constraint>
+    <constraint source="project">Live creation in dev and the solution import need owner approval and a stated rollback (delete the column).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/data-model/child-access-permission.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read sprk_createdbyperson's attribute and relationship definition on each table in the solution source, and its field security profile membership.</step>
+    <step order="2">Show the owner the planned columns, FLS posture and rollback; wait for approval.</step>
+    <step order="3">Create the four columns and relationships in dev (Web API or maker portal) mirroring sprk_createdbyperson; add them to the same field security profiles.</step>
+    <step order="4">Export the solution and update the four Entity.xml files (and the field security profile XML) in src/dataverse/solutions/SpaarkeMaster.</step>
+    <step order="5">Verify with a read-only query that each table returns the column, and that the BFF app user can write it (create then delete a test row, owner-approved).</step>
+    <step order="6">Create sprk_requesttype (local choice, values NDA Assessment, Invention Submission, Policy Question, Trademark Search; not required) and sprk_intakedata (multiline text, 1,048,576 chars, holds the wizard answers as JSON) on sprk_servicerequest; export into sprk_ServiceRequest/Entity.xml.</step>
+    <step order="7">Write docs/data-model/sprk_createdbycontact.md (purpose, tables, FLS, writer = BFF only) and add the two intake columns to docs/data-model/sprk_servicerequest.md.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-020-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_createdbyperson's FLS profile cannot include the BFF application user (so app-only writes would fail), STOP and escalate before creating anything.</trigger>
+    <trigger>If the owner wants different request-type values or a different intake storage shape, STOP and use theirs; do not guess.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_createdbyperson exists on the four tables (live read, dev 2026-10-10) but is a lookup to systemuser only. sprk_servicerequest has no type or intake column (live describe); sprk_recordsummary is a human summary field, sprk_direction is Inbound/Outbound.</existing>
+    <extension>No: a systemuser lookup cannot hold a contact, and retyping sprk_createdbyperson to polymorphic would break its existing readers (ProvisionProjectEndpoint and OwnedChildWrite callers). Overloading sprk_name or sprk_recordsummary with the type and answers would make the Service Requests tab unfilterable by type and lose structure.</extension>
+    <cost-of-doing-nothing>Contact callers' creates carry no author, so FR-26 cannot let a contact delete a record they created in error (auth record L-5); and a submitted intake cannot record which of the four request types it is or what the submitter answered (FR-05).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">src/dataverse/solutions/SpaarkeMaster/Entities/*/Entity.xml (4 tables)</output>
+    <output type="docs">docs/data-model/sprk_createdbycontact.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">In dev, each of sprk_document, sprk_todo, sprk_event and sprk_communication has sprk_createdbycontact, a lookup to contact, with RemoveLink delete behaviour.</criterion>
+    <criterion testable="true">Its field security matches sprk_createdbyperson's on the same table.</criterion>
+    <criterion testable="true">The BFF application user can create a row with the column set and read it back.</criterion>
+    <criterion testable="true">The solution source contains the four columns; the data-model doc exists.</criterion>
+    <criterion testable="true">sprk_servicerequest has sprk_requesttype with exactly the four values and sprk_intakedata (multiline); no other sprk_servicerequest column changes.</criterion>
+    <criterion testable="true">The owner's approval of the column names, choice values and FLS posture is recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-25. Downstream: 030 (stamping), 032 (delete check), 034 (sender stamp).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Teams live check with the owner's test guest (FR-21)</title>
+    <phase>7 Deploy and verify</phase>
+    <gate>after 070 — owner-driven session</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live verification with a written result</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Guided live check with explicit pass/fail</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live, owner-driven</parallel-reason>
+    <deps>070</deps>
+    <tags>auth, e2e-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>With the owner, confirm in Teams desktop and Teams web that a member and the test guest sign in through NAA (or the popup fallback) against the dev stamp app with no webApplicationInfo, and find out whether Microsoft's broker must be pre-authorized.</prompt>
+  <role>SPAARKE platform developer. Identity verification lead. Follow ADRs strictly.</role>
+  <goal>projects/spaarke-SPA-external-access-platform-r3/notes/fr-21-teams-live-check.md records, for member and guest on Teams desktop and web: sign-in path used (NAA or popup), token tid/aud/scp (masked), success or the exact AADSTS error, and whether broker pre-authorization was needed; any H3 change is sent to provisioning.</goal>
+
+  <context>
+    <background>notes/r3-auth-path.md §2.4: teams-app-r1 needed the broker pre-authorized on dev; unknown whether a stamp app needs it. The test guest is the owner's existing account. Owner 2026-10-08: the add-in removed webApplicationInfo in package 1.1.2 because single-tenant ids broke installs in customer tenants (AADSTS700016).</background>
+    <relevant-files>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/fr-21-teams-live-check.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read-only diagnostics; token values are masked in the notes (show claims only).</constraint>
+    <constraint source="project">Any pre-authorization change on an app registration is owner-approved with a rollback; changes for stamps go to provisioning as an H3 request, not made here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams sign-in verification</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Prepare a checklist (4 runs: member/guest × desktop/web).</step>
+    <step order="2">Run each with the owner; capture the sign-in path and the decoded claims.</step>
+    <step order="3">If a run fails, capture the AADSTS code; if it names the broker, test adding the broker pre-authorization on the dev app (owner-approved), re-run, and record.</step>
+    <step order="4">Write the result; if stamps need the broker, send provisioning an H3 request (notes/coordination/).</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="6">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-071-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any run fails for a reason other than broker pre-authorization, STOP and escalate with the error — do not restore webApplicationInfo or the SSO fallback.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Teams desktop guest">
+      <steps><step>Owner opens the dev Teams app as the test guest</step></steps>
+      <expected>Signed in; token tid = Spaarke, scp = user_impersonation</expected>
+    </test>
+    <test name="Teams web member">
+      <steps><step>Owner opens the app in Teams web as a member</step></steps>
+      <expected>Signed in via NAA or popup</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/fr-21-teams-live-check.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four runs are recorded with path used, masked claims and outcome.</criterion>
+    <criterion testable="true">The broker pre-authorization question is answered yes/no with evidence.</criterion>
+    <criterion testable="true">If yes, an H3 request is in notes/coordination/ for provisioning.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21, success criterion 7. Tags include auth but the task makes no code change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

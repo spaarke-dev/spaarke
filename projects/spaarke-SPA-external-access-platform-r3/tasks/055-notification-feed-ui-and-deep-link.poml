@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Notification feed UI + deep-link record open (FR-08, FR-07 client)</title>
+    <phase>5 SPA features</phase>
+    <gate>after 054, 037 and 041</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New frontend surface + link handling feeding backend selection (tags frontend)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend over a defined API; link handling constrained by the 041 seam</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies shell header and detail modal; chain 050 → 051 → 054 → 055</parallel-reason>
+    <deps>054, 037, 041</deps>
+    <tags>frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a notification bell with unread count to the portal header that lists the feed from GET /api/v1/external/notifications, marks it seen, and opens the record detail; and make ?customer={key}&amp;record={type}:{id} open that record's detail after sign-in.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>The header shows a bell with the unread count; opening it lists items (newest first) and calls POST /notifications/seen; clicking an item opens RecordDetailModal for that record; a deep link survives sign-in, selects the customer through the task-041 seam and opens the record (or the denied state).</goal>
+
+  <context>
+    <background>An unwired bell popover exists in pages/OutsideCounselDashboard.tsx:199-204 — reuse its look. msal-auth.ts already has captureReturnTo/consumeReturnTo/safeRelativePath/captureTeamsDeepLink (:37-:79) for preserving a path across sign-in. Deep-link target per owner 2026-10-09: record detail via ?customer=&amp;record=.</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/shell/NotificationBell.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/shell/PortalWorkspaceShell.tsx</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="modify">src/client/external-spa/src/App.tsx</file>
+      <file role="new">src/client/external-spa/src/api/notifications-client.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/pages/OutsideCounselDashboard.tsx</file>
+      <file role="new-artifact">src/client/external-spa/tests/NotificationBell.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="NFR-02">The deep link's customer key is resolved only through the task-041 seam; the record parameter must match ^(project|matter|workassignment|document|invoice|servicerequest):{guid}$ or it is ignored.</constraint>
+    <constraint source="project">Poll the feed at most every 60 seconds while the tab is visible; no polling in the background.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>notification UI</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Create notifications-client (list, markSeen) and NotificationBell (badge, popover list, empty state).</step>
+    <step order="2">Add the bell to PortalWorkspaceShell's header; opening it marks seen.</step>
+    <step order="3">Parse ?customer=&amp;record= at start-up, keep it across sign-in via the existing returnTo helpers, then select the backend and open the detail modal.</step>
+    <step order="4">Tests: unread badge count; mark seen clears it; item click opens the detail; invalid record param ignored; unknown customer key ignored.</step>
+    <step order="5">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-055-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>An unwired bell popover exists in pages/OutsideCounselDashboard.tsx:199-204; no feed client exists.</existing>
+    <extension>Partly: its look is reused; it is not wired to any data and sits on a legacy page, so the header component and client are new.</extension>
+    <cost-of-doing-nothing>Users have no in-portal notice of new access or messages, and grant-email deep links cannot open a record (FR-07, FR-08).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Bell">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Grant the test partner a new record</step><step>Reload the SPA</step></steps>
+      <expected>The bell shows 1 unread; opening it lists the grant and clears the badge</expected>
+    </test>
+    <test name="Deep link">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Sign out</step><step>Open &lt;origin&gt;/?customer={key}&amp;record=matter:{id}</step><step>Sign in</step></steps>
+      <expected>The matter's detail view opens after sign-in</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/shell/NotificationBell.tsx</output>
+    <output type="code">src/client/external-spa/src/api/notifications-client.ts</output>
+    <output type="test">src/client/external-spa/tests/NotificationBell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The header bell shows the feed's unreadCount and lists items newest first.</criterion>
+    <criterion testable="true">Opening the bell calls /notifications/seen and the badge clears.</criterion>
+    <criterion testable="true">Clicking an item opens that record's detail view (denied state if no longer accessible).</criterion>
+    <criterion testable="true">A deep link with a known customer key and a valid record opens the record after sign-in in the browser and in Teams.</criterion>
+    <criterion testable="true">An unknown customer key or a malformed record parameter is ignored.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 (link target), FR-08.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

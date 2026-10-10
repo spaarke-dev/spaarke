@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Server-side creator stamping on every external create (FR-25)</title>
+    <phase>3 BFF features</phase>
+    <gate>after 020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code on the external write path (tags bff-api, auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity attribution feeding an authorization decision (delete-own)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file chain on ExternalProjectDataEndpoints.cs: 030 → 031 → 032</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Stamp the calling principal on every row created through /api/v1/external/** — sprk_createdbyperson for a systemuser principal, sprk_createdbycontact for a contact principal — ignoring any creator value in the request.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core and Dataverse developer. Follow ADRs strictly.</role>
+  <goal>One stamping method in ExternalDataService is called by every external create (to-dos, events, document upload), sets exactly one of sprk_createdbyperson / sprk_createdbycontact from the resolved principal, and unit tests prove it for both principal kinds and for a client-supplied creator.</goal>
+
+  <context>
+    <background>Auth record L-5: SPA creates are app-only, so Dataverse createdby is always the BFF application user and nobody knows who created a row. FR-26 delete-own depends on this stamp. External creates today: CreateTodoForRoot (ExternalProjectDataEndpoints.cs:423, Create check :451 → ExternalDataService.CreateTodoAsync :481), CreateEvent (:883, check :900 → CreateEventAsync :928), UploadDocument (:631, check :655). Internal creates record sprk_createdbyperson through OwnedChildWrite (see Api/ChildRecordEndpoints.cs:27). Message send (034) and intake (035) will call the same method.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalDataServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">The stamp comes only from the resolved principal (ExternalCallerContext / caller principal). Any creator field in the request body (sprk_createdbyperson, sprk_createdbycontact, createdby, or their @odata.bind forms) is ignored, not honoured.</constraint>
+    <constraint source="project">Exactly one stamp per row: a systemuser principal sets sprk_createdbyperson; a contact principal (workforce contact or CIAM partner) sets sprk_createdbycontact.</constraint>
+    <constraint source="ADR-010">Implement as a method on the existing ExternalDataService (no new service, no new DI registration).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>creator attribution</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read ExternalProjectDataEndpoints.cs (create handlers), ExternalDataService.cs create methods and ExternalCallerContext.</step>
+    <step order="2">Add one internal stamping method in ExternalDataService that takes the caller context and the entity payload and writes the correct lookup bind.</step>
+    <step order="3">Call it from CreateTodoAsync, CreateEventAsync and the document-row create in UploadDocument; strip creator fields from incoming payloads.</step>
+    <step order="4">Unit tests: systemuser caller → sprk_createdbyperson set and sprk_createdbycontact absent; contact caller → the reverse; request body carrying another person's id is ignored; one test per create path (to-do, event, document).</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-030-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the caller context cannot tell a systemuser principal from a contact principal unambiguously (for example a workforce caller carrying both ids), STOP and escalate with the cases found rather than choosing a rule.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalDataServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A to-do, an event and a document created by a systemuser caller each carry sprk_createdbyperson = that systemuser and no sprk_createdbycontact.</criterion>
+    <criterion testable="true">The same three creates by a contact caller each carry sprk_createdbycontact = that contact and no sprk_createdbyperson.</criterion>
+    <criterion testable="true">A request that supplies a creator value for someone else is stored with the caller's stamp, not the supplied one.</criterion>
+    <criterion testable="true">No create path under /api/v1/external/** writes a row without a stamp (checked by test per path).</criterion>
+    <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-25. Closes auth record L-5 for the external plane.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

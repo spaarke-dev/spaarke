@@ -1,6 +1,6 @@
 # Spaarke External Access Platform R3 — AI Implementation Specification
 
-> **Status**: Ready for owner review (then `/project-pipeline`)
+> **Status**: Ready for implementation — initialized by `/project-pipeline` 2026-10-10 (plan.md, tasks/TASK-INDEX.md). Planning corrections are marked "(pipeline 2026-10-10)".
 > **Created**: 2026-10-09
 > **Source**: `design.md` (owner-confirmed through 2026-10-09) + `notes/r3-auth-path.md`
 > **Auth basis**: `spaarke-auth-system-of-record-r1` — `auth-system-of-record.md`, `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`, research `working/x09a`–`x09d` (branch `work/spaarke-auth-system-of-record-r1`)
@@ -107,7 +107,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 
 #### C2 — Legal Front Door
 
-- **FR-05: four intake wizards.** One `WizardModal` intake wizard per request type (NDA Assessment, Invention Submission, Policy Question, Trademark Search) writes a `sprk_servicerequest`.
+- **FR-05: four intake wizards.** One intake wizard per request type, built on the current `Wizard/WizardShell` + `InAppWizardHost` (`WizardModal`/`WizardRegistry` were deleted 2026-10-03; pipeline 2026-10-10). The four request types are NDA Assessment, Invention Submission, Policy Question and Trademark Search. Each wizard writes a `sprk_servicerequest`, recording `sprk_requesttype` and the answers in `sprk_intakedata` (new columns, task 020).
   - Acceptance:
     - each wizard opens from its quick-start card and from "More Services";
     - submitting creates a row that appears in the Service Requests tab.
@@ -193,7 +193,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
   - Users can list, view/download and upload documents in the SPA.
   - Every route checks Tier-2 on the parent: Read to list/download, Create to upload. A service request is checked through the submitter scope.
   - SPE access is app-only through `SpeContainerOwnershipGuard`; no OBO.
-  - Service requests have no document lookup today. Link them through the ADR-024 regarding model (`sprk_regardingrecordid`), or add a `sprk_servicerequest` lookup if that model needs one (§11 below).
+  - Documents link to a service request through the existing `sprk_document.sprk_relatedservicerequest` lookup (live describe, dev; pipeline 2026-10-10). No new lookup is needed.
   - Acceptance:
     - for each type, upload then download round-trips;
     - a ViewOnly caller cannot upload (403);
@@ -306,7 +306,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 - Send pipeline: `Services/Communication/CommunicationService.cs` (shared-mailbox/app-only branch) and `CommunicationRecordAuthorizationFilter.cs`.
 - SPA run-time auth seams: `src/client/external-spa/src/auth/` (`setActiveBffTokenAcquirer`, `setActiveLoginScope`, `workforceAuthorityConfig({authority})`).
 - Office add-in sign-in to copy: `src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`; `src/client/office-addins/shared/services/AuthService.ts`.
-- Wizards: `WizardModal` / `WizardRegistry` / `CreateRecordWizard` in `@spaarke/ui-components`.
+- Wizards: `Wizard/WizardShell` + `InAppWizardHost` + `CreateRecordWizard` in `@spaarke/ui-components` (`WizardModal`/`WizardRegistry` no longer exist).
 
 ## Placement & New Components (per CLAUDE.md §10 / §11)
 
@@ -339,6 +339,8 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | Join page (FR-13) | none in `external-spa` | No existing page | Licence-free staff have no way to get access |
 | Shared registration service (FR-14) | None in the repo. H11 (L2) invites guests at provisioning time, but only for a known list, and owner direction says provisioning does not own new components | Possibly co-hosted with the T240c directory; to be decided | Self-registration (owner requirement) is impossible without a Spaarke-tenant invite identity |
 | `sprk_createdbycontact` lookup (FR-25) on document, to-do, event, communication, service request | `sprk_createdbyperson` exists but targets systemuser only (FLS-secured) | No: a systemuser lookup cannot hold a contact. A polymorphic retype of `sprk_createdbyperson` would break existing readers | Contacts can never delete their own mistaken records; SPA creates carry no author (L-5) |
+| Intake columns `sprk_requesttype` (choice) + `sprk_intakedata` (multiline JSON) on `sprk_servicerequest` (FR-05; pipeline 2026-10-10) | Live describe: no type or answers column; `sprk_recordsummary` is a human summary, `sprk_direction` is Inbound/Outbound | No: overloading `sprk_name`/`sprk_recordsummary` loses structure and makes the tab unfilterable by type | A submitted intake cannot record which request type it is or the answers |
+| Event reads for Matter / Work Assignment (FR-03; pipeline 2026-10-10) | `GET /projects/{id}/events` (`ExternalProjectDataEndpoints.cs:215`) | Yes: generalize over the root map, as to-dos already are | The detail view shows no events for Matters and Work Assignments |
 | Document routes for Matter / WA / Invoice / Service Request (FR-24) | Project document routes in `ExternalProjectDataEndpoints.cs:193` | Yes: generalize the project routes over record type | Users cannot attach documents to most records (owner requirement) |
 | DELETE routes (FR-26) | none on the external surface | New. Gated on the creator stamp + parent Read | Users cannot remove records they created in error |
 | Partner service-request switch (FR-06) | Service Requests module descriptor (`ExternalAccessModule.cs:444`) | Yes: a configuration branch in the existing descriptor | (Optional) partners cannot submit requests where a customer wants it |

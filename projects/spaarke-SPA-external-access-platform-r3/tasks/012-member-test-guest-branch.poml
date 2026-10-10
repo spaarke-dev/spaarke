@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Member-test branch for registered workforce-contact guests (FR-15, #1563)</title>
+    <phase>1 BFF auth and entitlement</phase>
+    <gate>after 001 (A1 clarification approved)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Identity resolution change (tags auth, bff-api)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation-critical identity rule change</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>auth, bff-api, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let a B2B guest in the stamp's own tenant resolve as a workforce Member when their home tenant (idp) is on CustomerTenantIds, so a self-registered customer employee gets a contact on first sign-in; every other guest stays denied.</prompt>
+  <role>SPAARKE platform developer. Identity and authorization developer. Follow ADRs strictly.</role>
+  <goal>WorkforceMembershipTest.Evaluate returns Member for acct = 1 AND tid = stamp tenant AND home tenant (from idp) ∈ CustomerTenantIds; ContactIdentityBinder then email-binds or creates exactly one contact keyed by the guest oid; all other cases keep their current result and deny code.</goal>
+
+  <context>
+    <background>WorkforceIdentityOptions.cs:173-241: Evaluate(kind, tenantId, acct, customerTenantIds) checks kind (204), empty list (209), tid ∉ list → ForeignTenant (214), acct missing (219), then 0 → Member, 1 → Guest, else AcctUnrecognized (226-228). On a Model 1 stamp a guest's token has tid = Spaarke (the stamp tenant), acct = 1, idp = home tenant (owner live test 2026-10-08), and CustomerTenantIds never contains Spaarke, so today a guest is ForeignTenant. ContactIdentityBinder.ResolveWorkforceCallerAsync (:163-175) gives Member EmailBindAndCreate. Licensed guests resolve as systemusers before this path. NFR-07: dev lists Spaarke's own tenant in CustomerTenantIds — tests must use a stamp-shaped configuration.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityBinder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/WorkforcePrincipalResolverTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">The new branch is an exact conjunction: kind = UserDelegated AND acct = '1' AND tid = the stamp's own tenant id (AzureAd:TenantId) AND the tenant GUID parsed from idp (https://sts.windows.net/{tid}/ or login.microsoftonline.com/{tid}/v2.0) ∈ CustomerTenantIds. Anything else keeps today's result.</constraint>
+    <constraint source="project">Keep the evaluation order and every existing deny code (workforce_tenant_not_customer, workforce_guest, workforce_acct_unrecognized). A guest whose idp is missing or unparsable stays denied.</constraint>
+    <constraint source="ADR-028">The plane decision is unchanged: CIAM tokens never reach this path (CallerPrincipalResolver.DeterminePlane).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>workforce member test</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Read WorkforceIdentityOptions.cs, ContactIdentityBinder.cs (:163-260), WorkforcePrincipalResolver.cs (:176) and their tests.</step>
+    <step order="2">Pass the stamp tenant id and the idp claim into Evaluate (extend its signature; update all callers).</step>
+    <step order="3">Add the guest branch per the constraint; return Member (a distinct reason value such as RegisteredGuest is fine if callers map it to Member).</step>
+    <step order="4">Make sure the binder treats the new Member like an existing Member: email-bind or create one contact keyed by the guest oid.</step>
+    <step order="5">Tests (stamp-shaped config: CustomerTenantIds = {customerTenant}, stamp tenant = Spaarke): registered guest → Member + one contact; guest from non-listed tenant → workforce_tenant_not_customer; guest with idp missing → denied; acct = 0 member of Spaarke tenant (staff) unaffected; second sign-in binds, does not create a second contact.</step>
+    <step order="6">Seeding proof: drop the idp ∈ list check, confirm the non-listed-tenant test fails, restore.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-012-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If licensed Model 1 guests (U2) would reach this branch before systemuser resolution (changing how licensed staff resolve), STOP and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/WorkforcePrincipalResolverTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a stamp-shaped config, a token with acct = 1, tid = stamp tenant and idp = a listed customer tenant resolves as Member, and the first sign-in creates or binds exactly one contact keyed by the guest oid.</criterion>
+    <criterion testable="true">A second sign-in by the same guest binds the existing contact and creates none.</criterion>
+    <criterion testable="true">A guest whose idp tenant is not in CustomerTenantIds is denied with sdap.access.deny.workforce_tenant_not_customer.</criterion>
+    <criterion testable="true">A guest token with no idp claim, or an unparsable idp, is denied.</criterion>
+    <criterion testable="true">A guest token whose tid is not the stamp tenant is denied as before.</criterion>
+    <criterion testable="true">Spaarke staff (acct = 0, tid = Spaarke) resolve exactly as before.</criterion>
+    <criterion testable="true">The seeding proof is recorded in the task notes.</criterion>
+    <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15; closes #1563. Two adversarial-review passes (auth + tenant isolation) per root CLAUDE.md §8.5.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

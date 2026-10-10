@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Spike: Entra built-in B2B self-service sign-up vs custom join flow (FR-12)</title>
+    <phase>0 Governance and inputs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Research spike producing a decision document; no production code</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/identity platform research with a security-relevant decision</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth, spike, research</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Decide, with evidence, whether Entra's built-in B2B self-service sign-up user flow can deliver C7 (FR-13–FR-15) more simply than a custom join page plus a shared registration service.</prompt>
+  <role>SPAARKE platform developer. Identity platform researcher (use the researcher subagent for Microsoft Learn lookups). Follow ADRs strictly.</role>
+  <goal>projects/spaarke-SPA-external-access-platform-r3/notes/spikes/fr-12-self-registration-decision.md states the chosen approach and shows, for each FR-13/FR-14/FR-15 requirement, whether the built-in flow meets it, with Microsoft Learn citations.</goal>
+
+  <context>
+    <background>Owner 2026-10-09: 'agree on Entra built-in if available and simplifies'. Requirements to test: link per customer (/join?customer={key}); automatic approval only when the user's home tenant ∈ that customer's CustomerTenantIds and acct = 0; guest created in Spaarke's tenant with no licence; guest added to sprk-{customerId}-users; no secret; no User.Invite.All on a stamp. Known platform facts: self-service sign-up user flows are attached to apps and can call API connectors for approval; T240d S1 showed keyless app-only Graph works with MI-FIC.</background>
+    <relevant-files>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/spikes/fr-12-self-registration-decision.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/coordination/2026-10-10-from-provisioning-t240d-s1-partial.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read-only research: no tenant configuration change, no user flow created, no app registration created without explicit owner approval.</constraint>
+    <constraint source="ADR-028">Any recommended design keeps: no new secret, no ClientSecret, invite permission only in a shared Spaarke-tenant service (spec NFR-03, FR-14).</constraint>
+    <constraint source="CLAUDE.md §15">Use the researcher subagent; check knowledge/ first, then Microsoft Learn; cite the page for each platform claim.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>self-service sign-up</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>knowledge/</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">List the FR-13, FR-14 and FR-15 requirements as a checklist in the decision document.</step>
+    <step order="2">Research the B2B self-service sign-up user flow: how it is attached to an app, whether it can be limited per customer, whether an API connector can enforce home-tenant ∈ allow-list and acct = 0, how the guest is created, whether group membership can be set, licence implications, and what the customer tenant's cross-tenant settings must allow (PRQ-C-14).</step>
+    <step order="3">Sketch the custom alternative (join page + registration-only client + shared service with MI-FIC calling Graph invitations and group add) at the same level of detail.</step>
+    <step order="4">Compare on: requirements met, moving parts, identity/permission needs, failure modes (already a guest, non-listed tenant, guest of another tenant), and who hosts what.</step>
+    <step order="5">Write the recommendation and present it to the owner.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-003-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither approach can enforce 'home tenant ∈ CustomerTenantIds and acct = 0' without a secret or a stamp-held User.Invite.All, STOP and escalate to the owner with the options.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/spikes/fr-12-self-registration-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The decision document maps every FR-13/FR-14/FR-15 requirement to met / not met for both approaches, each with a citation.</criterion>
+    <criterion testable="true">It names the recommended approach, its identities and permissions, and the hosting it needs (input to task 060).</criterion>
+    <criterion testable="true">The owner's choice is recorded in the document and in notes/decisions.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12. Gates task 056 (join page) and task 060 (registration service).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

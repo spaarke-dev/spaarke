@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Email on subsequent grant + member notify on message send (FR-07, C6 notify)</title>
+    <phase>3 BFF features</phase>
+    <gate>after UAC-r2 PR #1583 merges and after 034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF change on the grant write path (tags bff-api)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends an existing notifier with a well-specified branch; reference implementation exists</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies GrantAccessNotifier/GrantExternalAccessEndpoint, also changed by UAC-r2 PR #1583</parallel-reason>
+    <deps>034</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When /grant gives an already-onboarded external contact access to another record, email them a portal deep link; and when a C6 message is posted, email the record's other member contacts the same kind of link.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core developer. Follow ADRs strictly.</role>
+  <goal>GrantAccessNotifier (from UAC-r2 PR #1583) gains an external-contact email branch and a message-posted entry point; exactly one email per qualifying event per recipient, each with https://external.spaarke.com/?customer={key}&amp;record={type}:{id}, sent from the configured sender with no OBO.</goal>
+
+  <context>
+    <background>R2 UAT 6A: /invite-and-grant emails only at first onboarding (InviteExternalUserEndpoint.cs:248 SendCiamOnboardingEmailAsync; InviteAndGrantExternalUserEndpoint.cs:70 RegistrationEmailService); a later /grant sends nothing. UAC-r2 PR #1583 (task 181) adds GrantAccessNotifier for internal users, firing only on GrantUpsertOutcome.AccessGained and never to the granter or external contacts. On stamps the sender is the per-customer shared mailbox (#1562). The deep link carries only the customer key and record (T240d), never a BFF URL or scope. Spec FR-11: message recipients are the record's members, told through this path.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file role="new-artifact">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every route this task adds or modifies is mapped inside the /api/v1/external group (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63) so it inherits the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter. No route in this task is mapped outside that group.</constraint>
+    <constraint source="ADR-028">No OBO on the external plane: every Dataverse and SPE call this task adds is app-only and scoped to the caller's accessible set (spec NFR-01).</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). Measure the publish-size delta against a fresh master build: more than +5 MB needs written justification; the total must stay at or under 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
+    <constraint source="project">Do not start until PR #1583 is merged to master and merged into this branch; build on its GrantAccessNotifier instead of adding a second notifier.</constraint>
+    <constraint source="project">Grant email only on AccessGained to a contact that is already onboarded (has a CIAM/workforce identity binding); never on same-level re-grant, expiry-only change, lower level, organization grant, or to the granter.</constraint>
+    <constraint source="project">Message email goes to member contacts of the record (active grants), excluding the sender; best effort — a failed send is logged and never fails the grant or the post.</constraint>
+    <constraint source="project">The link is built from configuration (portal base URL + this stamp's customer key) and record type:id only; no BFF URL, scope or token in it. The email body and subject are drafts for owner approval (spec Assumptions).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>grant notifications</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Merge master after #1583 lands; read GrantAccessNotifier and its tests.</step>
+    <step order="2">Add the external-contact branch on the grant path using the existing email sender (the one SendCiamOnboardingEmailAsync uses).</step>
+    <step order="3">Add a MessagePosted entry point called from the task-034 send handler after the row is created.</step>
+    <step order="4">Add configuration for the portal base URL and customer key (reuse ExternalAccess:PortalUrl if it exists; confirm in appsettings.template.json).</step>
+    <step order="5">Tests: onboarded contact gains access → one email with the right link; re-grant same level → none; not-yet-onboarded contact → none (invite path handles it); organization grant → none; message post → one email per other member contact, none to the sender; send failure → logged, grant/post still succeeds.</step>
+    <step order="6">Draft the email copy in the task notes for owner approval.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-036-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If PR #1583 is closed without merging or its notifier shape changes materially, STOP and re-plan with the owner.</trigger>
+    <trigger>If no sender is configured for a stamp (shared mailbox #1562 not provisioned), STOP for that environment and report — do not fall back to sending as the user.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A /grant that gives an already-onboarded contact access to a new record sends exactly one email whose link is &lt;portal&gt;/?customer={key}&amp;record={type}:{id}.</criterion>
+    <criterion testable="true">A same-level re-grant, an expiry-only change, a lower level, an organization grant or a grant to a not-yet-onboarded contact sends no external email.</criterion>
+    <criterion testable="true">A posted message sends one email to each other member contact of the record and none to the sender.</criterion>
+    <criterion testable="true">No link contains a BFF URL, a scope or a token.</criterion>
+    <criterion testable="true">A failed email send is logged and does not fail the grant or the message post.</criterion>
+    <criterion testable="true">The email copy is in the task notes, marked for owner approval.</criterion>
+    <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07, FR-11 (notify). Depends on UAC-r2 PR #1583.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

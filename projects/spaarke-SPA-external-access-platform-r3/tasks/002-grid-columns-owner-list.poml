@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Grid columns per owner list (C4, FR-09)</title>
+    <phase>0 Governance and inputs</phase>
+    <gate>blocked until the owner supplies the per-tab column list</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data-only configuration change with explicit acceptance; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical configuration update from an explicit owner list</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Update the sprk_gridconfiguration records behind the external SPA tabs so each tab shows exactly the owner's approved columns.</prompt>
+  <role>SPAARKE platform developer. Dataverse configuration specialist. Follow ADRs strictly.</role>
+  <goal>The Projects, Matters, Work Assignments, Documents, Invoices and Service Requests tabs each show exactly the owner-approved columns, and the change is captured in the solution source.</goal>
+
+  <context>
+    <background>C4 is data-only (design §4 C4, spec FR-09). The input is the owner's per-tab column list, requested as an early task (owner 2026-10-08). The widgets read their config by id (e.g. src/client/external-spa/src/widgets/InvoicesWidget.tsx createGridWidgetBody(CONFIG_ID)).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_GridConfiguration</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/ProjectsWidget.tsx</file>
+      <file role="canonical-reference">docs/data-model/json-field-schemas.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Only the sprk_gridconfiguration records used by the six external-SPA tabs change; no other grid configuration and no code.</constraint>
+    <constraint source="project">Every column added must already be readable on the external plane (the column allow-list in tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs); a column outside the allow-list is escalated, not added.</constraint>
+    <constraint source="project">The live dev update needs owner approval and a stated rollback (the previous JSON, saved in the task notes).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>grid configuration</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Ask the owner for the per-tab column list if it is not already in the task notes.</step>
+    <step order="2">For each of the six tabs, find its sprk_gridconfiguration record (config id from the widget file) and read the current column JSON (read-only).</step>
+    <step order="3">Compare the requested columns with the external column allow-list; list any that are not allowed.</step>
+    <step order="4">Write the new column JSON; show the diff and rollback JSON to the owner; on approval update dev and export the change into the solution source.</step>
+    <step order="5">Open each tab in the dev SPA and confirm the columns.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a requested column is not on the external column allow-list, STOP and ask the owner whether to drop it or open a separate task to allow it (it changes what external users can read).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/dataverse/solutions/SpaarkeMaster (sprk_gridconfiguration records)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-002-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the six tabs shows exactly the owner's listed columns, in the listed order.</criterion>
+    <criterion testable="true">No column outside the external allow-list is added.</criterion>
+    <criterion testable="true">The previous column JSON for every changed record is saved in the task notes as the rollback.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09. Owner review is the verification (success criterion 4).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

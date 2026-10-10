@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Workforce client switch: single-tenant client, Spaarke authority, NAA + popup (FR-16)</title>
+    <phase>4 SPA auth and platform</phase>
+    <gate>after 001 (A2 amendment approved) and the owner's client app registration</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client auth change (tags auth, frontend)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive sign-in change across browser and Teams</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>auth, frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Switch workforce sign-in (browser and Teams) to one dedicated single-tenant Spaarke client with the Spaarke-tenant authority and scope api://{customerBffAppId}/user_impersonation, using NAA then an MSAL popup in Teams and removing the Teams-SSO fallback and webApplicationInfo.</prompt>
+  <role>SPAARKE platform developer. Frontend identity developer (MSAL.js, Teams JS, NAA). Follow ADRs strictly.</role>
+  <goal>The SPA requests user_impersonation from https://login.microsoftonline.com/{Spaarke tenant} with the new client id in both hosts; in Teams it uses NAA then acquireTokenPopup via auth-callback.html; acquireBffTokenViaTeamsSso and the manifest's webApplicationInfo are gone; access_as_user appears nowhere.</goal>
+
+  <context>
+    <background>notes/r3-auth-path.md §2. Today: workforceAuthorityConfig defaults to /organizations (msal-config.ts:147,157), redirectUri = origin (:105); acquireTeamsWorkforceBffToken (msal-auth.ts:372) tries NAA then Teams SSO getAuthToken; appPackage/manifest.json:41-43 has webApplicationInfo (id 1e40baad…, the dev BFF app doubling as client); env.dev.json has AAD_APP_ACCESS_AS_USER_SCOPE; config.ts:100-116 holds the workforce config with an access_as_user comment; .github/workflows/deploy-external-spa.yml:43-52 hard-codes a Teams scope with access_as_user. The add-in's working pattern: src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts (_tryAcquireWith :218 silent then acquireTokenPopup :244) and src/client/office-addins/public/auth-callback.html. /organizations signs a guest into the home tenant (wrong oid) — the authority must be the Spaarke tenant.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/auth/msal-config.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/standalone-plane.ts</file>
+      <file role="modify">src/client/external-spa/src/config.ts</file>
+      <file role="modify">src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file role="modify">src/client/external-spa/appPackage/manifest.json</file>
+      <file role="modify">src/client/external-spa/appPackage/env.dev.json</file>
+      <file role="modify">src/client/external-spa/.env.example</file>
+      <file role="modify">src/client/external-spa/.env.development</file>
+      <file role="new">src/client/external-spa/public/auth-callback.html</file>
+      <file role="modify">src/client/external-spa/staticwebapp.config.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts</file>
+      <file role="canonical-reference">src/client/office-addins/public/auth-callback.html</file>
+      <file role="new-artifact">src/client/external-spa/tests/workforce-auth.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="ADR-028 A2 (as amended by 001)">One single-tenant client; authority https://login.microsoftonline.com/{VITE_MSAL_TENANT_ID or the workforce tenant config}; no /organizations or /common for the workforce plane.</constraint>
+    <constraint source="project">The only BFF scope requested is api://{bffAppId}/user_impersonation, supplied at run time by the backend-selection seam (task 041 replaces the static value; until then from VITE config). No access_as_user string remains in src/, appPackage/ or the workflow.</constraint>
+    <constraint source="project">The CIAM plane (ciamAuthorityConfig, msalInstance) is unchanged by this task.</constraint>
+    <constraint source="project">Live changes (creating the client registration, its redirect URIs https://external.spaarke.com/auth-callback.html, brk-multihub://external.spaarke.com and the dev origin, and moving the dev BFF app's Teams/broker pre-authorizations from access_as_user to user_impersonation) are done by or with the owner, with a stated rollback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>workforce sign-in</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Ask the owner for the new client id (or to approve creating it) and record it in the task notes (ids are not secrets).</step>
+    <step order="2">msal-config.ts: workforce authority = Spaarke tenant; redirectUri for popup = {origin}/auth-callback.html; add public/auth-callback.html copied from the add-in (adjust only paths).</step>
+    <step order="3">msal-auth.ts: replace the Teams SSO fallback with a popup fallback mirroring OfficeNaaStrategy._tryAcquireWith (silent, then acquireTokenPopup); keep TeamsWorkforceAuthError when both fail; delete acquireBffTokenViaTeamsSso.</step>
+    <step order="4">Remove webApplicationInfo from appPackage/manifest.json; replace access_as_user values in env files, config comments and .env.example with user_impersonation.</step>
+    <step order="5">staticwebapp.config.json: make sure /auth-callback.html is served as a static file (not rewritten to index.html).</step>
+    <step order="6">Tests: workforce config builds the Spaarke-tenant authority; the requested scope ends with /user_impersonation; Teams path calls NAA first and falls back to popup (mock MSAL/Teams); no code path calls getAuthToken.</step>
+    <step order="7">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-040-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If NAA in Teams fails without webApplicationInfo in dev testing, STOP and record it for the FR-21 live check (task 071) rather than restoring webApplicationInfo.</trigger>
+    <trigger>If the owner has not provided or approved the client registration, STOP after the code changes that do not need the id and mark the task blocked.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Today the dev BFF app (1e40baad…) doubles as the SPA/Teams client (appPackage/manifest.json:41-43).</existing>
+    <extension>No: the client must be decoupled from per-customer backends so one client can request any customer's scope; a BFF app cannot be that client for other customers.</extension>
+    <cost-of-doing-nothing>Teams and browser cannot sign workforce users into per-customer backends, and guests get the wrong oid via /organizations (FR-16).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Browser workforce sign-in">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Open the dev SPA</step><step>Choose work account sign-in with a Spaarke member</step><step>Open token diagnostics (or decode the BFF request token in dev tools)</step></steps>
+      <expected>Token tid = Spaarke tenant, aud = the dev BFF app, scp contains user_impersonation</expected>
+    </test>
+    <test name="Browser guest sign-in">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Sign in with the owner's test guest</step><step>Check the token</step></steps>
+      <expected>tid = Spaarke tenant, acct = 1; the SPA loads as the guest's systemuser</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/auth/msal-auth.ts</output>
+    <output type="code">src/client/external-spa/src/auth/msal-config.ts</output>
+    <output type="code">src/client/external-spa/public/auth-callback.html</output>
+    <output type="config">src/client/external-spa/appPackage/manifest.json</output>
+    <output type="test">src/client/external-spa/tests/workforce-auth.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The workforce MSAL configuration uses authority https://login.microsoftonline.com/{Spaarke tenant id} and the new client id in both hosts.</criterion>
+    <criterion testable="true">Every workforce token request asks for exactly one BFF scope ending in /user_impersonation.</criterion>
+    <criterion testable="true">In Teams, a failed NAA attempt falls back to acquireTokenPopup; no code path calls Teams getAuthToken.</criterion>
+    <criterion testable="true">appPackage/manifest.json has no webApplicationInfo.</criterion>
+    <criterion testable="true">A grep for access_as_user over src/client/external-spa and .github/workflows/deploy-external-spa.yml returns nothing.</criterion>
+    <criterion testable="true">/auth-callback.html is served by the SWA as a static page.</criterion>
+    <criterion testable="true">The CIAM sign-in path behaves exactly as before.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16; design §4.6 items 2, 5, 6; actions A2/A3. Live check of Teams desktop/web is task 071.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

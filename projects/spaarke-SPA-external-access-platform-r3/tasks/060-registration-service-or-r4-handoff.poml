@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Shared registration service: host decision, then build or R4 hand-off (FR-14)</title>
+    <phase>6 Registration service</phase>
+    <gate>after 003 — BLOCKED on the owner decision of who builds/hosts the T240c directory and registration service</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New identity service holding invite permission (tags auth, placement)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New security-critical service and an ADR-052 placement decision</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>blocked on owner decision; placement + identity work done serially</parallel-reason>
+    <deps>003</deps>
+    <tags>auth, placement, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Get the owner's decision on where the shared registration service lives (ADR-052), then either build it — verify home tenant ∈ CustomerTenantIds and acct = 0, invite the B2B guest without email, add it to sprk-{customerId}-users, idempotently, with no secret — or write the R4 hand-off and keep the join page behind its flag.</prompt>
+  <role>SPAARKE platform developer. Platform engineer (Microsoft Graph invitations, managed identity / federated credentials, ADR-052). Follow ADRs strictly.</role>
+  <goal>Either (a) a deployed shared Spaarke-tenant service implementing FR-14 with MI/FIC identity, tests, and the join page (056) flag turned on in dev; or (b) projects/spaarke-SPA-external-access-platform-r3/notes/fr-14-r4-handoff.md with the full design and this spec section as R4's start, and the decision recorded.</goal>
+
+  <context>
+    <background>Spec Unresolved Q1: recommendation is to co-host with the T240c directory (both are shared Spaarke-tenant services with no customer data), but T240c is a provisioning task and the owner said provisioning builds no new components. The service must hold User.Invite.All + group write in Spaarke's tenant; a stamp never does (T261: stamps hold only FileStorageContainer.Selected). It reads each customer's CustomerTenantIds from Spaarke-owned data (the directory/provisioning record), not from the request. Task 003's decision says whether Entra's built-in flow replaces part of it. T240d S1 (i) proved keyless MI-FIC app-only Graph tokens work.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/spikes/fr-12-self-registration-decision.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-052-workload-placement.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/fr-14-placement-decision.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-052">The host is chosen and written down under ADR-052 §6 before any code; the decision names the identity (MI or FIC), its Graph permissions, and who operates it.</constraint>
+    <constraint source="ADR-028 A4/A6">No secret and no ClientSecret credential; MI or federated credential only. The identity holds only User.Invite.All and group membership write for the sprk-*-users groups (or GroupMember.ReadWrite.All if scoping is impossible — escalate first).</constraint>
+    <constraint source="project">Approval is automatic only when the caller's verified token shows home tid ∈ that customer's CustomerTenantIds and acct = 0; the allow-list comes from Spaarke-owned data, never from the request. Invites are sent with sendInvitationMessage = false. A re-registration returns success without a second guest or a duplicate group membership.</constraint>
+    <constraint source="project">Any live tenant change (app/identity creation, Graph permission grant, deployment) needs owner approval and a stated rollback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>registration service</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Ask the owner (🔔 Human Input Required): who builds and hosts the directory + registration service, and whether R3 builds it now or hands FR-14 to R4. Offer the recommendation (co-host with T240c).</step>
+    <step order="2">If R4: write notes/fr-14-r4-handoff.md (requirements, identity, permissions, API contract the join page calls, failure outcomes, tests) and stop; keep VITE_JOIN_ENABLED off.</step>
+    <step order="3">If R3 builds: write notes/fr-14-placement-decision.md (ADR-052 §6), get approval, then implement the service per the constraints with unit tests, deploy to dev with owner approval, and point the dev join page at it.</step>
+    <step order="4">Either way, update spec Unresolved Questions and notes/decisions.md with the outcome.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="6">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-060-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>This task starts with an owner decision; do not choose the host or the R3/R4 split yourself.</trigger>
+    <trigger>If the only workable permission is tenant-wide group write (no way to scope to sprk-*-users), STOP and escalate before requesting it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None in the repo: provisioning H11 invites guests only at provisioning time for a known list (spec §New Components).</existing>
+    <extension>No: H11 is a provisioning-time batch step with a different identity and no per-user approval; a stamp cannot invite (NFR-03).</extension>
+    <cost-of-doing-nothing>Licence-free customer staff cannot self-register at all (owner requirement 2026-10-09).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/fr-14-placement-decision.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/fr-14-r4-handoff.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The owner's host/R3-vs-R4 decision is recorded with its date.</criterion>
+    <criterion testable="true">If built: an allow-listed member (acct = 0) is invited and added to sprk-{customerId}-users; registering twice creates no second guest and no duplicate membership; a non-listed tenant and an acct = 1 caller are refused with distinct messages; no invitation email is sent; no secret exists anywhere.</criterion>
+    <criterion testable="true">If handed off: the R4 document contains the full contract and test list, and the join page remains flagged off.</criterion>
+    <criterion testable="true">Spec Unresolved Questions and notes/decisions.md reflect the outcome.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14 and Unresolved Questions. If FR-14 moves to R4, success criterion 6 is met by the hand-off per README.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

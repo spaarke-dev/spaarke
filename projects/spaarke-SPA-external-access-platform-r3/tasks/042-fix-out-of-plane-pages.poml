@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Route upload, playbook and search pages through the external plane; remove production mock identity (FR-18, #1566)</title>
+    <phase>4 SPA auth and platform</phase>
+    <gate>after 041</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client auth/route changes (tags auth, frontend)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Pages currently call routes outside the external plane (OBO/default scheme) — auth boundary fix</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies pages and bff-client after 041</parallel-reason>
+    <deps>041</deps>
+    <tags>auth, frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make DocumentUploadPage, PlaybookLibraryPage and SemanticSearch call only /api/v1/external/** with the active plane's token acquirer, and make sure no production build can show a mock identity.</prompt>
+  <role>SPAARKE platform developer. Frontend developer. Follow ADRs strictly.</role>
+  <goal>The three surfaces work for both planes through external routes (or are hidden where no external route exists, per the escalation), use acquireActiveBffToken via bffApiCall, and a 401/403 shows a sign-in or denied state; VITE_DEV_MOCK cannot be enabled in a production build.</goal>
+
+  <context>
+    <background>#1566: DocumentUploadPage.tsx:107-115 builds its own fetch with acquireBffToken() (CIAM path) and shared-library adapters that call an OBO route; PlaybookLibraryPage.tsx:63-81 does the same and targets the /api/dataverse/ proxy (unmapped for the external plane); SemanticSearch.tsx:483 posts to /api/ai/search (default scheme). usePlaybookExecution.ts:123 already uses /api/v1/external/ai/playbook. App.tsx:193-200 and main.tsx:52 enable a mock user when VITE_DEV_MOCK === 'true'. External document upload exists (task 031 routes).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/pages/DocumentUploadPage.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/PlaybookLibraryPage.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/SemanticSearch.tsx</file>
+      <file role="modify">src/client/external-spa/src/App.tsx</file>
+      <file role="modify">src/client/external-spa/src/main.tsx</file>
+      <file role="modify">src/client/external-spa/vite.config.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/hooks/usePlaybookExecution.ts</file>
+      <file role="new-artifact">src/client/external-spa/tests/out-of-plane-routes.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hard-coded colours) and renders correctly in dark mode.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components (src/client/shared/Spaarke.UI.Components) before writing a new component; extend a shared component only where the Xrm-free external host needs it, without breaking its existing consumers.</constraint>
+    <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
+    <constraint source="project">No page under src/client/external-spa calls a route outside /api/v1/external/**; no page builds its own token-acquiring fetch — all calls go through bffApiCall/bffApiBlob.</constraint>
+    <constraint source="project">The production build fails (or strips the branch) if VITE_DEV_MOCK is 'true' with mode production; no mock user can render in production.</constraint>
+    <constraint source="project">A 401 shows the sign-in state and a 403 shows a denied state; neither shows a mock or default user.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external plane routing</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">List every BFF URL in src/ (grep for '/api/' outside /api/v1/external) and map each to an external route.</step>
+    <step order="2">DocumentUploadPage: upload through the task-031 /api/v1/external/{root}/{id}/documents routes via bffApiBlob/bffApiCall.</step>
+    <step order="3">PlaybookLibraryPage: read through the external scoped-read routes (/api/v1/external/api/dataverse/*) if the playbook entity is allowed there.</step>
+    <step order="4">SemanticSearch: use an external search route if one exists.</step>
+    <step order="5">Guard VITE_DEV_MOCK in vite.config.ts/main.tsx for production mode; make 401/403 render sign-in/denied states.</step>
+    <step order="6">Add a test that scans src/ for '/api/' strings outside '/api/v1/external' (allow-list empty) and a test that the production config rejects the mock flag.</step>
+    <step order="7">In src/client/external-spa run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` (all exit 0; install with `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is missing).</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="9">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-042-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the playbook entity is not readable through the external scoped reads, or no external search route exists, STOP and ask the owner whether to hide the feature on the external host or open a BFF task — do not call a non-external route.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Upload as partner">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Sign in as a CIAM partner</step><step>Open a granted project</step><step>Upload a document from the upload page</step></steps>
+      <expected>Upload succeeds through /api/v1/external/...; no request goes to another route</expected>
+    </test>
+    <test name="Forbidden handling">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Sign in as a user without access</step><step>Open the upload page for an inaccessible record</step></steps>
+      <expected>A denied state is shown, never a mock user</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <url>https://green-dune-0c4f1221e.7.azurestaticapps.net/</url>
+      <steps><step>Switch the SPA to dark theme (or OS dark mode)</step><step>Open the surface this task changed</step><step>Check backgrounds, text and icons</step></steps>
+      <expected>No white backgrounds or black text in dark mode; all colours come from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Typecheck, lint, test and build external-spa</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/pages/DocumentUploadPage.tsx</output>
+    <output type="code">src/client/external-spa/src/pages/PlaybookLibraryPage.tsx</output>
+    <output type="code">src/client/external-spa/src/components/SemanticSearch.tsx</output>
+    <output type="test">src/client/external-spa/tests/out-of-plane-routes.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A source scan finds no BFF route outside /api/v1/external/** in src/client/external-spa/src.</criterion>
+    <criterion testable="true">DocumentUploadPage uploads for a workforce user and a CIAM partner through external routes.</criterion>
+    <criterion testable="true">PlaybookLibraryPage and SemanticSearch either work through external routes or are hidden with an explanation (per the owner's escalation answer).</criterion>
+    <criterion testable="true">A production build with VITE_DEV_MOCK=true fails or renders no mock user.</criterion>
+    <criterion testable="true">A 401 shows sign-in; a 403 shows a denied state.</criterion>
+    <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18; closes #1566.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
