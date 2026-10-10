@@ -124,6 +124,7 @@ public static class PersistedClassificationSignalReader
             SuggestedActions = actions,
             PrivilegeFlagged = privilegeFlagged,
             Rationale = string.Equals(rationale, "(none)", StringComparison.Ordinal) ? null : rationale,
+            TriageCategory = string.IsNullOrWhiteSpace(primary.TriageCategory) ? null : primary.TriageCategory,
         };
     }
 

@@ -152,6 +152,61 @@ public class PersistedClassificationSignalReaderTests
             "NFR-04: no persisted AI-classify signal (e.g. rung 5 never ran) must degrade to null, never throw");
     }
 
+    /// <summary>The serializer settings IncomingAssociationResolver persists sprk_associationprovenance with.</summary>
+    private static readonly System.Text.Json.JsonSerializerOptions PersistOptions = new()
+    {
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+
+    [Fact]
+    public async Task TriageCategory_RoundTripsThroughTheRealMapperAndPersistedJson()
+    {
+        // D-117(b): rung 5 → AssociationStatusMapper → persisted JSON → reader → the TRIAGE-EMAIL hint.
+        _classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommunicationClassificationResult
+            {
+                Category = "general-correspondence",
+                Urgency = "routine",
+                Rationale = "Letter about next year's engagement terms.",
+                TriageCategory = "Some taxonomy row",
+            });
+        var matches = await BuildRung().EvaluateAsync(
+            RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None);
+
+        var decision = AssociationTestSupport.Mapper().Decide(matches, Sprk.Bff.Api.Services.Communication.Models.CommunicationDirection.Incoming, tenantKey: null);
+        var json = System.Text.Json.JsonSerializer.Serialize(decision.Provenance, PersistOptions);
+
+        var reconstructed = PersistedClassificationSignalReader.TryReadFromProvenanceJson(json);
+
+        reconstructed!.TriageCategory.Should().Be("Some taxonomy row");
+        reconstructed.Category.Should().Be("general-correspondence");
+    }
+
+    [Fact]
+    public async Task TriageCategory_WhenAbsent_IsNotWrittenToJson_AndPreD117DocumentsReadAsNull()
+    {
+        _classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommunicationClassificationResult { Category = "court-notice", Rationale = "Deadline." });
+        var matches = await BuildRung().EvaluateAsync(
+            RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None);
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            AssociationTestSupport.Mapper().Decide(matches, Sprk.Bff.Api.Services.Communication.Models.CommunicationDirection.Incoming, tenantKey: null).Provenance,
+            PersistOptions);
+
+        json.Should().NotContain("triageCategory", "a signal without the hint serializes exactly as before");
+        PersistedClassificationSignalReader.TryReadFromProvenanceJson(json)!.TriageCategory.Should().BeNull();
+
+        // A document persisted before D-117 (the shape the seam tests pin).
+        const string legacy =
+            """
+            {"version":1,"direction":"Incoming","decision":{"status":"PendingReview","autoFiled":false,"killSwitchEnabled":true,"autoFileThreshold":0.85,"topDeterministicConfidence":0.0,"topConfidence":0.6,"aiInvolved":true,"reason":"test"},"rungsFired":["AiClassification"],"candidates":[],"signals":[{"category":"court-notice","confidence":0.6,"provenance":"ai-classify:category=court-notice:urgency=urgent:types=[sprk_matter]:actions=[calendar-deadline]:Court deadline.","obligations":["respond-by-deadline"]}]}
+            """;
+        var old = PersistedClassificationSignalReader.TryReadFromProvenanceJson(legacy);
+        old!.Category.Should().Be("court-notice");
+        old.TriageCategory.Should().BeNull();
+    }
+
     [Fact]
     public void TryReadFromProvenanceJson_WhenColumnEmpty_ReturnsNull()
     {

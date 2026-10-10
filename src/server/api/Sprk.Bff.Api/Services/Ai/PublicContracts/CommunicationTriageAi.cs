@@ -171,7 +171,7 @@ public sealed class CommunicationTriageAi : ICommunicationTriageAi
     /// <c>infra/dataverse/actions/triage-email.action.json</c>'s <c>input</c> section 1:1) as the
     /// structured operand rendered under the prompt's <c>## Input</c> section.
     /// </summary>
-    private static JsonElement BuildInput(CommunicationTriageRequest request)
+    internal static JsonElement BuildInput(CommunicationTriageRequest request)
     {
         var payload = new
         {
@@ -191,6 +191,17 @@ public sealed class CommunicationTriageAi : ICommunicationTriageAi
                 bodyText = request.BodyText,
             },
         };
+
+        // D-117(b): rung 5's editable-taxonomy choice is added as classification.triageCategory, the hint the
+        // Action reads. Only when present, so an input without it (taxonomy off, or a signal persisted before the
+        // field existed) is byte-identical to the pre-D-117 input.
+        if (!string.IsNullOrWhiteSpace(request.Classification.TriageCategory))
+        {
+            var node = JsonSerializer.SerializeToNode(payload)!.AsObject();
+            node["classification"]!.AsObject()["triageCategory"] = request.Classification.TriageCategory;
+            using var withHint = JsonSerializer.SerializeToDocument(node);
+            return withHint.RootElement.Clone();
+        }
 
         using var doc = JsonSerializer.SerializeToDocument(payload);
         return doc.RootElement.Clone();
