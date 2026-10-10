@@ -36,6 +36,7 @@
  * @see projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-modal-audit.md
  */
 
+import type { OkResponse } from '@spaarke/auth';
 import { parse, HardSlashes } from '../CommandRouter';
 import {
   executeHardSlash,
@@ -71,7 +72,7 @@ function makeMinimalCtx(): PlaybookCtxBundle {
     bffBaseUrl: 'https://bff.test',
     authenticatedFetch: async () => {
       fetchCalls++;
-      return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 200 }) as OkResponse;
     },
     sessionId: 'session-1',
     paneEventBus: {
@@ -185,7 +186,7 @@ describe('R7 task 094 — /playbooks failure isolation', () => {
   it('degrades to failed-unknown if host openLibraryModal throws', async () => {
     const ctx: ExecutorContext = {
       bffBaseUrl: 'https://bff.test',
-      authenticatedFetch: async () => new Response('{}', { status: 200 }),
+      authenticatedFetch: async () => new Response('{}', { status: 200 }) as OkResponse,
       sessionId: 'session-1',
       paneEventBus: {
         dispatch: () => undefined,

@@ -17,7 +17,7 @@
  */
 
 import { parse } from '../CommandRouter';
-import { ApiError, AuthError } from '@spaarke/auth';
+import { ApiError, AuthError, type OkResponse } from '@spaarke/auth';
 import {
   executeHardSlash,
   parseFirstArg,
@@ -105,7 +105,7 @@ function makeCtx(opts: MakeCtxOptions = {}): TestCtxBundle {
     bffBaseUrl: 'https://bff.test',
     authenticatedFetch: async (url: string, init?: RequestInit) => {
       fetchCalls.push({ url, init });
-      return fetchImpl(url, init);
+      return (await fetchImpl(url, init)) as OkResponse;
     },
     sessionId,
     paneEventBus: {
@@ -167,22 +167,6 @@ async function timeIt<T>(fn: () => Promise<T>): Promise<{ result: T; elapsed: nu
   const result = await fn();
   const elapsed = performance.now() - t0;
   return { result, elapsed };
-}
-
-/**
- * Build a structurally-typed fake Response for tests. jsdom does not expose
- * the global `Response` constructor on a node-jest worker; the executor only
- * reads `ok` and `status`, so this minimal shape is sufficient.
- */
-function makeFakeResponse(status: number, body = '{}'): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    headers: new Headers({ 'Content-Type': 'application/json' }),
-    text: async () => body,
-    json: async () => JSON.parse(body),
-  } as unknown as Response;
 }
 
 /**
@@ -470,18 +454,6 @@ describe('/save-to-matter', () => {
     expect(result.message).toBe('Could not save to matter (HTTP 401).');
   });
 
-  it('keeps the returned non-2xx path for a fetch that returns it', async () => {
-    const history: ConversationMessage[] = [{ role: 'user', content: 'Q' }];
-    const bundle = makeCtx({
-      history,
-      activeMatterId: 'matter-1',
-      fetchImpl: async () => makeFakeResponse(500),
-    });
-    const result = await executeHardSlash(parse('/save-to-matter'), bundle.ctx);
-    expect(result.outcome).toBe('failed-network');
-    expect(result.errorCode).toBe('http-500');
-  });
-
   it('makes ZERO chat-completion requests', async () => {
     const history: ConversationMessage[] = [{ role: 'user', content: 'Q' }];
     const bundle = makeCtx({ history, activeMatterId: 'matter-1' });
@@ -548,17 +520,6 @@ describe('/pin', () => {
     expect(result.outcome).toBe('failed-validation');
     expect(result.errorCode).toBe('no-focused-tab');
     expect(bundle.fetchCalls).toHaveLength(0);
-  });
-
-  it('returns failed-network on HTTP 500', async () => {
-    const bundle = makeCtx({
-      sessionId: 'sess-1',
-      focusedTabId: 'tab-7',
-      fetchImpl: async () => makeFakeResponse(500),
-    });
-    const result = await executeHardSlash(parse('/pin'), bundle.ctx);
-    expect(result.outcome).toBe('failed-network');
-    expect(result.errorCode).toBe('http-500');
   });
 
   it('reports a thrown ApiError(404) as "(HTTP 404)" / http-404, not a network error', async () => {
