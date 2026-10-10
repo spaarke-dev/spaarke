@@ -4,7 +4,7 @@
     <title>Stored Secure and Access Permission follow the parent both ways for filed work assignments and projects, and are locked while a parent exists: un-securing cascades, permission changes cascade, the secure/unsecure commands and the field are unavailable on a child (owner round 84, replaces round 6 item 4)</title>
     <phase>Session 27 — UAC defect remediation (owner round 84, 2026-10-08)</phase>
     <gate>startable after task 174 merges (enforcement already follows the parent, so a lagging stored flag is never a hole)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the secure/unsecure write paths, the inheritance job, container moves on unsecure, ribbon/forms, and tests.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -74,6 +74,7 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md`. Design
 The full log is in `notes/session27-owner-decisions-and-research.md` (numbered rounds; earlier decisions in `notes/design-register.md` and `notes/decisions/`). Index and superseded items: [`notes/decisions.md`](notes/decisions.md).
 
 **Working rules:**
+- **2026-10-10 (round 90, BINDING): wrap-up mode.** Fix only findings that directly impact uac-r2's objectives or are significant breaking bugs on a real path (security and data loss in our code count). Everything else becomes a GitHub issue with evidence and is reported, not a new task. A task closes when merged, deployed and its server-side live gate passes; owner browser checks stay on the checklist and don't hold it open.
 - 2026-10-01/03: continue autonomously; stop only for a genuine owner decision (one batched question round, recommended first). On a partial-option escalation the main session decides the complete fix and records it as a round.
 - 2026-10-06 (round 75): ADR decisions inside 036's scope that are clearly consistent with this project's objectives are approved by the main session and recorded. Anything not clear-cut goes to the owner.
 - 2026-10-06: terminology: say "save the email as documents" (the archive route), never "Save to SharePoint".

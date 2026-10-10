@@ -1337,6 +1337,16 @@ Asked after the owner's hands-on testing as testuser1 (Spaarke Basic User role).
   7. **`sprk_communication` has its own `sprk_accesspermission`, which the BFF never reads** (`ExternalParticipationService.cs:549-553`).
   8. **The access-permission pill is never disabled** (`TrackingFieldTrio.tsx:335-367`).
 
+## Round 90 (2026-10-10): BINDING. OWNER: wrap up the core of uac-r2; fix only what impacts it, file the rest
+
+The owner, after the task count kept rising (74 tasks added 2026-09-28..10-09): "we need to wrap up the core uac-r2 functionality. BUT my concern ... is that we do not want to have buried issues that will only later come up and be more difficult to fix. BUT ALSO we need to get this project completed. ... focus on the core objectives of uac-r2, and if we come across issues that will directly impact uac-r2 or are significant functional bugs that will make the system not work (breaking) then fix those. For any others put into issues and we will address them after the project is completed."
+
+1. **Fix in this project** only a finding that (a) directly impacts uac-r2's objectives (access control: who can read, write, share, see or be notified, and its enforcement, reconciliation and bounds), or (b) is a significant functional bug that breaks the system on a real path. Security and data-loss defects in uac-r2's own code are (a).
+2. **Everything else becomes a GitHub issue, not a project task.** File it with evidence and report it; nothing is buried. It is worked after the project closes. A new project task needs (1).
+3. **Closing rule (accepted recommendation B):** a task closes when its code is merged and deployed and its server-side live gate passes. The owner's browser checks stay on `owner-hands-on-checklist-2026-10-08.md` and do not hold the task open. A failed owner check reopens the work as a fix, under rule 1.
+4. **Batch-4 sweep (accepted recommendation C):** one pass runs the batch-4 live checks that need nothing from the owner and closes those that pass. Tasks that need owner inputs (CIAM identities for 140, users for 171, the 165 role grant) are labelled as waiting on the owner.
+5. Unchanged: no round cap on fixing an in-scope defect; one full verifier pass (two for auth/security); escalate on non-convergence.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.

@@ -4,7 +4,7 @@
     <title>AccessGrantModal: provenance + level on every Current Access row; suppressed-row rendering (FR-30 client half)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 064 (report endpoint) + 065 (modal baseline with user rows) merged</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend on the authorization/attestation surface; wrong provenance display is a false compliance answer.</rigor-reason>
     <model-tier>sonnet</model-tier>
