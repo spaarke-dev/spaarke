@@ -12,6 +12,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type {
   IAccessGrantModalProps,
   IAccessGrantRecord,
@@ -115,11 +116,15 @@ interface ISetup {
   standing?: IAccessGrantRecord[];
   shares?: Array<{ systemUserId: string; fullName: string; accessLevel: number }>;
   overrides?: Partial<IAccessGrantModalProps>;
+  /** Control: a host whose fetch RETURNS a non-2xx response instead of throwing (the modal accepts both). */
+  returning?: boolean;
 }
 
 function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
   const noAccess = setup.noAccess ?? (async () => jsonResponse(noAccessBody([])));
-  const authenticatedFetch = jest.fn(async (url: string) => {
+  // Production shape by default: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+  const fetchFactory = setup.returning ? jest.fn : throwingAuthenticatedFetch;
+  const authenticatedFetch = fetchFactory(async (url: string) => {
     if (url.includes('/no-access')) return noAccess();
     if (url.includes('/user-shares')) return jsonResponse({ shares: setup.shares ?? [] });
     if (url.includes('/assigned-access')) return jsonResponse({ entries: [] });
@@ -309,9 +314,9 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
   });
 
   const failures: Array<[string, () => Promise<Response>]> = [
-    ['a 404 (the route’s uniform refusal)', async () => jsonResponse({ reasonCode: 'x' }, 404)],
-    ['a 403', async () => jsonResponse({ reasonCode: 'sdap.access.deny.delegation_write_required' }, 403)],
-    ['a 500', async () => jsonResponse({}, 500)],
+    ['a 404 (the route’s uniform refusal)', async () => jsonResponse({ status: 404, reasonCode: 'x' }, 404)],
+    ['a 403', async () => jsonResponse({ status: 403, reasonCode: 'sdap.access.deny.delegation_write_required' }, 403)],
+    ['a 500', async () => jsonResponse({ status: 500 }, 500)],
     ['entriesState unavailable', async () => jsonResponse(noAccessBody(null, 'unavailable'))],
     ['an unknown entriesState', async () => jsonResponse(noAccessBody([], 'someday'))],
     ['an answer about another record', async () => jsonResponse(noAccessBody([], 'complete', PARENT_MATTER_ID))],
@@ -345,6 +350,13 @@ describe('AccessGrantModal — No Access List (task 067)', () => {
     expect(screen.queryByText('Write access required')).not.toBeInTheDocument();
     expect(screen.getByText('Walter Walled')).toBeInTheDocument();
     expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('active');
+  });
+
+  it.each([404, 403, 500])('control: a host that RETURNS the %s response gets the same error state', async status => {
+    renderModal(makeProps({ returning: true, noAccess: async () => jsonResponse({ status }, status) }));
+    const section = await noAccessSection();
+    expect(within(section).getByText('No Access List unavailable')).toBeInTheDocument();
+    expect(within(section).queryByText(/No one is on/)).not.toBeInTheDocument();
   });
 });
 
@@ -574,7 +586,9 @@ describe('AccessGrantModal — cancellation follows the parent (task 174, owner 
       )
     ).toBeInTheDocument();
     expect(
-      within(currentAccessRow('Sam Standing')).getByText('No effect: this record is secure, so standing grants give no access.')
+      within(currentAccessRow('Sam Standing')).getByText(
+        'No effect: this record is secure, so standing grants give no access.'
+      )
     ).toBeInTheDocument();
     expect(screen.getByText(/It follows the matter it is filed under: Parent Matter\./)).toBeInTheDocument();
   });
@@ -590,7 +604,10 @@ describe('AccessGrantModal — cancellation follows the parent (task 174, owner 
   });
 
   it("never less strict than the record's own values: a Restricted host stays Restricted on a Standard answer", async () => {
-    renderModal({ ...allRows({ secure: 'doesNotApply', accessPermission: 'standard' }), accessPermissionState: 'restricted' });
+    renderModal({
+      ...allRows({ secure: 'doesNotApply', accessPermission: 'standard' }),
+      accessPermissionState: 'restricted',
+    });
     await noAccessSection();
     expect(currentAccessRow('Walter Walled').getAttribute('data-access-state')).toBe('suppressed');
   });
@@ -721,7 +738,7 @@ describe('AccessGrantModal — overlapping loads never show another record (veri
     const grantsA = deferred<IAccessGrantRecord[]>();
     const grantsB = deferred<IAccessGrantRecord[]>();
     let current = RECORD_A;
-    const authenticatedFetch = jest.fn(async (url: string) => {
+    const authenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
       if (url.includes(`/${RECORD_A}/no-access`)) return noAccessA.promise;
       if (url.includes(`/${RECORD_B}/no-access`)) return noAccessB.promise;
       if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
@@ -843,7 +860,7 @@ describe('AccessGrantModal — a write that finishes after a rebind never shows 
   it("a revoke on A answering after the host rebinds to B reloads nothing of A's and shows no notice about A", async () => {
     let current = A;
     const revokePost = deferred<Response>();
-    const fetchFn = jest.fn(async (url: string) => {
+    const fetchFn = throwingAuthenticatedFetch(async (url: string) => {
       if (url.includes('/revoke')) return revokePost.promise;
       const rec = url.includes(A) ? 'A' : url.includes(B) ? 'B' : '?';
       if (url.includes('/user-shares')) {
