@@ -704,6 +704,27 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Known gap (documented in the script's own `.DESCRIPTION`, not hidden):** the `.Worker` App Service's Bicep-declared config-key shape still diverges from `.Api`'s canonical NFR-05 shape (task 109 fixed `.Api` only; the Worker follow-on was filed but has no owning task number as of this writing). The script's config-key check uses the Worker's ACTUAL current key shape so the check reflects reality instead of always failing.
 
+### `provisioning/Deploy-ManagementGroups.ps1`
+**Purpose:** Creates the management-group hierarchy (`spaarke-environments` → `spaarke-customers`, `infrastructure/bicep/management-groups.bicep`), assigns the common customer policy at `spaarke-customers` (`infrastructure/bicep/customer-policy.bicep` — built-in definitions, Audit / DoNotEnforce, never blocks a deployment), moves the listed subscriptions and reads every placement back (ADR-027, G36).
+**Usage:** 🟡 Occasional - once per tenant (and whenever customer-policy.bicep changes); a new customer subscription is placed with `az account management-group subscription add` (PRQ-S-06)
+**Lifecycle:** ✅ Maintained (added 2026-10-09 by customer-provisioning-orchestration-r1 task 262)
+**Dependencies:** Azure CLI; `powershell-yaml` (ids from `scripts/provisioning-prereqs/spaarke-constants.yaml` `management_groups`). `-Apply` needs Owner — or Contributor + User Access Administrator (or Resource Policy Contributor) — at `/` (tenant-scope deployment); the plan run needs read only
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+**Last Used:** 2026-10-09 (plan run only; read-only)
+
+**Command:**
+```powershell
+# Plan (default): read-only; prints the groups, the policy, each subscription's move and the exact az commands
+pwsh scripts/provisioning/Deploy-ManagementGroups.ps1
+
+# Apply: create the groups, assign the policy, move Demo -> spaarke-customers and Dev + Shared Production -> spaarke-environments
+pwsh scripts/provisioning/Deploy-ManagementGroups.ps1 -Apply
+
+# A new customer subscription (PRQ-S-06) needs no tenant-level right - place it directly:
+az account management-group subscription add --name spaarke-customers --subscription <subscription-id>
+```
+Never runs `az account set`. Tests: `tests/scripts/Management-Groups.Tests.ps1` (Pester 3.4).
+
 ### `provisioning/Grant-ControlPlaneIdentity.ps1`
 **Purpose:** Idempotently registers the L2 control-plane UAMI as a Dataverse Application User on the admin registry environment (Path X, scoped custom role — NOT System Administrator) and grants the C5.8 Microsoft Graph app-role set on the same UAMI service principal.
 **Usage:** 🟡 Occasional - Once per environment (re-run is idempotent / safe)
@@ -1336,7 +1357,7 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../p
 
 ### `Set-ExternalFlagForB2BGuests.ps1`
 **Purpose:** One-off data step: every B2B guest system user (`#EXT#` in its user name, `systemuser.domainname`) gets `sprk_isexternal = Yes`; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so guests must be marked explicitly. JSON report of every user listed.
-**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
+**Usage:** 🛑 **Do NOT run this on a Model 1 customer stamp** (#1564): every customer employee there is a B2B guest (`#EXT#`) in Spaarke's tenant, so it would mark every customer employee external. Wait for unified-access-control-r2 to decide the rule (customer deployment guide §7.7 / §12.2 Phase 7b). For other environments: 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
 **Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003)
 **Dependencies:** Azure CLI (`az login`, Write on systemuser), PowerShell 7+
 **Owner:** `unified-access-control-r2`

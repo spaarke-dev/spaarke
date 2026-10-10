@@ -95,13 +95,19 @@ public interface IEnvVarValuesWriter
 /// container from (<c>RecordContainerResolver</c>: the record's owning business unit → its <c>sprk_containerid</c>).
 /// Null = no link (callers that write values only).
 /// </param>
+/// <param name="CustomerBusinessUnitId">
+/// T259 (ISS-010): the customer's own business unit (H10's <c>CustomerBusinessUnitId</c>), linked to the SAME container
+/// right after the root. Every user and every BFF application user lives there, so the records they own are owned there,
+/// and the BFF resolves a non-secure record's container from its OWNING unit only. Null = no customer-unit link.
+/// </param>
 public sealed record EnvVarValuesWriteRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
     string? ClientSecret,
     IReadOnlyList<KeyValuePair<string, string>> Values,
-    string? RootBusinessUnitContainerId = null);
+    string? RootBusinessUnitContainerId = null,
+    Guid? CustomerBusinessUnitId = null);
 
 /// <summary>
 /// Discriminated result of <see cref="IEnvVarValuesWriter.WriteAsync"/>.
@@ -117,9 +123,11 @@ public abstract record EnvVarValuesWriteOutcome
     /// Task 227g: the root business unit whose <c>sprk_containerid</c> names the container (already, or written and read
     /// back by this call); null when the request asked for no link.
     /// </param>
+    /// <param name="LinkedCustomerBusinessUnitId">T259: the customer's unit, linked to the same container; null when not asked.</param>
     public sealed record Success(
         IReadOnlyList<KeyValuePair<string, string>> WrittenVariables,
-        Guid? LinkedRootBusinessUnitId = null) : EnvVarValuesWriteOutcome;
+        Guid? LinkedRootBusinessUnitId = null,
+        Guid? LinkedCustomerBusinessUnitId = null) : EnvVarValuesWriteOutcome;
 
     /// <summary>
     /// The upsert failed on one variable (writer stops at the first failure —
@@ -180,4 +188,16 @@ public enum EnvVarValuesWriteFailureKind
     /// <see cref="EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict"/>.
     /// </summary>
     RootBusinessUnitContainerConflict = 6,
+
+    /// <summary>
+    /// T259: the customer's business unit (H10's <c>CustomerBusinessUnitId</c>) does not exist. Handler maps to
+    /// <see cref="EnvVarValuesRejectionCodes.CustomerBusinessUnitUnresolved"/>.
+    /// </summary>
+    CustomerBusinessUnitUnresolved = 7,
+
+    /// <summary>
+    /// T259: the customer's business unit's <c>sprk_containerid</c> already names ANOTHER container. Nothing is written.
+    /// Handler maps to <see cref="EnvVarValuesRejectionCodes.CustomerBusinessUnitContainerConflict"/>.
+    /// </summary>
+    CustomerBusinessUnitContainerConflict = 8,
 }

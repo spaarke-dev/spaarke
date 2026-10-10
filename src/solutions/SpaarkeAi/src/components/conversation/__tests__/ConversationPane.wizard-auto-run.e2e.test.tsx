@@ -173,7 +173,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
   }
   if (url.includes('/documents')) {
     if (failDocumentsUpload) {
-      return { ok: false, status: 500, json: async () => ({}), text: async () => '' } as unknown as Response;
+      throw httpError(500);
     }
     return { ok: true, status: 200, json: async () => ({ documentId: SESSION_FILE_ID }) } as unknown as Response;
   }
@@ -184,7 +184,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
     const session = sessionFromUrl(url);
     return { ok: true, status: 200, json: async () => ledger.get(session) ?? [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 const captured: {
@@ -275,6 +275,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks.
 import { ConversationPane, WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE, WIZARD_AUTO_RUN_WATCHDOG_MS } from '../ConversationPane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const registerActiveDocumentRef: { current: ComposeActiveDocumentRegistration | null } = { current: null };
 

@@ -23,6 +23,7 @@ import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-com
 import { NewThreadModal, type INewThreadModalProps } from '../NewThreadModal';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { INavigationService, LookupResult } from '../../../types/serviceInterfaces';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const BFF = 'https://bff.example.com';
 
@@ -52,7 +53,8 @@ function isSendUrl(url: string): boolean {
 
 function makeFetch(opts: IFakeFetchOptions = {}) {
   const threadId = opts.threadId ?? 'thread-abc';
-  return jest.fn((url: string) => {
+  // authenticatedFetch THROWS ApiError for a non-2xx: the double turns each non-OK answer below into the thrown failure.
+  return throwingAuthenticatedFetch(async (url: string) => {
     if (isCreateUrl(url)) {
       if (opts.createError) {
         return Promise.resolve(problem(opts.createError.status, opts.createError.detail, 'CREATE_THREAD_FAILED'));

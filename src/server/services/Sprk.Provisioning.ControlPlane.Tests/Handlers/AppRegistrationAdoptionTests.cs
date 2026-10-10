@@ -20,10 +20,13 @@ public sealed class AppRegistrationAdoptionTests
     private const string ControlPlane = "12345678-1234-1234-1234-123456789abc";
     private const string Squatter = "87654321-4321-4321-4321-cba987654321";
     private const string FicName = "spaarke-uami-trust";
+    private const string WorkerFicName = "spaarke-l2-worker";
 
     private static string? Refusal(
-        Application app, string[] owners, string[] fics, string? controlPlane = ControlPlane, bool secretFree = true)
-        => GraphAppRegistrationProvisioner.AdoptionRefusal(app, owners, fics, controlPlane, FicName, secretFree);
+        Application app, string[] owners, string[] fics, string? controlPlane = ControlPlane, bool secretFree = true,
+        string[]? managedFicNames = null)
+        => GraphAppRegistrationProvisioner.AdoptionRefusal(
+            app, owners, fics, controlPlane, managedFicNames ?? [FicName, WorkerFicName], secretFree);
 
     [Fact]
     public void OwnedOnlyByTheControlPlane_NoCredentials_OnlyOurFic_IsAdopted()
@@ -56,6 +59,20 @@ public sealed class AppRegistrationAdoptionTests
     [Fact]
     public void AForeignFederatedCredential_IsRefused()
         => Refusal(new Application(), [ControlPlane], [FicName, "my-own-trust"]).Should().Contain("my-own-trust");
+
+    [Fact]
+    public void ISS015_BothOfH3sFederatedCredentials_AreAdopted_ThenReconciledByTriple()
+        => Refusal(new Application(), [ControlPlane], [FicName, WorkerFicName]).Should().BeNull();
+
+    [Fact]
+    public void ISS015_AStampFromBeforeTheWorkerCredential_IsAdopted_SoH3CanAddIt()
+        => Refusal(new Application(), [ControlPlane], [FicName]).Should().BeNull();
+
+    [Fact]
+    public void ISS015_TheWorkerCredentialName_IsForeign_WhereH3DoesNotKeepIt()
+        // customer-owned-model2: H3 keeps only the stamp credential (MI-FIC cannot cross tenants).
+        => Refusal(new Application(), [], [FicName, WorkerFicName], controlPlane: null, managedFicNames: [FicName])
+            .Should().Contain(WorkerFicName);
 
     [Fact]
     public void Model2_SkipsTheOwnerCheck_ButStillRefusesCredentials()

@@ -3,9 +3,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
-using Sprk.Bff.Api.Services.Dataverse;
 
-namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// How a chat tool writes a row FILED under a project, matter or work assignment (unified-access-control-r2 task 146 r2,

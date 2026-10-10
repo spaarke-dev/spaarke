@@ -18,9 +18,9 @@
 //   `new ClientSecretCredential(...)` construction is confined to the
 //   factory's ClientSecret (pre-migration/fallback) branch — never on the
 //   secret-free branch. NOT DefaultAzureCredential-as-the-Worker: H7
-//   authenticates AS the BFF app-reg (the MI-Dataverse App User (H10) has
-//   not yet been created at H7's point in the DAG; H10 runs AFTER H7 per
-//   design.md §4.1) — under MI-FIC the Worker's UAMI merely MINTS the
+//   authenticates AS the BFF app-reg (which H10 registered as an
+//   application user before H6 — T228 moved H10 ahead of H6/H7) — under
+//   MI-FIC the Worker's UAMI merely MINTS the
 //   federated assertion the app-reg trusts (H3-created FIC). Token audience
 //   is the env URL's origin + `/.default` — Dataverse Web API's token scope
 //   convention (parity with DataverseWebApiHealthProbe).
@@ -32,6 +32,10 @@
 // no container. Equal → nothing written; empty → PATCH + read back; ANOTHER container → refused, nothing written.
 // LinkRootBusinessUnitContainerAsync takes the HttpClient + token, so it IS CI-unit-tested
 // (DataverseRootBusinessUnitLinkTests) against a hand-written HttpMessageHandler.
+//
+// T259 (ISS-010): right after the root, the CUSTOMER's business unit (H10) is linked to the same container with the same
+// rules (LinkCustomerBusinessUnitContainerAsync). Every user and BFF application user lives in that unit, so the records
+// they own are owned there — without the link every non-secure record of a T259 stamp resolves to no container.
 //
 // NOT under test in the CI unit suite. Integration coverage lives in an
 // env-guarded smoke test, parity with the H5 health-probe note. (The FR-39
@@ -158,6 +162,19 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
             linkedRootBusinessUnitId = link.RootBusinessUnitId;
         }
 
+        Guid? linkedCustomerBusinessUnitId = null;
+        if (!string.IsNullOrWhiteSpace(request.RootBusinessUnitContainerId) && request.CustomerBusinessUnitId is { } customerUnit)
+        {
+            var failure = await LinkCustomerBusinessUnitContainerAsync(
+                httpClient, envUri, token.Token, customerUnit, request.RootBusinessUnitContainerId.Trim(), _logger, cancellationToken)
+                .ConfigureAwait(false);
+            if (failure is not null)
+            {
+                return failure;
+            }
+            linkedCustomerBusinessUnitId = customerUnit;
+        }
+
         var written = new List<KeyValuePair<string, string>>(request.Values.Count);
         foreach (var (schemaName, value) in request.Values)
         {
@@ -170,7 +187,7 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
             written.Add(new KeyValuePair<string, string>(schemaName, value));
         }
 
-        return new EnvVarValuesWriteOutcome.Success(written, linkedRootBusinessUnitId);
+        return new EnvVarValuesWriteOutcome.Success(written, linkedRootBusinessUnitId, linkedCustomerBusinessUnitId);
     }
 
     /// <summary>The label H7's diagnostics use for the root business unit's container column.</summary>
@@ -271,6 +288,93 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
                 : new RootBusinessUnitLinkResult(null, new EnvVarValuesWriteOutcome.Failure(
                     EnvVarValuesWriteFailureKind.UnknownInvocationFailure, RootBusinessUnitContainerColumnLabel,
                     $"The root business unit {rootId} did not keep container '{containerId}' (read back: '{readBack}')."));
+        }
+    }
+
+    /// <summary>
+    /// T259 (ISS-010): makes the CUSTOMER's business unit's <c>sprk_containerid</c> name <paramref name="containerId"/> — the
+    /// root unit's rules: already equal → nothing written; empty → PATCH, then read back; another container → refused
+    /// (nothing written); the unit absent (404) → refused. Returns null when linked.
+    /// </summary>
+    internal static async Task<EnvVarValuesWriteOutcome.Failure?> LinkCustomerBusinessUnitContainerAsync(
+        HttpClient httpClient,
+        Uri envUri,
+        string bearerToken,
+        Guid customerBusinessUnitId,
+        string containerId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var unitUri = new Uri(envUri, $"/api/data/v9.2/businessunits({customerBusinessUnitId:D})?$select=sprk_containerid");
+        string? current;
+        try
+        {
+            using var read = BuildRequest(HttpMethod.Get, unitUri, bearerToken);
+            using var response = await httpClient.SendAsync(read, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new EnvVarValuesWriteOutcome.Failure(
+                    EnvVarValuesWriteFailureKind.CustomerBusinessUnitUnresolved, RootBusinessUnitContainerColumnLabel,
+                    $"The customer's business unit {customerBusinessUnitId} (H10) does not exist, so H7 cannot link it to " +
+                    $"container '{containerId}'. Nothing was written.");
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                return NonSuccess(response.StatusCode, "Reading the customer's business unit");
+            }
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            current = ContainerIdOf(document.RootElement);
+        }
+        catch (Exception ex) when (IsTransportFault(ex, cancellationToken) || ex is JsonException)
+        {
+            logger.LogWarning(ex, "H7 customer business unit link: read failed");
+            return Transport("Reading the customer's business unit", ex);
+        }
+
+        if (string.Equals(current, containerId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        if (current is not null)
+        {
+            return new EnvVarValuesWriteOutcome.Failure(
+                EnvVarValuesWriteFailureKind.CustomerBusinessUnitContainerConflict, RootBusinessUnitContainerColumnLabel,
+                $"The customer's business unit {customerBusinessUnitId} already names container '{current}', not this run's " +
+                $"container '{containerId}'. Nothing was written: replacing it would move where the customer's non-secure " +
+                "files go. Decide which container is the customer's, make the unit and the run agree, then resume.");
+        }
+
+        try
+        {
+            using var patch = BuildRequest(HttpMethod.Patch,
+                new Uri(envUri, $"/api/data/v9.2/businessunits({customerBusinessUnitId:D})"), bearerToken);
+            patch.Content = BuildJsonContent(new Dictionary<string, object?> { ["sprk_containerid"] = containerId });
+            using var patched = await httpClient.SendAsync(patch, cancellationToken).ConfigureAwait(false);
+            if (!patched.IsSuccessStatusCode)
+            {
+                return NonSuccess(patched.StatusCode, "Linking the customer's business unit");
+            }
+        }
+        catch (Exception ex) when (IsTransportFault(ex, cancellationToken))
+        {
+            logger.LogWarning(ex, "H7 customer business unit link: PATCH failed");
+            return Transport("Linking the customer's business unit", ex);
+        }
+
+        var (after, afterFailure) = await GetJsonAsync(httpClient, unitUri, bearerToken,
+            "Reading the customer's business unit's container back", logger, cancellationToken).ConfigureAwait(false);
+        if (afterFailure is not null)
+        {
+            return afterFailure;
+        }
+        using (after)
+        {
+            var readBack = ContainerIdOf(after!.RootElement);
+            return string.Equals(readBack, containerId, StringComparison.Ordinal)
+                ? null
+                : new EnvVarValuesWriteOutcome.Failure(
+                    EnvVarValuesWriteFailureKind.UnknownInvocationFailure, RootBusinessUnitContainerColumnLabel,
+                    $"The customer's business unit {customerBusinessUnitId} did not keep container '{containerId}' (read back: '{readBack}').");
         }
     }
 

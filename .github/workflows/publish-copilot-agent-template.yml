@@ -1,0 +1,198 @@
+# ============================================================================
+# publish-copilot-agent-template.yml — build the Copilot agent template from git and publish it to provisioning-artifacts
+# ============================================================================
+#
+# customer-provisioning-orchestration-r1 T257 (design: projects/customer-provisioning-orchestration-r1/notes/
+# t257-copilot-agent-design.md §3, owner-accepted 2026-10-09). Each customer's IT installs Spaarke's Copilot agent in
+# its own tenant. The operator renders that customer's package (scripts/copilot-agent/Render-CopilotAgentPackage.ps1)
+# from ONE template, which this workflow alone produces from the committed source src/solutions/CopilotAgent. The
+# template is never built on a laptop (the SpaarkeMaster rule, publish-dataverse-solutions-manifest.yml, by analogy).
+#
+# Steps:
+#   1. Run the package's Pester tests.
+#   2. Build the template with New-CopilotAgentTemplate. It refuses a source with permissions, webApplicationInfo, a
+#      bot, a knowledge capability, a hard-coded tenant, app id or reference id, or schema versions other than
+#      v1.30 / v1.8 / v2.4.
+#   3. Write the store manifest with New-CopilotAgentTemplateManifest (the one producer of its shape).
+#   4. Render a SAMPLE package (fixed non-production values) and validate it against Microsoft's published JSON schemas
+#      plus the OpenAPI value checks (scripts/copilot-agent/test_rendered_package.py).
+#   5. Keep everything as a run artifact.
+# Only a manual run on master with `publish: true` then uploads:
+#   - the template under a versioned name;
+#   - a versioned manifest;
+#   - a copy of the current latest manifest as `copilot-agent-template-latest.previous.json` (the rollback pointer);
+#   - the new `copilot-agent-template-latest.json`, read back.
+# A version publishes ONCE. A template of that version from a DIFFERENT commit refuses the run (bump "version" in
+# src/solutions/CopilotAgent/appPackage/manifest.json). One from the SAME commit (blob metadata `sourcesha`) is a re-run
+# after a partial failure and is replaced. Nothing is ever deleted.
+#
+# Storage access: the existing OIDC identity (azure/login, no key or SAS) — the same one
+# publish-dataverse-solutions-manifest.yml and publish-provisioning-arm-artifacts.yml use on the same container.
+# ============================================================================
+
+name: Publish Copilot Agent Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload to provisioning-artifacts and move copilot-agent-template-latest.json. false = dry run (tests + build + sample render + schema validation; nothing uploaded).'
+        required: false
+        type: boolean
+        default: false
+  # Dry run only: proves every change to the template source or the renderer still builds, renders and validates.
+  pull_request:
+    paths:
+      - 'src/solutions/CopilotAgent/**'
+      - 'scripts/copilot-agent/**'
+      - 'tests/scripts/CopilotAgentPackage.Tests.ps1'
+      - '.github/workflows/publish-copilot-agent-template.yml'
+
+permissions:
+  contents: read
+  id-token: write  # OIDC login for the publish steps (no stored storage key)
+
+concurrency:
+  group: publish-copilot-agent-template-${{ github.ref }}
+  cancel-in-progress: false  # never cancel an in-flight publish
+
+env:
+  SOURCE_FOLDER: src/solutions/CopilotAgent
+  CONTAINER: provisioning-artifacts
+  # Sample render values: fixed, non-production. They prove placement and schema validity, nothing else.
+  SAMPLE_CUSTOMER_ID: sample
+  SAMPLE_BFF_BASE_URL: https://sprk-sample-prod-api.azurewebsites.net
+  SAMPLE_BFF_APP_ID: 11111111-2222-3333-4444-555555555555
+  SAMPLE_TENANT_ID: 22222222-3333-4444-5555-666666666666
+  SAMPLE_AUTH_CONFIG_ID: c2FtcGxlLWF1dGgtY29uZmlnLWlk
+
+jobs:
+  build-and-publish:
+    name: Build the Copilot agent template, check, (publish)
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}
+      # The OIDC subject trusts refs/heads/master only; a publish from another branch is refused up front.
+      ON_MASTER: ${{ github.ref == 'refs/heads/master' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Refuse a publish from a branch other than master
+        if: env.PUBLISH == 'true' && env.ON_MASTER != 'true'
+        shell: bash
+        run: |
+          echo "::error::publish=true runs from master only (the OIDC federated subject trusts refs/heads/master). Merge first, or run with publish=false for a dry run."
+          exit 1
+
+      - name: Unit-test the template build and render (Pester)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5
+          $r = Invoke-Pester -Path tests/scripts/CopilotAgentPackage.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Copilot agent package Pester tests failed ($($r.FailedCount) failed, $($r.PassedCount) passed)." }
+
+      - name: Build the template, write the manifest, render a sample
+        id: build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./scripts/copilot-agent/CopilotAgentPackage.psm1 -Force
+          $t = New-CopilotAgentTemplate -SourceFolder $env:SOURCE_FOLDER -OutputFolder out
+          $buildId = "$((Get-Date).ToUniversalTime().ToString('yyyy.MM.dd'))-${{ github.run_number }}"
+          New-CopilotAgentTemplateManifest -Version $t.Version -BlobName $t.BlobName -Sha256 $t.Sha256 `
+              -BuildId $buildId -SourceSha '${{ github.sha }}' | Set-Content out/manifest.json -Encoding utf8NoBOM
+          Get-Content out/manifest.json
+
+          ./scripts/copilot-agent/Render-CopilotAgentPackage.ps1 -TemplatePath $t.ZipPath -TemplateManifestPath out/manifest.json `
+              -OutputFolder out/sample -CustomerId $env:SAMPLE_CUSTOMER_ID -BffBaseUrl $env:SAMPLE_BFF_BASE_URL `
+              -BffAppId $env:SAMPLE_BFF_APP_ID -AuthConfigId $env:SAMPLE_AUTH_CONFIG_ID -SpaarkeTenantId $env:SAMPLE_TENANT_ID | Format-List
+
+          "version=$($t.Version)" >> $env:GITHUB_OUTPUT
+          "blob=$($t.BlobName)" >> $env:GITHUB_OUTPUT
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+
+      - name: Validate the sample against Microsoft's schemas
+        shell: bash
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet jsonschema pyyaml
+          python3 scripts/copilot-agent/test_rendered_package.py "out/sample/spaarke-copilot-${SAMPLE_CUSTOMER_ID}-${VERSION}.zip" \
+            --bff-base-url "${SAMPLE_BFF_BASE_URL}" \
+            --scope "api://${SAMPLE_BFF_APP_ID}/user_impersonation" \
+            --tenant-id "${SAMPLE_TENANT_ID}"
+
+      - name: Keep the template, manifest and sample as a run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: copilot-agent-template-${{ steps.build.outputs.version }}-run${{ github.run_number }}
+          path: out/
+          retention-days: 14
+
+      - name: Azure Login (OIDC)
+        if: env.PUBLISH == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish (versioned template, versioned manifest, previous pointer, latest)
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          ACCOUNT: ${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}
+          VERSION: ${{ steps.build.outputs.version }}
+          BLOB: ${{ steps.build.outputs.blob }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACCOUNT}" ]; then echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."; exit 1; fi
+          blob() { az storage blob "$@" --account-name "${ACCOUNT}" --container-name "${CONTAINER}" --auth-mode login; }
+
+          # A version publishes once. A template of this version from ANOTHER commit refuses the run; one from THIS
+          # commit (metadata sourcesha) is a re-run after a partial failure and is replaced.
+          exists=$(blob exists --name "${BLOB}" --query exists -o tsv)
+          if [ "${exists}" = "true" ]; then
+            src=$(blob metadata show --name "${BLOB}" --query sourcesha -o tsv)
+            if [ "${src}" != "${GITHUB_SHA}" ]; then
+              echo "::error::${BLOB} already exists from commit ${src:-unknown} — template ${VERSION} is published. Bump \"version\" in src/solutions/CopilotAgent/appPackage/manifest.json and run again."
+              exit 1
+            fi
+            echo "${BLOB} exists from this commit (re-run) — replacing it."
+          fi
+          blob upload --name "${BLOB}" --file "out/${BLOB}" --overwrite true --metadata "sourcesha=${GITHUB_SHA}"
+          blob upload --name "copilot-agent-template-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
+
+          # Rollback pointer: keep the manifest being replaced.
+          latest_exists=$(blob exists --name copilot-agent-template-latest.json --query exists -o tsv)
+          if [ "${latest_exists}" = "true" ]; then
+            blob download --name copilot-agent-template-latest.json --file out/previous-latest.json --overwrite true
+            blob upload --name copilot-agent-template-latest.previous.json --file out/previous-latest.json --overwrite true
+          fi
+          blob upload --name copilot-agent-template-latest.json --file out/manifest.json --overwrite true
+
+          # Read back what the operator's render will read.
+          blob download --name copilot-agent-template-latest.json --file out/readback.json --overwrite true
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('out/readback.json'))['copilotAgentTemplate']
+          assert m['version'] == os.environ['VERSION'] and m['blobName'] == os.environ['BLOB'], m
+          print('latest manifest read back:', m)
+          PY
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Copilot agent template"
+            echo "- Version: \`${{ steps.build.outputs.version }}\` — mode: $([ "${PUBLISH}" = "true" ] && echo '**published**' || echo 'dry run (nothing uploaded)')"
+            echo "- Blob: \`${{ steps.build.outputs.blob }}\`"
+            echo "- Manifest: \`copilot-agent-template-${{ steps.build.outputs.build_id }}-${GITHUB_RUN_ATTEMPT}.json\` → \`copilot-agent-template-latest.json\` (container \`${CONTAINER}\`)"
+            echo "- Sample render validated against Microsoft's v1.30 / v1.8 / v2.4 schemas"
+          } >> "$GITHUB_STEP_SUMMARY"

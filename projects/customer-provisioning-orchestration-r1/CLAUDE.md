@@ -39,6 +39,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 - H9 deploys the BFF from the CI-published artifact, never `dotnet publish` at provision time (FR-12).
 - One BFF app registration per customer, both models (D-13, binding). No per-customer Entra tenant.
 - Tenant isolation I1–I5 (FR-28–FR-32): `provisioning.md` "Tenant-isolation invariants". Every app-only SPE call gets its Graph client from `SpeContainerOwnershipGuard`, never `.ForApp()` (T227d; `SpeAppOnlyContainerGuardTests`). This includes code that arrives in a master merge.
+- Stamp Graph app roles (T261 / G31): a stamp identity holds exactly `FileStorageContainer.Selected` in Entra (mailbox roles via Exchange, H14a); H10 removes every other Graph role and T3 fails on any. A role joins `GraphAppRoles.cs` only with a row in `notes/t261-stamp-graph-least-privilege.md` (call site + Learn least-privileged URL) — `StampGraphAppRoleEvidenceTests`. The L2 Worker's own roles are `ControlPlaneGraphAppRoles.cs`; never grant the stamp catalog to the Worker or the reverse.
 - Stamps are keyless (D13). Stamp Redis is Azure Managed Redis, Microsoft Entra only (D12). See `provisioning.md` "Stamp resources are keyless" and "Stamp Redis".
 - SPE: one container type per model and one root container per customer. Never propose a container type per customer (D28). SPE Admin on a stamp reaches only that stamp's containers (D29). Container-type creation is delegated-only, an operator one-time step (topology doc §R5).
 - Model 1 users are B2B guests in the environment security group `sprk-{customerId}-users`. Spaarke pays pay-as-you-go on the customer's stamp subscription; guest access must be on (D2, owner 2026-10-07; `provisioning.md` "Model 1 users").
@@ -66,7 +67,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 **ADR tensions approved here** (root §6.5; detail in `spec.md` "ADR Tensions", `design.md` §17):
 - ADR-004 A — L2 orchestration is a custom state machine over Cosmos.
 - ADR-027/028 A — one L2 identity holds Owner on every customer subscription (T228, owner 2026-10-06).
-- ADR-027 management groups — A, deferred (G36, awaiting the owner).
+- ADR-027 management groups — built by T262 (G36, owner approval 2026-10-09): `spaarke-customers` + Audit-only built-in policy + PRQ-S-06; becomes C (comply) once `scripts/provisioning/Deploy-ManagementGroups.ps1 -Apply` has run.
 - ADR-020 A — the `POST /api/runs` intake map rejects or requires keys (T245a/b/c, T225b).
 - ADR-020 A — the stamp deployment `gpt-4o-mini` runs gpt-4.1-mini (T247).
 - ADR-007 A — L2 calls Graph SPE APIs directly (T248).
@@ -199,6 +200,18 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
   - index-race recovery: `git reset --soft`, then a tagged `git stash push --keep-index -m <tag>`.
 - Never bare `git stash`, never stage `.husky/_/*`, never `--no-verify`. A fresh worktree needs a root `npm install` before the pre-commit hook works.
 - The pre-commit hook skips lint-staged on a merge commit. After resolving conflicts by hand, run `dotnet format <csproj> --include <files>` on those files. Its LF→CRLF "WHITESPACE/ENDOFLINE" reports are line endings only; check with `git diff --ignore-cr-at-eol` (2026-10-07).
+- Parallel lanes run as `Agent` with `isolation: worktree` (own branch; merge each into the work branch as it reports). The worktree is often cut from MASTER: the prompt must say "first `git fetch origin` + `git reset --hard origin/work/customer-provisioning-orchestration-r1`" — so push the work branch before dispatching. Agents cannot write `.claude/**`: they return proposed edits verbatim; the main session applies them (2026-10-09).
+- Assign ISS-numbers in the main session: parallel agents numbered two different defects ISS-008, and one filed open issues under "## Resolved" (2026-10-09).
+- `Spaarke.sln` does NOT contain `tests/Spaarke.ArchTests`: `dotnet test tests/Spaarke.ArchTests --no-build` after a solution build ran a stale dll twice (841 instead of 855/888). Always run ArchTests with a build (2026-10-09).
+- This session cannot write to the root of `C:\` ("Operation not permitted"); put scratch output in the scratchpad (2026-10-09).
+
+**CI (2026-10-09)**
+- Check names that read CANCELLED are often job timeouts, not cancellation: tier2 Markdown Link Validator (2-min cap < ~2m15s; raised to 5) and Office Add-ins "Server tests (office scope)" (11–20 min vs a 20-min cap whose owners say narrow the filter, never raise — #1504). Read the job log before re-running.
+- The Markdown validator scans all 604 governed .md files (204 pre-existing broken links on master); judge a PR by broken links in files it changed or targets it deleted.
+
+**Shell (2026-10-09)**
+- Windows `bash` on PATH can be the WSL stub in `%LOCALAPPDATA%\Microsoft\WindowsApps` (not only System32): "no installed distributions". Resolve Git for Windows' bash from `(Get-Command git).Source` → `..\..\bin\bash.exe` (the skill's Step 0.5b does).
+- A PowerShell command containing `"..."` with `$(...)` or `)` inside `-replace`/expressions can fail to parse as a whole (nothing runs). Check `git status` after such a command before assuming a commit happened.
 
 ## 7. Key documents
 

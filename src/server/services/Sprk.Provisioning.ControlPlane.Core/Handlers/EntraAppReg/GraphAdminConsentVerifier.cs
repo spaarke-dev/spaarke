@@ -11,7 +11,7 @@
 // TARGET TENANT for its oauth2PermissionGrants, and confirms the aggregate
 // granted scope string contains every value in
 // EntraAppRegPermissionCatalog.ScopeValues (5 as of task 130 — see that
-// file's header for why this is NOT the 14-role app-only catalog H10 owns).
+// file's header for why this is NOT the app-only catalog H10 owns).
 //
 // SP-NOT-FOUND SEMANTICS: for a MULTI-TENANT app (a Model 2 customer-tenant
 // app-reg with signInAudience=AzureADMultipleOrgs — see

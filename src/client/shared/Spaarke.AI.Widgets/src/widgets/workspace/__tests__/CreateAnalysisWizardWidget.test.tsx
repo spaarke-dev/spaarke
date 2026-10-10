@@ -52,6 +52,8 @@ jest.mock('@spaarke/ui-components', () => {
 import CreateAnalysisWizardWidget from '../CreateAnalysisWizardWidget';
 import type { CreateAnalysisWizardData } from '../CreateAnalysisWizardWidget';
 import { useDispatchPaneEvent } from '../../../events/useDispatchPaneEvent';
+import { ApiError } from '../../../../../Spaarke.Auth/src/errors';
+import type { OkResponse } from '../../../../../Spaarke.Auth/src/types';
 
 jest.mock('../../../events/useDispatchPaneEvent');
 
@@ -454,16 +456,18 @@ describe('CreateAnalysisWizardWidget', () => {
 
     /** Routed authenticatedFetch: session create → configurable; everything else generic-ok. */
     function buildRoutedAuthFetch(sessionCreate: { ok: boolean; sessionId?: string }) {
-      return jest.fn(async (input: RequestInfo, init?: RequestInit) => {
+      return jest.fn(async (input: string, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith('/api/ai/chat/sessions') && init?.method === 'POST') {
+          // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+          if (!sessionCreate.ok) throw new ApiError('HTTP 500', 500, null);
           return {
-            ok: sessionCreate.ok,
-            status: sessionCreate.ok ? 201 : 500,
-            json: async () => (sessionCreate.ok ? { sessionId: sessionCreate.sessionId } : {}),
-          } as unknown as Response;
+            ok: true,
+            status: 201,
+            json: async () => ({ sessionId: sessionCreate.sessionId }),
+          } as unknown as OkResponse;
         }
-        return { ok: true, json: async () => ({}) } as unknown as Response;
+        return { ok: true, json: async () => ({}) } as unknown as OkResponse;
       });
     }
 

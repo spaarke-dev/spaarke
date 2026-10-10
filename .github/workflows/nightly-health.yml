@@ -684,7 +684,7 @@ jobs:
 
   # -----------------------------------------------------------------------
   # customer-provisioning-orchestration-r1 task 067 — Nightly Graph app-role
-  # parity for UAMI SP ↔ GraphAppRoles.cs (14 roles). T3 silent-fail-trap
+  # parity for UAMI SP ↔ GraphAppRoles.cs (the stamp set, task 261). T3 silent-fail-trap
   # safety net. Coord-PR spec: projects/customer-provisioning-orchestration-r1
   # /notes/graph-app-role-parity-coord-pr.md (detail) + notes/phase-h-ci-wiring-coord-pr.md §3 (umbrella).
   # -----------------------------------------------------------------------

@@ -40,7 +40,7 @@
 //                   └── H12b (app-config seed)         # parallel with H12a
 //   H12c (runtime references) needs H12a + H12b + H2a  # 3-way join
 //     ↓
-//   H14 (post-deploy integration wiring — parent of H14a/b/c parallel sub-steps)
+//   H14 (post-deploy integration wiring — parent of the H14a sub-step)
 //     ↓
 //   H13 (E2E acceptance gate — final)
 //
@@ -175,7 +175,7 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH12a] = new[] { HandlerH11 },
             [HandlerH12b] = new[] { HandlerH11 },                             // Parallel with H12a.
             [HandlerH12c] = new[] { HandlerH12a, HandlerH12b, HandlerH2a },   // Join per task 072 + H14 handler code.
-            [HandlerH14] = new[] { HandlerH12c, HandlerH9 },                  // T245b: + H9 — webhook receivers are InterStepState.BffApiUrl (H9 output); H13 ← H14 so H13 also follows H9.
+            [HandlerH14] = new[] { HandlerH12c },                             // ISS-019: H14b/H14c (the webhook wiring) were removed; their H9 edge (BffApiUrl) went with them. H9 still precedes H14 transitively (H12c <- H12a <- H11 <- H7 <- H9), so H13 still sees BffApiUrl.
             [HandlerH13] = new[] { HandlerH14, HandlerH7b },                  // T256: + H7b (INCOMING-145 §2) — no run passes acceptance without the secure anchor (also implied via H9).
         };
 

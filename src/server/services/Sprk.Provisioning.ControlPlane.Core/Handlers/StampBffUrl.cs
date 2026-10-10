@@ -8,7 +8,7 @@
 //     `from-h2a-output:bff_url`); the BFF refuses to start outside
 //     Development/Testing without it (PublicConfigOptionsValidator).
 //   - H9 health-probes it and records it as InterStepState.BffApiUrl, which H7
-//     writes as sprk_BffApiBaseUrl and H13 / H14 call.
+//     writes as sprk_BffApiBaseUrl and H13 calls.
 // Two copies of the format could drift, and the browser clients would then be
 // told one URL while Dataverse holds another.
 // -----------------------------------------------------------------------------

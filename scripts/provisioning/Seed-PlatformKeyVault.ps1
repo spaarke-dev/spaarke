@@ -2,7 +2,9 @@
 .SYNOPSIS
     Seed the L2 platform-controlplane Key Vault (sprk-controlplane-{env}-kv)
     with the secrets its App Service KV-reference app-settings resolve --
-    idempotent, never-overwrite, sentinel-aware.
+    idempotent, never-overwrite. Since task 252 that is one secret:
+    Sidecar-Shared-Secret. It never creates BFF-API-ClientSecret or
+    Dataverse-ClientSecret, as a sentinel or a real value.
 
 .DESCRIPTION
     customer-provisioning-orchestration-r1 -- post-authoring audit defect #9
@@ -26,23 +28,27 @@
     entry, AzureOpenAI-Endpoint: it fed only H12c's Model 1 shared-platform
     branch, which is gone (every customer stamp has its own OpenAI account).
     The script no longer seeds it; a copy already in a vault is left alone.
-      1. Dataverse-ClientSecret   (BINDING never-delete) -- deliberately
-                                  seeded with a SENTINEL, never a real value,
-                                  unless -DataverseClientSecret is explicitly
-                                  passed: platform-controlplane.bicep's param
-                                  note says "keep the dummy KV binding; do NOT
-                                  seed a real secret (r3 MUST-NOT-reintroduce-
-                                  S2S rule)" pending C1.4.
-      2. BFF-API-ClientSecret     (BINDING never-delete) -- real value from
-                                  -BffApiClientSecret, else sentinel; the
-                                  Worker's EnvVarValuesOptions.Validate()
-                                  fail-fasts at boot until the real value is
-                                  populated.
-      3. Sidecar-Shared-Secret    -- from -SidecarSharedSecret, else a
+      1. Sidecar-Shared-Secret    -- from -SidecarSharedSecret, else a
                                   freshly GENERATED random GUID (the sidecar
                                   container + Worker both resolve the SAME KV
                                   secret, so a generated value is immediately
                                   self-consistent).
+      (BFF-API-ClientSecret and Dataverse-ClientSecret are no longer seeded
+       -- task 252, owner-approved 2026-10-09. The script used to seed the
+       sentinel 'pending-oob-population' for both. Nothing on a secret-free
+       control plane references either: the Api has had no Key Vault
+       reference since FR-38 (Wave G-8 Batch 2), and the Worker carries the
+       two BFF-API-ClientSecret references only on the legacy prong-3 chain
+       (platform-controlplane.bicep requireSecretFreeIdentity=false; the
+       default is true). BINDING rule (.claude/constraints/provisioning.md
+       "KV credential lifecycle" rule 1, ADR-028 A4): never create, seed or
+       restore either secret in a secret-free environment -- and a sentinel
+       in a credential slot is never correct anywhere (auth-v4 SS9.1: it
+       fails opaquely with AADSTS7000215). A prong-3 environment that opts
+       into the legacy chain gets its secret from the auth-v4 runbook, never
+       from this script. Copies already in a vault are left exactly as they
+       are -- never deleted (rule 2: Dataverse-ClientSecret is protected
+       until 2026-11-23).)
       (Exchange-Connect-Cert is no longer seeded -- task 251: the Exchange
        sidecar holds no credential; the Worker signs in as 'Spaarke Exchange
        Admin' through its managed identity's federated credential. An existing
@@ -59,18 +65,17 @@
     NEVER-DELETE / NEVER-OVERWRITE GUARD (BINDING):
       If a secret ALREADY EXISTS in the vault -- with ANY value -- this script
       SKIPS it and reports SKIPPED. It never overwrites, never deletes. This
-      makes re-runs safe (idempotent) and protects the BINDING never-delete
-      pair (Dataverse-ClientSecret, BFF-API-ClientSecret) per
-      scripts/canonical-secret-catalog/manifest.yaml.
+      makes re-runs safe (idempotent). It does not even probe the BINDING
+      never-delete pair (Dataverse-ClientSecret, BFF-API-ClientSecret): they
+      are not in its plan.
 
     OUTPUT:
       Per-secret status (CREATED / SKIPPED / FAILED / WHATIF) + a summary
-      table + the follow-up ceremony list (which sentinels an operator must
-      replace with real values out-of-band). Exit 0 when nothing failed;
-      exit 1 on any FAILED secret; exit 2 on pre-flight failure.
+      table. Exit 0 when nothing failed; exit 1 on any FAILED secret; exit 2
+      on pre-flight failure.
 
     SECRET HYGIENE: secret VALUES are never echoed -- only names + value
-    provenance (parameter / generated / sentinel) appear in output.
+    provenance (parameter / generated) appear in output.
 
 .PARAMETER Environment
     Target environment name (dev, staging, prod -- matching
@@ -80,19 +85,6 @@
 .PARAMETER KeyVaultName
     Target Key Vault name. Default: sprk-controlplane-{Environment}-kv
     (platform-controlplane.bicep convention).
-
-.PARAMETER DataverseClientSecret
-    Optional real value for Dataverse-ClientSecret. LEAVE UNSET in normal
-    operation -- the sentinel 'pending-oob-population' is the CORRECT
-    steady-state per the r3 MUST-NOT-reintroduce-S2S rule (see
-    platform-controlplane.bicep's dataverseClientSecretName param note);
-    passing a real value emits a warning but is honored.
-
-.PARAMETER BffApiClientSecret
-    Optional real value for BFF-API-ClientSecret (the shared multitenant BFF
-    app-registration client secret). If unset, the sentinel
-    'pending-oob-population' is seeded and an operator MUST replace it
-    out-of-band before the Worker can pass EnvVarValuesOptions validation.
 
 .PARAMETER SidecarSharedSecret
     Optional value for Sidecar-Shared-Secret (the X-Sidecar-Auth
@@ -109,13 +101,12 @@
     (Deploy-ControlPlane.ps1, Grant-ControlPlaneIdentity.ps1).
 
 .EXAMPLE
-    # Dev: seed all 5 (sentinels + generated sidecar secret)
+    # Dev: seed the generated sidecar secret (skipped when it already exists)
     .\Seed-PlatformKeyVault.ps1
 
 .EXAMPLE
-    # Dev: seed with a real BFF client secret
-    .\Seed-PlatformKeyVault.ps1 `
-        -BffApiClientSecret $env:BFF_API_CLIENT_SECRET
+    # Preview a dev run: lists what would be created, writes nothing
+    .\Seed-PlatformKeyVault.ps1 -DryRun
 
 .EXAMPLE
     # Preview a prod run without touching the vault
@@ -145,12 +136,6 @@ param(
     [string]$KeyVaultName,
 
     [Parameter(Mandatory = $false)]
-    [string]$DataverseClientSecret,
-
-    [Parameter(Mandatory = $false)]
-    [string]$BffApiClientSecret,
-
-    [Parameter(Mandatory = $false)]
     [string]$SidecarSharedSecret,
 
     [Parameter(Mandatory = $false)]
@@ -167,8 +152,6 @@ if ($DryRun) {
 }
 
 if (-not $KeyVaultName) { $KeyVaultName = "sprk-controlplane-$Environment-kv" }
-
-$SentinelValue = 'pending-oob-population'
 
 # -----------------------------------------------------------------------------
 # Console helpers (style parity with Deploy-ControlPlane.ps1)
@@ -187,7 +170,6 @@ function Write-Section { param([Parameter(Mandatory)][string]$Title) Write-Host 
 function Write-Step    { param([string]$D) Write-Host "  [STEP] $D" -ForegroundColor Yellow }
 function Write-Success { param([string]$M) Write-Host "  [OK] $M" -ForegroundColor Green }
 function Write-Info    { param([string]$M) Write-Host "  [--] $M" -ForegroundColor Gray }
-function Write-Warn    { param([string]$M) Write-Host "  [!!] $M" -ForegroundColor DarkYellow }
 function Write-Skip    { param([string]$M) Write-Host "  [SKIP] $M" -ForegroundColor DarkCyan }
 function Write-Fail    { param([string]$M) Write-Host "  [FAIL] $M" -ForegroundColor Red }
 
@@ -206,10 +188,6 @@ Write-Host "  Environment:   $Environment" -ForegroundColor Gray
 Write-Host "  Key Vault:     $KeyVaultName" -ForegroundColor Gray
 Write-Host '  Guard:         existing secrets are SKIPPED, never overwritten (BINDING)' -ForegroundColor Gray
 Write-Host ''
-
-if ($DataverseClientSecret) {
-    Write-Warn 'A REAL -DataverseClientSecret was passed. Per the r3 MUST-NOT-reintroduce-S2S rule (platform-controlplane.bicep dataverseClientSecretName param note), the platform vault should normally carry only the sentinel until C1.4 lands. Proceeding because the operator was explicit.'
-}
 
 # -----------------------------------------------------------------------------
 # Pre-flight
@@ -248,33 +226,20 @@ Write-Success "Key Vault reachable: $KeyVaultName"
 
 # -----------------------------------------------------------------------------
 # Secret plan -- name + value + PROVENANCE (values are never echoed).
-# Names MUST match the Bicep modules' KV-reference SecretName= values exactly:
-#   modules/controlplane-app-service.bicep        -> Dataverse-ClientSecret
-#   modules/controlplane-worker-app-service.bicep -> Dataverse-ClientSecret,
-#       BFF-API-ClientSecret, Sidecar-Shared-Secret
+# Names MUST match the Bicep modules' KV-reference SecretName= values exactly
+# (secret-free chain, the default since task 252):
+#   modules/controlplane-app-service.bicep        -> (none)
+#   modules/controlplane-worker-app-service.bicep -> Sidecar-Shared-Secret
+# BFF-API-ClientSecret / Dataverse-ClientSecret are deliberately absent --
+# see the description above (task 252; BINDING never-create rule).
 # -----------------------------------------------------------------------------
 
 $secretPlan = @(
     [pscustomobject]@{
-        Name       = 'Dataverse-ClientSecret'
-        Value      = if ($DataverseClientSecret) { $DataverseClientSecret } else { $SentinelValue }
-        Provenance = if ($DataverseClientSecret) { 'parameter' } else { 'sentinel' }
-        FollowUp   = if ($DataverseClientSecret) { $null } else { 'Sentinel is the CORRECT steady-state (r3 MUST-NOT-reintroduce-S2S; dummy binding kept pending C1.4). No action needed.' }
-        Note       = 'BINDING never-delete. Dummy KV binding per platform-controlplane.bicep param note.'
-    }
-    [pscustomobject]@{
-        Name       = 'BFF-API-ClientSecret'
-        Value      = if ($BffApiClientSecret) { $BffApiClientSecret } else { $SentinelValue }
-        Provenance = if ($BffApiClientSecret) { 'parameter' } else { 'sentinel' }
-        FollowUp   = if ($BffApiClientSecret) { $null } else { 'Operator MUST replace with the real shared BFF app-reg client secret out-of-band -- Worker EnvVarValuesOptions.Validate() fail-fasts at boot until then.' }
-        Note       = 'BINDING never-delete. Shared multitenant BFF app-reg secret (H7 credential provisioning source).'
-    }
-    [pscustomobject]@{
         Name       = 'Sidecar-Shared-Secret'
         Value      = if ($SidecarSharedSecret) { $SidecarSharedSecret } else { [guid]::NewGuid().ToString() }
         Provenance = if ($SidecarSharedSecret) { 'parameter' } else { 'generated' }
-        FollowUp   = $null
-        Note       = 'X-Sidecar-Auth shared secret. Worker AND sidecar container both resolve this same KV secret, so a generated value is self-consistent.'
+        Note      = 'X-Sidecar-Auth shared secret. Worker AND sidecar container both resolve this same KV secret, so a generated value is self-consistent.'
     }
 )
 
@@ -358,15 +323,6 @@ if ($whatIfPlanned.Count) {
 }
 Write-Host "  FAILED:     $(if ($failed.Count) { $failed -join ', ' } else { '(none)' })" -ForegroundColor $(if ($failed.Count) { 'Red' } else { 'Gray' })
 Write-Host ''
-
-$followUps = $secretPlan | Where-Object { $_.FollowUp -and ($created.Contains($_.Name) -or $whatIfPlanned.Contains($_.Name)) }
-if ($followUps) {
-    Write-Host '  FOLLOW-UP CEREMONY (out-of-band operator actions):' -ForegroundColor Yellow
-    foreach ($fu in $followUps) {
-        Write-Host "    - $($fu.Name): $($fu.FollowUp)" -ForegroundColor Yellow
-    }
-    Write-Host ''
-}
 
 if ($failed.Count -gt 0) {
     Write-Fail "$($failed.Count) secret(s) FAILED to seed. Fix + re-run (safe: existing secrets are skipped)."

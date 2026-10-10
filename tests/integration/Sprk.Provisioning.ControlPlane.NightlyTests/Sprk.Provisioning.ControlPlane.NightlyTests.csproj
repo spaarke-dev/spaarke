@@ -8,7 +8,7 @@
 
     Scope:
       - GraphAppRoleParityTest.cs: reflectively reads Sprk.Bff.Api.Infrastructure.Auth
-        .GraphAppRoles (14-role canonical catalog, r3 task 062 + r1 task 005) AND
+        .GraphAppRoles (the stamp identity's evidence-backed set, r1 task 261) AND
         queries the UAMI service principal's appRoleAssignments via Microsoft.Graph
         SDK v6 with an explicit tenantId (§4D I5 no-hardcoded-default-tenant). Fails
         with a diff-formatted message on missing OR extra roles. T3 silent-fail-trap

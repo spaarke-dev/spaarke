@@ -47,7 +47,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit) =
     activeDocPostBodies.push(JSON.parse(String(init?.body ?? '{}')));
     return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 jest.mock('@spaarke/ui-components', () => {
@@ -100,6 +100,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 
 // Import AFTER mocks.
 import { ConversationPane } from '../ConversationPane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const bridgeRef: { current: ComposeActionBridgeValue | null } = { current: null };
 function BridgeCapture(): null {

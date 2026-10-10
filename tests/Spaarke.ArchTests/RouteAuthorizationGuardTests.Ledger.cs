@@ -281,7 +281,10 @@ public partial class RouteAuthorizationGuardTests
             "circuit-breaker diagnostics behind sign-in only (task-167 UNOWNED-NEW, assigned to 166)."),
         new GovernedFile("Api/Platform/KeylessProofEndpoints.cs", Scope.RouteLevelGate,
             "the stamp's keyless proof for provisioning's acceptance gate (customer-provisioning task 230b): one managed-identity "
-            + "call per Azure service, behind an application role only the L2 Worker identity holds; no record is read or returned."),
+            + "call per Azure service, behind an application role only the L2 Worker identity holds; no record is read or returned. "
+            + "Task 260 (ISS-014) adds the stamp's read-only secure-record isolation census behind the same role: it reads the "
+            + "security directory (business units, roles, users, teams) as the BFF and returns only the scheduled job's result "
+            + "(status, verdict, findings) — no business record is read or returned, nothing is written."),
         new GovernedFile("Api/UserEndpoints.cs", Scope.RouteLevelGate,
             "the caller's own profile and capabilities, read on behalf of the caller."),
         // Api/WorkAssignmentEndpoints.cs entry DELETED at the task-167 integration (2026-10-05): task 166 deleted the file
@@ -1130,10 +1133,12 @@ public partial class RouteAuthorizationGuardTests
         new AdminOnlyGroup("Api/Platform/KeylessProofEndpoints.cs", KeylessProofRole,
             "PROVISIONING AUTOMATION behind the Provisioning.KeylessProof application role (no user acts): L2's acceptance gate "
             + "(H13) asks the stamp's BFF to prove one managed-identity call per Azure service. Status and timing only — no "
-            + "record, data or secret is returned (task 230b).",
+            + "record, data or secret is returned (task 230b). Task 260 (ISS-014): H13 also asks it to run the read-only "
+            + "secure-record isolation census (the scheduled job's code and result) and refuses Ready unless it is isolated.",
             new[]
             {
                 "POST /api/platform/keyless-proof",
+                "POST /api/platform/secure-record-isolation-census",
             }),
         new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", RagApiKeyCredential,
             "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts). The key "

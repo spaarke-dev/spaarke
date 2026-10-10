@@ -94,6 +94,10 @@ cross-*subscription* prohibition is load-bearing here.
   subscription
 - **MUST** use Azure Management Groups for common policy across customer subscriptions *(raised from
   SHOULD 2026-09-28 — hand-application does not scale to one subscription per customer)*
+  *Implemented 2026-10-09 (customer-provisioning-orchestration-r1 T262): `spaarke-environments` → `spaarke-customers`
+  (`infrastructure/bicep/management-groups.bicep`); common policy `infrastructure/bicep/customer-policy.bicep` at
+  `spaarke-customers` (built-in definitions only, Audit / DoNotEnforce); every customer subscription joins
+  `spaarke-customers` before its first run (prereq PRQ-S-06); applied by `scripts/provisioning/Deploy-ManagementGroups.ps1`.*
 - **SHOULD** run `pac solution check` before production import
 
 **History**: the 2026-06-02 amendment removed the managed mandate; the 2026-10-07 amendment restores managed as the customer default (D8) with the explicit unmanaged exception above. An environment that already holds unmanaged SpaarkeMaster stays unmanaged unless an owner-approved migration says otherwise (H6 refuses a silent switch).

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.28" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual">
-    <external-service-usage enabled="false">
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.29" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
     <!-- REQUIRED: At least one bound property for field control discoverability -->

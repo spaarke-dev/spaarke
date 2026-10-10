@@ -229,7 +229,7 @@ Locked 2026-08-18: the runtime is **Option D hybrid** — every collaborator wit
 | Class | Definition | Handlers | Count |
 |---|---|---|---|
 | **A — pure .NET** | Every collaborator has an SDK/REST equivalent | H0, H2a, H2b, H3, H4, H5, H6, H8, H9 (post-artifact-re-scope), H12a, H12b, H13 | 12 |
-| **C — mixed** | One residual PS collaborator among SDK-capable ones | H14 (H14a only; H14b/c already in-process REST) | 1 |
+| **C — mixed** | One residual PS collaborator among SDK-capable ones | H14 (H14a only; H14b/c were in-process REST, removed under ISS-019) | 1 |
 | **in-process already** | Never shelled out | H0.5, H1, H7, H10, H11, H12c | 6 |
 
 Per-handler SDK surface (packages already largely in the BFF/L2 dependency set):
@@ -248,7 +248,7 @@ Per-handler SDK surface (packages already largely in the BFF/L2 dependency set):
 | H12a | YamlDotNet + Dataverse Web API (H12c's existing in-process pattern) |
 | H12b | Dataverse Web API upserts (~40-line mechanical ports); the two deferred seeders (field-mapping, chart-def) authored directly in C# |
 | H13 | `HttpClient` probe suite (converges with the 11 real T/I probes owed under C3.1/C3.2); ~~pure-C# naming-conformance port~~ (removed by T230a — CI gate); Cost Management REST |
-| H14 | H14b/c in-process REST (unchanged); **H14a → `ExchangePolicySidecarClient : IExchangePolicyApplier` → sidecar HTTP** (§4.2a) |
+| H14 | H14b/c in-process REST (removed under ISS-019 / #1560); **H14a → `ExchangePolicySidecarClient : IExchangePolicyApplier` → sidecar HTTP** (§4.2a) |
 
 **Wave sequencing** (DS-1b §7): **Wave D-1** — dispatcher (§4.2b) + sidecar + the 9 thin az-one-liner SDK swaps + H0/H2b/H5/H12a/H12b/H13 ports + H9 artifact re-scope (~10 of 13 shell-out handlers executable). **Wave D-2** — H3, H6, H2a heavy ports with parity acceptance tests against recorded script outputs. Bounded fallback if a hard commercial date lands mid-wave: run those scripts temporarily in the sidecar (it has pwsh; add nothing but the scripts) — a contained concession, never a main-site shell-out.
 

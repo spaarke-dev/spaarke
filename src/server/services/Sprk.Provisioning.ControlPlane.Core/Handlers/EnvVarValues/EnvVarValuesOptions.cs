@@ -113,8 +113,8 @@ public sealed class EnvVarValuesOptions
             throw new InvalidOperationException(
                 $"Configuration '{SectionName}:ClientSecret' is required when the FR-39 credential chain's " +
                 $"primary is {nameof(CredentialKind.ClientSecret)} (the legacy/unconfigured default — prong-3 " +
-                "unmigrated environment). Set the shared BFF app-reg " +
-                "client secret H7 authenticates to customer Dataverse environments with (same identity " +
+                "unmigrated environment). Set the client secret of the BFF app registration " +
+                "H7 signs in to customer Dataverse environments as (same identity " +
                 "H6 uses for solution import). In deployed environments this is bound via the Worker App " +
                 "Service's EnvVarValues__ClientSecret KV-reference app setting " +
                 "(modules/controlplane-worker-app-service.bicep, sourced from the platform Key Vault's " +

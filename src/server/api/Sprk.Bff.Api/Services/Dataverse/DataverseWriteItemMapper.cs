@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
-namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// Maps the GA-Dataverse-MCP <c>item</c> argument (key/value pairs keyed by column logical

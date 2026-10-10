@@ -90,6 +90,12 @@ public interface ISecureRecordSetupDataverse
     /// <summary>S1: the business units with this name (at most two returned — enough to see ambiguity).</summary>
     Task<IReadOnlyList<SecureSetupBusinessUnit>> FindBusinessUnitsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken);
 
+    /// <summary>T259 (§6 T1): the business unit with this id, or null when there is none.</summary>
+    Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(SecureRecordSetupTarget target, Guid businessUnitId, CancellationToken cancellationToken);
+
+    /// <summary>T259 (§6 T3): the business unit of a systemuser, or null when the user does not exist.</summary>
+    Task<Guid?> GetUserBusinessUnitAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
     /// <summary>S2: up to <paramref name="top"/> systemusers of the unit — enabled or disabled, human or application.</summary>
     Task<IReadOnlyList<Guid>> ListBusinessUnitUsersAsync(SecureRecordSetupTarget target, Guid businessUnitId, int top, CancellationToken cancellationToken);
 

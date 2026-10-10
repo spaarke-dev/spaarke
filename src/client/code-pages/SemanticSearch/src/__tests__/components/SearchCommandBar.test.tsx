@@ -20,6 +20,8 @@ import type { SearchDomain } from '../../types';
 // ---------------------------------------------------------------------------
 
 jest.mock('@fluentui/react-icons', () => ({
+  // Keep the real exports (bundleIcon, bundled icons used by shared components); override only the stubs below.
+  ...jest.requireActual('@fluentui/react-icons'),
   DeleteRegular: () => <span data-testid="icon-delete" />,
   ArrowClockwiseRegular: () => <span data-testid="icon-refresh" />,
   MailRegular: () => <span data-testid="icon-mail" />,
@@ -43,6 +45,10 @@ const DEFAULT_PROPS: SearchCommandBarProps = {
   onOpenInDesktop: jest.fn(),
   onDownload: jest.fn(),
   onSendToIndex: jest.fn(),
+  onSaveSearch: jest.fn(),
+  columns: [],
+  hiddenColumns: new Set<string>(),
+  onHiddenColumnsChange: jest.fn(),
 };
 
 function renderCommandBar(props: Partial<SearchCommandBarProps> = {}) {

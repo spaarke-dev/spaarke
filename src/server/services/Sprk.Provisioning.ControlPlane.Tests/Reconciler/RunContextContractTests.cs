@@ -669,7 +669,7 @@ public sealed class RunContextContractTests
     public void EveryHandlerId_HasDeclaredInputs()
     {
         var undeclared = AllHandlerIds()
-            .Where(id => id is not (HandlerIds.H14a or HandlerIds.H14b or HandlerIds.H14c))   // in-process H14 sub-steps
+            .Where(id => id != HandlerIds.H14a)   // in-process H14 sub-step
             .Where(id => !HandlerRunInputs.ByHandler.ContainsKey(id))
             .ToList();
         undeclared.Should().BeEmpty("every handler's inputs are part of the contract (H14's sub-steps are covered by H14)");

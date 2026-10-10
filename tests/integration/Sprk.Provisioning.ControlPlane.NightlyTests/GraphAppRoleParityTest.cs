@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // GraphAppRoleParityTest.cs
 //
-// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the 15-role Microsoft
+// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the stamp-set Microsoft
 // Graph application (app-only) permission catalog owned by the BFF's
 // Infrastructure/Auth/GraphAppRoles.cs constant.
 //
@@ -110,15 +110,12 @@ public sealed class GraphAppRoleParityTest
         // fails LOUD (with a clear diagnostic) if the class/field is renamed,
         // rather than silently going stale.
         var expectedRoles = ReadExpectedRolesReflectively();
-        expectedRoles.Should().HaveCount(
-            15,
-            "GraphAppRoles.All must enumerate exactly the 15 canonical roles "
-            + "(5 SPE + 2 Directory + 4 Email + 3 Self-Service, populated by r1 task 005; + 1 Customer "
-            + "Provisioning User.Invite.All, added by task 144 -- H11 verification).");
+        expectedRoles.Select(r => r.Value).Should().BeEquivalentTo(
+            new[] { "FileStorageContainer.Selected", "Mail.Read", "Mail.ReadWrite", "Mail.Send" },
+            "GraphAppRoles.All is the stamp identity's evidence-backed set since task 261 "
+            + "(projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md).");
         expectedRoles.Where(r => string.IsNullOrWhiteSpace(r.AppRoleId)).Should().BeEmpty(
-            "All AppRoleId GUIDs must be populated per H10 escalation gate "
-            + "(spec.md MUST rule); r1 task 005 landed the first 14 on 2026-08-17, task 144 added the 15th "
-            + "on 2026-08-20.");
+            "All AppRoleId GUIDs must be populated per H10 escalation gate (spec.md MUST rule).");
 
         var graphResourceAppId = GetGraphResourceAppIdReflectively();
 
@@ -480,7 +477,7 @@ public sealed class GraphAppRoleParityTest
         var sb = new StringBuilder();
         sb.AppendLine(
             $"UAMI service principal '{uamiSpObjectId}' Graph app-role assignments diverge from "
-            + "GraphAppRoles.cs (15-role canonical catalog).");
+            + "GraphAppRoles.cs (the stamp identity's evidence-backed set, task 261).");
         sb.AppendLine($"Tenant: {tenantId}");
         sb.AppendLine(
             $"Expected: {expectedRoles.Count} Entra-granted roles from Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All"
@@ -506,9 +503,9 @@ public sealed class GraphAppRoleParityTest
             sb.AppendLine();
         }
         sb.AppendLine(
-            "Remediation: run H10 handler for the target customer, OR manually replay via "
-            + "`scripts/Grant-GraphAppRoles.ps1` (which reads GraphAppRoles.cs as authoritative). "
-            + "For extras, verify GraphAppRoles.cs against the runbook (docs/guides/auth-deployment-setup.md §5).");
+            "Remediation: run H10 for the target customer in a new run — it grants the missing role and REMOVES "
+            + "every extra (task 261). Do not replay scripts/Grant-GraphAppRoles.ps1 against a stamp identity. "
+            + "An extra means someone granted a role outside the evidence set: find who before re-running.");
         return sb.ToString();
     }
 

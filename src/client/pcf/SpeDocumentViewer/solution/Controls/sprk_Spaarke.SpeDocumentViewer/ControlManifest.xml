@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.28" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual" api-version="1.3.18">
-    <external-service-usage enabled="false"/>
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.29" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual" api-version="1.3.18">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
     <property name="value" display-name-key="Value_Display_Key" description-key="Value_Desc_Key" of-type="SingleLine.Text" usage="bound" required="true"/>
     <property name="documentId" display-name-key="DocumentId_Display_Key" description-key="Document ID (GUID). If empty, uses form record ID." of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="clientAppId" display-name-key="ClientAppId_Display_Key" description-key="Ignored since v1.0.28 (sprk_MsalClientId is used)" of-type="SingleLine.Text" usage="input" required="false"/>

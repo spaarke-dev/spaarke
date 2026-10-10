@@ -5,7 +5,6 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Access;
-using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api;
@@ -44,8 +43,8 @@ namespace Sprk.Bff.Api.Api;
 /// resolver, the synchronizer's sharees via the 2-minute job, the restamper all live here), BFF identity for the app-only
 /// create, request-scoped, no background work, no package. CRUD code: it consumes no AI capability (no
 /// <c>IOpenAiClient</c> / <c>IPlaybookService</c>); <see cref="OwnedChildWrite"/> and
-/// <see cref="DataverseWriteItemMapper"/> are Dataverse write cores that live beside the chat tools that first needed
-/// them.</para>
+/// <see cref="DataverseWriteItemMapper"/> are the shared Dataverse write cores (Services/Dataverse; the chat tools use them too, D-66)
+/// and depend on nothing in Services/Ai.</para>
 /// </remarks>
 public static class ChildRecordEndpoints
 {

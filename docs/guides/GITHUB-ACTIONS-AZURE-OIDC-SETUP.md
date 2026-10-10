@@ -28,14 +28,14 @@ GitHub's assertion changes depending on **how the job runs**. A job that declare
 
 | Subject | Needed by |
 |---|---|
-| `repo:spaarke-dev/spaarke:ref:refs/heads/master` | `publish-provisioning-arm-artifacts`, `build-provisioning-sidecar`, `publish-dataverse-solutions-manifest` |
+| `repo:spaarke-dev/spaarke:ref:refs/heads/master` | `publish-provisioning-arm-artifacts`, `build-provisioning-sidecar`, `publish-dataverse-solutions-manifest`, `publish-copilot-agent-template` |
 | `repo:spaarke-dev/spaarke:environment:dev` | `deploy-spaarke-ai` |
 | `repo:spaarke-dev/spaarke:environment:staging` | `deploy-bff-api` |
 | `repo:spaarke-dev/spaarke:environment:production` | `deploy-bff-api`, `deploy-spaarke-ai` |
 
 Only the first unblocks the currently-red workflow. **The rest will fail identically the first time they actually run** — create all four now rather than rediscovering this three more times.
 
-> **Never add `repo:spaarke-dev/spaarke:pull_request` (removed 2026-10-08, #1446).** No workflow signs in to Azure on a pull request (`build-provisioning-sidecar` and `publish-dataverse-solutions-manifest` skip `azure/login` there). With that subject trusted, any same-repo pull request could edit a workflow and sign in as this app with all of its Azure roles before review. Credential `gh-pull_request` was deleted from the app on 2026-10-08.
+> **Never add `repo:spaarke-dev/spaarke:pull_request` (removed 2026-10-08, #1446).** No workflow signs in to Azure on a pull request (`build-provisioning-sidecar`, `publish-dataverse-solutions-manifest` and `publish-copilot-agent-template` skip `azure/login` there). With that subject trusted, any same-repo pull request could edit a workflow and sign in as this app with all of its Azure roles before review. Credential `gh-pull_request` was deleted from the app on 2026-10-08.
 
 ---
 
@@ -131,6 +131,7 @@ The FIC lets the workflow **prove who it is**. It grants **no permissions**. Eac
 |---|---|
 | `publish-provisioning-arm-artifacts` | `Storage Blob Data Contributor` on the account in `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
 | `publish-dataverse-solutions-manifest` | same storage account |
+| `publish-copilot-agent-template` | same storage account |
 | `build-provisioning-sidecar` | `AcrPush` on the registry in `SIDECAR_ACR_LOGIN_SERVER` |
 | `deploy-bff-api`, `deploy-spaarke-ai` | scope-appropriate role on the target resource group / subscription |
 

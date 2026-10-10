@@ -37,8 +37,8 @@ internal static class ControlPlaneErrorCodes
     public const string ContainerTypeIdRequired = "container-type-id-required";
     public const string CommunicationDefaultMailboxInvalid = "intake-communication-default-mailbox-invalid";
     // Task 245c: an intake value a HANDLER would refuse is refused with that handler's own rejection code —
-    // H11Rejections (UserProvisioningIntake) for identityPreset / usersJson, H14aRejections.MissingPolicyScopeGroupId,
-    // H14bRejections.NoWebhookTargetsConfigured — so a caller sees one code for one rule wherever it fires.
+    // H11Rejections (UserProvisioningIntake) for identityPreset / usersJson, H14aRejections.MissingPolicyScopeGroupId —
+    // so a caller sees one code for one rule wherever it fires.
 
     // --- POST /api/runs: registry + concurrency ---------------------------------------
     public const string RegistryCustomerMismatch = "registry-customer-mismatch";

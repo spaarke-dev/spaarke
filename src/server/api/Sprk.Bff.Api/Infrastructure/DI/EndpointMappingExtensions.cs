@@ -447,8 +447,13 @@ public static class EndpointMappingExtensions
         // Reporting module endpoints (/api/reporting/*) — Power BI Embedded (App Owns Data)
         app.MapReportingEndpoints();
 
-        // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
-        app.MapRegistrationEndpoints();
+        // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection.
+        // Task 261: mapped only where the demo registration feature is registered (Spaarke's platform/demo BFF) —
+        // never on a customer stamp, which must not hold the directory write roles approval needs.
+        if (RegistrationModule.IsDemoProvisioningEnabled(app.Configuration))
+        {
+            app.MapRegistrationEndpoints();
+        }
 
         // Onboarding — H0.5 consent-callback (customer-provisioning-orchestration-r1, task 042).
         // POST /api/onboarding/consent-callback — Anonymous + HMAC-SHA256 signature verified.

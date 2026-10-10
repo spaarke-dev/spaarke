@@ -21,6 +21,7 @@ import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-com
 import { ConversationView } from '../ConversationView';
 import type { ConversationViewProps } from '../ConversationView.types';
 import type { IThreadMessageDto } from '../../../services/communicationTimelineApi';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const USER_1 = '11111111-1111-1111-1111-111111111111';
 
@@ -92,7 +93,8 @@ function buildStatefulFetch(initial: IThreadMessageDto[] = []) {
 }
 
 function buildFailingSendFetch() {
-  const fetchMock = jest.fn(async (url: string) => {
+  // authenticatedFetch THROWS ApiError for a non-2xx: the double turns this 500 answer into the thrown failure.
+  const fetchMock = throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/send')) {
       return {
         ok: false,

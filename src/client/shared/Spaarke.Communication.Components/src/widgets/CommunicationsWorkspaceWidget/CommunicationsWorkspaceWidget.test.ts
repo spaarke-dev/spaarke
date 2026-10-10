@@ -34,6 +34,7 @@
 import * as React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
+import { throwingAuthenticatedFetch } from '../../../../Spaarke.UI.Components/src/__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Mock @spaarke/auth — the widget imports the free-function `authenticatedFetch`
@@ -53,11 +54,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-const mockAuthenticatedFetch = jest.fn(async (url: string) => {
+// Production shape: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+const mockAuthenticatedFetch = throwingAuthenticatedFetch(async (url: string) => {
   if (/\/api\/communications\/threads(\?|$)/.test(url)) {
     return jsonResponse({ threads: [], count: 0, nextPageToken: null, hasMore: false });
   }
-  return jsonResponse({ title: 'Not Found' }, 404);
+  return jsonResponse({ title: 'Not Found', status: 404 }, 404);
 });
 
 jest.mock('@spaarke/auth', () => ({

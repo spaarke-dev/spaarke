@@ -4,7 +4,7 @@
     <title>INCOMING-141 (UAC-r2 task 141): provisioning writes the customer workforce tenant list, the acct optional claim, the contact identity-binding schema and the identity-link job switch</title>
     <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (accepted 2026-10-06)</phase>
     <gate>before T186</gate>
-    <status>blocked-shipped</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Intake + H3 (app registration claim) + H4b settings + H13 check + Dataverse schema step; auth-relevant.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -112,5 +112,6 @@
       create/update on sprk_issecure (= every default team) passed — it is now refused (field_lock_other_writer).
       ContactIdentityBindingSchemaPackagedTests now takes the profile names from H7b and pins H7b's lock columns to the
       package. Guide H7b row + §6.5.2 updated. Live verification: T186.</note>
+    <note date="2026-10-09">Closed. Owner-approved release: Assemble added EntityKey contact.sprk_externalobjectiduniquekey to SpaarkeMaster in spaarkedev1 (1.2.0.0 -> 1.2.1.0); Export; PR #1518 merged; publish-dataverse-solutions-manifest.yml dry run then publish=true (run 37969187349) — dataverse-solutions-latest.json names 1.2.1.0. KeyAwaitingExport pin removed; the key is required by ContactIdentityBindingSchemaPackagedTests.</note>
   </notes>
 </task>
