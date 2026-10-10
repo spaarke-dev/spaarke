@@ -32,9 +32,8 @@ import type { ResponseFetchFn } from '../utils/fetchTypes';
 /**
  * Minimal fetch signature this module depends on — the EITHER-shape {@link ResponseFetchFn}
  * (`utils/fetchTypes`; modeled structurally, not imported from `@spaarke/auth`). Hosts pass
- * `@spaarke/auth`'s `authenticatedFetch` (throws on failure), but `CreateAnalysisWizardWidget` falls
- * back to `globalThis.fetch` (returns failures), so `fetchPreviewUrl` handles both: a returned
- * `!ok` and a thrown error each resolve to `null`.
+ * `@spaarke/auth`'s `authenticatedFetch` (throws on failure); kept wide so `fetchPreviewUrl` handles
+ * both shapes: a returned `!ok` and a thrown error each resolve to `null`.
  */
 export type AuthenticatedFetchFn = ResponseFetchFn;
 

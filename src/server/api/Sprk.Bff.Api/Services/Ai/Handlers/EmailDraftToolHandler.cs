@@ -338,8 +338,40 @@ public sealed class EmailDraftToolHandler : IToolHandler
             // whose access comes from that matter.
             IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
             int? inheritedAccessPermission = null;
+            Guid? caller = null;
             if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
             {
+                // AS THE CALLER first: AppendTo on the regarding record — the right filing the draft under it costs — BEFORE
+                // its ancestry is derived. The derivation reads that record app-only, so its own answers ("could not be
+                // resolved" for a missing record, a stamp for an existing one) would otherwise tell a caller who may not
+                // file under it that it exists. A missing record, one they cannot see and one they may not append to are
+                // the same denial.
+                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                if (me.Failure is { } whoAmIFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                }
+
+                caller = me.SystemUserId;
+                var regardingAccess = await OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+                    _dataverse, me.SystemUserId, args.RegardingTable, ancestorTargetId, cancellationToken).ConfigureAwait(false);
+                if (regardingAccess.ClientFailure is { } accessFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, accessFailure, startedAt), stopwatch);
+                }
+
+                if (regardingAccess.Invalid is { } regardingInvalid)
+                {
+                    return LogOutcome(context, args,
+                        Error(tool, regardingInvalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
+                }
+
+                if (regardingAccess.Denied is { } regardingDenied)
+                {
+                    return LogOutcome(context, args,
+                        Error(tool, regardingDenied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
+                }
+
                 var ancestors = await _coreAncestors
                     .DeriveForHostAsync(CommunicationTable, args.RegardingTable, ancestorTargetId, cancellationToken)
                     .ConfigureAwait(false);
@@ -366,13 +398,18 @@ public sealed class EmailDraftToolHandler : IToolHandler
             Guid? sender = null;
             if (IsFiledUnderAnOwnershipParent(args, ancestorStamps))
             {
-                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
-                if (me.Failure is { } whoAmIFailure)
+                if (caller is null)
                 {
-                    return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                    if (me.Failure is { } whoAmIFailure)
+                    {
+                        return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                    }
+
+                    caller = me.SystemUserId;
                 }
 
-                sender = me.SystemUserId;
+                sender = caller;
             }
 
             // Build the record ITEM server-side (Communication-service column contract).
@@ -412,6 +449,11 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 if (owned.Denied is { } denied)
                 {
                     return LogOutcome(context, args, Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
+                }
+
+                if (owned.Invalid is { } invalid)
+                {
+                    return LogOutcome(context, args, Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
                 }
 
                 if (owned.CreatedId is not { } ownedId)
