@@ -2,27 +2,36 @@
 // DataverseWebApiAppUserCreator.cs
 //
 // Production IDataverseAppUserCreator — issues Dataverse Web API calls to
-// upsert an Application User (find-by-applicationid, else create against the
-// root business unit) and ensure the requested security role is associated.
+// find or create the customer's business unit (T259) and to upsert an
+// Application User IN it (find-by-applicationid, else create) with the
+// requested security role — the copy of that role in the same unit.
 // Auth via DefaultAzureCredential (ADR-028 MI-outbound MUST rule; §4D I5
-// explicit per-tenant scope — never a default-tenant credential). Parity in
-// shape with DataverseWebApiHealthProbe (task 048) — same token-acquisition
-// idiom, same typed-HttpClient registration pattern.
+// explicit per-tenant scope — never a default-tenant credential); the internal
+// constructor takes a credential factory so the request shapes are CI-tested
+// against a hand-written HttpMessageHandler (DataverseWebApiAppUserCreatorTests —
+// never Mock<HttpMessageHandler>, ADR-038).
 //
-// NOT under test in the CI unit suite (real Dataverse Web API calls). Handler
-// unit tests substitute a fake IDataverseAppUserCreator — parity with
-// DataverseWebApiHealthProbe's file-header note.
+// T259 (ISS-010 / #1486, owner decision 2026-10-09 — INCOMING-145 §6 T1/T3):
+//   EnsureCustomerBusinessUnitAsync — GET the root (exactly one), GET units by
+//   name ($top=2): two → Ambiguous; one under the root → reuse; one anywhere
+//   else (or the root itself) → WrongParent; none → POST businessunits under
+//   the root. Never re-parents a unit.
+//   EnsureAppUserAsync — an existing App User in another unit is refused
+//   (InForeignBusinessUnit, nothing written: a business-unit change strips every
+//   role); a new one is created with businessunitid = the customer's unit; the
+//   role is resolved in THAT unit (Dataverse assigns a user only its own unit's
+//   roles) — exactly one match, never a name-only fallback that could pick a
+//   copy from another unit.
 //
 // auth-v4 §10.4 DUAL APP-USER TRAP (task 205d / punch row A41): the UAMI row's
 // azureactivedirectoryobjectid MUST be the UAMI's principalId — NEVER its
-// clientId. See DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+// clientId. See DataverseAppUserCreationRequest.SystemUserAzureActiveDirectoryObjectId's
 // remarks for the full silent-fail shape. This creator writes that field
 // explicitly (in the same POST as applicationid) whenever the caller supplies
 // it; it does NOT rely on Dataverse's applicationid-only auto-resolution for
 // that field.
 // -----------------------------------------------------------------------------
 
-using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -35,22 +44,115 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 /// <inheritdoc cref="IDataverseAppUserCreator"/>
 public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 {
-    private readonly HttpClient _httpClient;
-    private readonly H10DataverseAppUserGraphParityOptions _options;
-    private readonly ILogger<DataverseWebApiAppUserCreator> _logger;
+    private const string Api = "/api/data/v9.2/";
 
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<DataverseWebApiAppUserCreator> _logger;
+    private readonly Func<string, TokenCredential> _credentialFactory;
+
+    /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public DataverseWebApiAppUserCreator(
         HttpClient httpClient,
         IOptions<H10DataverseAppUserGraphParityOptions> options,
         ILogger<DataverseWebApiAppUserCreator> logger)
+        : this(httpClient, options, logger,
+              tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>Test seam constructor — injects the credential factory.</summary>
+    internal DataverseWebApiAppUserCreator(
+        HttpClient httpClient,
+        IOptions<H10DataverseAppUserGraphParityOptions> options,
+        ILogger<DataverseWebApiAppUserCreator> logger,
+        Func<string, TokenCredential> credentialFactory)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
-        _options = options.Value;
         _logger = logger;
-        _httpClient.Timeout = _options.DataverseRequestTimeout;
+        _credentialFactory = credentialFactory;
+        _httpClient.Timeout = options.Value.DataverseRequestTimeout;
+    }
+
+    /// <inheritdoc/>
+    public async Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
+        string environmentUrl,
+        string tenantId,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        if (!Uri.TryCreate(environmentUrl, UriKind.Absolute, out var envUri))
+        {
+            return new CustomerBusinessUnitOutcome.Failure($"Environment URL '{environmentUrl}' is not a valid absolute URI.");
+        }
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, tenantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            return new CustomerBusinessUnitOutcome.Failure($"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        try
+        {
+            var roots = Values(await GetAsync(envUri, token,
+                "businessunits?$filter=parentbusinessunitid eq null&$select=businessunitid&$top=2", cancellationToken)
+                .ConfigureAwait(false));
+            if (roots.Count != 1)
+            {
+                return new CustomerBusinessUnitOutcome.Failure(
+                    $"The environment reports {roots.Count} root business units (expected exactly one). Nothing was written.");
+            }
+            var rootId = Id(roots[0], "businessunitid");
+
+            var named = Values(await GetAsync(envUri, token,
+                $"businessunits?$filter=name eq '{Literal(name)}'&$select=businessunitid,_parentbusinessunitid_value&$top=2",
+                cancellationToken).ConfigureAwait(false));
+            switch (named.Count)
+            {
+                case > 1:
+                    return new CustomerBusinessUnitOutcome.Ambiguous(named.Count);
+                case 1:
+                {
+                    var unitId = Id(named[0], "businessunitid");
+                    var parentId = OptionalId(named[0], "_parentbusinessunitid_value");
+                    return parentId == rootId
+                        ? new CustomerBusinessUnitOutcome.Success(unitId, Created: false)
+                        : new CustomerBusinessUnitOutcome.WrongParent(unitId, parentId, rootId);
+                }
+            }
+
+            var created = await CreateAsync(envUri, token, "businessunits", new Dictionary<string, object?>
+            {
+                ["name"] = name,
+                ["parentbusinessunitid@odata.bind"] = $"/businessunits({rootId:D})",
+            }, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("H10 created the customer business unit {BusinessUnitId} under the root {RootId}", created, rootId);
+            return new CustomerBusinessUnitOutcome.Success(created, Created: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return new CustomerBusinessUnitOutcome.Failure("A Dataverse request timed out.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DataverseWebApiAppUserCreator business-unit fault for env={EnvUrl}", environmentUrl);
+            return new CustomerBusinessUnitOutcome.Failure($"Dataverse Web API error: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <inheritdoc/>
@@ -70,12 +172,18 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 $"Environment URL '{request.EnvironmentUrl}' is not a valid absolute URI.");
         }
 
+        if (request.BusinessUnitId == Guid.Empty)
+        {
+            return new DataverseAppUserCreationOutcome.Failure(
+                "BusinessUnitId is empty — the App User's business unit (the customer's unit) must be resolved first.");
+        }
+
         // Defense-in-depth: applicationId is interpolated directly into an OData
         // $filter query string below. It is always a machine-produced GUID from
         // InterStepState (H2a/H3 output), never free-text user input, so
         // injection risk is negligible — but validating the shape here produces
         // a clear diagnostic instead of a confusing Dataverse 400.
-        if (!Guid.TryParse(request.ApplicationId, out _))
+        if (!Guid.TryParse(request.ApplicationId, out var applicationId))
         {
             return new DataverseAppUserCreationOutcome.Failure(
                 $"ApplicationId '{request.ApplicationId}' is not a valid GUID — refusing to build an OData filter from it.");
@@ -86,11 +194,11 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         // DataverseAppUserCreationRequest's remarks for the silent-fail trap
         // this guards against), validate its GUID shape before it reaches the
         // POST payload, same rationale as the ApplicationId check above.
-        if (request.AzureActiveDirectoryObjectId is not null
-            && !Guid.TryParse(request.AzureActiveDirectoryObjectId, out _))
+        if (request.SystemUserAzureActiveDirectoryObjectId is not null
+            && !Guid.TryParse(request.SystemUserAzureActiveDirectoryObjectId, out _))
         {
             return new DataverseAppUserCreationOutcome.Failure(
-                $"AzureActiveDirectoryObjectId '{request.AzureActiveDirectoryObjectId}' is not a valid GUID — " +
+                $"SystemUserAzureActiveDirectoryObjectId '{request.SystemUserAzureActiveDirectoryObjectId}' is not a valid GUID — " +
                 "refusing to write it to the systemuser row.");
         }
 
@@ -99,7 +207,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         {
             token = await AcquireTokenAsync(envUri, request.TenantId, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return new DataverseAppUserCreationOutcome.Failure(
                 $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
@@ -107,56 +215,78 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 
         try
         {
-            // (1) Idempotency: look for an existing App User by applicationid.
-            var existingId = await FindSystemUserIdAsync(
-                envUri, token, request.ApplicationId, cancellationToken).ConfigureAwait(false);
-
-            string systemUserId;
-            if (existingId is not null)
+            // (1) Idempotency: look for an existing App User by applicationid — and the unit it is in.
+            var existing = Values(await GetAsync(envUri, token,
+                $"systemusers?$filter=applicationid eq {applicationId:D}&$select=systemuserid,_businessunitid_value&$top=2",
+                cancellationToken).ConfigureAwait(false));
+            if (existing.Count > 1)
             {
-                systemUserId = existingId;
+                return new DataverseAppUserCreationOutcome.Failure(
+                    $"{existing.Count} systemusers carry applicationid {applicationId:D} (expected at most one). Nothing was written.");
+            }
+
+            Guid systemUserId;
+            if (existing.Count == 1)
+            {
+                systemUserId = Id(existing[0], "systemuserid");
+                var unit = OptionalId(existing[0], "_businessunitid_value");
+                if (unit != request.BusinessUnitId)
+                {
+                    // T259: never moved — a business-unit change strips every role of the user.
+                    return new DataverseAppUserCreationOutcome.InForeignBusinessUnit(systemUserId.ToString("D"), unit ?? Guid.Empty);
+                }
             }
             else
             {
-                // (2) Resolve root business unit.
-                var rootBuId = await FindRootBusinessUnitIdAsync(envUri, token, cancellationToken).ConfigureAwait(false);
-                if (rootBuId is null)
+                // (2) Create the App User IN the customer's unit. Explicit azureactivedirectoryobjectid
+                // (when supplied) is written in the SAME POST as applicationid — never a follow-up PATCH —
+                // so there is no window where the row exists with an unset/auto-resolved value (auth-v4 §10.4).
+                var payload = new Dictionary<string, object?>
                 {
-                    return new DataverseAppUserCreationOutcome.Failure(
-                        "Root business unit (parentbusinessunitid eq null) not found — cannot create App User.");
+                    ["applicationid"] = applicationId.ToString("D"),
+                    ["businessunitid@odata.bind"] = $"/businessunits({request.BusinessUnitId:D})",
+                };
+                if (!string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId))
+                {
+                    payload["azureactivedirectoryobjectid"] = request.SystemUserAzureActiveDirectoryObjectId;
                 }
+                systemUserId = await CreateAsync(envUri, token, "systemusers", payload, cancellationToken).ConfigureAwait(false);
+            }
 
-                // (3) Create the App User. Explicit azureactivedirectoryobjectid
-                // (when supplied) is written in the SAME POST as applicationid —
-                // never a follow-up PATCH — so there is no window where the row
-                // exists with an unset/auto-resolved value (auth-v4 §10.4).
-                systemUserId = await CreateSystemUserAsync(
-                    envUri, token, request.ApplicationId, request.AzureActiveDirectoryObjectId, rootBuId,
+            // (3) The role's copy IN the user's unit — exactly one.
+            var roles = Values(await GetAsync(envUri, token,
+                $"roles?$filter=name eq '{Literal(request.SecurityRoleName)}' and _businessunitid_value eq {request.BusinessUnitId:D}" +
+                "&$select=roleid&$top=2", cancellationToken).ConfigureAwait(false));
+            if (roles.Count != 1)
+            {
+                return new DataverseAppUserCreationOutcome.Failure(roles.Count == 0
+                    ? $"Security role '{request.SecurityRoleName}' not found in business unit {request.BusinessUnitId:D}."
+                    : $"More than one role named '{request.SecurityRoleName}' in business unit {request.BusinessUnitId:D} — refusing to guess.");
+            }
+            var roleId = Id(roles[0], "roleid");
+
+            // (4) Ensure role association (idempotent — check-then-insert).
+            var held = Values(await GetAsync(envUri, token,
+                $"systemusers({systemUserId:D})/systemuserroles_association?$filter=roleid eq {roleId:D}&$select=roleid",
+                cancellationToken).ConfigureAwait(false));
+            if (held.Count == 0)
+            {
+                var root = new Uri(envUri, "/").ToString().TrimEnd('/');
+                await SendAsync(envUri, token, HttpMethod.Post,
+                    $"systemusers({systemUserId:D})/systemuserroles_association/$ref",
+                    new Dictionary<string, object?> { ["@odata.id"] = $"{root}{Api}roles({roleId:D})" },
                     cancellationToken).ConfigureAwait(false);
             }
 
-            // (4) Resolve the requested security role at the root business unit.
-            var roleId = await FindSecurityRoleIdAsync(
-                envUri, token, request.SecurityRoleName, cancellationToken).ConfigureAwait(false);
-            if (roleId is null)
-            {
-                return new DataverseAppUserCreationOutcome.Failure(
-                    $"Security role '{request.SecurityRoleName}' not found in target environment.");
-            }
-
-            // (5) Ensure role association (idempotent — check-then-insert).
-            var alreadyAssociated = await IsRoleAssociatedAsync(
-                envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
-            if (!alreadyAssociated)
-            {
-                await AssociateRoleAsync(envUri, token, systemUserId, roleId, cancellationToken).ConfigureAwait(false);
-            }
-
-            return new DataverseAppUserCreationOutcome.Success(systemUserId);
+            return new DataverseAppUserCreationOutcome.Success(systemUserId.ToString("D"));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {
-            throw;
+            return new DataverseAppUserCreationOutcome.Failure("A Dataverse request timed out.");
         }
         catch (Exception ex)
         {
@@ -170,176 +300,100 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 
     private async Task<AccessToken> AcquireTokenAsync(Uri envUri, string tenantId, CancellationToken ct)
     {
-        var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
-        var scope = $"{scopeBase}/.default";
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
-        return await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct).ConfigureAwait(false);
+        var scope = $"{new Uri(envUri, "/").ToString().TrimEnd('/')}/.default";
+        return await _credentialFactory(tenantId).GetTokenAsync(new TokenRequestContext(new[] { scope }), ct).ConfigureAwait(false);
     }
 
-    private async Task<string?> FindSystemUserIdAsync(Uri envUri, AccessToken token, string applicationId, CancellationToken ct)
+    private async Task<JsonDocument> GetAsync(Uri envUri, AccessToken token, string relative, CancellationToken ct)
     {
-        var uri = new Uri(envUri, $"/api/data/v9.2/systemusers?$filter=applicationid eq {applicationId}&$select=systemuserid");
-        var doc = await SendAndReadAsync(uri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
-        var values = doc.RootElement.GetProperty("value");
-        return values.GetArrayLength() > 0
-            ? values[0].GetProperty("systemuserid").GetString()
-            : null;
-    }
-
-    private async Task<string?> FindRootBusinessUnitIdAsync(Uri envUri, AccessToken token, CancellationToken ct)
-    {
-        var uri = new Uri(envUri, "/api/data/v9.2/businessunits?$filter=parentbusinessunitid eq null&$select=businessunitid");
-        var doc = await SendAndReadAsync(uri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
-        var values = doc.RootElement.GetProperty("value");
-        return values.GetArrayLength() > 0
-            ? values[0].GetProperty("businessunitid").GetString()
-            : null;
-    }
-
-    private async Task<string> CreateSystemUserAsync(
-        Uri envUri, AccessToken token, string applicationId, string? azureActiveDirectoryObjectId,
-        string rootBuId, CancellationToken ct)
-    {
-        var uri = new Uri(envUri, "/api/data/v9.2/systemusers");
-        var payload = new Dictionary<string, object?>
-        {
-            ["applicationid"] = applicationId,
-            ["businessunitid@odata.bind"] = $"/businessunits({rootBuId})",
-        };
-
-        // auth-v4 §10.4 (BINDING, punch row A41): when the caller supplies an
-        // explicit azureactivedirectoryobjectid, write it in this SAME POST —
-        // do NOT rely on Dataverse's applicationid-only auto-resolution. That
-        // auto-resolution is reliable for a standard Entra app registration
-        // (BFF app-reg OBO row — omitted here, request.AzureActiveDirectoryObjectId
-        // is null) but is the exact silent-fail surface for a Managed Identity
-        // row: a row created with the WRONG value (e.g. the UAMI's clientId
-        // instead of its principalId) still passes T2's existence + count
-        // check — only the app-only Dataverse call's oid-claim match fails,
-        // 401ing every call for that customer until an operator repairs it.
-        if (!string.IsNullOrWhiteSpace(azureActiveDirectoryObjectId))
-        {
-            payload["azureactivedirectoryobjectid"] = azureActiveDirectoryObjectId;
-        }
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
-        {
-            Content = JsonContent.Create(payload),
-        };
-        ApplyCommonHeaders(request, token);
-
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException(
-                $"POST systemusers failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
-        }
-
-        // Dataverse returns the new row's id in the OData-EntityId response header:
-        // "{envUrl}/api/data/v9.2/systemusers(guid)".
-        if (response.Headers.TryGetValues("OData-EntityId", out var values))
-        {
-            var entityIdHeader = values.FirstOrDefault();
-            var extracted = ExtractGuidFromEntityId(entityIdHeader);
-            if (extracted is not null)
-            {
-                return extracted;
-            }
-        }
-
-        throw new InvalidOperationException(
-            "POST systemusers succeeded but the response carried no parseable OData-EntityId header.");
-    }
-
-    private async Task<string?> FindSecurityRoleIdAsync(Uri envUri, AccessToken token, string roleName, CancellationToken ct)
-    {
-        var encodedName = Uri.EscapeDataString(roleName);
-        var uri = new Uri(envUri, $"/api/data/v9.2/roles?$filter=name eq '{encodedName}' and _businessunitid_value eq (Microsoft.Dynamics.CRM.GetRootBusinessUnitId())&$select=roleid");
-        JsonDocument doc;
-        try
-        {
-            doc = await SendAndReadAsync(uri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
-        }
-        catch (InvalidOperationException)
-        {
-            // Fallback: some environments do not expose the bound function above —
-            // fall back to a plain name-only filter (root-BU system roles are unique
-            // by name in the common case; if genuinely ambiguous, the operator will
-            // see a role-not-found or wrong-role diagnostic downstream).
-            var fallbackUri = new Uri(envUri, $"/api/data/v9.2/roles?$filter=name eq '{encodedName}'&$select=roleid");
-            doc = await SendAndReadAsync(fallbackUri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
-        }
-
-        var values = doc.RootElement.GetProperty("value");
-        return values.GetArrayLength() > 0
-            ? values[0].GetProperty("roleid").GetString()
-            : null;
-    }
-
-    private async Task<bool> IsRoleAssociatedAsync(Uri envUri, AccessToken token, string systemUserId, string roleId, CancellationToken ct)
-    {
-        var uri = new Uri(envUri, $"/api/data/v9.2/systemusers({systemUserId})/systemuserroles_association?$filter=roleid eq {roleId}&$select=roleid");
-        var doc = await SendAndReadAsync(uri, HttpMethod.Get, token, body: null, ct).ConfigureAwait(false);
-        return doc.RootElement.GetProperty("value").GetArrayLength() > 0;
-    }
-
-    private async Task AssociateRoleAsync(Uri envUri, AccessToken token, string systemUserId, string roleId, CancellationToken ct)
-    {
-        var uri = new Uri(envUri, $"/api/data/v9.2/systemusers({systemUserId})/systemuserroles_association/$ref");
-        var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
-        var payload = new Dictionary<string, object?>
-        {
-            ["@odata.id"] = $"{scopeBase}/api/data/v9.2/roles({roleId})",
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
-        {
-            Content = JsonContent.Create(payload),
-        };
-        ApplyCommonHeaders(request, token);
-
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException(
-                $"POST systemuserroles_association/$ref failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
-        }
-    }
-
-    private async Task<JsonDocument> SendAndReadAsync(Uri uri, HttpMethod method, AccessToken token, HttpContent? body, CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(method, uri) { Content = body };
-        ApplyCommonHeaders(request, token);
-
-        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        using var response = await SendRawAsync(envUri, token, HttpMethod.Get, relative, body: null, ct).ConfigureAwait(false);
         var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(
-                $"{method} {uri.PathAndQuery} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
+                $"GET {relative.Split('?')[0]} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
         }
         return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
     }
 
-    private static void ApplyCommonHeaders(HttpRequestMessage request, AccessToken token)
+    private async Task SendAsync(Uri envUri, AccessToken token, HttpMethod method, string relative, object? body, CancellationToken ct)
     {
+        using var response = await SendRawAsync(envUri, token, method, relative, body, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"{method} {relative} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
+        }
+    }
+
+    /// <summary>POSTs a new row and returns its id from the <c>OData-EntityId</c> header.</summary>
+    private async Task<Guid> CreateAsync(Uri envUri, AccessToken token, string entitySet, object body, CancellationToken ct)
+    {
+        using var response = await SendRawAsync(envUri, token, HttpMethod.Post, entitySet, body, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"POST {entitySet} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
+        }
+
+        // Dataverse returns the new row's id in the OData-EntityId response header:
+        // "{envUrl}/api/data/v9.2/{entitySet}(guid)".
+        var header = response.Headers.TryGetValues("OData-EntityId", out var values) ? values.FirstOrDefault() : null;
+        return ExtractGuidFromEntityId(header)
+            ?? throw new InvalidOperationException(
+                $"POST {entitySet} succeeded but the response carried no parseable OData-EntityId header.");
+    }
+
+    private async Task<HttpResponseMessage> SendRawAsync(
+        Uri envUri, AccessToken token, HttpMethod method, string relative, object? body, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(envUri, Api + relative));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("OData-Version", "4.0");
         request.Headers.Add("OData-MaxVersion", "4.0");
-        request.Headers.Add("Prefer", "return=representation");
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+        return await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
     }
 
-    private static string? ExtractGuidFromEntityId(string? entityIdHeader)
+    private static List<JsonElement> Values(JsonDocument document)
+    {
+        using (document)
+        {
+            if (!document.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("The Dataverse response has no 'value' array.");
+            }
+            return value.EnumerateArray().Select(e => e.Clone()).ToList();
+        }
+    }
+
+    // ADR-044: ids read back from Dataverse are canonicalized before they reach a filter or a reference URL.
+    private static Guid Id(JsonElement row, string property)
+        => OptionalId(row, property) ?? throw new InvalidOperationException($"A Dataverse row has no usable '{property}'.");
+
+    private static Guid? OptionalId(JsonElement row, string property)
+        => row.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+           && Guid.TryParse(value.GetString(), out var id) && id != Guid.Empty
+            ? id
+            : null;
+
+    /// <summary>An OData string literal's content: quotes doubled, then URL-escaped.</summary>
+    private static string Literal(string value) => Uri.EscapeDataString(value.Replace("'", "''", StringComparison.Ordinal));
+
+    private static Guid? ExtractGuidFromEntityId(string? entityIdHeader)
     {
         if (string.IsNullOrWhiteSpace(entityIdHeader)) return null;
         var openParen = entityIdHeader.LastIndexOf('(');
         var closeParen = entityIdHeader.LastIndexOf(')');
         if (openParen < 0 || closeParen <= openParen) return null;
         var candidate = entityIdHeader.Substring(openParen + 1, closeParen - openParen - 1);
-        return Guid.TryParse(candidate, out var guid) ? guid.ToString() : null;
+        return Guid.TryParse(candidate, out var guid) ? guid : null;
     }
 
     private static string Truncate(string s, int max)

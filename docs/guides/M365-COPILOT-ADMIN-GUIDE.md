@@ -3,6 +3,7 @@
 > **Last Updated**: March 26, 2026
 > **Purpose**: Deployment, configuration, monitoring, and troubleshooting for the Spaarke AI M365 Copilot integration.
 > **Audience**: IT administrators, DevOps engineers, system administrators
+> **Customer stamps (T257, 2026-10-09)**: each customer's agent is rendered from one CI-published template and installed by the customer's IT in their own tenant (OAuth 2.0 + PKCE through the secret-free "Spaarke Copilot Agent" client; manifest v1.30, no bot, no `webApplicationInfo`, no permissions). Follow [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12 for that. Where this guide describes a bot, `webApplicationInfo`, a hand-edited manifest or upload to Spaarke's catalog, it applies only to Spaarke's own environments (`scripts/Deploy-CopilotAgent.ps1`).
 
 ---
 

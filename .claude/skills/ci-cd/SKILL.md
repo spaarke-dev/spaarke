@@ -149,7 +149,8 @@ None of these is a required check. Full per-workflow detail: [`docs/procedures/c
 | `office-addins-tests.yml` | Office add-in jest ratchet, typecheck, server suites, ESLint | PR/push on office-addins + related paths |
 | `build-provisioning-sidecar.yml` | Build + Trivy-scan the provisioning sidecar image (push leg publishes it) | PR/push on sidecar paths, manual |
 | `publish-provisioning-arm-artifacts.yml` | Compile the customer Bicep to ARM JSON for H2a | Push to master on Bicep paths, manual |
-| `publish-dataverse-solutions-manifest.yml` | Publish the managed-solution manifest H6 reads | Manual (release-time) |
+| `publish-dataverse-solutions-manifest.yml` | Publish the managed-solution manifest H6 reads | Manual (release-time); PR dry run on the SpaarkeMaster source |
+| `publish-copilot-agent-template.yml` | Build + publish the per-customer Copilot agent template (sample render validated against Microsoft's schemas) | Manual (release-time); PR dry run on the agent source |
 | `nightly-health.yml` | Flake hunt, bundle-size drift, vuln + Trivy scans, integration suite, coverage observation | Daily 06:00 UTC, manual |
 | `client-tests.yml` | Nightly jest baseline across client packages | Nightly 07:00 UTC, manual |
 | `report-workflow-health.yml` | Weekly per-workflow success-rate report | Weekly, manual |

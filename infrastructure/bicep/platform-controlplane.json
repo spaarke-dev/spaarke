@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8034886676849951773"
+      "templateHash": "6965580650366417234"
     }
   },
   "parameters": {
@@ -72,7 +72,7 @@
       "type": "string",
       "defaultValue": "BFF-API-ClientSecret",
       "metadata": {
-        "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default)."
+        "description": "LEGACY credential chain only (requireSecretFreeIdentity=false). Name of the platform Key Vault secret the Worker EnvVarValues__ClientSecret and SolutionImportOptions__ClientSecret Key Vault references resolve -- passed through to modules/controlplane-worker-app-service.bicep. NOT referenced when requireSecretFreeIdentity=true (the default since task 252). H6, H7 and H7b sign in as the per-customer BFF app registration H3 creates (D-13), so one shared platform secret cannot authenticate as it; the legacy chain survives only for the ADR-028 A4 prong-3 exception (sunset 2026-11-23). Never create, seed or restore this secret in a secret-free environment (provisioning.md KV credential lifecycle rule 1)."
       }
     },
     "githubActionsOidcPrincipalId": {
@@ -126,6 +126,13 @@
         "description": "Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the production Office add-in client (1958aec2, addins.spaarke.com; never the dev client c1258e2d); the Teams client joins when it exists (T240c)."
       }
     },
+    "copilotAgentClientAppId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Client id of the shared Spaarke Copilot Agent app (T257): a secret-free public client in Spaarke tenant (PKCE, redirect https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect) that each customer Copilot agent auth config signs users in with. Threaded to modules/controlplane-worker-app-service.bicep, which adds it to the PreAuthorizedClientAppIds list, so H3 pre-authorizes it on every customer BFF app (user_impersonation) and no user sees a consent prompt. Empty (default) until the operator creates the app (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); H3 then pre-authorizes only preAuthorizedClientAppIds."
+      }
+    },
     "ciamTenantIds": {
       "type": "array",
       "minLength": 1,
@@ -142,9 +149,9 @@
     },
     "requireSecretFreeIdentity": {
       "type": "bool",
-      "defaultValue": false,
+      "defaultValue": true,
       "metadata": {
-        "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record)."
+        "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H6, H7 and H7b then authenticate via the Worker UAMI federated assertion. Default TRUE since task 252 (2026-10-09): a new control-plane environment is secret-free, so it never references a secret the binding rule forbids creating. FALSE is a prong-3 opt-in for an unmigrated environment only (SS6.5 resolution record)."
       }
     },
     "jwtTenantId": {
@@ -1561,6 +1568,9 @@
           "preAuthorizedClientAppIds": {
             "value": "[parameters('preAuthorizedClientAppIds')]"
           },
+          "copilotAgentClientAppId": {
+            "value": "[parameters('copilotAgentClientAppId')]"
+          },
           "ciamTenantIds": {
             "value": "[parameters('ciamTenantIds')]"
           },
@@ -1590,7 +1600,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11669241497465723003"
+              "templateHash": "9235390544817115296"
             }
           },
           "parameters": {
@@ -1672,7 +1682,7 @@
               "type": "string",
               "defaultValue": "BFF-API-ClientSecret",
               "metadata": {
-                "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer's target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above)."
+                "description": "LEGACY credential chain only (requireSecretFreeIdentity=false). Name of the platform Key Vault secret the EnvVarValues__ClientSecret and SolutionImportOptions__ClientSecret Key Vault references resolve. NOT referenced when requireSecretFreeIdentity=true (the default since task 252): H6, H7 and H7b then sign in through the FR-39 chain (ManagedIdentityFederated only) and no app setting names this secret. H6, H7 and H7b sign in as the customer BFF app registration H3 creates for that customer (D-13: one BFF app registration per customer, both models), so one shared platform secret cannot authenticate as it; the legacy chain survives only for the ADR-028 A4 prong-3 exception (unmigrated environments, sunset 2026-11-23). Never create, seed or restore this secret in a secret-free environment (provisioning.md KV credential lifecycle rule 1); Seed-PlatformKeyVault.ps1 does not seed it."
               }
             },
             "redisEndpoint": {
@@ -1738,15 +1748,15 @@
             },
             "requireSecretFreeIdentity": {
               "type": "bool",
-              "defaultValue": false,
+              "defaultValue": true,
               "metadata": {
-                "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master's pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves the legacy shape byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)"
+                "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master's pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free control plane must carry ZERO references to the secret. Default TRUE since task 252 (2026-10-09): every control-plane environment is secret-free unless a prong-3 unmigrated environment explicitly passes false (SS6.5 resolution record), so a new environment never gets a Key Vault reference to a secret the binding rule forbids creating. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)"
               }
             },
             "controlPlanePrincipalId": {
               "type": "string",
               "metadata": {
-                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
+                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). H3 also makes it the subject of the federated credential spaarke-l2-worker on each customer BFF app registration (ISS-015), through which H6/H7/H7b sign in as that registration secret-free -- the principalId, never the clientId (AADSTS700213). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
               }
             },
             "speContainerTypeOwners": {
@@ -1763,6 +1773,13 @@
               ],
               "metadata": {
                 "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the PRODUCTION Office add-in client (Spaarke Office Add-in (Production), served from addins.spaarke.com) -- customer stamps are production. The dev add-in client c1258e2d talks only to the dev BFF and is never listed here. The Teams client joins when it exists (T240c)."
+              }
+            },
+            "copilotAgentClientAppId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Client id of the shared Spaarke Copilot Agent app (T257; secret-free public client, PKCE). When set it is appended to preAuthorizedClientAppIds, so H3 pre-authorizes it on every customer BFF app for user_impersonation. Empty (default): not added -- the app does not exist until the operator creates it. Must be a GUID: H3 rejects every run on a malformed entry (appreg-preauthorized-client-invalid)."
               }
             },
             "ciamTenantIds": {
@@ -1811,7 +1828,8 @@
             ],
             "reservedTenantSettings": "[concat(createArray(createObject('name', 'ReservedTenants__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('ciamTenantIds'))), lambda('i', createObject('name', format('ReservedTenants__CiamTenantIds__{0}', lambdaVariables('i')), 'value', parameters('ciamTenantIds')[lambdaVariables('i')]))))]",
             "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]",
-            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('preAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', parameters('preAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
+            "effectivePreAuthorizedClientAppIds": "[concat(parameters('preAuthorizedClientAppIds'), if(empty(parameters('copilotAgentClientAppId')), createArray(), createArray(parameters('copilotAgentClientAppId'))))]",
+            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(variables('effectivePreAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', variables('effectivePreAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
           },
           "resources": [
             {
