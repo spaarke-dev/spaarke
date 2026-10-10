@@ -15,6 +15,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type {
   IAccessFloor,
   IAccessGrantModalProps,
@@ -149,7 +150,8 @@ interface ISetup {
 }
 
 function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
-  const authenticatedFetch = jest.fn(async (url: string, init?: RequestInit) => {
+  // Production shape: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+  const authenticatedFetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
     if (url.includes('/no-access')) return json(noAccessBody(setup.noAccessEntries ?? []));
     if (url.includes('/user-shares')) return json({ shares: setup.shares ?? [] });
     if (url.includes('/assigned-access?')) return json({ entries: setup.suggestions ?? [] });
@@ -398,12 +400,35 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
   });
 
   it('a 409 with another reason code is an ordinary failure', async () => {
-    renderModal(makeProps({ write: () => json({ reasonCode: 'sdap.access.grant.would_lower_existing' }, 409) }));
+    renderModal(
+      makeProps({ write: () => json({ status: 409, reasonCode: 'sdap.access.grant.would_lower_existing' }, 409) })
+    );
     await loaded();
 
     await revokeCarla();
 
     expect(await screen.findByText(/Failed to revoke access for Carla Contact/)).toBeInTheDocument();
+  });
+});
+
+describe('AccessGrantModal — a host whose fetch RETURNS the refusal (control)', () => {
+  it('still shows the server sentence when the 409 comes back as a response, not a throw', async () => {
+    const sentence = 'This would make the work assignment less restricted than the matter Acme v. Beta.';
+    const props = makeProps();
+    const throwing = props.authenticatedFetch as unknown as jest.Mock;
+    // The other shape a host may inject: the refusal is RETURNED, not thrown.
+    (props as { authenticatedFetch: unknown }).authenticatedFetch = jest.fn(async (url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? json({ status: 409, reasonCode: 'sdap.access.access_follows_parent', detail: sentence }, 409)
+        : throwing(url, init)
+    );
+    renderModal(props);
+    await loaded();
+
+    fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
   });
 });
 
