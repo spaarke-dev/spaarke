@@ -335,12 +335,12 @@ export interface IAccessGrantModalProps {
    * as plain text. */
   onOpenContact?: (contactId: string) => void;
   /** Classifies a contact as internal-workforce (has a linked `systemuser`)
-   * vs external. Drives the notify branch: an external contact with a known
+   * vs external. Drives the write route: an external contact with a known
    * email is granted via the built `/invite-and-grant` (onboard + grant + CIAM
    * email, atomic); an internal contact is granted via the built `/grant`
    * only (no CIAM onboarding is appropriate for an internal workforce
-   * person) — see the modal's own doc comment for the escalated internal
-   * deep-link notify gap. */
+   * person). The server then notifies the internal user in-app (task 181) —
+   * see the modal's own doc comment. */
   isInternalContact: (contactId: string) => Promise<boolean>;
   // `onSetStandingGrant` was REMOVED by task 138: the modal has had no
   // standing-grant control since task 073 UAT v1.0.24 #5 (the standing grant is

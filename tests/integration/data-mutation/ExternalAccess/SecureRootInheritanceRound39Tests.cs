@@ -147,7 +147,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             hostGuard ? scope.ServiceProvider.GetRequiredService<SecureShareNoAccessGuard>() : SecureChildShareWorld.NobodyWalled(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
+            new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer, AssignedAccessTestDoubles.InertNotifier(),
             Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 

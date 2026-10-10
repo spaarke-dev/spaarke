@@ -26,29 +26,20 @@
  *     `sprk_grantedby` provenance — invoked directly rather than through the
  *     onboard-first endpoint, because `/invite-and-grant`'s contract is
  *     structurally email+CIAM-onboard-first and would incorrectly attempt to
- *     CIAM-provision an internal workforce person). See the ESCALATION note
- *     below for why the internal deep-link notify branch is NOT implemented
- *     here.
+ *     CIAM-provision an internal workforce person).
  *   - Revoke (both) → `POST /api/v1/external-access/revoke` (the built endpoint).
  *
- * ESCALATION (per this task's `<escalation>` trigger + root CLAUDE.md §6/§6.5):
- * design.md §5.1 calls for an "internal workforce contact → deep-link
- * notification (small addition — they already have M365)" branch. No such
- * endpoint exists in the BFF today (verified: `ExternalAccessEndpoints.cs` maps
- * only `/grant`, `/revoke`, `/invite`, `/invite-and-grant`, `/close-project`,
- * `/provision-project` — no notify-only endpoint), and this task's guardrails
- * explicitly forbid modifying any BFF `.cs` file (concurrent-agent boundary).
- * Building that "small addition" is BFF work outside this task's scope, and
- * `InviteAndGrantExternalUserEndpoint`'s CIAM-onboard-first contract cannot be
- * repurposed for it without incorrectly provisioning a CIAM account for an
- * internal person. Per the task's own escalation instruction ("STOP and
- * escalate ... rather than building a second write path or a parallel notify
- * mechanism"), this modal WRITES the grant for internal contacts (the
- * `sprk_externalrecordaccess` row — the record-access outcome — succeeds
- * unconditionally) but surfaces the missing notify step as a non-blocking,
- * clearly-labeled "Notify pending" state rather than inventing a client-side
- * notify mechanism. See the task's final report for the full escalation
- * writeup.
+ * INTERNAL NOTIFICATION (unified-access-control-r2 task 181, owner round 89
+ * item 3 — replaces teams-app-r1 task 041's "notify pending" notice).
+ * The SERVER tells an internal user they were given access: `/grant` when the
+ * contact represents an internal user, and `/share-user`, each after its write
+ * succeeded and only when it gave access the person did not hold. It is an
+ * in-app notification (the model-driven app's bell) linking to the record. It
+ * is best effort: a notification that could not be sent never undoes the
+ * grant; the route answers `notificationFailed: true` (on `/share-user`'s
+ * related-records-pending 500 too), and this modal adds "Some people could not
+ * be notified; share the record link with them." to the batch notice. The
+ * modal sends nothing itself.
  *
  * ACCESS-PERMISSION SHARING GATE (task 043, spec FR-14 Option A; made real by
  * unified-access-control-r2 task 138, owner round 2 item 3). The record-level
@@ -439,6 +430,8 @@ class AccessGrantModalApiError extends Error {
   readonly problemDetail?: string;
   /** Task 175: a 409 `access_follows_parent`'s `parentRecordType`, for the fallback sentence when it has no `detail`. */
   readonly parentRecordType?: string;
+  /** Task 181: `/share-user`'s related-records-pending 500 also says whether the person could not be notified. */
+  readonly notificationFailed?: boolean;
 
   constructor(
     status: number,
@@ -446,7 +439,7 @@ class AccessGrantModalApiError extends Error {
     reasonCode?: string,
     deactivatedCount?: number,
     speContainerOutcome?: SpeContainerRevokeOutcome,
-    extras?: { problemDetail?: string; parentRecordType?: string }
+    extras?: { problemDetail?: string; parentRecordType?: string; notificationFailed?: boolean }
   ) {
     super(`AccessGrantModal request failed (${status}): ${detail}`);
     this.name = 'AccessGrantModalApiError';
@@ -457,6 +450,7 @@ class AccessGrantModalApiError extends Error {
     this.speContainerOutcome = speContainerOutcome;
     this.problemDetail = extras?.problemDetail;
     this.parentRecordType = extras?.parentRecordType;
+    this.notificationFailed = extras?.notificationFailed;
     // Restore the prototype chain (extending built-ins across ES5/ts-jest
     // transpilation targets can otherwise break `instanceof` checks) — same
     // fix as communicationApi.ts's SendCommunicationError.
@@ -504,6 +498,8 @@ class AccessGrantModalApiError extends Error {
       speContainerOutcome?: string;
       // Task 175: an extension of the 409 `access_follows_parent`.
       parentRecordType?: unknown;
+      // Task 181: an extension of `/share-user`'s related-records-pending 500.
+      notificationFailed?: unknown;
     };
     const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
     const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
@@ -514,6 +510,7 @@ class AccessGrantModalApiError extends Error {
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
       parentRecordType: typeof body?.parentRecordType === 'string' ? body.parentRecordType : undefined,
+      notificationFailed: body?.notificationFailed === true,
     });
   }
 }
@@ -761,7 +758,8 @@ interface IGrantBatchOutcome {
   selectedCount: number;
   failures: number;
   denied: boolean;
-  anyNotifyPending: boolean;
+  /** Task 181: the server could not tell at least one person they were given access (`notificationFailed`). */
+  anyNotificationFailed: boolean;
   anyNarrowed: boolean;
   /** The server's `detail` for each grant the record's access policy refused
    * (task 138) — shown verbatim, never replaced by a generic "try again". */
@@ -771,18 +769,22 @@ interface IGrantBatchOutcome {
   relatedRecordsPending?: string[];
 }
 
-/** Builds the post-batch notice for `Add (N)` — seven distinct shapes ordered by
- * priority (a denial or a failure dominates a related-records-pending,
- * narrowed or notify-pending success). Denial and failure are reported separately because they call for
+/** Builds the post-batch notice for `Add (N)` — five distinct shapes ordered by
+ * priority (a denial or a failure dominates a related-records-pending or
+ * narrowed success). Denial and failure are reported separately because they call for
  * different next actions: a failure invites retry; a denial does not (retrying
- * without Write on the record fails the same way). */
+ * without Write on the record fails the same way). Task 181: whichever shape
+ * applies, a grant whose person could not be notified adds
+ * {@link NOTIFICATION_FAILED_SENTENCE}, and a success becomes a warning. */
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
-  const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
+  const { granted, selectedCount, failures, denied, anyNotificationFailed, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
   // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
   // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
+  // Task 181: likewise the could-not-notify sentence, last.
   const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
-  const relatedSuffix = relatedPending ? ` ${relatedPending}` : '';
+  const notifySuffix = anyNotificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : '';
+  const relatedSuffix = `${relatedPending ? ` ${relatedPending}` : ''}${notifySuffix}`;
 
   if (denied) {
     return {
@@ -809,32 +811,18 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
       text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.${relatedSuffix}`,
     };
   }
-  if (relatedPending) {
-    const narrowedNote = anyNarrowed
-      ? ' Some were narrowed to your own access level on this record (you can only grant what you hold).'
-      : '';
+  const narrowedNote = anyNarrowed
+    ? ' Some were narrowed to your own access level on this record (you can only grant what you hold).'
+    : '';
+  if (relatedPending || anyNarrowed || anyNotificationFailed) {
     return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
-  }
-  if (anyNotifyPending && anyNarrowed) {
-    return {
-      intent: 'warning',
-      text: `Granted access to ${granted} item(s). Some were narrowed to your own access level, and internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
-    };
-  }
-  if (anyNotifyPending) {
-    return {
-      intent: 'warning',
-      text: `Granted access to ${granted} item(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
-    };
-  }
-  if (anyNarrowed) {
-    return {
-      intent: 'warning',
-      text: `Granted access to ${granted} item(s). Some were narrowed to your own access level on this record (you can only grant what you hold).`,
-    };
   }
   return { intent: 'success', text: `Granted access to ${granted} item(s).` };
 }
+
+/** Task 181 (owner round 89 item 3): added to the batch notice when the server granted access but could not send the
+ * person the in-app notification that links to the record. */
+export const NOTIFICATION_FAILED_SENTENCE = 'Some people could not be notified; share the record link with them.';
 
 /**
  * Task 114 (owner round 67 amendment 4(c), owner-authored copy): the label of a user share on a Restricted record whose
@@ -1363,28 +1351,29 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [requestOk]
   );
 
-  /** Outcome of a single {@link grantContact} call — the grant write itself
-   * either succeeds or throws; `notifyPending` describes the one BEST-EFFORT,
-   * non-blocking follow-on (NFR-06 — the escalated internal deep-link notify gap)
-   * so callers can build one combined notice. */
+  /** Outcome of a single grant or share write — the write itself either succeeds or throws; the flags describe what
+   * the server reported alongside it, so callers can build one combined notice. */
   interface IGrantOutcome {
-    notifyPending: boolean;
+    /** Task 181: the server could not send the person the in-app notification (best effort; the grant stands). */
+    notificationFailed: boolean;
     /** Task 139: the server capped the grant at the caller's own level. */
     narrowed: boolean;
   }
 
-  /** The additive task-139 fields `/grant` and `/invite-and-grant` return. */
+  /** The additive fields `/grant`, `/invite-and-grant` and `/share-user` return (task 139; task 181's
+   * `notificationFailed`, which `/invite-and-grant` never sets — its external contact is told by the CIAM email). */
   interface IGrantWriteResponseBody {
     grantedAccessLevel?: number | null;
     narrowed?: boolean;
+    notificationFailed?: boolean;
   }
 
   /**
    * The single grant core shared by candidate-approve and named-add (per the
    * task's "no duplicate write path" constraint). Classifies the contact
    * internal-vs-external and routes to the correct BUILT endpoint. Throws only
-   * when the grant write itself fails; the notify concern is reported via the
-   * returned flag so a caller driving multiple grants (approve-selected) can
+   * when the grant write itself fails; what the server reported with it is
+   * returned so a caller driving multiple grants (approve-selected) can
    * aggregate one notice instead of each write overwriting the last.
    */
   const grantContact = React.useCallback(
@@ -1404,7 +1393,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // failure directions are not symmetric, so the catch must not default
       // to the more harmful one.
       const internal = await isInternalContact(contact.contactId).catch(() => true);
-      let notifyPending = false;
       let data: IGrantWriteResponseBody | undefined;
 
       if (!internal && contact.email) {
@@ -1422,22 +1410,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       } else {
         // Internal workforce contact, or an external contact with no email on
         // file → the built grant-only core (no CIAM onboarding attempted).
+        // Task 181: the server notifies the internal user this contact represents (it decides that itself).
         data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
           contactId: contact.contactId,
           recordType,
           recordId,
           accessLevel: opts.level,
         });
-        if (internal) {
-          // Escalated gap — see the module doc comment. The grant itself
-          // succeeded; only the deep-link notify step is unavailable.
-          notifyPending = true;
-        }
       }
 
       // Task 139: every grant is capped at the caller's own level; the server
       // says when it did, and the batch notice reports it.
-      return { notifyPending, narrowed: data?.narrowed === true };
+      return { notificationFailed: data?.notificationFailed === true, narrowed: data?.narrowed === true };
     },
     [isInternalContact, postJson, recordId, recordType]
   );
@@ -1524,16 +1508,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * caller's own rights on the record were narrower than the requested level, so
    * the share carries the intersection (owner decision 2026-09-16) — reported back
    * so the caller can build one combined notice, same pattern as grantContact's
-   * `notifyPending`. */
+   * outcome (task 181: with `notificationFailed`). */
   const shareUser = React.useCallback(
-    async (user: IUserPick, level: number): Promise<{ narrowed: boolean }> => {
-      const data = await postJson<{ narrowed?: boolean }>('/api/v1/external-access/share-user', {
+    async (user: IUserPick, level: number): Promise<IGrantOutcome> => {
+      const data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/share-user', {
         recordType,
         recordId,
         systemUserId: user.id,
         accessLevel: level,
       });
-      return { narrowed: data?.narrowed === true };
+      return { narrowed: data?.narrowed === true, notificationFailed: data?.notificationFailed === true };
     },
     [postJson, recordType, recordId]
   );
@@ -1557,7 +1541,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setApproving(true);
     let failures = 0;
     let granted = 0;
-    let anyNotifyPending = false;
+    let anyNotificationFailed = false;
     let anyNarrowed = false;
     let denied = false;
     const policyRefusals: string[] = [];
@@ -1567,7 +1551,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       try {
         if (it.kind === 'contact' && it.contact) {
           const outcome = await grantContact(it.contact, { level });
-          anyNotifyPending = anyNotifyPending || outcome.notifyPending;
+          anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           anyNarrowed = anyNarrowed || outcome.narrowed;
         } else if (it.kind === 'organization' && it.org) {
           const outcome = await grantOrganization(it.org, level);
@@ -1575,6 +1559,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         } else if (it.kind === 'user' && it.user) {
           const outcome = await shareUser(it.user, level);
           anyNarrowed = anyNarrowed || outcome.narrowed;
+          anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
         }
         granted += 1;
       } catch (err) {
@@ -1600,6 +1585,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         if (pendingDetail) {
           granted += 1;
           relatedRecordsPending.push(pendingDetail);
+          // Task 181: that response also says whether the person could not be notified.
+          anyNotificationFailed =
+            anyNotificationFailed || (err instanceof AccessGrantModalApiError && err.notificationFailed === true);
           continue;
         }
         // Task 138: a refusal by the record's access policy carries the
@@ -1631,19 +1619,26 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         selectedCount: selected.length,
         failures,
         denied,
-        anyNotifyPending,
+        anyNotificationFailed,
         anyNarrowed,
         policyRefusals,
         relatedRecordsPending,
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
-    // and access was not denied partway — a notify-pending or narrowed grant still
+    // and access was not denied partway — a narrowed grant still
     // succeeded (the access row/share was written). A share whose related records are
     // still pending (task 149) also succeeded, but Save keeps the modal open once so the
-    // warning is read: it can name related records an administrator must repair. Nothing
-    // is staged any more, so the next Save closes it.
-    return !denied && failures === 0 && policyRefusals.length === 0 && relatedRecordsPending.length === 0;
+    // warning is read: it can name related records an administrator must repair. Task 181:
+    // likewise a grant whose person could not be notified — the granter is asked to share
+    // the link. Nothing is staged any more, so the next Save closes it.
+    return (
+      !denied &&
+      failures === 0 &&
+      policyRefusals.length === 0 &&
+      relatedRecordsPending.length === 0 &&
+      !anyNotificationFailed
+    );
   }, [
     availableItems,
     selectedCandidateIds,

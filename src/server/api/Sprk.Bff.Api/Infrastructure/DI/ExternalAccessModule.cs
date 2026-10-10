@@ -215,6 +215,11 @@ public static class ExternalAccessModule
         //   • NoAccessShareEnforcer — removes the direct shares an entry walls off (never a team or role share; never
         //     the last person; only where the entry's author holds Write). Used by the enforce route and the job.
         services.AddScoped<SecureShareNoAccessGuard>();
+
+        // unified-access-control-r2 task 181 (owner round 89 item 3) — the in-app "you were given access" notification that
+        // /grant and /share-user send after a write gives an internal user access. Task 100's channel (NotificationService),
+        // the Web API client and the No Access guard, all unconditional (ADR-032: no Null-Object). Scoped for the guard.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>();
         services.AddHttpClient<NoAccessEnforcementStore>((sp, client) =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
