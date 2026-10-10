@@ -1,7 +1,7 @@
 /**
  * Lint CONTROLS for `client-lint.mjs controls` -- never imported, never executed.
  *
- * The line AFTER a `@control must-fire` marker MUST be reported by `@typescript-eslint/no-unnecessary-condition`;
+ * The line AFTER a `@control must-fire [ruleId]` marker MUST be reported by that rule (default `@typescript-eslint/no-unnecessary-condition`);
  * the line AFTER a `@control must-not-fire` marker MUST NOT be reported. The runner asserts exactly this, so
  * a toolchain or type regression that silently stops catching dead `!res.ok` checks turns the build red.
  */
