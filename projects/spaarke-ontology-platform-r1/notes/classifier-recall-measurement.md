@@ -7,6 +7,9 @@
 > is re-scoped (both owner decisions). **The measurement found a probable root cause upstream of the classifier, §6.3:**
 > the deployed TRIAGE-EMAIL prompt is corrupted, so the task-072 guidance has never reached the model. Read §6 first;
 > §1-§4a are the history that led to the run.
+> **Update 2026-10-10 (§7):** the owner repaired the corruption, but the pre-run render check found a **second, older
+> blocker**: the Action's example inputs are objects, the JPS contract requires strings, so the prompt still falls back
+> to flat text and the guidance is still absent. **Run 2 was NOT executed** (0 model calls). STOPPED again for an owner decision.
 
 ## 1. D-49 conflict check with the email project (done BEFORE the column adds)
 
@@ -242,3 +245,49 @@ identity (System Administrator), HTTP 204 each.
 
 Recommendation: 1 then 2. The current number measures a broken prompt, so improving or re-scoping before the repair
 would decide on the wrong evidence.
+
+## 7. 2026-10-10: row repaired, pre-run check FAILED, run 2 not executed
+
+**What the owner did (coordinator, approved option 1 then 2):** the spaarkedev1 `triage-email` row
+(`c1fa96bf-...`, modified **2026-10-10T13:33:08Z**) now holds exactly the repo mirror, minus the six deploy-row
+scalars and every `$comment*` key. Before writing, the owner confirmed that every non-corrupt value was byte-identical
+to the mirror. Exactly 33 fields were `{"Length"|"Count": N}` artefacts: the 9 constraints, the 5 tags, and fields in
+the examples. Read-back matched, with 0 artefacts left. A backup of the corrupt row is in the coordinator's scratchpad
+(`triage-fix/live-row-backup.json`).
+
+**Pre-run check (dispatch step 1)** used the same code with zero model calls. The real `CommunicationTriageAi` →
+`ActionResolver` (live binding) → `ActionRunner` → `LookupChoicesResolver` → `PromptSchemaRenderer` ran against the
+repaired row, with only `IOpenAiClient` mocked to capture the final prompt. **It FAILED:**
+
+| Check | Repaired row | Same row, example inputs stringified (in memory only) |
+|---|---|---|
+| `PromptSchema` deserializes | ❌ `JsonException ... Path: $.examples[0].input` | ✅ |
+| Renderer takes the JPS path (no fallback warning) | ❌ falls back to flat text | ✅ |
+| `## Allowed values for 'category'` present | ❌ | ✅ |
+| Fee and Scope tie-breaker lines present | ❌ | ✅ both |
+| `{"Length": N}` artefacts in prompt | none (repair worked) | none |
+
+**Second cause (older than the corruption):** `PromptSchema.ExampleEntry.Input` is `required string`, and the JPS
+authoring contract (`docs/guides/JPS-AUTHORING-GUIDE.md`, "examples Section") defines `examples[].input` as a string.
+`triage-email.action.json` has used **object** example inputs since its first commit (`71ac39087`, task 022,
+2026-07-29). So this Action has **never** rendered on the JPS path. The 2026-09-29 corruption was a second,
+independent defect, and the repair, though necessary, could not on its own get the guidance into the prompt. Only
+`triage-email` among the repo mirrors has object example inputs. Added to #1584 (comment 6098080127) and F-53.
+
+**What run 1 (§6, 21.8%) therefore measured:** the classifier with **no** guidance, no rendered constraints and a
+raw-JSON prompt. This was the deployed state before *and* after the corruption.
+
+**Run 2: NOT executed.** Dispatch step 1 made a JPS-path render the precondition for spending ~184 calls. A run now
+would measure the same flat-text prompt, with the constraints restored but still no guidance. Model calls this round: **0**.
+D-49 values unchanged (run 1: Fee 14.81, Scope 28.57, n 92, 2026-10-09).
+
+### 7.1 🔔 Owner decision needed
+
+**Recommended (Path C, comply with the JPS contract):** re-author the 4 `examples[*].input` values as **strings** in
+the mirror and the row. The verified mechanical form is a JSON-string of each object; prose is fine too. Then verify
+with a read-back plus a local render showing no fallback and the "Allowed values" section present. After that, task
+074 runs once with the unchanged fixture, key and harness. The Action belongs to the email project, so this is the
+owner's call, like the first repair.
+
+Rejected alternative: widening `ExampleEntry.Input` to accept objects. That changes the shared renderer and the JPS
+contract for every Action in order to accommodate one non-conformant mirror (ADR-change territory, §6.5 Path B).
