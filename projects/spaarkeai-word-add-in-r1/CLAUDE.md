@@ -347,6 +347,8 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
   - Linux cold start is 90–120 s — a `/healthz` timeout after a passing hash check is not a reason to redeploy.
   - Probe an authed route → 401 (404 = incomplete package).
 - **A failed Kudu upload can leave the app STOPPED** after the script's recovery (2026-09-19): check state after every deploy and start it if not `Running`.
+- **`pac solution import` exits 0 when the import fails** (2026-10-10, #1591), so `Import-SolutionScoped.ps1` can report "Imported and scoped-published" and publish the OLD bundle. After every import, read back `solutions.version` (must equal the ZIP's) or the newest `importjob.progress` (must be 100). `customcontrols.version` does NOT move under the scoped publish (no PublishXml element for it); the served bundle is the published `cc_<ns>.<ctrl>/bundle.js`, so compare its content with the build and have the owner check the footer.
+- **A PCF manifest `*-key` attribute must not contain an apostrophe** (Dataverse XSD; ArchTest `PcfManifestKeyAttributeGuardTests` since #1597). In a fresh worktree VisualHost also needs `npm install` in `src/client/shared/Spaarke.Visuals`.
 - **M365 Admin Center refuses a non-greater manifest/package version** ("Please update the version number") (2026-09-19): bump before any re-upload; never ask for a same-version re-upload.
 
 ### Dataverse / platform facts (measured — do not re-derive)
