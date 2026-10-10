@@ -569,13 +569,13 @@ public class SecureChildShareMirrorTests
         | AccessRights.Share;
 
     private Task<IResult> Share(SecureChildShareWorld world, Guid user, ExternalAccessLevel level,
-        AccessRights callerRights = CallerHoldsEverything) =>
+        AccessRights callerRights = CallerHoldsEverything, GrantAccessNotifier? notifier = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
             _shares, _users.Client, _flags, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
             world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
-            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertNotifier(), // task 181
+            notifier ?? Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertNotifier(), // task 181
             Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> Unshare(SecureChildShareWorld world, Guid user) =>
@@ -643,6 +643,27 @@ public class SecureChildShareMirrorTests
         _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().BeNull();
     }
 
+    /// <summary>
+    /// Task 181: the related-records-pending 500 still says whether the user could not be notified — the modal reads it
+    /// from this answer, which carries no 200 body.
+    /// </summary>
+    [Fact]
+    public async Task ShareUser_WhenAChildCannotBeWritten_AndTheNotificationFails_The500SaysNotificationFailed()
+    {
+        _shares.FailWritesOnRecord = ("sprk_events", EventR);
+        var notifier = new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Harness
+        {
+            NotificationWriteFailure = new HttpRequestException("Simulated appnotification create failure."),
+        }.Notifier;
+
+        var result = await Share(World(), UserB, ExternalAccessLevel.ViewOnly, notifier: notifier);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["notificationFailed"].Should().Be(true);
+        _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(ViewOnly, "the root share stands");
+    }
+
     [Fact]
     public async Task ShareUser_WhenAChildCannotBeWritten_Is500ChildrenIncomplete_TheRootShareStands_AndReconcileCompletesIt()
     {
@@ -658,6 +679,7 @@ public class SecureChildShareMirrorTests
         problem.ProblemDetails.Extensions["childrenNotUpdated"].Should().Be(1);
         problem.ProblemDetails.Extensions["childrenUpdated"].Should().Be(ChildrenOfR.Length - 1);
         problem.ProblemDetails.Detail.Should().Contain($"1 of its {ChildrenOfR.Length} related records");
+        problem.ProblemDetails.Extensions["notificationFailed"].Should().Be(false, "task 181: the user was told");
         _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(ViewOnly, "the root share stands");
 
         _shares.FailWritesOnRecord = null;

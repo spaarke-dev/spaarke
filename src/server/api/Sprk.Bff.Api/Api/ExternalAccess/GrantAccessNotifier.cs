@@ -84,6 +84,7 @@ internal sealed class GrantAccessNotifier
     {
         IReadOnlyList<AssignedLinkCandidate> candidates;
         Guid? boundOid = null;
+        var oidResolvesHere = false;
         try
         {
             // Status-first: a contact read that failed is "could not tell", never "represents nobody". A binding column
@@ -91,7 +92,16 @@ internal sealed class GrantAccessNotifier
             var contact = await _identities.GetContactAsync(contactId, CancellationToken.None);
             if (contact.Status == LookupStatus.Read)
             {
-                var raw = contact.Rows.FirstOrDefault(r => r.ContactId == contactId)?.RawOid?.Trim();
+                // An inactive (or missing) contact is nobody's: it resolves for no one on the read path (ADR-003).
+                if (contact.Rows.FirstOrDefault(r => r.ContactId == contactId) is not { IsActive: true } row)
+                {
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] Contact {ContactId} is not active; nobody is told about the grant on {RootType} {RootId}.",
+                        contactId, rootType, rootId);
+                    return GrantNotificationOutcome.NotApplicable;
+                }
+
+                var raw = row.RawOid?.Trim();
                 boundOid = Guid.TryParse(raw, out var oid) && oid != Guid.Empty ? oid : null;
             }
             else if (contact.Status != LookupStatus.ColumnMissing)
@@ -101,6 +111,26 @@ internal sealed class GrantAccessNotifier
 
             candidates = await _links.ReadLinkCandidatesAsync(contactId, boundOid, CancellationToken.None)
                          ?? Array.Empty<AssignedLinkCandidate>();
+
+            // A user with NO link is represented through the oid binding only where the READ path would resolve it:
+            // the binder's own oid decision (ContactBindingDecision.DecideBoundContact, as IdentityNormalizationService
+            // asks it) must answer "exactly one active contact carries the oid, and it is this one". Two contacts on
+            // the oid, or an inactive one, resolve to no contact there, so nobody is told here either.
+            if (boundOid is { } bound && candidates.Any(c => c.PrimaryContactId is null && c.Oid == bound))
+            {
+                var byOid = await _identities.FindContactsByOidAsync(bound, CancellationToken.None);
+                if (byOid.Status != LookupStatus.Read)
+                    throw new InvalidOperationException($"The contacts bound to oid {bound} could not be read ({byOid.Status}).");
+
+                var decision = ContactBindingDecision.DecideBoundContact(byOid);
+                oidResolvesHere = decision is { Action: BindingAction.ResolveByOid } && decision.ContactId == contactId;
+                if (!oidResolvesHere)
+                {
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] Contact {ContactId}'s oid binding does not resolve to it alone ({DenyCode}); a user " +
+                        "known only by that oid is not told.", contactId, decision?.DenyCode ?? "no contact");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -112,9 +142,10 @@ internal sealed class GrantAccessNotifier
 
         // A contact grant reaches only a record that is not Restricted (the grant policy refuses it otherwise), so the
         // external flag bars nobody here; the person test is the share rule's.
+        // The link is honoured as it is (the read path's primary rule); the oid only where it resolves here alone.
         var people = candidates
             .Where(u => u.SystemUserId != Guid.Empty
-                        && u.Represents(contactId, boundOid)
+                        && u.Represents(contactId, oidResolvesHere ? boundOid : null)
                         && InternalShareEndpoints.ClassifyEligibility(
                                u.IsDisabled, u.AccessMode, u.ApplicationId, u.IsExternal, rootIsRestricted: false)
                            == InternalShareEndpoints.ShareEligibility.Eligible)
@@ -251,7 +282,9 @@ internal sealed class GrantAccessNotifier
             {
                 var name = value.GetString()?.Trim();
                 if (!string.IsNullOrEmpty(name))
-                    return name.Length > MaxNameLength ? name[..MaxNameLength] + "…" : name;
+                    // The shared surrogate-safe cut (a pure string helper, not an AI capability; ADR-013 is about
+                    // AI-capability types, and its ArchTest forbids only those).
+                    return Sprk.Bff.Api.Services.Ai.Chat.ChatHistoryManager.TruncateSurrogateSafe(name, MaxNameLength);
             }
         }
         catch (Exception ex)

@@ -1728,25 +1728,27 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSuggestionBusy(entry.entryId);
       const name = entry.subjectName ?? 'This person';
       try {
-        if (entry.systemUserId) {
-          await postJson('/api/v1/external-access/share-user', {
-            recordType,
-            recordId,
-            systemUserId: entry.systemUserId,
-            accessLevel: ASSIGNED_ACCESS_LEVEL,
-          });
-        } else {
-          await postJson('/api/v1/external-access/grant', {
-            contactId: entry.subjectId,
-            accessLevel: ASSIGNED_ACCESS_LEVEL,
-            recordType,
-            recordId,
-          });
-        }
+        // Task 181: both routes report whether the person could not be notified.
+        const data = entry.systemUserId
+          ? await postJson<IGrantWriteResponseBody>('/api/v1/external-access/share-user', {
+              recordType,
+              recordId,
+              systemUserId: entry.systemUserId,
+              accessLevel: ASSIGNED_ACCESS_LEVEL,
+            })
+          : await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
+              contactId: entry.subjectId,
+              accessLevel: ASSIGNED_ACCESS_LEVEL,
+              recordType,
+              recordId,
+            });
         await loadData();
+        const notificationFailed = data?.notificationFailed === true;
         setNoticeIfCurrent({
-          intent: 'success',
-          text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`,
+          intent: notificationFailed ? 'warning' : 'success',
+          text:
+            `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` +
+            (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
         });
       } catch (err) {
         const { deny, parentRefusal } = splitAccessFailure(err);
@@ -1757,9 +1759,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         else if (parentRefusal) setNoticeIfCurrent({ intent: 'error', text: parentRefusal });
         else if (pendingDetail) {
           await loadData();
+          const notificationFailed = err instanceof AccessGrantModalApiError && err.notificationFailed === true;
           setNoticeIfCurrent({
             intent: 'warning',
-            text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}`,
+            text:
+              `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}` +
+              (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
           });
         } else
           setNoticeIfCurrent({

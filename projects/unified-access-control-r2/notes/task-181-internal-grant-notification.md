@@ -90,6 +90,28 @@ keeps valid.
 
 No new endpoint, package, Dataverse column or file surface.
 
+**Considered and not reused:**
+- `NoAccessShareEnforcer.UsersRepresentingAsync` — it OVER-matches by design: for a veto, every systemuser the contact
+  might represent (any link, any contact bound to the oid) is the safe direction. Notifying is the opposite direction:
+  over-matching names the record to someone who did not get access. The notifier therefore follows the READ path's rule
+  (who the evaluator gives the contact's grants to), not the veto's.
+- The `OutboxService` / `sprk_notificationoutbox` spine — its `kind` taxonomy is closed and the client's `KindRouter`
+  drops unknown kinds, so a new kind reaches no screen without client work; task 100 recorded the same finding and the
+  owner chose `appnotification` (the bell). Reusing task 100's channel is the POML's instruction.
+
+**Who a contact represents — the read path's rule (fix round).** A user whose `sprk_primarycontact` names the contact is
+honoured as is (the read path's primary rule). A user with NO link counts only when the binder's own oid decision
+(`ContactBindingDecision.DecideBoundContact` over `IContactIdentityStore.FindContactsByOidAsync`, exactly what
+`IdentityNormalizationService` asks) resolves the oid to THIS contact alone and active. Two contacts on the oid, or an
+inactive one, resolve to no contact there, so nobody is told (not a failure). An inactive granted contact tells nobody.
+A user whose link names ANOTHER contact is never this contact's (`AssignedLinkCandidate.Represents`). A failed binding
+read is reported as a failure (could not tell).
+
+**Name truncation** reuses `ChatHistoryManager.TruncateSurrogateSafe` (surrogate-safe cut + ellipsis). It is a pure
+string helper in `Services/Ai/Chat`; ADR-013's facade rule concerns AI-capability types, and its ArchTest forbids only
+those, so the call is not a CRUD→AI dependency in the ADR's sense. **CA1068:** `actionTitle` sits before the
+`CancellationToken`; every caller passes named arguments, so the order change compiled without call-site edits.
+
 ## 5. Placement Justification (root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`)
 
 - **In the BFF, on the request path.** The notification must follow a write the BFF makes and must report its own failure

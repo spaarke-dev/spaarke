@@ -48,13 +48,13 @@ public sealed class NotificationService
     /// <param name="actionUrl">Optional deep-link URL for the notification action.</param>
     /// <param name="regardingId">Optional ID of the related record.</param>
     /// <param name="aiMetadata">Optional AI-generated metadata (stored as JSON in custom field).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="actionTitle">
     /// Optional label of a clickable link on the notification card (task 181). With <paramref name="actionUrl"/>, the
     /// <c>data</c> JSON also carries the platform's <c>actions</c> array — the only part of <c>data</c> the model-driven
     /// app's notification bell turns into a link. Omitted, the card has no link (the earlier behaviour, kept for every
     /// caller that does not pass it); <c>actionUrl</c> itself is read only by Spaarke surfaces such as the Daily Briefing.
     /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The ID of the created appnotification record.</returns>
     /// <exception cref="ArgumentNullException">Thrown when userId is empty or title is null/empty.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the Dataverse create operation fails.</exception>
@@ -67,8 +67,8 @@ public sealed class NotificationService
         string? actionUrl = null,
         Guid? regardingId = null,
         Dictionary<string, object?>? aiMetadata = null,
-        CancellationToken cancellationToken = default,
-        string? actionTitle = null)
+        string? actionTitle = null,
+        CancellationToken cancellationToken = default)
     {
         if (userId == Guid.Empty)
             throw new ArgumentNullException(nameof(userId), "Target user ID is required");

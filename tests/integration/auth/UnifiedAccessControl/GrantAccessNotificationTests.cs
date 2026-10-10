@@ -10,6 +10,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles;
 
@@ -191,6 +192,120 @@ public class GrantAccessNotificationTests
 
         body.NotificationFailed.Should().BeFalse("a walled user is not someone to be told, so nothing failed");
         _h.SentNotifications.Should().BeEmpty();
+    }
+
+    // ── Who a contact represents: the READ path's rule (fix round, reviewers' F1) ──────────────────
+
+    /// <summary>A user with no link, whose oid the granted contact (alone) carries, is that contact on the read path.</summary>
+    private (Guid ContactId, Guid UserId) OidOnlyContact(Guid oid, Guid? userLinkedTo = null, int contactState = 0)
+    {
+        var contact = _h.Contact(oid: oid.ToString("D"), stateCode: contactState);
+        var user = Guid.NewGuid();
+        _h.Store.UsersByOid.GetOrAdd(oid, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(user, userLinkedTo, oid, false, 0, null, false));
+        return (contact, user);
+    }
+
+    [Fact]
+    public async Task Grant_ToAContactBoundToTheOidOfAnUnlinkedUser_TellsThatUser()
+    {
+        var (contact, user) = OidOnlyContact(Guid.NewGuid());
+
+        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+
+        OwnerOf(_h.SentNotifications.Should().ContainSingle().Subject).Should().Be(user);
+    }
+
+    [Fact]
+    public async Task Grant_WhenTwoContactsCarryTheOid_TellsNobody_AndIsNotAFailure()
+    {
+        var oid = Guid.NewGuid();
+        var (contact, _) = OidOnlyContact(oid);
+        _h.Contact(oid: oid.ToString("D")); // a second contact on the same oid: ambiguous, resolves to no contact
+
+        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+
+        _h.SentNotifications.Should().BeEmpty("an ambiguous binding resolves to no contact on the read path");
+    }
+
+    [Fact]
+    public async Task Grant_ToAnInactiveBoundContact_TellsNobody_AndIsNotAFailure()
+    {
+        var (contact, _) = OidOnlyContact(Guid.NewGuid(), contactState: 1);
+
+        await Grant(contact);
+
+        _h.SentNotifications.Should().BeEmpty("an inactive contact resolves for nobody");
+    }
+
+    /// <summary>A leak path: the user's link names ANOTHER contact, so this contact's grant is not theirs, whatever the oid.</summary>
+    [Fact]
+    public async Task Grant_ToAContactCarryingTheOidOfAUserLinkedToAnotherContact_TellsNobody()
+    {
+        var (contact, _) = OidOnlyContact(Guid.NewGuid(), userLinkedTo: Guid.NewGuid());
+
+        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+
+        _h.SentNotifications.Should().BeEmpty();
+    }
+
+    // ── When a grant gives access ───────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Grant_OverALapsedGrantAtTheSameLevel_RestoresIt_AndTellsThem()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate,
+            Today.AddDays(-1));
+
+        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+
+        OwnerOf(_h.SentNotifications.Should().ContainSingle("the lapsed grant gave nothing; the restore gives access").Subject)
+            .Should().Be(user);
+    }
+
+    [Fact]
+    public async Task Grant_RaisingTheLevel_TellsThem()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(60));
+
+        await Grant(contact, ExternalAccessLevel.Collaborate);
+
+        var sent = _h.SentNotifications.Should().ContainSingle().Subject;
+        OwnerOf(sent).Should().Be(user);
+        sent.GetAttributeValue<string>("body").Should().Be("Gina Granter gave you Collaborate access.");
+    }
+
+    [Fact]
+    public async Task Grant_ChangingOnlyTheExpiry_TellsNobody()
+    {
+        var (contact, _) = _h.LinkedContact();
+        _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate, Today.AddDays(60));
+
+        var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
+            new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, Today.AddDays(80), null, "matter", _matter),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+
+        OkBody<GrantAccessResponse>(result);
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(80));
+        _h.SentNotifications.Should().BeEmpty("they already held this level; only the date moved");
+    }
+
+    [Fact]
+    public async Task Grant_ToAnOrganization_TellsNobody()
+    {
+        var organization = Guid.NewGuid();
+
+        var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
+            new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+
+        OkBody<GrantAccessResponse>(result).NotificationFailed.Should().BeFalse();
+        _h.Grants.ActiveRowsOf(_matter, organizationId: organization).Should().ContainSingle();
+        _h.SentNotifications.Should().BeEmpty("an organization grant fans out to nobody (round 2 item 9)");
     }
 
     // ── Best effort ─────────────────────────────────────────────────────────────────────────────
