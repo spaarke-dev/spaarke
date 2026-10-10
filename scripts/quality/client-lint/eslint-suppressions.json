@@ -526,7 +526,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
+      "count": 3
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageAttachments.tsx": {
@@ -911,7 +911,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 6
+      "count": 5
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts": {
@@ -941,12 +941,17 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 5
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/FieldSecurityService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts": {
@@ -956,7 +961,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/services/PrivilegeService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
+      "count": 3
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/services/RecordContainerResolver.ts": {
