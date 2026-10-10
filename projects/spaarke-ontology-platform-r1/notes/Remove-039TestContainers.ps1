@@ -4,6 +4,9 @@
 # collection (restorable ~93 days). Run with -WhatIfOnly first to list them.
 # Requires: Install-Module Microsoft.Online.SharePoint.PowerShell (Windows PowerShell 5.1, or pwsh with -UseWindowsPowerShell).
 param([switch]$WhatIfOnly)
+if (-not (Get-Command Connect-SPOService -ErrorAction SilentlyContinue)) {
+  throw "The SharePoint Online module is not installed (Connect-SPOService not found). Install the 'SharePoint Online Management Shell' from Microsoft, or delete the two containers in the SharePoint admin center (Containers page). Nothing was checked or deleted."
+}
 Connect-SPOService -Url 'https://spaarke-admin.sharepoint.com'
 $ids = @(
   'b!QPhJA-4NgU6Tx4SFIauctdNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-10 task 039 gate (zz-039 probe)

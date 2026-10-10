@@ -34,7 +34,7 @@
 ## Open owner questions / owner actions
 
 - **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV: r2-r5 (wizards) belong to 111; r6/r7/r8 to deferred 121/122/129.
-- **Housekeeping (owner, by hand):** `C:\wt120d`, `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480*`, `C:\wts-b56`, `C:\wts-135`, `C:\wts-131`; older list in `notes/handoff-history/2026-10.md`.
+- **Housekeeping (owner, by hand, not blocking):** 2 SPE containers from the 039 live gate (`notes/Remove-039TestContainers.ps1`; owner's PC lacks the SPO module — delete in SharePoint admin center Containers page, or batch with uac-r2's ~29 test containers); `C:\wt120d`, `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480*`, `C:\wts-b56`, `C:\wts-135`, `C:\wts-131`; older list in `notes/handoff-history/2026-10.md`.
 
 ## Coordination
 
