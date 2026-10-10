@@ -21,7 +21,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 033 | External message read endpoint (FR-04) | P3 | 🔲 [open] | 011 | O/h | FULL | Wave 3 |
 | 034 | External message send endpoint (FR-11) | P3 | 🔲 [open] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
-| 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔲 [open] | 034 + UAC-r2 PR #1583 merged | S/h | FULL | Wave 5 (if #1583 merged) |
+| 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔲 [open] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
 | 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
@@ -86,7 +86,7 @@ At most 4 agents per wave (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`, `.claude/co
 ## High-risk and coordination
 
 - **010, 012, 032, 033, 034, 037:** security guards. Each needs a seeding proof and two adversarial passes for auth/tenant isolation (root CLAUDE.md §8.5).
-- **036:** waits for UAC-r2 PR #1583 (`GrantAccessNotifier`).
+- **036:** UAC-r2 PR #1583 (`GrantAccessNotifier`) merged 2026-10-10 and is merged into this branch; 036 now waits only on 034.
 - **Shared surfaces:**
   - `/conflict-check` before every BFF PR (UAC-r2 PRs #1583 and #1586 touch the same files);
   - PR #1494 touches `Services/Communication`;

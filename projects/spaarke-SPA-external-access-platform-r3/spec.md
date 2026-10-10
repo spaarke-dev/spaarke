@@ -343,7 +343,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | Event reads for Matter / Work Assignment (FR-03; pipeline 2026-10-10) | `GET /projects/{id}/events` (`ExternalProjectDataEndpoints.cs:215`) | Yes: generalize over the root map, as to-dos already are | The detail view shows no events for Matters and Work Assignments |
 | Document routes for Matter / WA / Invoice / Service Request (FR-24) | Project document routes in `ExternalProjectDataEndpoints.cs:193` | Yes: generalize the project routes over record type | Users cannot attach documents to most records (owner requirement) |
 | DELETE routes (FR-26) | none on the external surface | New. Gated on the creator stamp + parent Read | Users cannot remove records they created in error |
-| Partner service-request switch (FR-06) | Service Requests module descriptor (`ExternalAccessModule.cs:444`) | Yes: a configuration branch in the existing descriptor | (Optional) partners cannot submit requests where a customer wants it |
+| Partner service-request switch (FR-06) | Service Requests module descriptor (`ExternalAccessModule.cs:453`) | Yes: a configuration branch in the existing descriptor | (Optional) partners cannot submit requests where a customer wants it |
 | Workforce client app registration (FR-16) | The dev BFF app doubles as the client today | No: the client must be decoupled from per-customer backends | Teams/SPA cannot sign users into per-customer backends |
 
 ## ADR Tensions (per CLAUDE.md §6.5)

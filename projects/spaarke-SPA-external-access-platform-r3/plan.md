@@ -39,7 +39,7 @@
 - **Service-request documents** link through the existing `sprk_document.sprk_relatedservicerequest` lookup (live describe, dev).
 - **Intake schema.** `sprk_servicerequest` has no request-type or intake-answers column; task 020 adds `sprk_requesttype` and `sprk_intakedata`.
 - **Wizards** use `Wizard/WizardShell` + `InAppWizardHost` (`WizardModal`/`WizardRegistry` were deleted 2026-10-03).
-- **Partner service-request switch** `ExternalAccess:PartnerServiceRequestsEnabled`, default off. It changes the Service Requests descriptor predicate (`ExternalAccessModule.cs:444-455`), the intake endpoint, and the CIAM default modules.
+- **Partner service-request switch** `ExternalAccess:PartnerServiceRequestsEnabled`, default off. It changes the Service Requests descriptor predicate (`ExternalAccessModule.cs:453-462, descriptor "service-requests"`), the intake endpoint, and the CIAM default modules.
 
 ### Discovered Resources
 
@@ -75,7 +75,7 @@ BFF:
 | Scoped reads | `ExternalModuleDataEndpoints.cs` |
 | Principal resolution | `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs`, `WorkforcePrincipalResolver.cs:176`, `WorkforceIdentityOptions.cs:173-241`, `ContactIdentityBinder.cs:163` |
 | Module entitlement | `ModuleEntitlementResolver.cs:44` |
-| Module descriptor | `Infrastructure/DI/ExternalAccessModule.cs:444` |
+| Module descriptor | `Infrastructure/DI/ExternalAccessModule.cs:453` |
 | Accessible set | `AccessibleRecordSetService.cs:49` |
 | Auth schemes | `Infrastructure/DI/AuthorizationModule.cs` (default scheme ~48, Ciam ~60–72, `CopilotAudience` merge ~100–139) |
 | Message read and send | `Services/Communication/CommunicationThreadReadService.cs` (`ListThreadsAsync` `:342`, `sprk_isinternalonly` `:75`); `CommunicationService.SendAsync` `:1107` |

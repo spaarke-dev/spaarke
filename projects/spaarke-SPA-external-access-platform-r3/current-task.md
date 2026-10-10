@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-10 (by project-pipeline)
+> **Last Updated**: 2026-10-10 (by project-continue — master merged in, 20 commits incl. UAC-r2 #1583/#1586)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -35,7 +35,7 @@ None.
    - agents: 003, 010, 020 (schema import is owner-gated), 050.
 2. Ask the owner for the per-tab column list (task 002).
 3. Ask the owner the 060 host question early, since it decides whether FR-14 stays in R3 or moves to R4.
-4. Task 036 cannot start until UAC-r2 PR #1583 merges.
+4. Task 036: UAC-r2 PR #1583 merged and is in this branch; 036 waits only on 034.
 
 ## Open Owner Questions / Blockers
 
@@ -53,7 +53,6 @@ None.
   - H3 pre-authorization of the new workforce client;
   - per-customer shared mailbox (#1562).
 - **UAC-r2:**
-  - PR #1583 (needed by 036);
-  - PR #1586;
+  - PR #1583 and PR #1586 merged 2026-10-10 (in this branch; `ExternalAccessModule.cs` descriptor refs updated to :453-462);
   - A5 (#1567).
 - **Issues R3 carries:** #1563 (task 012), #1566 (task 042), #1568 (task 011).

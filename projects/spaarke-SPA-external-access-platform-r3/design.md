@@ -87,7 +87,7 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   `sprk_servicerequest`; registry entries; wire each quick-start action's target. **NOT code pages** —
   these are shared React `WizardModal` components mounted in the SPA (same as the Create* wizards).
 - **Submitters — RESOLVED 2026-10-08: workforce only.** Matches the code (the Service Requests module is
-  internal-only and fail-closed for the CIAM plane, `ExternalAccessModule.cs:444`) and R2 FR-17 (Front Door
+  internal-only and fail-closed for the CIAM plane, `ExternalAccessModule.cs:453`) and R2 FR-17 (Front Door
   user = workforce sign-in). C2 therefore has **no 240d dependency**.
 
 ### C3 — Subsequent-assignment notification (G3 / 6A) — R3 (owner confirmed 2026-08-12, not an R2 hotfix)

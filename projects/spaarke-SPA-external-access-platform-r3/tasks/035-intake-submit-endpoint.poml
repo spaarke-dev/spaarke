@@ -23,7 +23,7 @@
   <goal>The submit route validates the request type and answers, requires the legal-front-door module entitlement, creates one sprk_servicerequest app-only with sprk_requestedby = the caller's contact, sprk_requesttype, sprk_intakedata, sprk_name and sprk_direction = Inbound, and returns its id; the row then appears in the caller's Service Requests tab.</goal>
 
   <context>
-    <background>C2: four wizards (NDA Assessment, Invention Submission, Policy Question, Trademark Search) write sprk_servicerequest. No intake endpoint exists (grep 2026-10-10). Task 020 adds sprk_requesttype and sprk_intakedata. sprk_name and sprk_direction are required (live describe). The Service Requests module lists rows by sprk_requestedby (ExternalAccessModule.cs:444-455); task 011 adds the partner switch and the CIAM legal-front-door default.</background>
+    <background>C2: four wizards (NDA Assessment, Invention Submission, Policy Question, Trademark Search) write sprk_servicerequest. No intake endpoint exists (grep 2026-10-10). Task 020 adds sprk_requesttype and sprk_intakedata. sprk_name and sprk_direction are required (live describe). The Service Requests module lists rows by sprk_requestedby (ExternalAccessModule.cs:453-462, descriptor "service-requests"); task 011 adds the partner switch and the CIAM legal-front-door default.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
