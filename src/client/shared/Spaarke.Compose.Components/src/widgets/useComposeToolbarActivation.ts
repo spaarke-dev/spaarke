@@ -59,7 +59,7 @@
  */
 
 import * as React from 'react';
-import { useAuth } from '@spaarke/auth';
+import { useAuth, type AuthenticatedFetchFn } from '@spaarke/auth';
 import { getComposeAiToolbarActions, registerComposeAiToolbarAction } from './ComposeAiToolbar';
 
 /** Placement surface requested by the compose toolbar (matches the deployed compose bindings). */
@@ -91,7 +91,7 @@ export interface UseComposeToolbarActivationOptions {
    * Test/injection escape hatch — bypasses `useAuth().authenticatedFetch` so a test
    * can drive the hook without an MSAL bootstrap. Production hosts must NOT set this.
    */
-  fetchOverride?: typeof fetch;
+  fetchOverride?: AuthenticatedFetchFn;
 }
 
 /**
@@ -118,10 +118,6 @@ export function useComposeToolbarActivation(options: UseComposeToolbarActivation
         url.searchParams.set('surface', surface);
 
         const response = await doFetch(url.toString(), { method: 'GET' });
-        if (!response.ok) {
-          throw new Error(`capability-discovery fetch failed: ${response.status}`);
-        }
-
         const payload = (await response.json()) as CapabilityDiscoveryResponseShape;
         if (cancelled) return;
 

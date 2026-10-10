@@ -1148,7 +1148,6 @@ export function ConversationPane(): React.JSX.Element {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ contextType, activeContext: focusStamp }),
           });
-          if (!response.ok) return;
           const data = (await response.json()) as { chips?: unknown[] };
           const top = Array.isArray(data?.chips) ? data.chips.slice(0, 3) : [];
           // task 024 (FR-B6) — dev-only trace of the selection outcome (contextType + tab + trigger +
@@ -1433,7 +1432,6 @@ export function ConversationPane(): React.JSX.Element {
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: "GET" });
-        if (!response.ok) return null; // 404 = no compose outputs yet — nothing to apply
         const outputs = (await response.json()) as unknown;
         const ledgerRef = resolveCurrentComposeLedgerRef(outputs, bindingId);
         if (!ledgerRef) return null; // not a compose-writing action (e.g. explain/compare)
@@ -1943,7 +1941,6 @@ export function ConversationPane(): React.JSX.Element {
         `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
         { method: "GET" }
       );
-      if (!response.ok) return null;
       const data = (await response.json()) as { previewUrl?: string };
       return data.previewUrl ?? null;
     } catch {
@@ -2018,7 +2015,6 @@ export function ConversationPane(): React.JSX.Element {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        if (!response.ok) return null;
         const json = (await response.json()) as { sessionId?: string };
         const newId =
           typeof json?.sessionId === "string" && json.sessionId.length > 0 ? json.sessionId : null;
@@ -2105,7 +2101,6 @@ export function ConversationPane(): React.JSX.Element {
                   `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(capturedSessionId)}/documents`,
                   { method: "POST", body: form }
                 );
-                if (!uploadResp.ok) return undefined;
                 const uploaded = (await uploadResp.json()) as { documentId?: string };
                 const id = uploaded?.documentId;
                 if (id) activeDocUploadCacheRef.current.set(cacheKey, id);
@@ -2721,7 +2716,6 @@ export function ConversationPane(): React.JSX.Element {
             method: "GET",
             headers: { Accept: "application/json" },
           });
-          if (!resp.ok) return;
           const spec = (await resp.json()) as {
             uploadedFiles?: Array<{
               fileId: string;

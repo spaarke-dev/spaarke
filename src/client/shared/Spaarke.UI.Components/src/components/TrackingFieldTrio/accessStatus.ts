@@ -20,6 +20,7 @@
  */
 
 import { cleanGuid } from '../../utils/guid';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 import { buildNoAccessPath } from '../AccessGrantModal/noAccess';
 import type { ExternalGrantRootType } from '../AccessGrantModal/types';
 
@@ -99,7 +100,7 @@ export function resolveAccessIndicator(
  * {@link ACCESS_STATUS_UNAVAILABLE}. The entries a Write caller also receives are never read.
  */
 export async function readAccessStatus(
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  authenticatedFetch: AuthenticatedFetchFn,
   recordType: ExternalGrantRootType,
   recordId: string,
   timeoutMs: number = ACCESS_STATUS_TIMEOUT_MS
@@ -123,12 +124,6 @@ export async function readAccessStatus(
       return { ...ACCESS_STATUS_UNAVAILABLE };
     }
     const res = answer;
-    if (!res || !res.ok) {
-      console.info(
-        `[TrackingFieldTrio] Access status unavailable for ${recordType} ${recordId}: ${res ? res.status : 'no response'}.`
-      );
-      return { ...ACCESS_STATUS_UNAVAILABLE };
-    }
     return parseAccessStatusResponse(await res.json(), recordId);
   } catch (err) {
     console.warn(`[TrackingFieldTrio] Access status unavailable for ${recordType} ${recordId}.`, err);

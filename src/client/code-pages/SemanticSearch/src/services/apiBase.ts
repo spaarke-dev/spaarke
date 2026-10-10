@@ -4,14 +4,14 @@
  * Provides:
  * - getBffBaseUrl() — resolves BFF API base URL from Dataverse env vars at runtime
  * - buildAuthHeaders() — constructs Authorization + Content-Type headers via @spaarke/auth
- * - handleApiResponse<T>() — parses success or throws typed ApiError (RFC 7807 ProblemDetails)
+ * - handleApiResponse<T>() — parses the JSON body of a successful (2xx) response
  *
  * @see ADR-013: All AI calls go through BFF API
  */
 
 import { getAuthHeader } from './authInit';
 import { resolveRuntimeConfig } from '@spaarke/auth';
-import type { ApiError } from '../types';
+import type { OkResponse } from '@spaarke/auth';
 
 /**
  * Module-level cache for the resolved BFF base URL.
@@ -60,38 +60,16 @@ export async function buildAuthHeaders(): Promise<Record<string, string>> {
 }
 
 /**
- * Handle a fetch Response, parsing JSON on success or throwing a typed ApiError.
+ * Parse the JSON body of a successful fetch Response.
  *
- * On success (2xx): parses and returns JSON body as T.
- * On failure: attempts to parse RFC 7807 ProblemDetails body, then throws ApiError.
+ * `@spaarke/auth`'s `authenticatedFetch` resolves only with a 2xx ({@link OkResponse}); every failure
+ * is THROWN (`ApiError` / `AuthError`) before this is reached, and the callers' error mapping
+ * (`extractErrorMessage`) reads those thrown shapes.
  *
  * @template T - Expected response body type
- * @param response - The fetch Response object
+ * @param response - The successful fetch Response object
  * @returns Parsed response body
- * @throws ApiError with status, title, detail, type, and optional validation errors
  */
-export async function handleApiResponse<T>(response: Response): Promise<T> {
-  if (response.ok) {
-    return response.json() as Promise<T>;
-  }
-
-  // Parse ProblemDetails error response (RFC 7807)
-  let error: ApiError;
-  try {
-    const body = await response.json();
-    error = {
-      status: response.status,
-      title: body.title || response.statusText,
-      detail: body.detail,
-      type: body.type,
-      errors: body.errors,
-    };
-  } catch {
-    error = {
-      status: response.status,
-      title: response.statusText,
-    };
-  }
-
-  throw error;
+export async function handleApiResponse<T>(response: OkResponse): Promise<T> {
+  return response.json() as Promise<T>;
 }

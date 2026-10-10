@@ -99,11 +99,6 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
           }),
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to create session (${response.status}): ${errorText}`);
-        }
-
         const data = await response.json();
         const newSession: IChatSession = {
           sessionId: data.sessionId,
@@ -171,16 +166,6 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     try {
       const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
 
-      if (response.status === 404) {
-        // Stale-session signal — server no longer has this session id.
-        return { ok: false, staleSession: true };
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to load history (${response.status}): ${errorText}`);
-      }
-
       const data = await response.json();
       const historyMessages: IChatMessage[] = (data.messages || []).map(
         (m: { role: string; content: string; timestamp: string }) => ({
@@ -193,9 +178,8 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
       setMessages(historyMessages);
       return { ok: true };
     } catch (err: unknown) {
-      // `@spaarke/auth`'s authenticatedFetch THROWS ApiError(404) instead of returning the 404 the
-      // branch above checks, so the stale-session signal has to be recognised here too — otherwise the
-      // host never learns to start a fresh session.
+      // `@spaarke/auth`'s authenticatedFetch THROWS ApiError(404) for a 404 (it never returns it), so the stale-session signal is
+      // recognised here — otherwise the host never learns to start a fresh session.
       if (isApiError(err, 404)) {
         return { ok: false, staleSession: true };
       }
@@ -243,16 +227,11 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
           body.additionalDocumentIds = additionalDocumentIds;
         }
 
-        const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
+        await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to switch context (${response.status}): ${errorText}`);
-        }
       } catch (err: unknown) {
         const errorObj = requestFailure('Failed to switch context', err);
         setError(errorObj);
@@ -276,14 +255,9 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     setError(null);
 
     try {
-      const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, {
+      await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, {
         method: 'DELETE',
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete session (${response.status}): ${errorText}`);
-      }
 
       setSession(null);
       setMessages([]);

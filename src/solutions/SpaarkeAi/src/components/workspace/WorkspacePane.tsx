@@ -1362,7 +1362,6 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
-          if (!resp.ok) return; // transient; keep polling until the deadline
           const outputs = (await resp.json()) as ComposeLedgerOutputLike[];
           if (cancelled) return;
           const present = hasFindings(outputs);
@@ -1526,22 +1525,20 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
-          // 404 (no session ever bound) / any non-OK → fall through to the
-          // document-only surface below; never mint an empty session (task 031).
-          if (response.ok) {
-            const session = (await response.json()) as { sessionId?: string };
-            if (!cancelled && session.sessionId) {
-              // Restores the transcript (Assistant history) + session-keyed
-              // review/findings widgets. The Compose document is mounted separately
-              // below so it survives a cross-browser reopen (no localStorage tab).
-              dispatch("conversation", {
-                type: "session_switch",
-                sessionId: session.sessionId,
-              });
-            }
+          // 404 (no session ever bound) / any non-OK is THROWN (ApiError) → the catch falls
+          // through to the document-only surface below; never mint an empty session (task 031).
+          const session = (await response.json()) as { sessionId?: string };
+          if (!cancelled && session.sessionId) {
+            // Restores the transcript (Assistant history) + session-keyed
+            // review/findings widgets. The Compose document is mounted separately
+            // below so it survives a cross-browser reopen (no localStorage tab).
+            dispatch("conversation", {
+              type: "session_switch",
+              sessionId: session.sessionId,
+            });
           }
         } catch {
-          // Network/parse failure — fall through to the document-only surface.
+          // Non-OK (thrown ApiError) / network / parse failure — fall through to the document-only surface.
         }
 
         // Surface the analysis's linked document in the EDITABLE Compose/TipTap

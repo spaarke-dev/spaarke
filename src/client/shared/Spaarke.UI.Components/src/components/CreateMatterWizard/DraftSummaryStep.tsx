@@ -20,6 +20,7 @@ import { streamAiDraftSummary } from './matterService';
 import { RecipientField, IRecipientItem } from './RecipientField';
 import type { ICreateMatterFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,7 +54,7 @@ export interface IDraftSummaryStepProps {
    * Authenticated fetch function for BFF API calls.
    * Required for AI summary streaming. Injected by the host application.
    */
-  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch?: AuthenticatedFetchFn;
   /**
    * BFF API base URL (e.g. "https://spe-api-dev-67e2xz.azurewebsites.net/api").
    * Required for AI summary streaming. Injected by the host application.

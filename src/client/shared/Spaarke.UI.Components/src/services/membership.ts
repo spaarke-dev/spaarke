@@ -22,6 +22,8 @@
  * @see MembershipEndpoints.cs — the BFF endpoint contract (`GET /api/users/me/memberships/{entityType}`)
  */
 
+import type { OkResponse } from '../utils/fetchTypes';
+
 /**
  * Options forwarded to the membership endpoint as query parameters.
  * All optional — omit for the broadest "everything I'm on" resolution.
@@ -54,8 +56,11 @@ export interface MembershipResponseBody {
   count?: number;
 }
 
-/** A host-supplied fetch already bound to the BFF (path in, `Response` out). */
-export type MembershipFetch = (path: string, init?: RequestInit) => Promise<Response>;
+/**
+ * A host-supplied fetch already bound to the BFF (path in, 2xx `Response` out). It wraps `@spaarke/auth`'s
+ * throwing `authenticatedFetch`: a non-2xx is THROWN, so the resolver fails soft in its `catch`.
+ */
+export type MembershipFetch = (path: string, init?: RequestInit) => Promise<OkResponse>;
 
 const DEFAULT_MEMBERSHIP_PATH = '/api/users/me/memberships';
 
@@ -66,7 +71,7 @@ const DEFAULT_MEMBERSHIP_PATH = '/api/users/me/memberships';
  * bearer token (typically wrapping `authenticatedFetch` from `@spaarke/auth` with
  * `buildBffApiUrl`). This keeps `@spaarke/ui-components` free of an auth dependency.
  *
- * @param authFetch  Host fetch: `(path, init) => Promise<Response>`. `path` is the
+ * @param authFetch  Host fetch: `(path, init) => Promise<OkResponse>`. `path` is the
  *                   endpoint path (e.g. `/api/users/me/memberships/sprk_event?roles=owner`).
  * @param options.basePath  Override the membership route base (default
  *                          `/api/users/me/memberships`).
@@ -93,11 +98,6 @@ export function createMembershipResolver(
       const path = `${basePath}/${encodeURIComponent(entityType)}${qs ? `?${qs}` : ''}`;
 
       const res = await authFetch(path, { method: 'GET' });
-      if (!res.ok) {
-        // eslint-disable-next-line no-console
-        console.warn(`[membership] resolve failed for ${entityType}: HTTP ${res.status}`);
-        return null;
-      }
       const body = (await res.json()) as MembershipResponseBody;
       return Array.isArray(body.ids) ? body.ids.map(String) : [];
     } catch (err) {

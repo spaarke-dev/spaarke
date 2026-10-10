@@ -19,6 +19,7 @@
 
 import * as React from "react";
 import { FluentProvider } from "@fluentui/react-components";
+import type { AuthenticatedFetchFn } from "@spaarke/auth";
 import { tokens, Text, Button, makeStyles } from "@fluentui/react-components";
 import { CheckmarkCircle24Regular, DeleteRegular } from "@fluentui/react-icons";
 import {
@@ -79,7 +80,7 @@ interface AppProps {
   /** Display name of the source layout (saveAs mode) */
   sourceName: string | null;
   /** Authenticated fetch function from @spaarke/auth for BFF API calls. */
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch: AuthenticatedFetchFn;
   /**
    * Optional subset of layout template IDs to surface in Step 1. When `undefined`
    * (default), the wizard renders all 9 canonical templates — preserves backwards
@@ -598,9 +599,6 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
           `/api/workspace/layouts/${encodeURIComponent(layoutId)}`,
         );
         if (cancelled) return;
-        if (!res.ok) {
-          throw new Error(`Failed to load workspace layout (HTTP ${res.status})`);
-        }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const layout = (await res.json()) as any;
         if (cancelled) return;
@@ -720,7 +718,6 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       const res = await authenticatedFetch(
         `/api/workspace/layouts/${encodeURIComponent(id)}`,
       );
-      if (!res.ok) return null;
       // Prefer the ETag header (server-emitted, exact); fall back to
       // computing from modifiedOn if the header isn't present.
       const etag = res.headers.get("ETag");
@@ -778,11 +775,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         body: JSON.stringify(body),
       });
 
-      // R4 task 054 (B-5): 412 = concurrent edit — bubble a clear error.
-      if (response.status === 412) {
-        throw new Error(LAYOUT_EDITED_ELSEWHERE_MESSAGE);
-      }
-
+      // R4 task 054 (B-5): a 412 (concurrent edit) is THROWN as ApiError(412) and mapped by `layoutSaveError`.
       // Parse the created/updated layout to extract the ID
       const savedLayout = await response.json();
       const savedId = savedLayout?.id ?? savedLayout?.Id ?? layoutId;
@@ -992,19 +985,16 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               onClick={async () => {
                 if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
                 try {
-                  const response = await authenticatedFetch(
+                  // A non-2xx THROWS (ApiError) → the catch below alerts.
+                  await authenticatedFetch(
                     `/api/workspace/layouts/${layoutId}`,
                     { method: "DELETE" },
                   );
-                  if (response.ok) {
-                    if (inApp) {
-                      inApp.onClose();
-                    } else {
-                      (window as any).__dialogResult = { confirmed: true, deleted: true };
-                      window.close();
-                    }
+                  if (inApp) {
+                    inApp.onClose();
                   } else {
-                    alert("Failed to delete workspace.");
+                    (window as any).__dialogResult = { confirmed: true, deleted: true };
+                    window.close();
                   }
                 } catch {
                   alert("Failed to delete workspace.");

@@ -114,13 +114,6 @@ export function useSessionRestore(
 
         if (cancelled) return;
 
-        if (!response.ok) {
-          const detail = await response.text().catch(() => "");
-          setRestoreError(`Restore failed: ${response.status} ${response.statusText}`);
-          console.error(`[SessionRestore] Restore failed:`, response.status, detail);
-          return;
-        }
-
         const raw = (await response.json()) as SessionRestoreSpec;
         // FR-D5 backward-compat: a pre-FR-D5 server omits `uploadedFiles`. Normalise to [] so
         // consumers can read it unconditionally.

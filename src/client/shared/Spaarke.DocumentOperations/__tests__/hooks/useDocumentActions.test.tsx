@@ -31,16 +31,6 @@ import { useDocumentActions } from '../../src/hooks/useDocumentActions';
 
 const BFF = 'https://bff.example.com';
 const mockedFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
-/**
- * The same mock, typed as a fetch that RETURNS failures — only for the "returned-shape control" tests,
- * which feed it a non-OK Response. `authenticatedFetch` never does that (it throws; its type,
- * `Promise<OkResponse>`, rejects such a mock), but the hook still has that branch, and these
- * controls pin it until it is removed.
- */
-const returningFetch = mockedFetch as unknown as jest.MockedFunction<
-  (url: string, init?: RequestInit) => Promise<Response>
->;
-
 // Minimal SUCCESS Response-like shape that satisfies the hook's reads (.ok, .status,
 // .json, .blob, .headers.get). Using a typed factory keeps assertions honest
 // without forcing us to construct full Response objects.
@@ -53,18 +43,6 @@ function jsonResponse(body: unknown, init: { status?: OkStatus } = {}): OkRespon
     blob: jest.fn().mockResolvedValue(new Blob(['x'])),
     headers: { get: () => null },
   } as unknown as OkResponse;
-}
-
-/** A RETURNED non-OK response, for the returned-shape controls (see `returningFetch`). */
-function returnedFailure(status: number): Response {
-  return {
-    ok: false,
-    status,
-    statusText: 'Error',
-    json: jest.fn().mockResolvedValue({}),
-    blob: jest.fn().mockResolvedValue(new Blob(['x'])),
-    headers: { get: () => null },
-  } as unknown as Response;
 }
 
 function blobResponse(disposition: string | null = null): OkResponse {
@@ -132,21 +110,6 @@ describe('useDocumentActions — openInWeb', () => {
     expect(result.current.isActing).toBe(false);
   });
 
-  test('a RETURNED non-OK response (a fetch that does not throw) gets the same sentence', async () => {
-    returningFetch.mockResolvedValueOnce(returnedFailure(500));
-
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.openInWeb('doc-1');
-    });
-
-    expect(window.open).not.toHaveBeenCalled();
-    expect(result.current.actionError).toBe(
-      "Couldn't open the document: The document service is temporarily unavailable. Try again in a few minutes."
-    );
-    expect(result.current.isActing).toBe(false);
-  });
 });
 
 describe('useDocumentActions — openInDesktop', () => {
@@ -268,23 +231,6 @@ describe('useDocumentActions — deleteDocuments', () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  test('sets actionError when DELETE returns non-OK (returned-shape control)', async () => {
-    returningFetch.mockResolvedValueOnce(returnedFailure(403));
-
-    const onSuccess = jest.fn();
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.deleteDocuments(['a'], onSuccess);
-    });
-
-    expect(onSuccess).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(result.current.actionError).toBe(
-        "Couldn't delete the document: You do not have permission to do this with this document."
-      )
-    );
-  });
 });
 
 describe('useDocumentActions — emailLink', () => {
@@ -317,19 +263,6 @@ describe('useDocumentActions — emailLink', () => {
     errSpy.mockRestore();
   });
 
-  test('sets actionError when open-links returns non-OK (returned-shape control)', async () => {
-    returningFetch.mockResolvedValueOnce(returnedFailure(404));
-
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.emailLink('missing');
-    });
-
-    await waitFor(() =>
-      expect(result.current.actionError).toBe("Couldn't create the email link: The document was not found.")
-    );
-  });
 });
 
 describe('useDocumentActions — sendToIndex', () => {
@@ -349,21 +282,6 @@ describe('useDocumentActions — sendToIndex', () => {
     expect(result.current.actionError).toBeNull();
   });
 
-  test('sets actionError when analyze returns non-success status (returned-shape control)', async () => {
-    returningFetch.mockResolvedValueOnce(returnedFailure(500));
-
-    const { result } = renderHook(() => useDocumentActions({ bffBaseUrl: BFF }));
-
-    await act(async () => {
-      await result.current.sendToIndex(['a']);
-    });
-
-    await waitFor(() =>
-      expect(result.current.actionError).toBe(
-        "Couldn't send the document to the index: The document service is temporarily unavailable. Try again in a few minutes."
-      )
-    );
-  });
 });
 
 // ===========================================================================

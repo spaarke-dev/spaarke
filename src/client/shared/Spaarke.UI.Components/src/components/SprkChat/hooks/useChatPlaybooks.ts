@@ -81,11 +81,6 @@ export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlay
         headers: { 'Content-Type': 'application/json' },
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to load playbooks (${response.status}): ${errorText}`);
-      }
-
       const data = await response.json();
       const playbookOptions: IPlaybookOption[] = (data.playbooks || []).map(
         (pb: { id: string; name: string; description?: string; isPublic?: boolean }) => ({
