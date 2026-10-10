@@ -510,7 +510,7 @@ class AccessGrantModalApiError extends Error {
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
       parentRecordType: typeof body?.parentRecordType === 'string' ? body.parentRecordType : undefined,
-      notificationFailed: body?.notificationFailed === true,
+      notificationFailed: body.notificationFailed === true,
     });
   }
 }
@@ -1421,7 +1421,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       // Task 139: every grant is capped at the caller's own level; the server
       // says when it did, and the batch notice reports it.
-      return { notificationFailed: data?.notificationFailed === true, narrowed: data?.narrowed === true };
+      return { notificationFailed: data.notificationFailed === true, narrowed: data.narrowed === true };
     },
     [isInternalContact, postJson, recordId, recordType]
   );
@@ -1517,7 +1517,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         systemUserId: user.id,
         accessLevel: level,
       });
-      return { narrowed: data?.narrowed === true, notificationFailed: data?.notificationFailed === true };
+      return { narrowed: data.narrowed === true, notificationFailed: data.notificationFailed === true };
     },
     [postJson, recordType, recordId]
   );
@@ -1743,7 +1743,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               recordId,
             });
         await loadData();
-        const notificationFailed = data?.notificationFailed === true;
+        const notificationFailed = data.notificationFailed === true;
         setNoticeIfCurrent({
           intent: notificationFailed ? 'warning' : 'success',
           text:
