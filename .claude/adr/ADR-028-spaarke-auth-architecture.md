@@ -34,6 +34,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST NOT** use `useState`/`useEffect` to snapshot a token (root cause of the 401-after-refresh bug v2 fixes)
 - **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope. Each carries `// Auth v2 (D-AUTH-7):` justification comment.
 - **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal **Xrm** surfaces). The **collaboration hosts are exempted** — the external SPA and the Teams tab share **one standalone-MSAL module** (direct `PublicClientApplication` + per-tab `sessionStorage` isolation) with a **pluggable authority**: **Entra External ID (CIAM)** for the external SPA (**Amendment A1**) and **workforce Entra (multitenant, Teams SSO/NAA)** for the Teams tab (**Amendment A2**). Neither uses workforce B2B guests. All A1 isolation invariants are preserved for both hosts.
+  > ⚠️ **Model 1: the workforce authority here is superseded by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration).** The Teams tab and browser work-account sign-in use one **single-tenant** Spaarke client pinned to Spaarke's tenant (NAA, then popup), not multitenant Teams SSO.
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
 - **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only (production); dev OK with plain values
@@ -50,10 +51,12 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** resolve the CIAM-authenticated caller to a Dataverse `Contact` by **stable `oid`** (`sprk_externalobjectid`), and enforce authorization server-side via `sprk_externalrecordaccess` (three-plane model). Downstream authorization is **unchanged**.
 - **MUST** keep all external-surface SPE + Dataverse access **app-only / managed identity** (BFF-brokered). The external user's token is used **only** to authenticate to the BFF and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the external path**). When document content is exposed, the BFF **MUST** stream it app-only via `FileStorageContainer.Selected` + `ReadContent`.
 - **MUST**, when external self-registration is eventually enabled, use Entra External ID **self-service sign-up user flows** (R1 is admin-initiated only; sign-up is disabled via `isSignUpAllowed=false` until a future project enables it).
+  > ⚠️ **Scoped by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule governs **CIAM partner** self-registration only. Workforce-contact (customer staff) self-registration follows A7's self-registration rule.
 
 ### New MUST NOT rules
 
 - **MUST NOT** require or provision a per-external-user Entra **B2B guest** object in the workforce tenant for document read/download (eliminated by the broker-only design).
+  > ⚠️ **Scoped by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule targets **CIAM partners**. Customer staff (licensed users and licence-free workforce contacts) are B2B guests in Spaarke's tenant on the workforce plane.
 - **MUST NOT** federate the External ID tenant back to internal/workforce identities in a way that reintroduces cross-tenant guest coupling, without a further amendment.
 
 ### Documented boundary (limitation E-3)
@@ -69,6 +72,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 ### New MUST rules (collaboration Teams host only)
 
 - **MUST** authenticate Teams-host collaboration users with their **workforce Microsoft Entra identity** via Teams SSO / NAA against a **multitenant** app registration (per-customer admin consent). CIAM is not used inside Teams.
+  > ⚠️ **Superseded for Model 1 by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** one single-tenant Spaarke client, Spaarke-tenant authority, NAA then MSAL popup, no `webApplicationInfo`, no Teams-SSO fallback, scope `user_impersonation`. Multitenant is revisited only for Model 2.
 - **MUST** serve both the external SPA (CIAM) and the Teams host (workforce) from **one shared standalone-MSAL module** whose **authority is config-driven / pluggable**; the module is exempt from the `@spaarke/auth`-only rule exactly as the A1 SPA is.
 - **MUST** keep the collaboration surface **broker-only** in both hosts (A1 invariant): the user token authenticates to the BFF **only** and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the collaboration path**). Document content streams **app-only**.
 - **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership; ⚠️ **the systemuser derivation is SUPERSEDED by [Amendment A5](#amendment-a5-2026-09-04-workforce-systemuser-root-sets-derive-from-dataverses-impersonated-answer)** — root sets now come from Dataverse's own answer via app-only impersonated read, ∪ contact grants) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
@@ -123,6 +127,7 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 - **MUST NOT** stand up a **second maintained workforce entry point** for the module-host surface. The workforce and CIAM planes share the **one** `ExternalCollaboration`-guarded group; the transitional `/api/v1/collab/*` group is slated for removal (teams-app-r1 §7) and **MUST NOT** be extended or given new callers.
 - **MUST NOT** exchange the caller's token for a downstream Graph/SPE/Dataverse token on **either** plane (**broker-only / no-OBO preserved from A1/A2 across the whole module-host platform**). Module document content streams **app-only** (`SpeFileStore` facade, `FileStorageContainer.Selected` + `ReadContent`, ADR-007), with authorization enforced server-side **before** streaming.
 - **MUST NOT** infer Tier-1 module entitlement from the fact of authentication, from the identity plane, or from Tier-2 record access; an unentitled module MUST be neither shown nor routable (direct-route denied server-side).
+  > ⚠️ **Amended by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** each caller gets a default Tier-1 module set derived from the **server-resolved principal kind**; unentitled modules are still neither shown nor routable.
 - **MUST NOT** route the module-host SPA through the Xrm-bound `@spaarke/auth` while it remains Xrm-context-bound + MSAL v3; the shared standalone-MSAL module with pluggable authority (A1/A2) is the sanctioned client surface for this platform until a superseding consolidation amendment.
 
 ### Scope + preserved invariants
@@ -437,6 +442,91 @@ dedicated deployment per customer (D-12), so it can start without keys instead o
 > **Note (A6)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries
 > Amendments **A1–A6**. A6 changes resource configuration and provisioning only — no client surface, IdP or token
 > exchange changes.
+
+## Amendment A7 (2026-10-10): Workforce client, scope, default modules and workforce-contact self-registration
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**:
+> `spaarke-SPA-external-access-platform-r3` (spec §ADR Tensions rows A2, A3, A1). **Owner-approved** 2026-10-10 ("the ADR modifications are approved").
+> **Amends one clause each of A1, A2 and A3; adds one rule.** Rationale: `projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md`.
+> The auth system-of-record findings (§12b) are **not** in A7; they are a separate amendment owned by `spaarke-auth-system-of-record-r1`.
+
+### Why
+
+**The A2 client shape does not work on stamps.** A2 required the Teams host to sign users in "via Teams SSO / NAA against a **multitenant** app". Model 1 (D-12) gives each customer its own BFF app registration in Spaarke's tenant. Licensed customer staff are B2B guests there, with `systemuser` rows keyed by the guest `oid`. That leads to three problems:
+- **Authority.** Only an authority pinned to Spaarke's tenant issues a token with that guest `oid`. This was proven live on 2026-10-08: `tid` = Spaarke, `acct = 1`, `idp` = home tenant. A multitenant or `/organizations` sign-in lands the guest in their home tenant, with a different `oid` and no `systemuser` match.
+- **Teams SSO.** Teams SSO (`getAuthToken`) needs `webApplicationInfo` naming one resource. Its token audience would be wrong for a per-customer server.
+
+The Office add-in already runs the working shape: one single-tenant Spaarke client, NAA then popup.
+
+**A3 leaves workforce users with no modules.** A3 forbids inferring Tier-1 entitlement from authentication or plane. Owner decision 2026-10-09 (option b) gives every caller a default module set by **user type**, so workforce users are not left with no modules and no per-user setup.
+
+**A1's guest rule needs a scope.** A1's "no per-external-user B2B guest" rule was written for CIAM partners. Licence-free **customer staff** ("workforce contacts") are a different population. They must be B2B guests in Spaarke's tenant to sign in on the workforce plane. A1 :52 (External ID sign-up flows) is likewise a CIAM rule.
+
+### New MUST rules
+
+**Workforce client (replaces A2 :71 for Model 1; covers the browser "work account" sign-in and the Teams host)**
+
+- **MUST** authenticate workforce-plane users of the module-host SPA and the Teams host through **one single-tenant public client registration in Spaarke's tenant**, shared by every Model 1 customer.
+  - It is not the BFF app registration.
+  - Its authority is pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`.
+- **MUST**, in Teams, acquire tokens with **Nested App Authentication first, then the MSAL popup**.
+- **MUST** request `api://{customer BFF app id}/user_impersonation` on **both** planes: the workforce client and the CIAM client.
+  - The customer BFF app id and server URL come from Spaarke-owned data: the T240c directory, or dev configuration until it ships.
+  - They never come from a link, query string or other client-supplied input.
+
+**Default Tier-1 modules (amends A3 :125)**
+
+- **MUST** give each caller a default Tier-1 module set derived from the **server-resolved principal kind**:
+
+  | Caller | Default modules |
+  |---|---|
+  | Workforce `systemuser` or workforce contact | `legal-front-door` + `policy-library` |
+  | CIAM partner contact | `assigned-work` |
+  | CIAM partner contact, when `ExternalAccess:PartnerServiceRequestsEnabled` is on (default off) | `assigned-work` + `legal-front-door` |
+
+  - `sprk_approlemodulemap` adds extras only.
+  - A3's other Tier-1 rules stand: entitlement is resolved server-side, never from client input, and an unentitled module is neither shown nor routable.
+
+**Workforce-contact self-registration (new)**
+
+- **MUST** create workforce-contact B2B guests only in Spaarke's tenant, and only through **one shared Spaarke-tenant registration path**. That path is either a shared registration service or Entra's B2B self-service sign-up user flow, whichever R3 task 003/060 selects.
+- **MUST** approve a registration automatically only when the caller's home tenant is in the customer's `CustomerTenantIds` **and** the caller is a member of that home tenant (`acct = 0`). Every other case is refused or held for approval; it is never auto-approved.
+
+### New MUST NOT rules
+
+- **MUST NOT** declare `webApplicationInfo` in the Teams manifest or fall back to Teams SSO (`getAuthToken`) for the BFF token.
+- **MUST NOT** use a multitenant workforce client, or a `common`/`organizations` authority, for Model 1. Multitenant is revisited only for Model 2 (customer-tenant stamps), under a further amendment.
+- **MUST NOT** request or expose `access_as_user` for the module-host SPA or the Teams host; `user_impersonation` replaces it.
+- **MUST NOT** grant `User.Invite.All` (or any invite permission) to a customer stamp identity.
+
+### Clarifications (A1)
+
+- **A1 :56** ("MUST NOT require or provision a per-external-user B2B guest") applies to **CIAM partners**.
+  - It does not forbid B2B guests for **customer staff** (licensed U2, licence-free workforce contacts U3), who are workforce-plane users in Spaarke's tenant.
+  - A1's broker-only reasoning is unchanged for them: no OBO, and app-only SPE/Dataverse.
+- **A1 :52** (External ID self-service sign-up user flows) governs **CIAM partner** self-registration only. Workforce-contact self-registration is governed by the rule above. (Spike `notes/spikes/fr-12-self-registration-decision.md`: the built-in B2B self-service sign-up flow cannot enforce the tenant-and-`acct` rule, so it recommends the custom join flow.)
+
+### Scope and preserved invariants
+
+**Unchanged:**
+- **No OBO on any collaboration plane.** A1/A2/A3 broker-only stays textually in force. The token authenticates to the BFF only; SPE and Dataverse access stay app-only, or impersonated under A5.
+- **Plane selection** from validated `iss`/`tid` only (A3), and **plane-agnostic handlers**.
+- **The shared standalone-MSAL module** with a pluggable authority (A2). Its workforce authority is now the Spaarke tenant rather than multitenant.
+- **A5's** `systemuser` derivation.
+- **Internal Xrm surfaces**: `@spaarke/auth`, PCFs and Code Pages are unaffected.
+
+**Model 1 only.** Model 2 keeps A2's text until a further amendment.
+
+### Alternatives considered and rejected
+
+- **Keep A2 (multitenant + Teams SSO).** It signs guests into their home tenant, so the `oid` mismatches and no `systemuser` matches. The SSO token audience is wrong for per-customer servers, and every customer would need admin consent.
+- **A new `access_as_user` scope per stamp.** The BFF checks only that a delegated scope is present (`src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs:113,247-249`), and every stamp app already exposes `user_impersonation` (H3). A second scope adds provisioning work for no gain.
+- **Per-user Tier-1 setup through the role map only (comply with A3).** Every workforce user would need manual setup before they see anything. The owner rejected this on 2026-10-09.
+- **Invites from each stamp BFF.** It puts a tenant-wide invite permission on every customer identity. A single shared path keeps it in one place.
+- **Combining with the §12b amendment.** §12b is not finished, and R3's Wave 2 (tasks 011, 012, 040) needs these rules first. Two dated amendments do not conflict, because they touch different clauses.
+
+> **Note (A7)**: Applied concise-only, like A1–A6. This concise ADR now carries Amendments A1–A7.
+> A7 changes the workforce client, scope, Tier-1 defaults and guest-creation path. It adds no IdP or token exchange, and does not weaken the no-OBO invariant.
 
 ## Documented MI exceptions
 

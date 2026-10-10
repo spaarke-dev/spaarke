@@ -4,7 +4,7 @@
     <title>ADR-028 amendment for R3 (A2 single-tenant client, A3 modules by user type, A1 workforce-contact clarification)</title>
     <phase>0 Governance and inputs</phase>
     <gate>startable — needs owner approval to edit .claude/adr/</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth ADR amendment (tags auth); binding rule change that gates C8 code</rigor-reason>
     <model-tier>opus</model-tier>
