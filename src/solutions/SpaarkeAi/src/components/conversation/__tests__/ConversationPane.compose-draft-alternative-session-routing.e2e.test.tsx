@@ -127,7 +127,7 @@ beforeAll(() => {
       ledger.set(session, [...(ledger.get(session) ?? []), entry]);
       return sseCompleteResponse(entry.payload);
     }
-    throw httpError(404);
+    return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
   }) as unknown as typeof fetch;
 });
 afterAll(() => {

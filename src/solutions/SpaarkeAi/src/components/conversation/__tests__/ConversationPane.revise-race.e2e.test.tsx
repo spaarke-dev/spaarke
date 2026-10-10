@@ -64,7 +64,7 @@ beforeAll(() => {
       dispatchPostBodies.push(typeof init?.body === 'string' ? init.body : '');
       return sseCompleteResponse({ edits: [], rationale: 'revised', sources: [] });
     }
-    throw httpError(404);
+    return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
   }) as unknown as typeof fetch;
 });
 afterAll(() => {
