@@ -1590,13 +1590,14 @@ public partial class RouteAuthorizationGuardTests
             + "the Signal (SignalCoreRecordAccess.cs:98) and then its core record (:150) through IDataverseUserClient AS THE CALLER; "
             + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:69, caller_unresolved 403 at :54-56)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — the payload mapped with the "
-            + "caller's client (ChildRecordEndpoints.cs:194), then OwnedChildWrite.CreateAsync checks the table privilege and "
-            + "AppendTo on EVERY bound record before the app-only create (:199)."),
+            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:225), the payload mapped with the "
+            + "caller's client (:239), then OwnedChildWrite.CreateAsync checks the table privilege and AppendTo on EVERY bound "
+            + "record before the app-only create (:254) — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:241-256 → "
-            + "UpdateAsync, :271): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
-            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :320)."),
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:426-427 → "
+            + "UpdateAsync, :442): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :491)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "

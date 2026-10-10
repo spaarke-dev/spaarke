@@ -168,10 +168,14 @@ describe('the client writers call the sync route after their create (criterion 1
     expect(syncCalls(fetchMock)).toEqual([]);
   });
 
-  it('Create Work Assignment: syncs the created work assignment', async () => {
+  // Ontology task 046 (D-21; uac-r2 D-113): the work assignment is created through POST /api/v1/child-records/
+  // sprk_workassignment, which materializes the Assigned-To access INLINE on the server (ChildRecordEndpoints
+  // CompleteRootCreateAsync; pinned by SecureChildOwnershipAiToolTests.WorkAssignmentCreate). The wizard therefore makes
+  // no client sync call for this create — one L1 trigger, on the server.
+  it('Create Work Assignment: creates through the BFF route, which materializes the access — no client sync call', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).Xrm = { Utility: { getGlobalContext: () => ({ userSettings: { userId: null } }) } };
-    const fetchMock = jest.fn().mockResolvedValue(ok());
+    const fetchMock = jest.fn().mockResolvedValue(ok({ id: CREATED }));
     const form = {
       name: 'Wizard WA',
       description: '',
@@ -186,11 +190,16 @@ describe('the client writers call the sync route after their create (criterion 1
       recordName: '',
     } as unknown as ICreateWorkAssignmentFormState;
 
-    const result = await new WorkAssignmentService(dataService(), fetchMock, BFF).createWorkAssignment(form, [], []);
+    const service = dataService();
+    const result = await new WorkAssignmentService(service, fetchMock, BFF).createWorkAssignment(form, [], []);
 
     expect(result.status).not.toBe('error');
-    expect(syncCalls(fetchMock)).toEqual([
-      { url: SYNC_URL, body: { recordType: 'workassignment', recordId: CREATED } },
-    ]);
+    expect(result.workAssignmentId).toBe(CREATED);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${BFF}/api/v1/child-records/sprk_workassignment`,
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(service.createRecord).not.toHaveBeenCalled();
+    expect(syncCalls(fetchMock)).toEqual([]);
   });
 });

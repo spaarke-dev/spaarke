@@ -1,4 +1,142 @@
-# Task 046 — server-side work-assignment create: parity table and escalation
+# Task 046 — server-side work-assignment create: parity table and execution record
+
+> **2026-10-10, third pass — D-113 (uac-r2's answer on #1355, comment 6089838200): BUILT on uac-r2's child-records
+> route, live parity PROVEN on spaarkedev1, awaiting the two reviews.** §A–§F below are this pass. The second pass (D-59:
+> a separate `WorkAssignmentCreateService` + `POST /api/v1/record-creation/workassignment`, branch
+> `stream/c2-047-046`, never merged) and the first pass (escalation) follow unchanged as history; **D-113 supersedes
+> both**: no new service, no new route, no new ledger entry.
+
+## A. uac-r2 re-read (before starting; project branch `origin/docs/ontology-platform-design` @ `48742f4d2`, master @ `b4faf6222`)
+
+| File | Last commit (same on master unless noted) | What 046 relies on |
+|---|---|---|
+| `Services/Dataverse/OwnedChildWrite.cs` | `da20ca7bf` (task 048 move, #1555) | `CreateAsync` (G5 as the caller → plan → app-only create owned by the resolver's team, creator stamped); the #1391 org-owned AppendTo fix is in |
+| `Api/ChildRecordEndpoints.cs` | `da20ca7bf` | the route; `CreateTables`; it passed **no** secure-create plan (a work assignment under a secure parent would have been refused 409 `SecureFilingRefused`) |
+| `Services/Access/SecureRootFilingGate.cs`, `SecureRootInheritance*.cs` | `61b0aa77a` (task 175) | `PlanCreateAsync` (refuses caller-supplied `sprk_issecure` / `sprk_accessinheritance`), `CompleteIsolatedCreateAsync` |
+| `Services/Dataverse/RecordOwnershipResolver.cs` (I-6) | `d254d7166` | record-first owner team |
+| `Services/Access/SecureChildLineage.cs`, `config/secure-record-owner-role.json` | branch `b2fc3fb78`, master `0615f9781` | untouched (a work assignment is a root, not a lineage child) |
+| `Api/Filters/RecordRouteAccessAuthorizationFilter.cs` | `c5f71487f` | not on this route (handler-level decision, ledger `RouteLevelGate`) |
+| `Services/Dataverse/CoreAncestorResolver.cs` | `d7fdcafc3` | the restamper is a no-op for a root |
+| `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` | branch `48742f4d2`, master `d5e1dffe7` | the route is already in the census; **only** its HandlerDecision line references were refreshed |
+| `Services/ExternalAccess/AssignedAccessMaterializer.cs` | `e78c47149` | `RunAfterWriteAsync` (I-12 L1) |
+| client `utils/adapters/bffChildWriteAdapter.ts` | `d254d7166` | the one browser seam |
+
+Open PRs touching these files: **#1501** (`fix/136-create-analysis-hub-404`, ChildRecordEndpoints/OwnedChildWrite) — deferred per
+D-113, rebases later; soft overlap only. uac-r2's session (`bf82fa958`) is merging 175/176/180; no work-assignment create
+work queued. **Plan not invalidated** — the D-113 shape works with one gap closed here (the route did not pass the plan).
+
+## B. Parity table — wizard (browser) vs `POST /api/v1/child-records/sprk_workassignment`
+
+Wizard = `CreateWorkAssignmentWizard/workAssignmentService.ts` `createWorkAssignment`. The wizard keeps building the SAME
+payload (cascade, resolver fields, field mapping) client-side; only where it is sent changes. **Live** = proven on
+spaarkedev1 2026-10-10 (§C).
+
+| # | Column / effect | Wizard (before) | Route (after) | Parity | Live |
+|---|---|---|---|---|---|
+| 1 | `sprk_name` | `form.name.trim()` | as sent | ✅ | ✅ |
+| 2 | `sprk_priority` | form | as sent | ✅ | ✅ |
+| 3 | `sprk_description` | trimmed, when present | as sent | ✅ | ✅ |
+| 4 | `sprk_responseduedate` (Date Only) | form | as sent | ✅ | ✅ |
+| 5 | `sprk_searchindexname` (BU cascade, FR-WIZ-04, INV-5) | the **user's** BU value | as sent (built by the wizard) | ✅ | ✅ |
+| 6 | `sprk_ai_search_index` lookup (BU cascade) | the user's BU index | as sent | ✅ | ✅ (operator leg) |
+| 7 | `sprk_containerid` | not written (task 076 W1) | not written; **refused if sent** (403 — provisioning's column, not field-secured) | ✅ | ✅ null on both |
+| 8 | typed regarding `sprk_regarding{matter,project,invoice,event}` | `applyResolverFields` | as sent; **AppendTo asked as the caller** | ✅ | ✅ |
+| 9 | ADR-024 fields: `sprk_regardingrecordtype` (→ `sprk_recordtype_ref`), `…recordid`, `…recordname`, `…recordnumber`, `…recordurl` | `applyResolverFields` | as sent | ✅ | ✅ |
+| 10 | field mapping `{parent → sprk_workassignment}` (live: `sprk_assignedattorney1`) | `applyFieldMappings` | as sent | ✅ | ✅ |
+| 11 | `sprk_mattertype`, `sprk_practicearea` | form | as sent | ✅ | ✅ |
+| 12 | Assign Work lookups (`…attorney1`, `…paralegal1`, `…lawfirm1`, `…lawfirmattorney1`) | `bindLookup` | as sent | ✅ | (not in the live payload; unit-tested) |
+| 13 | `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` (D-113) | not sent | not sent; `sprk_issecure`/`sprk_accessinheritance` refused if sent (403, field-secured + plan) | ✅ | ✅ equal (accesspermission 100000000; access record identical once the job ran) |
+| 14 | **`ownerid`** | **the user** | **the regarding record's BU default team** (I-6), or the named Secure Record Owners team under a secure parent | ❌ **intended (D-113 / G5)** | ✅ as stated |
+| 15 | **`owningbusinessunit`** | the user's BU | derived from the owner team (record first) | ✅ when the user's BU = the record's BU; ❌ intended otherwise | ✅ equal for the BU1 user; root-BU operator → BU1 (intended) |
+| 16 | `sprk_createdbyperson` | not set | the caller | ❌ intended (task 133) | ✅ |
+| 17 | `createdby` / `modifiedby` / `timezoneruleversionnumber` | the user | the application (BFF identity) | ❌ intended (app-only create) | ✅ |
+| 18 | caller checks | Dataverse's own (Create; AppendTo on every bound record) | the same questions asked **as the caller** before the app-only write | ✅ | ✅ both refuse (§C) |
+| 19 | secure parent (I-13) | created user-owned, secured by the ≤ 5-min job | created **INTO isolation** in the request (plan + `CompleteIsolatedCreateAsync`) | ❌ intended — closes the exposure window | unit/fixture-tested only (§D) |
+| 20 | Assigned-To access (I-12) | client `syncAssignedAccess` → `/assigned-access/sync` | `AssignedAccessMaterializer` inline in the route; the client call is dropped | ✅ same materializer | harness could not authorise its secure-flag read (§C, K) — job is the safety net either way |
+| 21 | the chat tool's "for person" default (`sprk_assignedtointernal` = caller's contact) | not set | **not added** by the route | ✅ | ✅ null on both |
+| 22 | files, documents, indexing, follow-on event, email | later wizard steps | unchanged | ✅ | n/a |
+| 23 | UI | — | unchanged; a server warning (secure create not finished) is shown as a "partial" result like any other warning | ✅ | jest |
+
+**Area-owner review: PENDING.** Rows 14–17 and 19 are the differences the owner has to accept (they are uac-r2's G5 rule,
+mandated by D-113). If the work-assignment area owner rejects any of them, the POML's escalation trigger fires — stop.
+Reviewer: _(name, date, decision — to be recorded here by the main session)_.
+
+## C. Live proof — spaarkedev1, 2026-10-10 15:5x UTC (`WorkAssignmentCreateLiveTests`, opt-in)
+
+The REAL route in-process (`ChildRecordEndpoints.CreateAsync` via HTTP, real G5 core, resolver, gate, restamper, app-only
+SDK + Web API clients) against spaarkedev1. Substitutions: inbound token (the acting user's real oid); the caller's
+Dataverse = operator token + `MSCRMCallerID`, **and WhoAmI answered with the acting user** (Dataverse's WhoAmI ignores
+`MSCRMCallerID` — found this pass: it made the second pass's denied-leg 404 untrustworthy evidence); outbound identity =
+AzureCliCredential. Browser leg = the wizard's exact payload POSTed to `sprk_workassignments` as the acting user. Both
+rows read **in full** and compared column by column after the environment's secure-root job wrote its access record on
+both (243 s).
+
+| Leg | Result |
+|---|---|
+| Operator (System Administrator, root BU), matter CMRCL-441482 (BU1, ordinary) | browser `d7adef07…` / route **201** `3cef8bf5…`; **59 columns, 51 equal, 0 unexpected** (differences: rows 14–17 + ids/timestamps/version) |
+| `# UAC Child BU Test User` (BU1; Spaarke Basic User + Core User), same matter, BU without AI index bind | browser `bc40b2ba…` / route **201** `ef356bb4…`; **59 columns, 48 equal, 0 unexpected**; owning BU **equal** (BU1) |
+| Same user, payload WITH the BU1 AI search index | browser **403** (missing `prvAppendTosprk_AISearchIndex`) / route **404** uniform; nothing created — refusal parity |
+| Same user, root-BU matter EMPL-847770 (no AppendTo), no AI index | route **404** `child_record.not_found`; zz-046 count unchanged |
+| Cleanup | **4 of 4 deleted** (`d7adef07…`, `3cef8bf5…`, `bc40b2ba…`, `ef356bb4…`); query: **0 zz-046 work assignments remain** |
+| SPE containers | **none created**: every live work assignment was filed under an ordinary matter (`sprk_containerid` null; no isolated provisioning ran). The secure-parent leg was not run live (it would provision a container; the only secure parent in dev is uac-r2's test project) |
+
+## D. What changed (code)
+
+- `Api/ChildRecordEndpoints.cs` (uac-r2's): `sprk_workassignment` in `CreateTables`; the secure-create plan passed for
+  every create (decides only for a root); `CompleteRootCreateAsync` after a root create (isolated completion — removed
+  again → 500 and nothing created; stranded/incomplete → 201 with `warnings`; then the I-12 materializer); provisioning's
+  columns refused for a root; plan refusals mapped (`AccessDenied` → uniform 404, No Access / server-only column → 403,
+  unverifiable / no secure team → 500, else 409); **a caller WhoAmI cannot name → the single 403
+  `sdap.access.deny.caller_unresolved`** (NFR-10, D-29) on this create route for every table; the share mirror only for
+  secure children; `Noun` "work assignment".
+- `Services/Signals/Actions/DecisionRouteCores.cs`: `CreateChildAsync` passes the gate and scope factory — **task 043**
+  calls it in-process and reads `RouteReply.CreatedId`.
+- `bffChildWriteAdapter.ts` (uac-r2's): `sprk_workassignment` in `BFF_CHILD_CREATE_TABLES`; `createRecordViaBffWithWarnings`.
+- `workAssignmentService.ts`: create via the route; server warnings appended; `syncAssignedAccess` dropped for this
+  create; a pre-existing unreachable `else if` removed (eslint `no-dupe-else-if` blocks the commit otherwise).
+- Ledger: the two child-records HandlerDecision line references refreshed (text only).
+
+## E. Deviations from the POML
+
+1. **D-113 supersedes** outputs `WorkAssignmentCreateService.cs` / `WorkAssignmentEndpoints.cs` and the new ledger entry:
+   not created.
+2. **The BU cascade is not re-implemented server-side.** The wizard still builds it; the route writes the payload as
+   given (rows 5–6). Task 043, which calls the route in-process, builds its own payload: if it wants the cascade it
+   should mirror `EntityCreationService.applyUserBuDefaults` — and note §F item 1 (an AI-index bind fails for ordinary
+   users). Server precedent: `RecordCreationService.ApplyBusinessUnitDefaultsAsync` (private).
+3. **AC "single 403 for an unresolved caller"** is met by a pre-check added to the shared create route (all its tables),
+   not by a new route.
+4. The live proof runs the real route **in-process**, not a deployed BFF (a dev deploy of this branch is an Azure
+   change for the owner, after uac-r2's review).
+
+## F. Found, not fixed (D-106 — document only)
+
+1. ([#1607](https://github.com/spaarke-dev/spaarke/issues/1607), F-56) **Ordinary users cannot create a work assignment through today's wizard when their BU names an AI search index**:
+   Spaarke Basic User + Core User hold Read but not AppendTo on `sprk_aisearchindex`; the wizard always binds
+   `sprk_AI_Search_Index` from the user's BU (live 403 above). The same bind is in the Matter / Project / Event / Invoice
+   wizards (`EntityCreationService` cascade). Fix = a role privilege (AppendTo on `sprk_aisearchindex`) — a role change
+   for the owner/uac-r2, not made here.
+2. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-57) The G5 core answers a missing **privilege** on a user-owned lookup target (here AppendTo on the AI index) with the
+   uniform "A record … was not found" 404 — misleading for that case (uac-r2's core; related to task 126's rule).
+3. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-57) `OwnedChildWrite.ServerOwnedColumns` does not protect a root's `sprk_containerid` / `sprk_securitybu`, so the chat
+   `dataverse.create_record` tool can still carry a caller-chosen container on a work-assignment or project create (the
+   route now refuses them; the chat tool does not). uac-r2's core.
+4. The opt-in live harness cannot authorise the inline Assigned-To step's secure-flag read
+   (`ExternalParticipationService` → 401 in-process); production uses the managed identity. Harness limitation.
+
+## G. Gates and measurements (this pass)
+
+- **Publish size** (`.claude/rules/bff-hygiene.md`): fresh short-path worktrees, `dotnet restore` + `dotnet publish -c
+  Release` (the `Deploy-BffApi.ps1` commands), PowerShell `Compress-Archive`, **192 files both sides**. Base = project
+  branch tip `1df5a2c56` (fresh `C:\w46b`; differs from this branch's base `48742f4d2` only in project docs) →
+  **38,340,724 B (36.56 MB)**; branch `941a1c851` → **38,343,043 B (36.57 MB)**; **delta +2,319 B**. Ceiling 60 MB.
+- **CVE**: no `.csproj` / `package.json` dependency changed.
+- **Tests**: see the PR body (unit suites, ArchTests, jest, live).
+
+---
+
+# Second pass (D-59) and first pass — history, superseded by D-113
+
 
 > **2026-10-07, second pass — owner decision D-59 (option A): BUILT, live-proven; merge waits on uac-r2.** §0 is the
 > execution record. Sections 1-4 below are the first pass's escalation record, kept unchanged (its §2 parity table is

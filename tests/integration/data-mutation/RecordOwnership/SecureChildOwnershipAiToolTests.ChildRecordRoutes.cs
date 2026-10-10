@@ -1273,11 +1273,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// the host has no AssignedAccessMaterializer (its inline step logs and leaves a root to the job — never fails).
     /// </summary>
     private Task<IResult> CreateChild(
-        string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null) =>
+        string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
+        IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
             table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
             gate ?? SecureRootFilingGateFixtures.NothingSecure(),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>

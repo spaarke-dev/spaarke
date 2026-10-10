@@ -221,6 +221,34 @@ public sealed partial class SecureChildOwnershipAiToolTests
         reply.CreatedId.Should().Be(created.Id, "the decision records the new work assignment as its follow-on");
     }
 
+    /// <summary>
+    /// I-12 L1 on this route: after a work assignment is created, its "Assigned *" contacts' access is materialized INLINE
+    /// (the wizard no longer calls <c>/assigned-access/sync</c>) — the REAL materializer, over uac-r2's harness, is asked
+    /// about the new row; its root read is made to fail so the outcome is observable in its log. A to-do (not a root) is not
+    /// materialized.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_RunsTheAssignedToMaterializerInline_ForTheNewRow_AndNotForAChild()
+    {
+        var log = new CapturedMaterializerLog();
+        var harness = new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Harness { Logger = log };
+        harness.Store.FailRootRead = true;
+        var services = new ServiceCollection();
+        services.AddScoped(_ => harness.Materializer);
+        var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var workAssignment = await CreateChild("sprk_workassignment", WizardWorkAssignment(OrdinaryMatter), scopes: scopes);
+        var todo = await CreateChild("sprk_todo", new() { ["sprk_name"] = "Call back" }, scopes: scopes);
+
+        Status(workAssignment).Should().Be(StatusCodes.Status201Created, Detail(workAssignment));
+        Status(todo).Should().Be(StatusCodes.Status201Created, Detail(todo));
+        var waId = Created(workAssignment);
+        log.Lines.Should().Contain(l => l.Contains(waId.ToString(), StringComparison.OrdinalIgnoreCase),
+            "the materializer was asked about the new work assignment in the request");
+        log.Lines.Should().NotContain(l => l.Contains(Created(todo).ToString(), StringComparison.OrdinalIgnoreCase),
+            "a child is not an Assigned-To root");
+    }
+
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A caller's Dataverse whose WhoAmI answers <paramref name="whoAmI"/>; any other question is recorded.</summary>
@@ -229,6 +257,19 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var client = new Mock<IDataverseUserClient>(MockBehavior.Loose);
         client.Setup(u => u.GetAsync("WhoAmI()", It.IsAny<CancellationToken>())).ReturnsAsync(whoAmI);
         return client;
+    }
+
+    /// <summary>The materializer's log lines (formatted).</summary>
+    private sealed class CapturedMaterializerLog : Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer>
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Lines.Enqueue(formatter(state, exception));
     }
 
     private static JsonElement CreatedBody(IResult result) =>
