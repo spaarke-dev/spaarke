@@ -44,6 +44,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
   - The join page.
   - A shared Spaarke registration service that invites the B2B guest and adds them to the customer group.
   - A stamp-side member-test change that creates and binds the contact on first sign-in.
+- **C9 — Documents, creator attribution, delete-own.** Documents on every core record that allows them, including service requests; server-stamped creator on every SPA create; users delete only what they created.
 - **C8 — Auth alignment.**
   - The workforce client switch.
   - Run-time backend selection on both planes.
@@ -102,6 +103,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
     - an accessible record returns its thread;
     - an inaccessible record returns 403;
     - a CIAM caller never sees internal-only messages.
+  - Also covers the caller's **own service requests** (scoped by `sprk_requestedby`, not the root set), so a submitter can read the questions asked on their request (owner 2026-10-10: "answer questions").
 
 #### C2 — Legal Front Door
 
@@ -109,7 +111,15 @@ R3 turns the external SPA from a read-only portal into a working destination for
   - Acceptance:
     - each wizard opens from its quick-start card and from "More Services";
     - submitting creates a row that appears in the Service Requests tab.
-- **FR-06: workforce only.** Intake is workforce-only; the Service Requests module stays fail-closed for the CIAM plane (`ExternalAccessModule.cs:444`). Acceptance: a CIAM caller cannot launch or submit (403 server-side).
+- **FR-06: workforce by default; partners behind a switch (owner 2026-10-10).** Intake is workforce-only by default.
+  - A per-customer setting (`ExternalAccess:PartnerServiceRequestsEnabled`, default **off**) lets CIAM partners submit and read their own service requests. When it is on:
+    - the Service Requests module's accessible set includes the CIAM contact's own requests;
+    - the intake endpoint accepts the CIAM plane;
+    - partners' default modules add `legal-front-door`.
+  - Owned like workforce submissions; no extra partner-only work.
+  - Acceptance:
+    - switch off → a CIAM caller cannot launch or submit (403 server-side) and sees 0 rows;
+    - switch on → a CIAM caller submits, sees only their own requests, and never sees anyone else's.
 
 #### C3 — Notifications
 
@@ -147,6 +157,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
     - a send on an accessible record appears in that record's thread;
     - a send on a record outside the set returns 403 (negative test);
     - the sender equals the caller.
+  - Also allowed on the caller's **own service requests** (answering a question asked on the request).
 
 #### C7 — Workforce-contact self-registration
 
@@ -175,6 +186,42 @@ R3 turns the external SPA from a read-only portal into a working destination for
     - a guest from a non-listed home tenant is denied (`workforce_tenant_not_customer`);
     - Spaarke staff are unaffected.
 
+#### C9 — Documents, creator attribution and delete-own (owner 2026-10-10)
+
+- **FR-24: documents on every core record that allows them.**
+  - Covers the record types `sprk_document` links to: Project (exists today), Matter, Work Assignment, Invoice, and **Service Request** (workforce submitters; partners when the FR-06 switch is on).
+  - Users can list, view/download and upload documents in the SPA.
+  - Every route checks Tier-2 on the parent: Read to list/download, Create to upload. A service request is checked through the submitter scope.
+  - SPE access is app-only through `SpeContainerOwnershipGuard`; no OBO.
+  - Service requests have no document lookup today. Link them through the ADR-024 regarding model (`sprk_regardingrecordid`), or add a `sprk_servicerequest` lookup if that model needs one (§11 below).
+  - Acceptance:
+    - for each type, upload then download round-trips;
+    - a ViewOnly caller cannot upload (403);
+    - a record outside the set returns 403.
+- **FR-25: creator attribution on every SPA create.**
+  - Every create through `/api/v1/external/**` stamps who created it:
+    - a systemuser principal → `sprk_createdbyperson` (existing; FLS-secured lookup to systemuser);
+    - a contact principal (workforce contact or partner) → a **new contact-creator lookup**.
+  - Covers documents, to-dos, events, communications and service requests (service requests already carry `sprk_requestedby`).
+  - Server-side only, never from client input.
+  - This closes auth record L-5 (no creator attribution): today SPA creates are app-only, so Dataverse `createdby` is always the BFF application user.
+  - Acceptance: each create records the calling principal; a client-supplied creator is ignored.
+- **FR-26: delete your own records.**
+  - New DELETE routes for documents (Dataverse row + SPE file, app-only through the guard), to-dos, events and service requests.
+  - A delete is allowed only when the FR-25 stamp equals the caller **and** the caller still holds Read on the parent.
+  - Nobody can delete another person's record, whatever their level.
+  - Records created before FR-25 have no stamp, so they are not deletable from the SPA.
+  - Acceptance:
+    - the creator deletes their own record;
+    - a different user, even with FullAccess, gets 403;
+    - a document delete removes the SPE file.
+- **"Answer questions" (owner 2026-10-10).** Covered by:
+  - **forms** — C2 wizards;
+  - **replies on a record or own service request** — C6/FR-04/FR-11;
+  - **completing a to-do** — the existing `PATCH /api/v1/external/todos/{id}`, Write-checked.
+
+  Richer tasks and questionnaires are future scope.
+
 #### C8 — Auth alignment
 
 - **FR-16: workforce client (browser and Teams).**
@@ -196,7 +243,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
   - Acceptance: the pages work for both planes; a 401/403 shows a sign-in or denied state, never a mock user.
 - **FR-19: default modules by user type (#1568).** `ModuleEntitlementResolver` returns, by principal type:
   - workforce (systemuser or workforce contact) → `legal-front-door` + `policy-library`;
-  - CIAM → `assigned-work`.
+  - CIAM → `assigned-work`, plus `legal-front-door` when the FR-06 partner switch is on.
 
   `sprk_approlemodulemap` stays only for optional extras. Acceptance: a workforce user sees the Legal Front Door and the Policy Library; a partner sees Assigned Work.
 - **FR-20: production build and package (design actions A1, A2, A4).**
@@ -290,6 +337,10 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | Default modules by type (FR-19) | `ModuleEntitlementResolver` | Yes: modify | Workforce users see no Front Door / Policy Library modules |
 | Join page (FR-13) | none in `external-spa` | No existing page | Licence-free staff have no way to get access |
 | Shared registration service (FR-14) | None in the repo. H11 (L2) invites guests at provisioning time, but only for a known list, and owner direction says provisioning does not own new components | Possibly co-hosted with the T240c directory; to be decided | Self-registration (owner requirement) is impossible without a Spaarke-tenant invite identity |
+| Contact-creator lookup column (FR-25) on document, to-do, event, communication | `sprk_createdbyperson` exists but targets systemuser only (FLS-secured) | No: a systemuser lookup cannot hold a contact. A polymorphic retype of `sprk_createdbyperson` would break existing readers | Contacts can never delete their own mistaken records; SPA creates carry no author (L-5) |
+| Document routes for Matter / WA / Invoice / Service Request (FR-24) | Project document routes in `ExternalProjectDataEndpoints.cs:193` | Yes: generalize the project routes over record type | Users cannot attach documents to most records (owner requirement) |
+| DELETE routes (FR-26) | none on the external surface | New. Gated on the creator stamp + parent Read | Users cannot remove records they created in error |
+| Partner service-request switch (FR-06) | Service Requests module descriptor (`ExternalAccessModule.cs:444`) | Yes: a configuration branch in the existing descriptor | (Optional) partners cannot submit requests where a customer wants it |
 | Workforce client app registration (FR-16) | The dev BFF app doubles as the client today | No: the client must be decoupled from per-customer backends | Teams/SPA cannot sign users into per-customer backends |
 
 ## ADR Tensions (per CLAUDE.md §6.5)
@@ -314,6 +365,9 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 7. [ ] Browser and Teams sign-in use the single-tenant client, Spaarke-tenant authority and `user_impersonation`, for both a member and a guest. Verify: token diagnostics + the FR-21 live check.
 8. [ ] One SPA build reaches two different backends by run-time selection. Verify: a dev test with two configured entries.
 9. [ ] No SPA page leaves the external plane; no mock identity in production. Verify: code test + E2E.
+10. [ ] Documents upload/download on Project, Matter, Work Assignment, Invoice and Service Request; ViewOnly cannot upload. Verify: server tests + E2E.
+11. [ ] A user deletes a record they created; another user (even FullAccess) gets 403. Verify: server negative tests.
+12. [ ] With the partner switch off, partners cannot submit service requests; with it on, they see only their own. Verify: server tests both ways.
 
 ## Dependencies
 
@@ -343,7 +397,12 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 | In-portal storage | New table? | No — a derived feed (2026-10-08) | FR-08 |
 | Grid columns | Spec now? | Parameterized; an early task with owner input (2026-10-08) | FR-09 |
 | Messages | View or send? | Send — thread post + notify members, no email (2026-10-08) | FR-11 |
-| C2 submitters | Who? | Workforce only (2026-10-08) | FR-06 |
+| C2 submitters | Who? | Workforce by default; partners behind an on/off switch if cheap (2026-10-10, refines 2026-10-08) | FR-06 |
+| Delete | Who may delete? | Only the creator, for records created in error; never someone else's (2026-10-10) | FR-25, FR-26 |
+| Documents | Where? | Every core record that allows documents, including service requests (2026-10-10) | FR-24 |
+| "Answer questions" | Meaning? | Answering questions, submitting forms; completing tasks later (2026-10-10) | C2, C6, to-do update |
+| SPA access levels | CRUD? | All users can have CRUD; some may be read-only — auth must not prevent CRUD (2026-10-10) | Grant levels (ViewOnly / Collaborate / FullAccess) + FR-26 |
+| Add-in | Who? | Dataverse-licensed users only (2026-10-10) | Server already requires a systemuser on `/api/office/*` |
 | Teams for partners | In scope? | No — browser only (2026-10-07) | FR-10 |
 | Scope name | `access_as_user` or `user_impersonation`? | `user_impersonation` everywhere (2026-10-09) | FR-16 |
 | Workforce-contact access | Pre-created or self-service? | Self-registration via a customer-shared link; automatic approval (2026-10-09) | C7 |
@@ -361,6 +420,8 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 
 - **Notification copy**: drafted in the C3 task; the owner approves the wording.
 - **Feed retention**: the feed shows the last 30 days of grants/messages. *Affects FR-08 query cost; confirm in the task.*
+- **Messages are not deletable**: sent messages notify the record's members, so FR-26 excludes communications. Owner to confirm.
+- **Delete is a hard delete** of the user's own row (and SPE file for documents), not a deactivate. Owner to confirm.
 - **Picker storage**: known customer keys are kept in `localStorage`; a new device re-uses the invite or join link (T240d §4).
 
 ## Unresolved Questions
