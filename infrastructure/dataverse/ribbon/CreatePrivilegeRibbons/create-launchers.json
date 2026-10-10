@@ -1,0 +1,56 @@
+{
+  "$comment": "unified-access-control-r2 task 180 (owner round 89 item 2). Every ribbon JavaScript function that creates a record or opens a create wizard, and the table it creates. A command whose action calls one of these functions must carry the display rule sprk.CreatePrivilege.<table>.DisplayRule (EntityPrivilegeRule Create, depth Basic, on that table), so a user without the Create privilege does not see it. Merge-CreatePrivilegeRule.ps1 adds the rule; Set-CreatePrivilegeRibbon.ps1 deploys and verifies it. A NEW create launcher is added here, or the command will not be ruled and -Verify will not see it.",
+  "ruleIdFormat": "sprk.CreatePrivilege.{0}.DisplayRule",
+  "launchers": {
+    "Spaarke.Commands.Wizards.openCreateMatterWizard": "sprk_matter",
+    "Spaarke.Commands.Wizards.openCreateMatterStandalone": "sprk_matter",
+    "Spaarke.Commands.Wizards.openCreateProjectWizard": "sprk_project",
+    "Spaarke.Commands.Wizards.openCreateProjectStandalone": "sprk_project",
+    "Spaarke.Commands.Wizards.openCreateEventWizard": "sprk_event",
+    "Spaarke.Commands.Wizards.openCreateEventStandalone": "sprk_event",
+    "Spaarke.Commands.Wizards.openCreateTodoWizard": "sprk_todo",
+    "Spaarke.Commands.Wizards.openCreateWorkAssignmentStandalone": "sprk_workassignment",
+    "Spaarke.Commands.Wizards.openDocumentUploadWizard": "sprk_document",
+    "Spaarke.Commands.Wizards.openPlaybookLibrary": "sprk_analysis",
+    "Spaarke.Commands.Wizards.openPlaybookWithIntent": "sprk_analysis",
+    "Spaarke_UploadDocumentsStandalone": "sprk_document",
+    "Spaarke_AddMultipleDocuments": "sprk_document",
+    "Spaarke_NewAnalysisFromSubgrid": "sprk_analysis",
+    "Spaarke_NewAnalysis": "sprk_analysis",
+    "Spaarke.Email.saveToDocument": "sprk_document",
+    "Spaarke.KpiRibbon.openQuickCreate": "sprk_kpiassessment",
+    "Spaarke.Event.AddMemo": "sprk_memo",
+    "Spaarke_NewPlaybookBuilder": "sprk_analysisplaybook",
+    "Spaarke_NewPlaybookFromList": "sprk_analysisplaybook"
+  },
+  "notCreate": {
+    "Spaarke.Commands.Wizards.openSummarizeFilesWizard": "Summarizes uploaded files; creates nothing itself. Its follow-on cards (create project, work on analysis) are separate creates, checked server-side.",
+    "Spaarke.Commands.Wizards.openFindSimilarDialog": "Search only; creates nothing.",
+    "Spaarke.SecureChild.Ribbon.newChild": "Already carries the platform's Mscrm.CreateSelectedEntityPermission (task 147).",
+    "XrmCore.Commands.Open.addNewFromSubGridStandard": "The platform's own subgrid New; the platform rules it (Mscrm.CreateSelectedEntityPermission)."
+  },
+  "hideAppActions": [
+    {
+      "appactionid": "ffbd45bf-8c9d-48db-b433-c3c09e6577de",
+      "uniquename": "sprk__NewDocument!97b3448447bf4b1bb0bd610c4dd96e4f!sprk_MatterManagement!sprk_document!1",
+      "decision": "Owner, 2026-10-09 (task 180 fix round): hide this modern \"New Document\" (Matter Management, sprk_document main grid). The classic \"+New Document\" (sprk.Document.NewUpload.Grid.Command, same launcher, same grid) stays and carries the Create privilege rule."
+    }
+  ],
+  "hosts": [
+    "sprk_matter",
+    "sprk_project",
+    "sprk_event",
+    "sprk_workassignment",
+    "sprk_document",
+    "sprk_analysis",
+    "email",
+    "sprk_kpiassessment",
+    "sprk_analysisplaybook",
+    "sprk_todo",
+    "sprk_invoice",
+    "sprk_budget",
+    "sprk_communication",
+    "contact",
+    "sprk_organization"
+  ]
+}
