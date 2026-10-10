@@ -1,6 +1,6 @@
 {
   "name": "spe-document-viewer",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "description": "SPE Document Viewer PCF Control with check-out/check-in workflow",
   "scripts": {
     "build": "pcf-scripts build",
