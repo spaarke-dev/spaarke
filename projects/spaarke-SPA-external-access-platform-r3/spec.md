@@ -64,7 +64,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 - Attachments on message send (deferred).
 - **Built by other projects**, which R3 consumes as dependencies:
   - the T240c directory service (provisioning);
-  - the T240d CIAM-on-stamps work — per-customer CIAM audience, keyless provisioner, the `Ciam` audience forms, and the default-scheme CIAM-token guard (provisioning);
+  - the T240d CIAM-on-stamps provisioning work — `Ciam:*` settings via H4b, H3c service-principal provisioning, the keyless `CiamGraphClientFactory` (MI-FIC, `User.Create`), H13 probes (provisioning). *(The two BFF auth changes moved to R3 — FR-22/FR-23.)*
   - ADR-028 A5 / the impersonated record set (UAC-r2 task 036, #1567).
 
 ### Affected Areas
@@ -204,6 +204,10 @@ R3 turns the external SPA from a read-only portal into a working destination for
   - A production Teams app package with its own manifest.
   - Redirects `https://external.spaarke.com` and `brk-multihub://external.spaarke.com`.
   - Acceptance: the artefacts build in CI. Go-live is gated (Dependencies).
+- **FR-22: `Ciam` scheme audiences (owner decision 2026-10-10).** The `Ciam` JwtBearer scheme accepts the per-customer audience in both forms, `{bffAppId}` (bare GUID, v2 tokens) and `api://{bffAppId}`. Acceptance:
+  - a CIAM token for this stamp's app passes in either form;
+  - a token for another customer's app returns 401 (T240d S1 (iv) shape).
+- **FR-23: default-scheme guard against CIAM tokens (owner decision 2026-10-10; auth review R1).** The default (workforce) scheme rejects any token whose `iss` contains `ciamlogin.com` or whose `tid` equals `Ciam:TenantId`. This mirrors `CallerPrincipalResolver.DeterminePlane` and does not rely on library issuer defaults. Acceptance: a CIAM token on a workforce-only route returns 401 (the H13 hard-gate probe); workforce and Copilot tokens are unaffected.
 - **FR-21: Teams live check.** Use the owner's test guest, on Teams desktop and web, to confirm FR-16 against a stamp app, including whether Microsoft's broker must be pre-authorized. Acceptance: a written result; the H3 pre-authorized list is updated through provisioning if needed.
 
 ### Non-Functional Requirements
@@ -323,10 +327,11 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 ### External
 
 - **T240c directory service** (workforce lookup + CIAM lookup) — required for production routing (FR-17). Dev runs without it.
-- **T240d CIAM on stamps** (provisioning; spike S1 first) — required for partner features on provisioned customers. Includes the production CIAM SPA client (redirect `https://external.spaarke.com`), the `Ciam` audience forms, and the default-scheme CIAM-token guard.
+- **T240d CIAM on stamps** (provisioning; spike S1 first) — required for partner features on provisioned customers. Includes the production CIAM SPA client (redirect `https://external.spaarke.com`), keyless contact-account creation and the H13 probes. The BFF audience forms and the guard are R3 (FR-22/FR-23).
 - **H3 pre-authorization** of the new workforce client on every customer BFF app (provisioning platform list).
 - **PRQ-C-14** — customer tenant allows outbound B2B collaboration. **Added** by provisioning (PR #1589): a customer attestation `customerOutboundB2BAttested`, required for every B2BGuest (Model 1) run.
 - **Production SWA** `swa-spaarke-external-spa-prod` / `external.spaarke.com` (exists; DNS by the owner).
+- **Per-customer shared mailbox** (owner-approved provisioning step, #1562). It is the sender for C3's notification emails on stamps. C6 sends no email.
 
 ## Owner Clarifications
 
@@ -347,7 +352,7 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 | Built-in Entra sign-up | Use it? | Yes, if available and simpler (2026-10-09) | FR-12 |
 | Customer IT setting | Handling? | A required customer approval (PRQ-C-14) (2026-10-09) | Dependencies |
 | Modules | App roles or by type? | By user type, option (b) (2026-10-09) | FR-19 |
-| Partner-token BFF changes | R3 or T240d? | T240d (2026-10-09, assumption accepted) | Out of scope |
+| Partner-token BFF changes | R3 or T240d? | **R3** — owner decision 2026-10-10, relayed by provisioning; supersedes the 2026-10-09 assumption | FR-22, FR-23 |
 | Default module sets | Staff the same as workforce contacts? | Yes (2026-10-09) | FR-19 |
 | Deep-link target | Where? | Record detail via `?customer=&record=` (2026-10-09) | FR-07 |
 | Production | R3 delivers? | Yes — build + package; go-live gated (2026-10-09) | FR-20 |
