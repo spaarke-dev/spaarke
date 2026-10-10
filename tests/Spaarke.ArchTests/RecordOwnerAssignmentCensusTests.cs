@@ -486,6 +486,11 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("DecisionRecordWriter.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
             "sprk_decisionrecord of an item with NO core record: owned by the item's own owner (a user), never by a team. A "
             + "Decision Record WITH a core record takes the resolver's answer through ApplyTo (the censused resolver write)."),
+        // spaarke-ontology-platform-r1 task 031 (task 037 hand-off, D-35): needs uac-r2 review (listed PerUser, as BuildEntity above).
+        new OwnerWriteEntry("SignalWriter.cs", "ReassignNoCoreOwnerAsync", 1, OwnerWriteKind.PerUser,
+            "A no-core Do-lane Signal follows its item's owner (D-35): when the To Do / event is reassigned, the nightly job "
+            + "reassigns the Signal to the item's CURRENT owner (a user or team read from the item), instead of escalating "
+            + "no_core_owner_mismatch every pass. Reached only for a Signal with no core record whose item still has none."),
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
